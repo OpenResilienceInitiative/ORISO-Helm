@@ -1,0 +1,293 @@
+
+cert-manager:
+  enabled: true
+
+global:
+
+  domainName: "your.domain"
+  domains:
+    matrix: "matrix.your.domain"
+    auth: "http://keycloak:8080/"
+
+
+
+  acmedomainName: "acme.your.domain"
+ #adminDomainName: "admin.your.domain"
+  internal:
+    keycloakURL: "http://keycloak:8080/"
+  external:
+    keycloakURL: "https://your.domain/auth/"
+
+  springSecurityOAuth2ResourceserverJWTIssuerURI: "https://your.domain/auth/realms/your-realm"
+  springSecurityOAuth2ResourceserverJWTJWKSETURI: "http://keycloak:8080/auth/realms/your-realm/protocol/openid-connect/certs"
+  authorizationendpoint: "http://keycloak:8080/auth/realms/your-realm/protocol/openid-connect/auth"
+  tokenendpoint: "http://keycloak:8080/auth/realms/your-realm/protocol/openid-connect/token"
+  userinfoendpoint: "http://keycloak:8080/auth/realms/your-realm/protocol/openid-connect/userinfo"
+
+  # TLS
+  enableTls: true
+  enableLiquibase: "false"
+  # CORS
+  enableCors: false
+  corsAllowOrigin:
+  corsAllowHeaders:
+
+  #services to nginx
+  nginxServiceURL: "http://cob-proxy:8089/"
+  internalUseHTTPS: "false"
+  useAPIURL: "true"
+
+  keycloakAuthServerUrl: "http://keycloak:8080/"
+  ServiceURL: "http://mongodb:27017"
+  # CSRF
+  csrfCookieProperty: "CSRF-TOKEN"
+  csrfHeaderProperty: "X-CSRF-TOKEN"
+  csrfWhitelistHeaderProperty: "X-U25-CSRF-TOKEN"
+
+  multitenancyEnabled: true
+  multitenancyWithSingleDomainEnabled: "true"
+
+  topicsEnabled: "false"
+  featureTopicsEnabled: "true"
+  statisticsEnabled: "true"
+  demographicsEnabled: "false"
+
+  initializeDummyData: true
+
+  logstashHost: "http://logstash.default:8080"
+
+  # Keycloak connection
+
+
+  keycloak:
+    realm: "your-realm"
+    authServerUrl: "https://your.domain/auth"
+    otpUrl: "/realms/your-realm/otp-config"
+    openidConnectUrl: "/realms/your-realm/protocol/openid-connect"
+    loginSuffix: "/token"
+    logoutSuffix: "/logout"
+    technicalUser:
+      password: "technical"
+
+    principalAttribute: "preferred_username"
+    serviceAppClientId: "app"
+    serviceAdminClientId: "admin-cli"
+    serviceTechUserId:  "8294c392-e1e0-405b-ac2f-ba3043cbad3e"
+
+  secrets:
+    # Liquibase
+    liquibaseUser: "liquibase"
+    liquibasePassword: "liquibase"
+
+    # RabbitMQ
+    rabbitmqUsername: "admin"
+    rabbitmqPassword: "admin"
+
+    # Secrets
+    caritasDbUsername: "caritas"
+    caritasDbPassword: "caritas"
+    keycloakDbUsername: "keycloak"
+    keycloakDbPassword: "keycloak"
+    agencyServiceDbUsername: "aservice"
+    agencyServiceDbPassword: "aservice"
+    consultingTypeServiceDbUsername: "ctservice"
+    consultingTypeServiceDbPassword: "ctservice"
+    consultingTypeMongoUser: "consulting_types"
+    consultingTypeMongoPass: "consulting_types"
+    userServiceDbUsername: "uservice"
+    userServiceDbPassword: "uservice"
+    uploadServiceDbUsername: "upservice"
+    uploadServiceDbPassword: "upservice"
+    tenantServiceDbUsername: "tservice"
+    tenantServiceDbPassword: "tservice"
+    redisdefaultPass: "redisadm"
+    matrixRegistrationSharedSecret: "changeme"
+    keycloakAdminUsername: "realmadmin"
+    keycloakAdminPassword: "realmadmin"
+
+
+
+postgres:
+  postgresDB: "c3luYXBzZQ=="
+  postgresPassword: "changeme"
+  postgresUser: "c3luYXBzZQ=="
+
+
+matrix:
+  synapseServerName: "caritas.local"
+  synapseReportStats: "no"
+  synapseEnableAuthenticatedMedia: "false"
+  matrixAdminUsername: "matrixadm"
+  matrixAdminPassword: "matrixadm"
+  matrixApiUrl: "http://matrix-synapse:8008"
+  matrixServerName: "caritas.local"
+
+
+
+
+# ---------- Infrastructure Services ----------------------------------------------------------------------------------
+
+admin:
+  imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
+  imageVersion: "latest"
+# MongoDB
+online-counseling-mongodb:
+  imageName: "mongo"
+  imageVersion: "5.0"
+
+  rocketchatMongoUsername: "rocketchat"
+  rocketchatMongoPassword: "rocketchat"
+
+  mongoSharedKey: "default"
+  mongoInitDbRootUsername: "admin"
+  mongoInitDbRootPassword: "admin"
+
+  noSqlClientMongoUsername: "nosqlclient"
+  noSqlClientMongoPassword: "nosqlclient"
+
+  oplogMongoUsername: "oplog"
+  oplogMongoPassword: "oplog"
+
+  statisticsMongoUser: "statistics"
+  statisticsMongoPass: "statistics"
+
+
+# MariaDB
+online-counseling-mariadb:
+  imageName: "mariadb"
+  imageVersion: "11.0.6"
+  dbRootPassword: "changeme"
+  maxconnections: "1000"
+livekit:
+  api:
+    key: "orisoKey"
+    secret: "orisoKey"
+tokenService:
+  replicas: 2
+  image:
+    repository: ghcr.io/openresilienceinitiative/livekit-token-service
+    tag: "latest"
+    pullPolicy: Always
+  service:
+    port: 3010
+    targetPort: 3010
+    type: ClusterIP
+
+
+# RabbitMQ
+online-counseling-rabbitmq:
+  imageName: "rabbitmq"
+  imageVersion: "3-management"
+
+# Redis
+online-counseling-redis:
+  imageName: "redis"
+  imageVersion: "7-alpine"
+  user: "redisadm"
+  serviceURL: "redis://redis:6379"
+
+
+# Keycloak
+online-counseling-keycloak:
+  imageName: "quay.io/keycloak/keycloak"
+  imageVersion: "26.6.3"
+
+  dbVendor: "mariadb"
+  dbServer: "mariadb"
+  dbDatabase: "keycloak"
+
+  # Logging (supported log levels are ALL, DEBUG, ERROR, FATAL, INFO, OFF, TRACE and WARN)
+  keycloakLogLevel: "WARN"
+  rootLogLevel: "WARN"
+
+
+# ---------- Backend Services -----------------------------------------------------------------------------------------
+
+
+# Agency service
+agencyService:
+  imageName: "ghcr.io/openresilienceinitiative/oriso-agencyservice"
+  imageVersion: "latest"
+
+  keycloakResource: "agency-service"
+
+  springProfilesActive: "dev"
+
+  topicEnrichmentEnabled: "false"
+
+  agencyDeleteworkflowCron: "0 20 4 * * *"
+
+
+# ConsultingType service
+consultingTypeService:
+  imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
+  imageVersion: "latest"
+  serviceURL: "http://consultingtypeservice:8080"
+
+  keycloakResource: "consultingtype-service"
+
+  consultingTypesJsonPath : "consulting-type-settings"
+
+
+# Tenant Service
+tenantService:
+  imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
+  imageVersion: "latest"
+  springProfilesActive: "dev"
+  springDatasourceURL: "jdbc:mariadb://mariadb:3306/tenantservice"
+  springDatasourceUsername: "caritas"
+  springDatasourcePassword: "caritas"
+  springRabbitmqHost: "rabbitmq"
+  springRabbitmqPort: "5672"
+  springRabbitmqUsername: "admin"
+  springRabbitmqPassword: "admin"
+
+
+
+# User service
+userService:
+  imageName: "ghcr.io/openresilienceinitiative/oriso-userservice"
+  imageVersion: "latest"
+  serviceURL: "http://userservice:8080"
+
+  keycloakResource: "user-service"
+
+  springProfilesActive: "dev"
+
+  firebaseConfigurationCredentialsFilePath: "/firebase/firebase-credentials.json"
+  firebaseConfigurationNotificationMessage: "Du hast eine neue Nachricht erhalten"
+
+  consultantImportFilename: "import/consultants.csv"
+  consultantImportProtocolFilename: "import/consultants-import.txt"
+  askerImportFilename: "import/askers.csv"
+  askerImportWithoutSessionFilename: "import/askers-without-session.csv"
+  askerImportProtocolFilename: "import/askers-import.txt"
+  askerImportWelcomeMessageFilename: "import/welcome_consulting_type_[ConsultingType].txt"
+  askerImportWelcomeMessageFilenameReplaceValue: "[ConsultingType]"
+
+  sessionInactiveDeleteWorkflowEnabled: "false"
+  sessionInactiveDeleteWorkflowCron: "0 0 * * * ?"
+  sessionInactiveDeleteWorkflowCheckDays: "30"
+
+  serviceEncryptionAppkey: "changeme"
+
+
+  # Rocketchat
+  rocketSystemuserId: "hjvBcfWH5vS3KLv27"
+  rocketTechnicalUsername: "rocket-chat-technical-user"
+  rocketTechnicalPassword: "rocket-chat-technical-user"
+  rocketSystemuserUsername: "system1"
+  rocketSystemuserPassword: "system1"
+  rocketCredentialschedulerCron: "0 0 0/1 * * ?"
+
+  # Keycloak
+  keycloakTechnicalUsername: "technical"
+  keycloakTechnicalPassword: "technical"
+
+
+# ---------- Frontend Services ----------------------------------------------------------------------------------------
+
+# Frontend
+frontend:
+  imageName: "ghcr.io/openresilienceinitiative/oriso-frontend"
+  imageVersion: "latest"
