@@ -6,39 +6,48 @@ The chart covers the full stack: Keycloak, MariaDB, MongoDB, RabbitMQ, Redis, Ma
 
 ## Getting started
 
-### 1. Create your local values file
+Configuration is split across two files — both are gitignored and must be created locally before deploying.
 
-The repository ships a `values-default.yaml` with placeholder passwords (each password is set to its corresponding username). Copy it and fill in your real credentials:
+### 1. Set up your config
+
+Copy the values template and fill in your domain and realm:
 
 ```bash
-cp values-default.yaml values.yaml
+cp values.yaml.default values.yaml
 ```
 
-`values.yaml` is listed in `.gitignore` and will never be committed.
+Open `values.yaml` and update:
 
-### 2. Set your passwords
+- `global.domainName` — your public domain (and the derived `domains.*` / URL fields)
+- `global.keycloak.realm` — your Keycloak realm name (appears in several URL fields)
+- `matrix.synapseServerName` / `matrixServerName` — your Matrix server name
 
-Open `values.yaml` and replace all placeholder values with your actual passwords. Fields to look for:
+### 2. Set up your secrets
+
+Copy the secrets template and fill in all credentials:
+
+```bash
+cp secrets.yaml.default secrets.yaml
+```
+
+Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fill in:
 
 - `global.secrets.*Password` / `*Pass` — database and service passwords
 - `global.secrets.matrixRegistrationSharedSecret` — Matrix shared secret
-- `global.keycloak.technicalUser.password` — Keycloak technical user
+- `global.keycloak.technicalUser.password` — Keycloak technical user password
+- `global.keycloak.serviceTechUserId` — Keycloak technical user ID
 - `postgres.postgresPassword` — PostgreSQL root password
 - `matrix.matrixAdminPassword` — Matrix admin password
 - `online-counseling-mongodb.*Password` / `*Pass` — MongoDB passwords
 - `online-counseling-mariadb.dbRootPassword` — MariaDB root password
-- `livekit.api.secret` — LiveKit API secret
+- `livekit.api.key` / `livekit.api.secret` — LiveKit API credentials
 - `tenantService.springDatasourcePassword` / `springRabbitmqPassword`
-- `userService.rocket*Password` / `keycloakTechnicalPassword`
-
-Also set `global.domainName` (and the derived domain fields) to your actual domain — they are pre-filled with `your.domain` as a placeholder.
-
-Set `global.keycloak.realm` to your Keycloak realm name — it is pre-filled with `your-realm` and appears in several URL fields throughout the file.
+- `userService.rocket*Password` / `keycloakTechnicalPassword` / `serviceEncryptionAppkey`
 
 ### 3. Install / Upgrade
 
 ```bash
-helm upgrade --install caritas ./ --namespace caritas --create-namespace --wait-for-jobs --timeout 15m -f values.yaml
+helm upgrade --install caritas ./ --namespace caritas --create-namespace --wait-for-jobs --timeout 15m -f secrets.yaml
 ```
 
-The first `caritas` is the Helm release name, the second is the Kubernetes namespace. Both can be set to whatever fits your environment, they don't have to match.
+The first `caritas` is the Helm release name, the second is the Kubernetes namespace. Both can be changed to suit your environment.
