@@ -290,4 +290,4 @@ userService:
 # Frontend
 frontend:
   imageName: "ghcr.io/openresilienceinitiative/oriso-frontend"
-  imageVersion: "latest"
+  imageVersion: "2.0.1"
