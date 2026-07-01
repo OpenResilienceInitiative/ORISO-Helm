@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "health-dashboard.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.healthDashboard.namespace }}
+  labels:
+    {{- include "health-dashboard.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.healthDashboard.service.type }}
+  ports:
+  - port: {{ .Values.healthDashboard.service.port }}
+    targetPort: {{ .Values.healthDashboard.service.targetPort }}
+    protocol: TCP
+    name: http
+  selector:
+    app: health-dashboard
