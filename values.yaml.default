@@ -1,24 +1,24 @@
-
+﻿
 cert-manager:
   enabled: true
 
 global:
 
-  domainName: "your.domain"
+  domainName: "your-domain.example.com"
   domains:
-    matrix: "matrix.your.domain"
+    matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
 
 
-  acmedomainName: "acme.your.domain"
- #adminDomainName: "admin.your.domain"
+  acmedomainName: "acme.your-domain.example.com"
+ #adminDomainName: "admin.your-domain.example.com"
   internal:
     keycloakURL: "http://keycloak:8080/"
   external:
-    keycloakURL: "https://your.domain/auth/"
+    keycloakURL: "https://your-domain.example.com/auth/"
 
-  springSecurityOAuth2ResourceserverJWTIssuerURI: "https://your.domain/auth/realms/your-realm"
+  springSecurityOAuth2ResourceserverJWTIssuerURI: "https://your-domain.example.com/auth/realms/your-realm"
   springSecurityOAuth2ResourceserverJWTJWKSETURI: "http://keycloak:8080/auth/realms/your-realm/protocol/openid-connect/certs"
   authorizationendpoint: "http://keycloak:8080/auth/realms/your-realm/protocol/openid-connect/auth"
   tokenendpoint: "http://keycloak:8080/auth/realms/your-realm/protocol/openid-connect/token"
@@ -61,66 +61,25 @@ global:
 
   keycloak:
     realm: "your-realm"
-    authServerUrl: "https://your.domain/auth"
+    authServerUrl: "https://your-domain.example.com/auth"
     otpUrl: "/realms/your-realm/otp-config"
     openidConnectUrl: "/realms/your-realm/protocol/openid-connect"
     loginSuffix: "/token"
     logoutSuffix: "/logout"
-    technicalUser:
-      password: "technical"
-
     principalAttribute: "preferred_username"
     serviceAppClientId: "app"
     serviceAdminClientId: "admin-cli"
-    serviceTechUserId:  "8294c392-e1e0-405b-ac2f-ba3043cbad3e"
 
-  secrets:
-    # Liquibase
-    liquibaseUser: "liquibase"
-    liquibasePassword: "liquibase"
-
-    # RabbitMQ
-    rabbitmqUsername: "admin"
-    rabbitmqPassword: "admin"
-
-    # Secrets
-    caritasDbUsername: "caritas"
-    caritasDbPassword: "caritas"
-    keycloakDbUsername: "keycloak"
-    keycloakDbPassword: "keycloak"
-    agencyServiceDbUsername: "aservice"
-    agencyServiceDbPassword: "aservice"
-    consultingTypeServiceDbUsername: "ctservice"
-    consultingTypeServiceDbPassword: "ctservice"
-    consultingTypeMongoUser: "consulting_types"
-    consultingTypeMongoPass: "consulting_types"
-    userServiceDbUsername: "uservice"
-    userServiceDbPassword: "uservice"
-    uploadServiceDbUsername: "upservice"
-    uploadServiceDbPassword: "upservice"
-    tenantServiceDbUsername: "tservice"
-    tenantServiceDbPassword: "tservice"
-    redisdefaultPass: "redisadm"
-    matrixRegistrationSharedSecret: "changeme"
-    keycloakAdminUsername: "realmadmin"
-    keycloakAdminPassword: "realmadmin"
-
-
-
-postgres:
-  postgresDB: "c3luYXBzZQ=="
-  postgresPassword: "changeme"
-  postgresUser: "c3luYXBzZQ=="
 
 
 matrix:
-  synapseServerName: "caritas.local"
+  synapseServerName: "your-server.local"
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"
-  matrixAdminUsername: "matrixadm"
-  matrixAdminPassword: "matrixadm"
   matrixApiUrl: "http://matrix-synapse:8008"
-  matrixServerName: "caritas.local"
+  matrixServerName: "your-server.local"
+
+
 
 
 
@@ -135,33 +94,12 @@ online-counseling-mongodb:
   imageName: "mongo"
   imageVersion: "5.0"
 
-  rocketchatMongoUsername: "rocketchat"
-  rocketchatMongoPassword: "rocketchat"
-
-  mongoSharedKey: "default"
-  mongoInitDbRootUsername: "admin"
-  mongoInitDbRootPassword: "admin"
-
-  noSqlClientMongoUsername: "nosqlclient"
-  noSqlClientMongoPassword: "nosqlclient"
-
-  oplogMongoUsername: "oplog"
-  oplogMongoPassword: "oplog"
-
-  statisticsMongoUser: "statistics"
-  statisticsMongoPass: "statistics"
-
 
 # MariaDB
 online-counseling-mariadb:
   imageName: "mariadb"
   imageVersion: "11.0.6"
-  dbRootPassword: "changeme"
   maxconnections: "1000"
-livekit:
-  api:
-    key: "orisoKey"
-    secret: "orisoKey"
 tokenService:
   replicas: 2
   image:
@@ -183,7 +121,6 @@ online-counseling-rabbitmq:
 online-counseling-redis:
   imageName: "redis"
   imageVersion: "7-alpine"
-  user: "redisadm"
   serviceURL: "redis://redis:6379"
 
 
@@ -194,7 +131,7 @@ online-counseling-keycloak:
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
-  dbDatabase: "keycloak"
+  dbDatabase: "keycloak" 
 
   # Logging (supported log levels are ALL, DEBUG, ERROR, FATAL, INFO, OFF, TRACE and WARN)
   keycloakLogLevel: "WARN"
@@ -232,15 +169,11 @@ consultingTypeService:
 # Tenant Service
 tenantService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "latest"
+  imageVersion: "latest"  
   springProfilesActive: "dev"
   springDatasourceURL: "jdbc:mariadb://mariadb:3306/tenantservice"
-  springDatasourceUsername: "caritas"
-  springDatasourcePassword: "caritas"
   springRabbitmqHost: "rabbitmq"
   springRabbitmqPort: "5672"
-  springRabbitmqUsername: "admin"
-  springRabbitmqPassword: "admin"
 
 
 
@@ -249,7 +182,7 @@ userService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-userservice"
   imageVersion: "latest"
   serviceURL: "http://userservice:8080"
-
+ 
   keycloakResource: "user-service"
 
   springProfilesActive: "dev"
@@ -269,20 +202,8 @@ userService:
   sessionInactiveDeleteWorkflowCron: "0 0 * * * ?"
   sessionInactiveDeleteWorkflowCheckDays: "30"
 
-  serviceEncryptionAppkey: "changeme"
-
-
   # Rocketchat
-  rocketSystemuserId: "hjvBcfWH5vS3KLv27"
-  rocketTechnicalUsername: "rocket-chat-technical-user"
-  rocketTechnicalPassword: "rocket-chat-technical-user"
-  rocketSystemuserUsername: "system1"
-  rocketSystemuserPassword: "system1"
   rocketCredentialschedulerCron: "0 0 0/1 * * ?"
-
-  # Keycloak
-  keycloakTechnicalUsername: "technical"
-  keycloakTechnicalPassword: "technical"
 
 
 # ---------- Frontend Services ----------------------------------------------------------------------------------------
@@ -291,3 +212,94 @@ userService:
 frontend:
   imageName: "ghcr.io/openresilienceinitiative/oriso-frontend"
   imageVersion: "2.0.1"
+
+
+# ---------- Observability & Monitoring -------------------------------------------------------------------------------
+
+# Health Dashboard
+healthDashboard:
+  image:
+    repository: ghcr.io/openresilienceinitiative/health-dashboard
+    tag: rebuild
+    pullPolicy: Never
+  replicas: 1
+  namespace: ""
+  resources: {}
+  service:
+    type: ClusterIP
+    port: 9100
+    targetPort: 9100
+  env:
+    PORT: "9100"
+
+# SigNoz
+signoz:
+  image:
+    repository: signoz/signoz
+    tag: "v0.105.1"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  namespace: ""
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+    internalPort: 8085
+    opampPort: 4320
+    otlpGrpcPort: 4317
+    otlpHttpPort: 4318
+  clickhouse:
+    host: ""
+    port: 9000
+    httpPort: 8123
+    cluster: "cluster"
+    user: "default"
+    password: ""
+    secret:
+      name: clickhouse-config
+      key: default-password
+  appConfig:
+    telemetryStore:
+      provider: "clickhouse"
+    prometheus:
+      activeQueryTracker:
+        enabled: false
+    emailing:
+      enabled: false
+    alertmanager:
+      provider: "signoz"
+      signozExternalUrl: ""
+    dotMetrics:
+      enabled: true
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+    limits:
+      cpu: 4000m
+      memory: 16Gi
+  livenessProbe:
+    httpGet:
+      path: /api/v1/health
+      port: http
+      scheme: HTTP
+    failureThreshold: 6
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 5
+  readinessProbe:
+    httpGet:
+      path: /api/v1/health?live=1
+      port: http
+      scheme: HTTP
+    failureThreshold: 6
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 5
+  persistence:
+    enabled: true
+    storageClass: "local-path"
+    size: 20Gi
+    accessMode: ReadWriteOnce
