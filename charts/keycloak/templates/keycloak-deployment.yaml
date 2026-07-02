@@ -102,6 +102,7 @@ spec:
           {{- if .Values.keycloakSecurityContext }}
           securityContext:
             {{- toYaml .Values.keycloakSecurityContext.container | nindent 12 }}
+          {{- end }}
           {{- if .Values.keycloakProbes }}
           startupProbe:
             httpGet:

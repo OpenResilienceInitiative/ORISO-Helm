@@ -1,0 +1,22 @@
+# Keep the packaged chart (and the Helm release secret, which stores a full
+# copy of the chart) small — the release secret has a hard 1MiB limit.
+.git/
+.gitignore
+.claude/
+.helmignore
+secrets.yaml
+secrets.yaml.default
+values.yaml.default
+README.md
+*.sh
+*.txt
+*.tgz
+# Font files: mounted via a ConfigMap `data:` field as base64 text, which never
+# produced valid fonts in the pod anyway, and they alone add ~1MB (chart copy +
+# base64 manifest) to the release secret. Ship them in the image or via
+# `binaryData:` with woff2 files if the custom fonts are ever actually needed.
+*.ttf
+*.woff
+*.woff2
+*.eot
+*.otf
