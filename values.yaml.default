@@ -56,6 +56,11 @@ global:
 
   logstashHost: "http://logstash.default:8080"
 
+  # Matrix values needed by subcharts (subcharts cannot see the top-level `matrix:` block).
+  # matrixAdminUsername / matrixAdminPassword must be set under global.matrix in secrets.yaml.
+  matrix:
+    matrixServerName: "your-server.local"
+
   # Keycloak connection
 
 
