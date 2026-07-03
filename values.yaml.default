@@ -254,7 +254,8 @@ signoz:
     otlpGrpcPort: 4317
     otlpHttpPort: 4318
   clickhouse:
-    host: ""
+    deploy: true  # deploy a single-node ClickHouse in-cluster; set false to use an external one via host/port
+    host: "clickhouse"
     port: 9000
     httpPort: 8123
     cluster: "cluster"
@@ -263,6 +264,24 @@ signoz:
     secret:
       name: clickhouse-config
       key: default-password
+    image:
+      repository: clickhouse/clickhouse-server
+      tag: "25.5.6"
+      pullPolicy: IfNotPresent
+    persistence:
+      storageClass: ""  # empty = use the cluster's default StorageClass
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 4Gi
+  schemaMigrator:
+    image:
+      repository: signoz/signoz-schema-migrator
+      tag: "v0.129.12"
+      pullPolicy: IfNotPresent
   appConfig:
     telemetryStore:
       provider: "clickhouse"
@@ -305,6 +324,6 @@ signoz:
     timeoutSeconds: 5
   persistence:
     enabled: true
-    storageClass: "local-path"
+    storageClass: ""  # empty = use the cluster's default StorageClass
     size: 20Gi
     accessMode: ReadWriteOnce

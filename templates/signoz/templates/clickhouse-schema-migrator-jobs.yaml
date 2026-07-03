@@ -1,0 +1,83 @@
+{{- if .Values.signoz.clickhouse.deploy }}
+{{- $gSvc := default dict (.Values.global | default dict).services -}}
+{{- $gCh  := default dict $gSvc.clickhouse -}}
+{{- $chHost := default .Values.signoz.clickhouse.host (default "" $gCh.host) -}}
+{{- $chPort := default .Values.signoz.clickhouse.port (default 0 $gCh.port) -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clickhouse-schema-migrator-sync
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    app: clickhouse-schema-migrator
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    # run after the other post-install hooks (e.g. create-mongo-users) so a slow or
+    # failing migration can never block them
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app: clickhouse-schema-migrator
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+      - name: wait-for-clickhouse
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          until nc -z {{ $chHost }} {{ $chPort }}; do
+            echo "Waiting for ClickHouse at {{ $chHost }}:{{ $chPort }}..."
+            sleep 2
+          done
+      containers:
+      - name: schema-migrator
+        image: "{{ .Values.signoz.schemaMigrator.image.repository }}:{{ .Values.signoz.schemaMigrator.image.tag }}"
+        imagePullPolicy: {{ .Values.signoz.schemaMigrator.image.pullPolicy }}
+        args:
+        - sync
+        - --dsn=tcp://{{ $chHost }}:{{ $chPort }}
+        - --up=
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clickhouse-schema-migrator-async
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    app: clickhouse-schema-migrator
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "11"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app: clickhouse-schema-migrator
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+      - name: wait-for-clickhouse
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          until nc -z {{ $chHost }} {{ $chPort }}; do
+            echo "Waiting for ClickHouse at {{ $chHost }}:{{ $chPort }}..."
+            sleep 2
+          done
+      containers:
+      - name: schema-migrator
+        image: "{{ .Values.signoz.schemaMigrator.image.repository }}:{{ .Values.signoz.schemaMigrator.image.tag }}"
+        imagePullPolicy: {{ .Values.signoz.schemaMigrator.image.pullPolicy }}
+        args:
+        - async
+        - --dsn=tcp://{{ $chHost }}:{{ $chPort }}
+        - --up=
+{{- end }}

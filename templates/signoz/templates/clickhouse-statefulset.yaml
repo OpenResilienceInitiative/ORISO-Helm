@@ -1,0 +1,82 @@
+{{- if .Values.signoz.clickhouse.deploy }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clickhouse
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    app: clickhouse
+spec:
+  serviceName: clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      app: clickhouse
+  template:
+    metadata:
+      labels:
+        app: clickhouse
+    spec:
+      containers:
+      - name: clickhouse
+        image: "{{ .Values.signoz.clickhouse.image.repository }}:{{ .Values.signoz.clickhouse.image.tag }}"
+        imagePullPolicy: {{ .Values.signoz.clickhouse.image.pullPolicy }}
+        env:
+        # since 24.11 the image restricts the default user to localhost unless this is set;
+        # SigNoz upstream keeps the open empty-password default user (cluster-internal only)
+        - name: CLICKHOUSE_SKIP_USER_SETUP
+          value: "1"
+        ports:
+        - name: http
+          containerPort: {{ .Values.signoz.clickhouse.httpPort }}
+        - name: native
+          containerPort: {{ .Values.signoz.clickhouse.port }}
+        volumeMounts:
+        - name: clickhouse-data
+          mountPath: /var/lib/clickhouse
+        - name: clickhouse-cluster-config
+          mountPath: /etc/clickhouse-server/config.d/cluster.xml
+          subPath: cluster.xml
+        readinessProbe:
+          httpGet:
+            path: /ping
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /ping
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        {{- with .Values.signoz.clickhouse.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      volumes:
+      - name: clickhouse-cluster-config
+        configMap:
+          name: clickhouse-config
+          items:
+          - key: cluster.xml
+            path: cluster.xml
+  volumeClaimTemplates:
+  - metadata:
+      name: clickhouse-data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      {{- with .Values.signoz.clickhouse.persistence.storageClass }}
+      storageClassName: {{ . }}
+      {{- end }}
+      resources:
+        requests:
+          storage: {{ .Values.signoz.clickhouse.persistence.size }}
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+{{- end }}

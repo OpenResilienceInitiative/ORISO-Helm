@@ -1,0 +1,20 @@
+{{- if .Values.signoz.clickhouse.deploy }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.signoz.clickhouse.host }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    app: clickhouse
+spec:
+  type: ClusterIP
+  selector:
+    app: clickhouse
+  ports:
+  - name: native
+    port: {{ .Values.signoz.clickhouse.port }}
+    targetPort: native
+  - name: http
+    port: {{ .Values.signoz.clickhouse.httpPort }}
+    targetPort: http
+{{- end }}

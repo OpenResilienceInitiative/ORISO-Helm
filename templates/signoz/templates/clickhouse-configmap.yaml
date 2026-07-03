@@ -1,0 +1,52 @@
+{{- if .Values.signoz.clickhouse.deploy }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-config
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    app: clickhouse
+data:
+  default-password: {{ .Values.signoz.clickhouse.password | quote }}
+  cluster.xml: |
+    <clickhouse>
+      <!-- embedded keeper replaces the separate zookeeper of the official setup;
+           required for the ON CLUSTER DDL the schema migrator issues -->
+      <keeper_server>
+        <tcp_port>9181</tcp_port>
+        <server_id>1</server_id>
+        <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+        <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+        <coordination_settings>
+          <operation_timeout_ms>10000</operation_timeout_ms>
+          <session_timeout_ms>30000</session_timeout_ms>
+        </coordination_settings>
+        <raft_configuration>
+          <server>
+            <id>1</id>
+            <hostname>localhost</hostname>
+            <port>9234</port>
+          </server>
+        </raft_configuration>
+      </keeper_server>
+      <zookeeper>
+        <node>
+          <host>localhost</host>
+          <port>9181</port>
+        </node>
+      </zookeeper>
+      <remote_servers>
+        <{{ .Values.signoz.clickhouse.cluster }}>
+          <shard>
+            <replica>
+              <!-- must be a local address, not the Service name: the DDL worker only
+                   executes ON CLUSTER tasks for hosts it recognizes as itself, and a
+                   Service ClusterIP is never local to the pod -->
+              <host>127.0.0.1</host>
+              <port>{{ .Values.signoz.clickhouse.port }}</port>
+            </replica>
+          </shard>
+        </{{ .Values.signoz.clickhouse.cluster }}>
+      </remote_servers>
+    </clickhouse>
+{{- end }}
