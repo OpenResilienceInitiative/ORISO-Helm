@@ -1,0 +1,14 @@
+{
+  "name": "oriso-helm-livekit-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "End-to-end verification that the deployed LiveKit SFU carries a real WebRTC session.",
+  "scripts": {
+    "test:livekit": "playwright test livekit-sfu.spec.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "jose": "^6.1.2",
+    "livekit-client": "^2.16.1"
+  }
+}

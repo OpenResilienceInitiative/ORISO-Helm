@@ -35,6 +35,14 @@ spec:
             - containerPort: 7880
               name: http
               protocol: TCP
+            # RTC signalling/media ports. Declared for clarity; under
+            # hostNetwork the SFU binds them on the node regardless. The UDP
+            # media port(s) are governed by the `rtc` block in
+            # livekit-configmap.yaml and must be reachable through the node
+            # firewall — see docs/livekit-crashloop-postmortem-2026-07-03.md.
+            - containerPort: 7881
+              name: rtc-tcp
+              protocol: TCP
           volumeMounts:
             - name: livekit-config
               mountPath: /etc/livekit
