@@ -10,16 +10,11 @@ DROP SEQUENCE IF EXISTS `sequence_agency_topic`;
 CREATE SEQUENCE `sequence_agency_topic` start with 0 minvalue 0 maxvalue 9223372036854775806 increment by 1 cache 10 nocycle ENGINE=InnoDB;
 DO SETVAL(`sequence_agency_topic`, 400, 0);
 
-DROP SEQUENCE IF EXISTS `sequence_diocese`;
-CREATE SEQUENCE `sequence_diocese` start with 0 minvalue 0 maxvalue 9223372036854775806 increment by 1 nocache nocycle ENGINE=InnoDB;
-DO SETVAL(`sequence_diocese`, 0, 0);
-
 DROP TABLE IF EXISTS `agency_topic`;
 DROP TABLE IF EXISTS `agency_postcode_range`;
 DROP TABLE IF EXISTS `agency`;
 DROP TABLE IF EXISTS `DATABASECHANGELOG`;
 DROP TABLE IF EXISTS `DATABASECHANGELOGLOCK`;
-DROP TABLE IF EXISTS `diocese`;
 
 CREATE TABLE `DATABASECHANGELOG` (
   `ID` varchar(255) NOT NULL,
@@ -46,19 +41,9 @@ CREATE TABLE `DATABASECHANGELOGLOCK` (
   PRIMARY KEY (`ID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
-CREATE TABLE `diocese` (
-  `id` bigint(21) NOT NULL,
-  `name` varchar(100) NOT NULL,
-  `id_old` bigint(21) NOT NULL,
-  `create_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `update_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_unicode_ci;
-
 CREATE TABLE `agency` (
   `id` bigint(21) NOT NULL,
   `tenant_id` bigint(21) DEFAULT NULL,
-  `diocese_id` bigint(21) DEFAULT NULL,
   `name` varchar(100) NOT NULL,
   `description` text DEFAULT NULL,
   `postcode` varchar(5) DEFAULT NULL,
@@ -84,9 +69,14 @@ CREATE TABLE `agency` (
   `agency_logo` longtext DEFAULT NULL,
   `matrix_user_id` varchar(255) DEFAULT NULL,
   `matrix_password` varchar(255) DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `diocese_id` (`diocese_id`),
-  CONSTRAINT `agency_ibfk_1` FOREIGN KEY (`diocese_id`) REFERENCES `diocese` (`id`) ON UPDATE CASCADE
+  `street` varchar(255) DEFAULT NULL,
+  `house_number` varchar(20) DEFAULT NULL,
+  `floor_building` varchar(100) DEFAULT NULL,
+  `country` varchar(100) DEFAULT NULL,
+  `phone` varchar(30) DEFAULT NULL,
+  `phone_secondary` varchar(30) DEFAULT NULL,
+  `email` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_unicode_ci;
 
 CREATE TABLE `agency_postcode_range` (
@@ -108,6 +98,8 @@ CREATE TABLE `agency_topic` (
   `topic_id` bigint(21) NOT NULL,
   `create_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `update_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `content_dpp` longtext DEFAULT NULL,
+  `publication_status` varchar(20) NOT NULL DEFAULT 'DRAFT',
   PRIMARY KEY (`id`),
   KEY `agency_id` (`agency_id`),
   CONSTRAINT `agency_topic_ibfk_1` FOREIGN KEY (`agency_id`) REFERENCES `agency` (`id`) ON UPDATE CASCADE
@@ -116,34 +108,30 @@ CREATE TABLE `agency_topic` (
 
 USE agencyservice;
 
--- 1. Create a diocese (required by FK constraint)
-INSERT INTO diocese (id, name, id_old, create_date, update_date)
-VALUES (1, 'Erzbistum Test', 1, NOW(), NOW());
-
--- 2. Create the agency
+-- 1. Create the agency
 INSERT INTO agency (
-    id, tenant_id, diocese_id, name, description, postcode, city,
+    id, tenant_id, name, description, postcode, city,
     is_team_agency, consulting_type, is_offline, url, is_external,
     age_from, age_to, genders, create_date, update_date
 ) VALUES (
-             1, 1, 1, 'Test Beratungsstelle', 'Eine Test-Beratungsstelle',
+             1, 1, 'Test Beratungsstelle', 'Eine Test-Beratungsstelle',
              '12345', 'Berlin', 0, 1, 0, 'https://www.example.com', 0,
              0, 100, 'FEMALE,MALE,DIVERSE', NOW(), NOW()
          );
 
--- 3. Create postcode range (so it shows up in registration)
-INSERT INTO `agency` VALUES
-                         (237,1,NULL,'Caritas Agency','Description.','12345','City',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-13 17:28:02','2026-03-13 17:29:36',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-237-service:caritas.local','NSDta-DETIWNyvb7tzCQo5Gc'),
-                         (238,1,NULL,'Caritas Mitte','Description.','12345','Berlin',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-13 19:43:17','2026-04-10 10:27:06',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-238-service:caritas.local','McgyiNBNsmCb4DoQ43m3_40D'),
-                         (239,0,NULL,'Testing Field','description.','12345','CITY',0,1,1,NULL,0,NULL,NULL,NULL,NULL,'2026-03-13 20:00:26','2026-03-13 20:00:26',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-239-service:caritas.local','iFxyWrTZonBzP3QnGdU-bLye'),
-                         (240,1,NULL,'Testing field 2','description.','12345','city',0,1,1,NULL,0,NULL,NULL,NULL,NULL,'2026-03-13 20:01:54','2026-03-13 20:01:54',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-240-service:caritas.local','zadQ0Y6smDulB7xTL_4H79Qj'),
-                         (241,1,NULL,'Beratungsstelle Kreuzberg','Schaun ma wie es jeht - na jut!','10965','Berlin',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-19 13:22:00','2026-03-24 12:51:16',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-241-service:caritas.local','XDmfYtp0RSdDsJrOoElGkV-w'),
-                         (243,20,NULL,'Beratungsstelle Kiel','Vorführung Christine ','24103','Kiel',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-30 12:08:37','2026-03-30 12:11:52',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-243-service:caritas.local','aGnSX0Q9zK0oPXMskSEEY65i'),
-                         (244,20,NULL,'Beratungstelle U25 ','Peer Beratung für Jugendliche in Schwierigen Situationen','00000','Kiel',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-30 12:11:12','2026-03-30 12:11:46',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-244-service:caritas.local','wvzBZdlCUTc2-tibAnkPIfms'),
-                         (245,21,NULL,'Caritas am Meer','','23966','Wismar',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-31 13:52:35','2026-03-31 13:54:02',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-245-service:caritas.local','2xT0ZAg3z8K01CkmH-OIOTE9'),
-                         (246,21,NULL,'Caritasverband Wismar ','dfds','23966','Wismar',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-31 13:54:41','2026-03-31 13:59:53',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-246-service:caritas.local','LxBq_wZ-CnqKmXBIxFSs6kj_'),
-                         (247,1,NULL,'Caritas Neukölln','','12043','Berlin',0,1,1,NULL,0,NULL,NULL,NULL,NULL,'2026-04-10 10:46:47','2026-04-10 10:46:47',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-247-service:caritas.local','eKGF2iAVLWvFWRA7rcnX7-Zs'),
-                         (248,22,NULL,'Schwangerschaftberatung Deutschland','Demo 14. April','86161','Augburg',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-04-14 06:51:00','2026-04-14 06:54:06',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-248-service:caritas.local','Ck38ojHZ0zVrzVCocCOloLuf');
+-- 2. Create further agencies (and, below, postcode ranges so they show up in registration)
+INSERT INTO `agency` (`id`, `tenant_id`, `name`, `description`, `postcode`, `city`, `is_team_agency`, `consulting_type`, `is_offline`, `url`, `is_external`, `age_from`, `age_to`, `genders`, `id_old`, `create_date`, `update_date`, `delete_date`, `counselling_relations`, `data_protection_responsible_entity`, `data_protection_alternative_contact`, `data_protection_officer_contact`, `data_protection_agency_contact`, `agency_logo`, `matrix_user_id`, `matrix_password`) VALUES
+                         (237,1,'Caritas Agency','Description.','12345','City',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-13 17:28:02','2026-03-13 17:29:36',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-237-service:caritas.local','NSDta-DETIWNyvb7tzCQo5Gc'),
+                         (238,1,'Caritas Mitte','Description.','12345','Berlin',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-13 19:43:17','2026-04-10 10:27:06',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-238-service:caritas.local','McgyiNBNsmCb4DoQ43m3_40D'),
+                         (239,0,'Testing Field','description.','12345','CITY',0,1,1,NULL,0,NULL,NULL,NULL,NULL,'2026-03-13 20:00:26','2026-03-13 20:00:26',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-239-service:caritas.local','iFxyWrTZonBzP3QnGdU-bLye'),
+                         (240,1,'Testing field 2','description.','12345','city',0,1,1,NULL,0,NULL,NULL,NULL,NULL,'2026-03-13 20:01:54','2026-03-13 20:01:54',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-240-service:caritas.local','zadQ0Y6smDulB7xTL_4H79Qj'),
+                         (241,1,'Beratungsstelle Kreuzberg','Schaun ma wie es jeht - na jut!','10965','Berlin',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-19 13:22:00','2026-03-24 12:51:16',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-241-service:caritas.local','XDmfYtp0RSdDsJrOoElGkV-w'),
+                         (243,20,'Beratungsstelle Kiel','Vorführung Christine ','24103','Kiel',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-30 12:08:37','2026-03-30 12:11:52',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-243-service:caritas.local','aGnSX0Q9zK0oPXMskSEEY65i'),
+                         (244,20,'Beratungstelle U25 ','Peer Beratung für Jugendliche in Schwierigen Situationen','00000','Kiel',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-30 12:11:12','2026-03-30 12:11:46',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-244-service:caritas.local','wvzBZdlCUTc2-tibAnkPIfms'),
+                         (245,21,'Caritas am Meer','','23966','Wismar',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-31 13:52:35','2026-03-31 13:54:02',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-245-service:caritas.local','2xT0ZAg3z8K01CkmH-OIOTE9'),
+                         (246,21,'Caritasverband Wismar ','dfds','23966','Wismar',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-31 13:54:41','2026-03-31 13:59:53',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-246-service:caritas.local','LxBq_wZ-CnqKmXBIxFSs6kj_'),
+                         (247,1,'Caritas Neukölln','','12043','Berlin',0,1,1,NULL,0,NULL,NULL,NULL,NULL,'2026-04-10 10:46:47','2026-04-10 10:46:47',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-247-service:caritas.local','eKGF2iAVLWvFWRA7rcnX7-Zs'),
+                         (248,22,'Schwangerschaftberatung Deutschland','Demo 14. April','86161','Augburg',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-04-14 06:51:00','2026-04-14 06:54:06',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-248-service:caritas.local','Ck38ojHZ0zVrzVCocCOloLuf');
 
 
 
@@ -163,7 +151,7 @@ INSERT INTO `agency_postcode_range` VALUES
 
 
 
-INSERT INTO `agency_topic` VALUES
+INSERT INTO `agency_topic` (`id`, `agency_id`, `topic_id`, `create_date`, `update_date`) VALUES
                                (334,237,3,'2026-03-13 17:29:36','2026-03-13 17:29:36'),
                                (337,239,3,'2026-03-13 20:00:26','2026-03-13 20:00:26'),
                                (338,240,3,'2026-03-13 20:01:54','2026-03-13 20:01:54'),
@@ -183,6 +171,7 @@ INSERT INTO `agency_topic` VALUES
 
 
 
+DROP TABLE IF EXISTS `agency_admin_control`;
 CREATE TABLE `agency_admin_control` (
                                         `id` bigint(21) unsigned NOT NULL,
                                         `controls` varchar(4000) NOT NULL,
