@@ -2343,10 +2343,15 @@
       "emailVerified": false,
       "firstName": "Realm",
       "lastName": "Admin",
-      "disableableCredentialTypes": [],
-      "requiredActions": [
-        "UPDATE_PASSWORD"
+      "credentials": [
+        {
+          "type": "password",
+          "temporary": false,
+          "value": "{{ .Values.global.secrets.keycloakAdminPassword }}"
+        }
       ],
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
       "realmRoles": [
         "default-roles-online-beratung"
       ],

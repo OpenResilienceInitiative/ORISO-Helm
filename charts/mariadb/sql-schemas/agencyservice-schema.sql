@@ -132,7 +132,13 @@ INSERT INTO agency (
          );
 
 -- 3. Create postcode range (so it shows up in registration)
-INSERT INTO `agency` VALUES
+-- Explicit column list: the rows below carry 27 values and do not include agency_logo
+INSERT INTO `agency` (id, tenant_id, diocese_id, name, description, postcode, city,
+                      is_team_agency, consulting_type, is_offline, url, is_external,
+                      age_from, age_to, genders, id_old, create_date, update_date,
+                      delete_date, counselling_relations, data_protection_responsible_entity,
+                      data_protection_alternative_contact, data_protection_officer_contact,
+                      settings, data_protection_agency_contact, matrix_user_id, matrix_password) VALUES
                          (237,1,NULL,'Caritas Agency','Description.','12345','City',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-13 17:28:02','2026-03-13 17:29:36',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-237-service:caritas.local','NSDta-DETIWNyvb7tzCQo5Gc'),
                          (238,1,NULL,'Caritas Mitte','Description.','12345','Berlin',0,1,0,NULL,0,NULL,NULL,NULL,NULL,'2026-03-13 19:43:17','2026-04-10 10:27:06',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-238-service:caritas.local','McgyiNBNsmCb4DoQ43m3_40D'),
                          (239,0,NULL,'Testing Field','description.','12345','CITY',0,1,1,NULL,0,NULL,NULL,NULL,NULL,'2026-03-13 20:00:26','2026-03-13 20:00:26',NULL,'RELATIVE_COUNSELLING,SELF_COUNSELLING,PARENTAL_COUNSELLING',NULL,NULL,NULL,NULL,'','@agency-239-service:caritas.local','iFxyWrTZonBzP3QnGdU-bLye'),
