@@ -74,10 +74,10 @@ CREATE TABLE tenant_admin_controls (
                                        PRIMARY KEY (id)
 );
 
--- AVV/Legal (TenantService changesets 0016-0019): DPA signature + version history
-DROP SEQUENCE IF EXISTS `SEQUENCE_TENANT_DPA_SIGNATURE`;
-CREATE SEQUENCE `SEQUENCE_TENANT_DPA_SIGNATURE` start with 100000 increment by 1;
-DO SETVAL(`SEQUENCE_TENANT_DPA_SIGNATURE`, 100000, 0);
+-- AVV/Legal (TenantService changesets 0016-0020): DPA signature + version history
+DROP SEQUENCE IF EXISTS `sequence_tenant_dpa_signature`;
+CREATE SEQUENCE `sequence_tenant_dpa_signature` start with 100000 increment by 1;
+DO SETVAL(`sequence_tenant_dpa_signature`, 100000, 0);
 
 CREATE TABLE `tenant_dpa_signature` (
  `id` bigint(21) NOT NULL,
@@ -101,9 +101,9 @@ CREATE TABLE `tenant_dpa_signature` (
  CONSTRAINT `fk_tenant_dpa_signature_tenant` FOREIGN KEY (`tenant_id`) REFERENCES `tenant` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
-DROP SEQUENCE IF EXISTS `SEQUENCE_TENANT_DPA_VERSION`;
-CREATE SEQUENCE `SEQUENCE_TENANT_DPA_VERSION` start with 100000 increment by 1;
-DO SETVAL(`SEQUENCE_TENANT_DPA_VERSION`, 100000, 0);
+DROP SEQUENCE IF EXISTS `sequence_tenant_dpa_version`;
+CREATE SEQUENCE `sequence_tenant_dpa_version` start with 100000 increment by 1;
+DO SETVAL(`sequence_tenant_dpa_version`, 100000, 0);
 
 CREATE TABLE `tenant_dpa_version` (
  `id` bigint(21) NOT NULL,

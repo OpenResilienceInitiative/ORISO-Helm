@@ -35,6 +35,10 @@ Source of truth: `ORISO-TenantService/src/main/resources/db/changelog/changeset/
 0017_tenant_dpa_signature_token, 0018_tenant_dpa_version,
 0019_tenant_dpa_signature_audit_fields.
 
+Note (2026-07-04): the DPA sequence names here are lowercase on purpose — Hibernate
+requests the lowercase names at runtime; TenantService changeset 0020 renames any
+UPPERCASE leftovers on Liquibase-managed databases (TenantService PR #62).
+
 ```sql
 -- 0013: tenant admin controls
 CREATE SEQUENCE IF NOT EXISTS `tenantservice`.`sequence_tenant_admin_controls`
@@ -56,7 +60,7 @@ ALTER TABLE `tenantservice`.`tenant` ADD COLUMN IF NOT EXISTS content_dpa LONGTE
 ALTER TABLE `tenantservice`.`tenant` ADD COLUMN IF NOT EXISTS dpa_activation_date DATETIME NULL;
 
 -- 0016: DPA signature table + sequence
-CREATE SEQUENCE IF NOT EXISTS `tenantservice`.`SEQUENCE_TENANT_DPA_SIGNATURE`
+CREATE SEQUENCE IF NOT EXISTS `tenantservice`.`sequence_tenant_dpa_signature`
   START WITH 100000 INCREMENT BY 1;
 
 CREATE TABLE IF NOT EXISTS `tenantservice`.`tenant_dpa_signature` (
@@ -81,7 +85,7 @@ ALTER TABLE `tenantservice`.`tenant_dpa_signature` ADD COLUMN IF NOT EXISTS toke
 ALTER TABLE `tenantservice`.`tenant_dpa_signature` ADD COLUMN IF NOT EXISTS token_expires_at datetime NULL;
 
 -- 0018: DPA version history table + sequence
-CREATE SEQUENCE IF NOT EXISTS `tenantservice`.`SEQUENCE_TENANT_DPA_VERSION`
+CREATE SEQUENCE IF NOT EXISTS `tenantservice`.`sequence_tenant_dpa_version`
   START WITH 100000 INCREMENT BY 1;
 
 CREATE TABLE IF NOT EXISTS `tenantservice`.`tenant_dpa_version` (
@@ -176,7 +180,7 @@ WHERE table_schema = 'tenantservice'
 -- tenantservice sequences: expect 2
 SELECT COUNT(*) FROM information_schema.tables
 WHERE table_schema = 'tenantservice' AND table_type = 'SEQUENCE'
-  AND table_name IN ('SEQUENCE_TENANT_DPA_SIGNATURE', 'SEQUENCE_TENANT_DPA_VERSION');
+  AND table_name IN ('sequence_tenant_dpa_signature', 'sequence_tenant_dpa_version');
 
 -- agencyservice: expect 8
 SELECT COUNT(*) FROM information_schema.columns
