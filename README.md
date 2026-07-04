@@ -4,6 +4,8 @@ Helm chart for deploying the [ORISO](https://github.com/OpenResilienceInitiative
 
 The chart covers the full stack: Keycloak, MariaDB, MongoDB, RabbitMQ, Redis, Matrix/Synapse, LiveKit, and all backend/frontend services.
 
+> **Liquibase re-enablement (2026):** before an environment is switched back to `SPRING_LIQUIBASE_ENABLED=true`, it needs a one-time database baseline — see [runbooks/liquibase-baseline-sync.md](runbooks/liquibase-baseline-sync.md).
+
 ## Getting started
 
 Configuration is split across two files — both are gitignored and must be created locally before deploying.
