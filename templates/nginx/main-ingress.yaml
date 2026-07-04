@@ -70,6 +70,20 @@ spec:
             name: consultingtypeservice
             port:
               number: 8080
+        path: /service/topic-groups
+        pathType: Prefix
+      - backend:
+          service:
+            name: consultingtypeservice
+            port:
+              number: 8080
+        path: /service/settingsadmin
+        pathType: Prefix
+      - backend:
+          service:
+            name: consultingtypeservice
+            port:
+              number: 8080
         path: /service/settings
         pathType: Prefix
       - backend:
