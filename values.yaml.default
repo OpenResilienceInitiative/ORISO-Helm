@@ -26,7 +26,12 @@ global:
 
   # TLS
   enableTls: true
-  enableLiquibase: "false"
+  # Liquibase kill switch: rendered into SPRING_LIQUIBASE_ENABLED for the four
+  # backends (user/agency/consultingtype/tenant service). Set to "false" ONLY to
+  # disable schema migrations in an emergency. STRICT ORDERING: before rolling
+  # this default out to an EXISTING environment, the baseline-sync runbook MUST
+  # have been executed there first — see runbooks/liquibase-baseline-sync.md.
+  enableLiquibase: "true"
   # CORS
   enableCors: false
   corsAllowOrigin:
