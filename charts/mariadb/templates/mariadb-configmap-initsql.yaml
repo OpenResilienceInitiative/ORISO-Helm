@@ -50,36 +50,11 @@ data:
     GRANT ALTER, CREATE, CREATE VIEW, DELETE, DROP, INDEX, INSERT, REFERENCES, SELECT, SHOW VIEW, TRIGGER, UPDATE, ALTER ROUTINE, EXECUTE ON appointmentservice.* TO '{{ .Values.global.secrets.liquibaseUser }}'@'%';
     FLUSH PRIVILEGES;
 
-  02tenantservice_schema.sql: | 
-    use tenantservice;
-{{ .Files.Get "sql-schemas/tenantservice-schema.sql" | indent 4 }}
-  03setinitialsettings.sql: |
-    update tenantservice.tenant set settings = '{ 
-      "featureMultitenancyEnabled" : {{ .Values.global.multitenancyEnabled }},
-      "featureStatisticsEnabled" : {{ .Values.global.statisticsEnabled }},
-      "featureTopicsEnabled" : {{ .Values.global.topicsEnabled }},
-      "enableTopicsInRegistration" : false,
-      "featureDemographicsEnabled" : {{ .Values.global.demographicsEnabled }}
-    }'
-    where settings is null;
-  04consultingtype_schema.sql: | 
-    use consultingtypeservice;
-{{ .Files.Get "sql-schemas/consultingtypeservice-schema.sql" | indent 4 }}
-
-  05uploadservice_schema.sql: | 
+  # NOTE: The dump-based schema imports for the four Liquibase-managed
+  # databases (tenantservice, consultingtypeservice, userservice,
+  # agencyservice) were removed: with global.enableLiquibase="true" each
+  # service creates and migrates its own schema on first boot. Database and
+  # user creation (including the liquibase user and its grants) stays here.
+  05uploadservice_schema.sql: |
     use uploadservice;
 {{ .Files.Get "sql-schemas/uploadservice-schema.sql" | indent 4 }}
-
-  06userservice_schema.sql: | 
-    use userservice;
-{{ .Files.Get "sql-schemas/userservice-schema.sql" | indent 4 }}  
-
-  07agencyservice.sql: |
-    use agencyservice;
-{{ .Files.Get "sql-schemas/agencyservice-schema.sql" | indent 4 }}
-  08agencyservice-matrix.sql: |
-    use agencyservice;
-    UPDATE agency
-    SET matrix_user_id='@{{ .Values.matrix.matrixAdminUsername }}:{{ .Values.matrix.matrixServerName }}',
-        matrix_password='{{ .Values.matrix.matrixAdminPassword }}'
-    WHERE id=1;
