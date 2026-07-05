@@ -42,6 +42,9 @@ DROP SEQUENCE IF EXISTS `sequence_user_mobile_token`;
 CREATE SEQUENCE `sequence_user_mobile_token` start with 0 minvalue 0 maxvalue 9223372036854775806 increment by 1 cache 100 nocycle ENGINE=InnoDB;
 DO SETVAL(`sequence_user_mobile_token`, 0, 0);
 
+DROP TABLE IF EXISTS `invite_email_delivery`;
+DROP TABLE IF EXISTS `invite_email_template`;
+DROP TABLE IF EXISTS `account_invite`;
 DROP TABLE IF EXISTS `session_topic`;
 DROP TABLE IF EXISTS `session_supervisor`;
 DROP TABLE IF EXISTS `session_data`;
@@ -375,6 +378,7 @@ CREATE TABLE `event_notification` (
   `read_date` datetime DEFAULT NULL,
   `create_date` datetime NOT NULL DEFAULT current_timestamp(),
   `tenant_id` bigint(20) DEFAULT NULL,
+  `params` text DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_event_notification_recipient_create` (`recipient_user_id`,`create_date`),
   KEY `idx_event_notification_recipient_read` (`recipient_user_id`,`read_date`),
@@ -536,3 +540,73 @@ CREATE SEQUENCE `sequence_consultant_topic`
     CACHE 10
 NOCYCLE
 ENGINE=InnoDB;
+
+-- Account invite subsystem (UserService changeset 0055_account_invites).
+-- These three tables were missing from the pre-seed mirror, which crashlooped
+-- UserService on a fresh install (ddl-auto=validate + Liquibase off).
+-- account_invite must be created before invite_email_delivery (FK dependency).
+CREATE TABLE `account_invite` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `target_role` varchar(64) NOT NULL,
+  `tenant_id` bigint(20) DEFAULT NULL,
+  `recipient_email` varchar(255) NOT NULL,
+  `first_name` varchar(255) DEFAULT NULL,
+  `last_name` varchar(255) DEFAULT NULL,
+  `agency_id` bigint(20) DEFAULT NULL,
+  `department_id` bigint(20) DEFAULT NULL,
+  `token_hash` varchar(64) DEFAULT NULL,
+  `expires_at` datetime DEFAULT NULL,
+  `status` varchar(32) NOT NULL,
+  `email_verification_status` varchar(32) NOT NULL,
+  `two_factor_status` varchar(32) NOT NULL,
+  `accepted_at` datetime DEFAULT NULL,
+  `accepted_by_user_id` varchar(36) DEFAULT NULL,
+  `revoked_at` datetime DEFAULT NULL,
+  `revoked_by_user_id` varchar(36) DEFAULT NULL,
+  `superseded_at` datetime DEFAULT NULL,
+  `superseded_by_user_id` varchar(36) DEFAULT NULL,
+  `superseded_by_invite_id` bigint(20) DEFAULT NULL,
+  `two_factor_waived_by` varchar(36) DEFAULT NULL,
+  `two_factor_waived_at` datetime DEFAULT NULL,
+  `two_factor_waiver_reason` varchar(512) DEFAULT NULL,
+  `created_by_user_id` varchar(36) DEFAULT NULL,
+  `created_by_username` varchar(255) DEFAULT NULL,
+  `create_date` datetime NOT NULL,
+  `update_date` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_account_invite_token_hash` (`token_hash`),
+  KEY `idx_account_invite_tenant_status` (`tenant_id`,`status`),
+  KEY `idx_account_invite_target_role` (`target_role`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `invite_email_template` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `kind` varchar(32) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `language` varchar(16) DEFAULT NULL,
+  `subject` varchar(255) NOT NULL,
+  `body` longtext NOT NULL,
+  `active` bit(1) NOT NULL DEFAULT b'1',
+  `created_by_user_id` varchar(36) DEFAULT NULL,
+  `create_date` datetime NOT NULL,
+  `update_date` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_invite_email_template_kind` (`kind`,`active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `invite_email_delivery` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `account_invite_id` bigint(20) NOT NULL,
+  `template_id` bigint(20) DEFAULT NULL,
+  `template_kind` varchar(32) NOT NULL,
+  `subject_snapshot` varchar(255) NOT NULL,
+  `body_snapshot` longtext NOT NULL,
+  `recipient_snapshot` varchar(255) NOT NULL,
+  `status` varchar(32) NOT NULL,
+  `sent_at` datetime DEFAULT NULL,
+  `failure_reason` varchar(1024) DEFAULT NULL,
+  `create_date` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_invite_email_delivery_invite` (`account_invite_id`),
+  CONSTRAINT `fk_invite_email_delivery_account_invite` FOREIGN KEY (`account_invite_id`) REFERENCES `account_invite` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
