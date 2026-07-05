@@ -100,7 +100,10 @@ CREATE TABLE `agency_topic` (
   `update_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `content_dpp` longtext DEFAULT NULL,
   `publication_status` varchar(20) NOT NULL DEFAULT 'DRAFT',
+  `content_imprint` longtext DEFAULT NULL,
+  `publication_status_imprint` varchar(20) NOT NULL DEFAULT 'DRAFT',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_agency_topic` (`agency_id`,`topic_id`),
   KEY `agency_id` (`agency_id`),
   CONSTRAINT `agency_topic_ibfk_1` FOREIGN KEY (`agency_id`) REFERENCES `agency` (`id`) ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_unicode_ci;
