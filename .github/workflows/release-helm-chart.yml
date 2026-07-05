@@ -1,0 +1,145 @@
+name: Release Helm Chart
+
+run-name: Release Helm chart v${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the v prefix, for example 2.0.1
+        required: true
+        type: string
+      create_tag:
+        description: Create and push Git tag from master
+        required: true
+        default: true
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  ORG: openresilienceinitiative
+  CHART_REPOSITORY: charts
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Create tag and publish Helm chart
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Validate release input
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ inputs.version }}"
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version must use MAJOR.MINOR.PATCH format, for example 2.0.1"
+            exit 1
+          fi
+
+          if [[ "${GITHUB_REF_NAME}" != "master" ]]; then
+            echo "This workflow must run from master after the release PR is merged."
+            echo "Current ref is ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+
+          CHART_VERSION="$(awk -F': *' '$1 == "version" { print $2; exit }' Chart.yaml | tr -d '"')"
+          APP_VERSION="$(awk -F': *' '$1 == "appVersion" { print $2; exit }' Chart.yaml | tr -d '"')"
+
+          if [[ "$CHART_VERSION" != "$VERSION" ]]; then
+            echo "Chart.yaml version is ${CHART_VERSION}, but workflow input is ${VERSION}"
+            exit 1
+          fi
+
+          if [[ "$APP_VERSION" != "$VERSION" ]]; then
+            echo "Chart.yaml appVersion is ${APP_VERSION}, but workflow input is ${VERSION}"
+            exit 1
+          fi
+
+          if git ls-remote --tags origin "refs/tags/v${VERSION}" | grep -q "refs/tags/v${VERSION}"; then
+            echo "Tag v${VERSION} already exists. Choose a new version or delete the incorrect tag first."
+            exit 1
+          fi
+
+      - name: Validate Helm chart
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          helm lint . -f values.yaml.default
+          helm template oriso . -f values.yaml.default >/tmp/oriso-rendered.yaml
+
+      - name: Package Helm chart
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist
+          helm package . --destination dist
+          ls -lh dist
+
+      - name: Create and push release tag
+        if: ${{ inputs.create_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ inputs.version }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${VERSION}" -m "Release Helm chart v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Login to GitHub Container Registry
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login "${{ env.REGISTRY }}" \
+            --username "${{ github.actor }}" \
+            --password-stdin
+
+      - name: Push Helm chart to GHCR
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CHART_PACKAGE="$(find dist -maxdepth 1 -name '*.tgz' -print -quit)"
+
+          if [[ -z "$CHART_PACKAGE" ]]; then
+            echo "No packaged Helm chart found in dist/"
+            exit 1
+          fi
+
+          helm push "$CHART_PACKAGE" "oci://${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.CHART_REPOSITORY }}"
+
+      - name: Release summary
+        shell: bash
+        run: |
+          {
+            echo "### Helm chart release"
+            echo ""
+            echo "- Git tag: \`v${{ inputs.version }}\`"
+            echo "- Chart version: \`${{ inputs.version }}\`"
+            echo "- Registry: \`oci://${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.CHART_REPOSITORY }}/online-counseling\`"
+            echo ""
+            echo "Deploy with:"
+            echo ""
+            echo "\`\`\`bash"
+            echo "helm upgrade --install oriso oci://${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.CHART_REPOSITORY }}/online-counseling --version ${{ inputs.version }} --namespace oriso"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
