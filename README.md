@@ -37,7 +37,7 @@ Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fi
 - `global.keycloak.technicalUser.password` — Keycloak technical user password
 - `global.keycloak.serviceTechUserId` — Keycloak technical user ID
 - `postgres.postgresPassword` — PostgreSQL root password
-- `matrix.matrixAdminPassword` — Matrix admin password
+- `global.matrix.matrixAdminUsername` / `matrixAdminPassword` — Matrix admin credentials (must live under `global:` so subcharts can read them)
 - `online-counseling-mongodb.*Password` / `*Pass` — MongoDB passwords
 - `online-counseling-mariadb.dbRootPassword` — MariaDB root password
 - `livekit.api.key` / `livekit.api.secret` — LiveKit API credentials
