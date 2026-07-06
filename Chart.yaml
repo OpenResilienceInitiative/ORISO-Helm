@@ -7,3 +7,22 @@ keywords:
   - online-counseling
 sources:
   - https://github.com/OpenResilienceInitiative
+# Subcharts are vendored unpacked in charts/. The file:// repositories point at
+# those directories so `helm dependency update` can rebuild the lock file; the
+# names/versions must match each subchart's Chart.yaml.
+dependencies:
+  - name: online-counseling-keycloak
+    version: 0.0.1
+    repository: file://charts/keycloak
+  - name: online-counseling-mariadb
+    version: 0.0.1
+    repository: file://charts/mariadb
+  - name: online-counseling-mongodb
+    version: 0.0.1
+    repository: file://charts/mongodb
+  - name: online-counseling-rabbitmq
+    version: 0.0.1
+    repository: file://charts/rabbitmq
+  - name: online-counseling-redis
+    version: 0.0.1
+    repository: file://charts/redis
