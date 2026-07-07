@@ -85,7 +85,7 @@ CREATE TABLE `tenant_dpa_signature` (
  `dpa_version` datetime DEFAULT NULL,
  `signer_name` varchar(255) DEFAULT NULL,
  `signer_position` varchar(255) DEFAULT NULL,
- `signer_is_member` tinyint(1) DEFAULT NULL,
+ `signer_is_member` int(11) DEFAULT NULL,
  `lang` varchar(10) DEFAULT NULL,
  `signature_status` varchar(20) NOT NULL DEFAULT 'PENDING',
  `signed_at` datetime DEFAULT NULL,
