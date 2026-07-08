@@ -1,0 +1,32 @@
+{
+  "_comment": "PLAINTEXT EXAMPLE — schema only, no real credentials. The real store is test-users.enc.json (SOPS-encrypted; only 'password' values are ciphertext). Copy this shape, never commit this file with real passwords.",
+  "users": [
+    {
+      "env": "predev",
+      "tenant": "t1",
+      "role": "consultant",
+      "username": "test-consultant-001",
+      "password": "changeme",
+      "created": "manual",
+      "notes": "primary consultant used by the agency-registration e2e flow"
+    },
+    {
+      "env": "predev",
+      "tenant": "t1",
+      "role": "user",
+      "username": "test-user-001",
+      "password": "changeme",
+      "created": "seed-script",
+      "notes": "asker account, no 2FA (backend-created)"
+    },
+    {
+      "env": "predev",
+      "tenant": "t1",
+      "role": "tenant-admin",
+      "username": "test-tenantadmin-001",
+      "password": "changeme",
+      "created": "manual",
+      "notes": ""
+    }
+  ]
+}
