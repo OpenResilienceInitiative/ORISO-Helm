@@ -1,0 +1,70 @@
+# Reference tag configuration for the service repos' image build.
+# Tracking: #22. This file is REFERENCE ONLY — it lives under docs/ so it does
+# NOT run in ORISO-Helm. Copy the relevant blocks into each service repo's
+# `.github/actions/docker-build-push/action.yml` (or its ci-*.yml workflows).
+#
+# It extends the current setup (which already emits sha-<sha>, plus `latest` on
+# main and `dev` on dev) with PR-preview tags and release semver, giving the
+# convention documented in docs/ci-image-build-strategy.md.
+
+# --- 1. docker/metadata-action tag rules ------------------------------------
+# Produces:
+#   sha-<sha>                always (immutable source of truth)
+#   pr-<number>              on pull_request       -> pre-merge validation image
+#   dev                      on push to dev
+#   vX.Y.Z / vX.Y           on a v* git tag        -> ArgoCD prod pinning
+#   latest                  on default branch only (human convenience, not prod)
+metadata_tags: |
+  type=sha,prefix=sha-
+  type=ref,event=pr,prefix=pr-
+  type=ref,event=branch,enable=${{ github.ref == format('refs/heads/{0}', 'dev') }}
+  type=semver,pattern={{version}}
+  type=semver,pattern={{major}}.{{minor}}
+  type=raw,value=latest,enable={{is_default_branch}}
+
+# --- 2. Minimal ci-pull-request.yml to push a preview image -----------------
+# Use `pull_request` (NOT pull_request_target) so forks never get package:write.
+pull_request_workflow: |
+  name: ci-pull-request
+  on:
+    pull_request:
+      branches: [main, dev]
+  permissions:
+    contents: read
+    packages: write
+  jobs:
+    build:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v6
+        - uses: ./.github/actions/maven-build
+          with:
+            java_version: '17'
+        - uses: ./.github/actions/docker-build-push
+          with:
+            push_to_ghcr: true
+            image_name: oriso-<service>
+            github_token: ${{ secrets.GITHUB_TOKEN }}
+
+# --- 3. Release semver job (tag-triggered) ----------------------------------
+release_workflow: |
+  name: ci-release
+  on:
+    push:
+      tags: ['v*']
+  permissions:
+    contents: read
+    packages: write
+  jobs:
+    build:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v6
+        - uses: ./.github/actions/maven-build
+          with:
+            java_version: '17'
+        - uses: ./.github/actions/docker-build-push
+          with:
+            push_to_ghcr: true
+            image_name: oriso-<service>
+            github_token: ${{ secrets.GITHUB_TOKEN }}
