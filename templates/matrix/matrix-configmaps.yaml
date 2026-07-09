@@ -72,7 +72,7 @@ data:
   default.conf: |
     server {
         listen 8090;
-        server_name 91.99.219.182;
+        server_name {{ .Values.matrix.matrixServerName }};
 
         location /well-known-matrix-server {
             alias /usr/share/nginx/html/.well-known/matrix/server/caritas.local;
@@ -93,11 +93,11 @@ apiVersion: v1
 data:
   caritas.local: |
     {
-      "m.server": "91.99.219.182:8448"
+      "m.server": "{{ .Values.matrix.matrixServerName }}:8448"
     }
   caritas2.local: |
     {
-      "m.server": "91.99.219.182:8449"
+      "m.server": "{{ .Values.matrix.matrixServerName }}:8449"
     }
 kind: ConfigMap
 metadata: 
@@ -208,7 +208,9 @@ data:
     # Exempt internal network from rate limiting
     exempt_from_ratelimiting:
       - "10.42.0.0/16"
-      - "91.99.219.182"
+{{- if .Values.matrix.serverPublicIp }}
+      - {{ .Values.matrix.serverPublicIp | quote }}
+{{- end }}
       - "127.0.0.1"
 
     # Enable Sliding Sync (Matrix 2.0) for INSTANT real-time synchronization

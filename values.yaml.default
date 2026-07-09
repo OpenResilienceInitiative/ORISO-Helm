@@ -85,6 +85,9 @@ matrix:
   synapseEnableAuthenticatedMedia: "false"
   matrixApiUrl: "http://matrix-synapse:8008"
   matrixServerName: "your-server.local"
+  # Server's own public IP, exempted from Synapse rate limiting. Supplied by the
+  # per-environment overlay — never hardcode an IP in the chart (ADR-005 / DB-M04).
+  serverPublicIp: ""
 
 
 
