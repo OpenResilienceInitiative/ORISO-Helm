@@ -1,24 +1,45 @@
 name: matrix-servername-guard
 
-# ADR-005 / DB-M04: prevent a bare IPv4 from ever being committed as a Matrix
-# server_name / well-known m.server (it would bake the host IP into every MXID).
-# Static source scan — this chart ships no committed values.yaml (secrets live
-# out of repo), so `helm template` cannot render here without secrets.
+# ADR-005 / DB-M04: the Matrix server_name is immutable inside every MXID and room
+# ID, so it must stay a domain driven from a single value and never a bare host IP.
+# This workflow enforces that with two complementary layers:
+#   - a STATIC source scan (no helm/secrets needed), plus self-tests proving the
+#     scanner actually rejects bad input, and
+#   - a RENDER-based suite that helm-templates the Matrix config in an isolated
+#     minimal chart and asserts the ADR-005 invariants on the rendered output.
 on:
   pull_request:
     paths:
       - "templates/**"
       - "values.yaml*"
       - "values-*.yaml"
-      - "tests/check-no-bare-ip-servername.sh"
+      - "tests/**"
       - ".github/workflows/matrix-servername-guard.yml"
   push:
-    branches: [dev, main]
+    branches: [dev, pre-dev, main]
 
 jobs:
   guard:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: no bare-IP server_name / m.server
+
+      - name: Static scan — no bare-IP server_name / m.server
         run: bash tests/check-no-bare-ip-servername.sh
+
+      - name: Guardrail self-tests (the scanner must be able to fail)
+        run: bash tests/guardrail_selftest.sh
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install --upgrade pyyaml
+
+      - name: Render-based ADR-005 invariants
+        run: python3 tests/render_adr005_test.py
