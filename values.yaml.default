@@ -59,7 +59,7 @@ global:
   # Matrix values needed by subcharts (subcharts cannot see the top-level `matrix:` block).
   # matrixAdminUsername / matrixAdminPassword must be set under global.matrix in secrets.yaml.
   matrix:
-    matrixServerName: "your-server.local"
+    matrixServerName: "matrix.oriso.org"
 
   # Keycloak connection
 
@@ -78,11 +78,11 @@ global:
 
 
 matrix:
-  synapseServerName: "your-server.local"
+  synapseServerName: "matrix.oriso.org"
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"
   matrixApiUrl: "http://matrix-synapse:8008"
-  matrixServerName: "your-server.local"
+  matrixServerName: "matrix.oriso.org"
   # Server's own public IP, exempted from Synapse rate limiting. Supplied by the
   # per-environment overlay — never hardcode an IP in the chart (ADR-005 / DB-M04).
   serverPublicIp: ""
