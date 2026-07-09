@@ -80,6 +80,21 @@ scripts/seed-keycloak-users.sh \
   --write-back --store test-data/test-users.enc.json --env predev --tenant t1
 ```
 
+### Keycloak user attributes (tenant-aware flows)
+
+Tenant-aware ORISO flows need custom Keycloak attributes (e.g. `tenantId`).
+Pass `--attribute KEY=VALUE` (repeatable) to apply them to every created user:
+
+```bash
+scripts/seed-keycloak-users.sh --count 5 --role user \
+  --attribute tenantId=21 --attribute displayName=Tester --write-back
+```
+
+Per-user attributes can also be set via an `attributes` object in the
+`--users-file` (see `test-users.example.json`); per-user values override the
+global `--attribute` values. Stored records keep the merged attributes so a
+re-drive from the store recreates them.
+
 Re-drive an existing set (idempotent — existing usernames are skipped):
 ```bash
 scripts/seed-keycloak-users.sh \

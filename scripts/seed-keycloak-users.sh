@@ -32,6 +32,13 @@
 #     scripts/seed-keycloak-users.sh --count 5 --role user \
 #       --write-back --store test-data/test-users.enc.json --env predev --tenant t1
 #
+#   With Keycloak user attributes (needed for tenant-aware app flows):
+#     scripts/seed-keycloak-users.sh --count 5 --role user \
+#       --attribute tenantId=21 --attribute displayName=Tester
+#   (--attribute KEY=VALUE is repeatable and applies to every created user.
+#    Per-user attributes can also be set via an "attributes" object in the
+#    --users-file; per-user values override the global --attribute values.)
+#
 # Environment (required)
 #   KEYCLOAK_URL             Base URL incl. the /auth path (no trailing slash needed).
 #   KEYCLOAK_REALM           Realm the users are created in (e.g. online-beratung).
@@ -57,6 +64,7 @@ STORE="test-data/test-users.enc.json"
 ENVIRONMENT="predev"
 TENANT=""
 DRY_RUN=0
+ATTRIBUTES_JSON="{}"          # global Keycloak user attributes, {key:[values]}
 
 ADMIN_REALM="${KEYCLOAK_ADMIN_REALM:-master}"
 ADMIN_CLIENT="${KEYCLOAK_ADMIN_CLIENT:-admin-cli}"
@@ -64,7 +72,16 @@ ADMIN_CLIENT="${KEYCLOAK_ADMIN_CLIENT:-admin-cli}"
 die() { echo "error: $*" >&2; exit 1; }
 log() { echo "[seed] $*" >&2; }
 
-usage() { sed -n '2,55p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,62p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+# Append "KEY=VALUE" to a Keycloak attributes object (values are arrays).
+add_attribute() {  # $1 current-json, $2 "key=value" -> updated json
+  local cur="$1" kv="$2" k v
+  [[ "$kv" == *=* ]] || die "--attribute expects KEY=VALUE, got: $kv"
+  k="${kv%%=*}"; v="${kv#*=}"
+  [[ -n "$k" ]] || die "--attribute has an empty key: $kv"
+  jq -c --arg k "$k" --arg v "$v" '.[$k] = ((.[$k] // []) + [$v])' <<<"$cur"
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -73,6 +90,7 @@ while [[ $# -gt 0 ]]; do
     --role)         ROLE="${2:?}"; shift 2 ;;
     --prefix)       PREFIX="${2:?}"; shift 2 ;;
     --password)     DEFAULT_PASSWORD="${2:?}"; shift 2 ;;
+    --attribute)    ATTRIBUTES_JSON="$(add_attribute "$ATTRIBUTES_JSON" "${2:?}")"; shift 2 ;;
     --write-back)   WRITE_BACK=1; shift ;;
     --store)        STORE="${2:?}"; shift 2 ;;
     --env)          ENVIRONMENT="${2:?}"; shift 2 ;;
@@ -160,21 +178,32 @@ user_exists() {  # $1 token, $2 username
 }
 
 create_user() {  # $1 token, $2 user-json
-  local token="$1" uj="$2" username password email first last payload
+  local token="$1" uj="$2" username password email first last payload attrs
   username="$(jq -r '.username' <<<"$uj")"
   password="$(jq -r '.password' <<<"$uj")"
   email="$(jq -r '.email // (.username + "@example.test")' <<<"$uj")"
   first="$(jq -r '.firstName // "Test"' <<<"$uj")"
   last="$(jq -r '.lastName // .username' <<<"$uj")"
 
+  # Keycloak attributes: global --attribute values merged with the entry's own
+  # "attributes" object (per-user wins). Every value is normalised to an array
+  # of strings, which is the format Keycloak's user representation expects.
+  attrs="$(jq -c --argjson g "$ATTRIBUTES_JSON" '
+      ((.attributes // {})
+        | with_entries(.value = (.value | if type == "array"
+                                          then map(tostring) else [tostring] end))) as $u
+      | $g * $u' <<<"$uj")"
+
   payload="$(jq -n \
     --arg u "$username" --arg e "$email" --arg f "$first" --arg l "$last" --arg p "$password" \
+    --argjson attrs "$attrs" \
     '{username:$u, email:$e, firstName:$f, lastName:$l,
       enabled:true, emailVerified:true, requiredActions:[],
+      attributes:$attrs,
       credentials:[{type:"password", value:$p, temporary:false}]}')"
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    log "DRY-RUN would create: $username"
+    log "DRY-RUN would create: $username$([[ "$attrs" != "{}" ]] && echo " attrs=$attrs")"
     return 0
   fi
 
@@ -218,15 +247,25 @@ write_back() {  # $1 user-json
     else
       echo '{"users":[]}' > "$tmp"
     fi
+    # Merge global + per-user attributes (per-user wins), same rule as create_user,
+    # so the stored record is self-contained and re-drivable via --users-file.
+    local merged_attrs
+    merged_attrs="$(jq -c --argjson g "$ATTRIBUTES_JSON" '
+        ((.attributes // {})
+          | with_entries(.value = (.value | if type == "array"
+                                            then map(tostring) else [tostring] end))) as $u
+        | $g * $u' <<<"$uj")"
     jq \
-      --arg env "$ENVIRONMENT" --arg tenant "$TENANT" --argjson u "$uj" \
+      --arg env "$ENVIRONMENT" --arg tenant "$TENANT" \
+      --argjson u "$uj" --argjson attrs "$merged_attrs" \
       '.users += [{
-          env:      $env,
-          tenant:   $tenant,
-          role:     ($u.role // ""),
-          username: $u.username,
-          password: $u.password,
-          created:  "seed-script"
+          env:        $env,
+          tenant:     $tenant,
+          role:       ($u.role // ""),
+          username:   $u.username,
+          password:   $u.password,
+          attributes: $attrs,
+          created:    "seed-script"
       }]' "$tmp" > "${tmp}.new"
     mv "${tmp}.new" "$tmp"
     # Re-encrypt using the target store path so .sops.yaml creation rules match.

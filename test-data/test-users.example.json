@@ -7,8 +7,9 @@
       "role": "consultant",
       "username": "test-consultant-001",
       "password": "changeme",
+      "attributes": { "tenantId": ["21"] },
       "created": "manual",
-      "notes": "primary consultant used by the agency-registration e2e flow"
+      "notes": "attributes are Keycloak user attributes (arrays), e.g. tenantId for tenant-aware app flows"
     },
     {
       "env": "predev",
