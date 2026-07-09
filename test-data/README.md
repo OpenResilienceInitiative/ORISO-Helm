@@ -63,7 +63,7 @@ sops test-data/test-users.enc.json
 Create the encrypted store the first time from the example:
 ```bash
 jq '{users: []}' <<<'{}' > /tmp/seed.json
-sops -e /tmp/seed.json > test-data/test-users.enc.json && rm /tmp/seed.json
+sops --filename-override test-data/test-users.enc.json -e /tmp/seed.json > test-data/test-users.enc.json && rm /tmp/seed.json
 ```
 
 ## Bulk-create test users (and auto-save them)

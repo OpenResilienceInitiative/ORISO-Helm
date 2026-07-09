@@ -206,9 +206,12 @@ assign_role() {  # $1 token, $2 username, $3 role
 # write-back into the SOPS-encrypted store
 # ---------------------------------------------------------------------------
 write_back() {  # $1 user-json
-  local uj="$1" tmp
+  local uj="$1" tmp out store_dir
+  store_dir="$(dirname "$STORE")"
+  mkdir -p "$store_dir"
   tmp="$(mktemp)"
-  trap 'rm -f "$tmp" "${tmp}.new"' RETURN
+  out="$(mktemp "${store_dir}/.$(basename "$STORE").XXXXXX")"
+  trap 'rm -f "$tmp" "${tmp}.new" "$out"' RETURN
   if [[ -f "$STORE" ]]; then
     sops -d "$STORE" > "$tmp"
   else
@@ -225,15 +228,16 @@ write_back() {  # $1 user-json
         created:  "seed-script"
     }]' "$tmp" > "${tmp}.new"
   mv "${tmp}.new" "$tmp"
-  # Re-encrypt using the creation rules in test-data/.sops.yaml.
-  sops -e "$tmp" > "$STORE"
+  # Re-encrypt using the target store path so .sops.yaml creation rules match.
+  sops --filename-override "$STORE" -e "$tmp" > "$out"
+  mv "$out" "$STORE"
 }
 
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 main() {
-  local token="" users_json count created=0
+  local token="" users_json count created=0 written=0
   if [[ "$DRY_RUN" -eq 1 ]]; then
     log "DRY-RUN: not contacting Keycloak"
   else
@@ -256,13 +260,16 @@ main() {
     fi
     create_user "$token" "$uj"
     [[ "$DRY_RUN" -eq 0 ]] && assign_role "$token" "$username" "$(jq -r '.role // ""' <<<"$uj")"
-    [[ "$WRITE_BACK" -eq 1 && "$DRY_RUN" -eq 0 ]] && write_back "$uj"
+    if [[ "$WRITE_BACK" -eq 1 && "$DRY_RUN" -eq 0 ]]; then
+      write_back "$uj"
+      written=$((written + 1))
+    fi
     created=$((created + 1))
     log "created: $username${ROLE:+ (role=$ROLE)}"
   done
 
   log "done. created ${created} new user(s)."
-  [[ "$WRITE_BACK" -eq 1 ]] && log "credentials written to encrypted store: ${STORE}"
+  [[ "$written" -gt 0 ]] && log "credentials written to encrypted store: ${STORE}"
   return 0
 }
 
