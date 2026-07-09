@@ -32,6 +32,10 @@ jobs:
 
       - name: Install Helm
         uses: azure/setup-helm@v4
+        with:
+          # Pinned: an unpinned setup-helm resolves to `latest` (today Helm 4.x),
+          # so a new Helm release could silently change what this suite renders.
+          version: v4.2.2
 
       - name: Set up Python
         uses: actions/setup-python@v5
