@@ -206,31 +206,33 @@ assign_role() {  # $1 token, $2 username, $3 role
 # write-back into the SOPS-encrypted store
 # ---------------------------------------------------------------------------
 write_back() {  # $1 user-json
-  local uj="$1" tmp out store_dir
-  store_dir="$(dirname "$STORE")"
-  mkdir -p "$store_dir"
-  tmp="$(mktemp)"
-  out="$(mktemp "${store_dir}/.$(basename "$STORE").XXXXXX")"
-  trap 'rm -f "$tmp" "${tmp}.new" "$out"' RETURN
-  if [[ -f "$STORE" ]]; then
-    sops -d "$STORE" > "$tmp"
-  else
-    echo '{"users":[]}' > "$tmp"
-  fi
-  jq \
-    --arg env "$ENVIRONMENT" --arg tenant "$TENANT" --argjson u "$uj" \
-    '.users += [{
-        env:      $env,
-        tenant:   $tenant,
-        role:     ($u.role // ""),
-        username: $u.username,
-        password: $u.password,
-        created:  "seed-script"
-    }]' "$tmp" > "${tmp}.new"
-  mv "${tmp}.new" "$tmp"
-  # Re-encrypt using the target store path so .sops.yaml creation rules match.
-  sops --filename-override "$STORE" -e "$tmp" > "$out"
-  mv "$out" "$STORE"
+  (
+    local uj="$1" tmp out store_dir
+    store_dir="$(dirname "$STORE")"
+    mkdir -p "$store_dir"
+    tmp="$(mktemp)"
+    out="$(mktemp "${store_dir}/.$(basename "$STORE").XXXXXX")"
+    trap 'rm -f "$tmp" "${tmp}.new" "$out"' EXIT
+    if [[ -f "$STORE" ]]; then
+      sops -d "$STORE" > "$tmp"
+    else
+      echo '{"users":[]}' > "$tmp"
+    fi
+    jq \
+      --arg env "$ENVIRONMENT" --arg tenant "$TENANT" --argjson u "$uj" \
+      '.users += [{
+          env:      $env,
+          tenant:   $tenant,
+          role:     ($u.role // ""),
+          username: $u.username,
+          password: $u.password,
+          created:  "seed-script"
+      }]' "$tmp" > "${tmp}.new"
+    mv "${tmp}.new" "$tmp"
+    # Re-encrypt using the target store path so .sops.yaml creation rules match.
+    sops --filename-override "$STORE" -e "$tmp" > "$out"
+    mv "$out" "$STORE"
+  )
 }
 
 # ---------------------------------------------------------------------------

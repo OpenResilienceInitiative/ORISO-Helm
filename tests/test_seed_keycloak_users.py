@@ -19,8 +19,10 @@ class SeedKeycloakUsersTest(unittest.TestCase):
 
     def test_write_back_is_atomic(self):
         self.assertIn('out="$(mktemp "${store_dir}/.$(basename "$STORE").XXXXXX")"', self.script)
+        self.assertIn("trap 'rm -f \"$tmp\" \"${tmp}.new\" \"$out\"' EXIT", self.script)
         self.assertIn('mv "$out" "$STORE"', self.script)
         self.assertNotIn('> "$STORE"', self.script)
+        self.assertNotIn("RETURN", self.script)
 
     def test_write_back_log_only_when_credentials_are_written(self):
         self.assertIn("written=0", self.script)
