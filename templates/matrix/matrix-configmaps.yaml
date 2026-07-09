@@ -210,13 +210,13 @@ data:
         per_second: 100000
         burst_count: 100000
 
-    # Exempt internal network from rate limiting
+    # Exempt internal network from rate limiting. serverPublicIp is optional —
+    # `compact` drops it when unset, so there is a single render path and no
+    # whitespace-trimming edge case inside this block scalar.
     exempt_from_ratelimiting:
-      - "10.42.0.0/16"
-{{- if .Values.matrix.serverPublicIp }}
-      - {{ .Values.matrix.serverPublicIp | quote }}
-{{- end }}
-      - "127.0.0.1"
+      {{- range compact (list "10.42.0.0/16" .Values.matrix.serverPublicIp "127.0.0.1") }}
+      - {{ . | quote }}
+      {{- end }}
 
     # Enable Sliding Sync (Matrix 2.0) for INSTANT real-time synchronization
     experimental_features:

@@ -18,7 +18,22 @@ pattern='server_name[ :][^#]*[0-9]{1,3}(\.[0-9]{1,3}){3}|"m\.server":[[:space:]]
 
 # Search template sources and any committed values files. Loopback/CIDR in other
 # keys (e.g. exempt_from_ratelimiting) are out of scope — only server_name/m.server.
-offenders="$(grep -rEn "$pattern" templates values.yaml.default $(ls values-*.yaml 2>/dev/null) 2>/dev/null || true)"
+# Build the target list explicitly so a missing path is a loud error, not silence,
+# and let grep's stderr through so real failures stay diagnosable.
+targets=(templates values.yaml.default)
+for overlay in values-*.yaml; do
+  [ -e "$overlay" ] && targets+=("$overlay")
+done
+
+set +e
+offenders="$(grep -rEn "$pattern" "${targets[@]}")"
+status=$?
+set -e
+# grep: 0 = match found, 1 = no match (the good case), >1 = real error.
+if [ "$status" -gt 1 ]; then
+  echo "❌ guardrail could not scan the chart sources (grep exit $status)" >&2
+  exit "$status"
+fi
 
 if [ -n "$offenders" ]; then
   echo "❌ ADR-005 guardrail: bare IPv4 in a Matrix server_name / m.server:" >&2
