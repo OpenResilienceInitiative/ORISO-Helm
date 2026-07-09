@@ -5,31 +5,26 @@
 # into all MXIDs and breaks any server move. Server names must come from
 # `.Values.matrix.matrixServerName` (per-environment overlay), never a literal IP.
 #
-# Runs `helm template` with the default values and fails if any rendered
-# `server_name:` / `server_name <x>;` / `"m.server"` line contains an IPv4.
+# Static source scan (no helm / no secrets needed — this chart ships no committed
+# values.yaml). Scans templates + any tracked values files for an IPv4 sitting in
+# a `server_name` (yaml or nginx directive) or a well-known `m.server`.
 set -euo pipefail
 
 CHART_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-VALUES="${1:-$CHART_DIR/values.yaml.default}"
+cd "$CHART_DIR"
 
-if ! command -v helm >/dev/null 2>&1; then
-  echo "helm not found — cannot render templates" >&2
-  exit 2
-fi
+# IPv4 immediately after `server_name:` / `server_name ` or inside `"m.server": "..."`.
+pattern='server_name[ :][^#]*[0-9]{1,3}(\.[0-9]{1,3}){3}|"m\.server":[[:space:]]*"[0-9]{1,3}(\.[0-9]{1,3}){3}'
 
-rendered="$(helm template oriso "$CHART_DIR" -f "$VALUES" 2>/dev/null)"
-
-# IPv4 in a server_name (Synapse yaml or nginx directive) or a well-known m.server.
-# Excludes the trusted_key_servers matrix.org line and CIDR/loopback which are not identities.
-offenders="$(printf '%s\n' "$rendered" \
-  | grep -nE 'server_name[ :].*[0-9]{1,3}(\.[0-9]{1,3}){3}|"m\.server":[[:space:]]*"[0-9]{1,3}(\.[0-9]{1,3}){3}' \
-  || true)"
+# Search template sources and any committed values files. Loopback/CIDR in other
+# keys (e.g. exempt_from_ratelimiting) are out of scope — only server_name/m.server.
+offenders="$(grep -rEn "$pattern" templates values.yaml.default $(ls values-*.yaml 2>/dev/null) 2>/dev/null || true)"
 
 if [ -n "$offenders" ]; then
-  echo "❌ ADR-005 guardrail: bare IPv4 found in a Matrix server_name / m.server:" >&2
+  echo "❌ ADR-005 guardrail: bare IPv4 in a Matrix server_name / m.server:" >&2
   printf '%s\n' "$offenders" >&2
   echo "Use .Values.matrix.matrixServerName (a domain) instead — see ADR-005 / DB-M04." >&2
   exit 1
 fi
 
-echo "✅ ADR-005 guardrail: no bare-IP server_name / m.server in rendered manifests."
+echo "✅ ADR-005 guardrail: no bare-IP server_name / m.server in chart sources."

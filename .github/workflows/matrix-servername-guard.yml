@@ -1,12 +1,15 @@
 name: matrix-servername-guard
 
-# ADR-005 / DB-M04: prevent a bare IPv4 from ever being rendered as a Matrix
+# ADR-005 / DB-M04: prevent a bare IPv4 from ever being committed as a Matrix
 # server_name / well-known m.server (it would bake the host IP into every MXID).
+# Static source scan — this chart ships no committed values.yaml (secrets live
+# out of repo), so `helm template` cannot render here without secrets.
 on:
   pull_request:
     paths:
       - "templates/**"
       - "values.yaml*"
+      - "values-*.yaml"
       - "tests/check-no-bare-ip-servername.sh"
       - ".github/workflows/matrix-servername-guard.yml"
   push:
@@ -17,10 +20,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
-        with:
-          version: v3.14.4
-      - name: helm lint
-        run: helm lint . -f values.yaml.default
       - name: no bare-IP server_name / m.server
         run: bash tests/check-no-bare-ip-servername.sh
