@@ -107,8 +107,13 @@ metadata:
 apiVersion: v1
 data:
   homeserver.yaml: |
-    server_name: {{ .Values.matrix.matrixServerName }}  
+    server_name: {{ .Values.matrix.matrixServerName }}
     pid_file: /data/homeserver.pid
+
+    # ADR-005: this homeserver is NOT federated — every account is local, managed
+    # via Keycloak/UserService. An empty whitelist federates with nobody.
+    federation_domain_whitelist: []
+    allow_public_rooms_over_federation: false
 
     listeners:
       - port: 8008
