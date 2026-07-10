@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: en-US
+
+tone_instructions: "Be a strict, practical ORISO reviewer for this Helm chart. Keep comments concise, concrete, and focused on correctness, rendering safety, secret hygiene, and maintainability."
+
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  review_status: true
+  review_details: true
+  poem: false
+
+  auto_review:
+    enabled: true
+    description_keyword: "coderabbit: review"
+    auto_incremental_review: false
+    drafts: false
+    labels:
+      - "coderabbit"
+    base_branches:
+      - "dev"
+
+  path_filters:
+    - "!charts/**"
+    - "templates/**"
+    - "values.yaml*"
+    - "values-*.yaml"
+    - "ci/**"
+    - "tests/**"
+    - "Chart.yaml"
+    - ".github/**"
+    - "*.md"
+
+  path_instructions:
+    - path: "templates/**"
+      instructions: |
+        Values must be environment-driven — never hardcode a host, IP or credential
+        in a template. The Matrix `server_name` is immutable inside every MXID, so an
+        IPv4 there is a defect (ADR-005 / finding DB-M04). Watch whitespace-trimming
+        inside YAML block scalars: `{{-` can concatenate lines and silently produce
+        invalid config.
+    - path: "ci/**"
+      instructions: |
+        These are CI placeholders, never real credentials. Flag any value that looks
+        like a real secret.
+
+  pre_merge_checks:
+    title:
+      mode: warning
+      requirements: "Use a concise conventional title that names the affected chart area."
+    description:
+      mode: warning
+    custom_checks:
+      - name: "Validation evidence"
+        mode: error
+        instructions: |
+          Pass for docs-only PRs. For template or values changes, pass only if the PR
+          shows the chart still lints, renders and packages (or the CI job that proves it).
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "README.md"
+
+chat:
+  auto_reply: true
