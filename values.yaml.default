@@ -52,7 +52,9 @@ global:
   statisticsEnabled: "true"
   demographicsEnabled: "false"
 
-  initializeDummyData: true
+  # Prod-safe baseline: no dummy seeding. The dev overlay (values-dev.yaml)
+  # turns this on. See docs/infrastructure-report-2026-07.md §7.
+  initializeDummyData: false
 
   logstashHost: "http://logstash.default:8080"
 
@@ -153,7 +155,7 @@ agencyService:
 
   keycloakResource: "agency-service"
 
-  springProfilesActive: "dev"
+  springProfilesActive: "prod"
 
   topicEnrichmentEnabled: "false"
 
@@ -175,7 +177,7 @@ consultingTypeService:
 tenantService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
   imageVersion: "latest"  
-  springProfilesActive: "dev"
+  springProfilesActive: "prod"
   springDatasourceURL: "jdbc:mariadb://mariadb:3306/tenantservice"
   springRabbitmqHost: "rabbitmq"
   springRabbitmqPort: "5672"
@@ -190,7 +192,17 @@ userService:
  
   keycloakResource: "user-service"
 
-  springProfilesActive: "dev"
+  springProfilesActive: "prod"
+
+  # 2FA / OTP login posture (NOT encryption — encryption is never toggled).
+  # Defaults keep OTP off; the dev overlay leaves it off for fast test-user
+  # creation, and prod's posture is a deliberate choice (see values-prod.yaml).
+  twoFactorAuthUserEnabled: "false"
+  twoFactorAuthConsultantEnabled: "false"
+  otpAllowedForUsers: "false"
+  otpAllowedForConsultants: "false"
+  otpAllowedForSingleTenantAdmins: "false"
+  otpAllowedForTenantSuperAdmins: "false"
 
   firebaseConfigurationCredentialsFilePath: "/firebase/firebase-credentials.json"
   firebaseConfigurationNotificationMessage: "Du hast eine neue Nachricht erhalten"
