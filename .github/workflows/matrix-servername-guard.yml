@@ -47,3 +47,6 @@ jobs:
 
       - name: Render-based ADR-005 invariants
         run: python3 tests/render_adr005_test.py
+
+      - name: Render committed PreDev Matrix and encryption contract
+        run: python3 tests/render_predev_test.py

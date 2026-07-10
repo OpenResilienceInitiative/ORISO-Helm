@@ -197,7 +197,11 @@ userService:
 
   springProfilesActive: "prod"
 
-  # 2FA / OTP login posture (NOT encryption — encryption is never toggled).
+  # Rollout-safe server-side switch for encrypted Matrix room creation.
+  # Environment overlays opt in only after their stable homeserver identity is ready.
+  matrixEncryptionEnabled: "false"
+
+  # 2FA / OTP login posture (independent from Matrix room encryption).
   # Defaults keep OTP off; the dev overlay leaves it off for fast test-user
   # creation, and prod's posture is a deliberate choice (see values-prod.yaml).
   twoFactorAuthUserEnabled: "false"

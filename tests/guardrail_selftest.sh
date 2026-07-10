@@ -47,7 +47,18 @@ run_guard() {
 # expect <label> <actual_rc> <test-op> <expected_rc>
 expect() {
   local label="$1" actual="$2" op="$3" expected="$4"
-  if [ "$actual" "$op" "$expected" ]; then
+  local matched=0
+  case "$op" in
+    -eq) [ "$actual" -eq "$expected" ] && matched=1 ;;
+    -gt) [ "$actual" -gt "$expected" ] && matched=1 ;;
+    *)
+      note "FAIL: $label (unsupported comparison operator $op)"
+      fail=1
+      return
+      ;;
+  esac
+
+  if [ "$matched" -eq 1 ]; then
     note "PASS: $label (exit $actual)"
   else
     note "FAIL: $label (exit $actual, expected $op $expected)"

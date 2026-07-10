@@ -405,6 +405,11 @@ spec:
                 configMapKeyRef:
                   key: MATRIX_SERVER_NAME
                   name: userservice-configmap-env
+            - name: MATRIX_ENCRYPTION_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: MATRIX_ENCRYPTION_ENABLED
+                  name: userservice-configmap-env
             - name: MATRIX_MIGRATION_ENABLED
               valueFrom:
                 configMapKeyRef:

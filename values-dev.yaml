@@ -5,8 +5,8 @@
 #     -f values.yaml -f values-dev.yaml -f secrets.yaml
 #
 # Only environment DELTAS belong here. This overlay lowers *test friction*
-# only. It NEVER weakens security: encryption stays on, there is no encryption
-# toggle anywhere. See docs/infrastructure-report-2026-07.md §7. Tracking: #24.
+# only. Matrix room encryption rollout is configured separately per environment;
+# this generic dev overlay does not opt in. See docs/infrastructure-report-2026-07.md §7.
 
 global:
   # Seed dummy tenants/users so the app is immediately explorable in dev.
@@ -19,6 +19,7 @@ tenantService:
   springProfilesActive: "dev"
 userService:
   springProfilesActive: "dev"
+  matrixEncryptionEnabled: "false"
   # OTP stays off in dev so backend-seeded test users log in with just a
   # password (rapid testing). Flip any of these to "true" to exercise the 2FA
   # flows. This is login posture only — not encryption.

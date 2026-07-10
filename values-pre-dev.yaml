@@ -1,0 +1,25 @@
+# Pre-Dev environment deltas.
+#
+# Apply after the base values and before the secret overlay:
+#   helm upgrade --install oriso ./ -n oriso \
+#     -f values.yaml -f values-pre-dev.yaml -f secrets.yaml
+#
+# Matrix identity is immutable inside MXIDs and room IDs. Pre-Dev therefore owns
+# one stable DNS identity from its first clean homeserver start (ADR-005).
+
+global:
+  domains:
+    matrix: "matrix.oriso-dev.site"
+  matrix:
+    matrixServerName: "matrix.oriso-dev.site"
+
+matrix:
+  synapseServerName: "matrix.oriso-dev.site"
+  matrixServerName: "matrix.oriso-dev.site"
+  matrixApiUrl: "https://matrix.oriso-dev.site"
+  serverPublicIp: "46.224.170.69"
+
+userService:
+  # Enables encrypted Matrix room creation only after the clean Pre-Dev
+  # homeserver is configured with the stable identity above.
+  matrixEncryptionEnabled: "true"
