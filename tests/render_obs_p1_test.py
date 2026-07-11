@@ -11,10 +11,14 @@ duplicating the workloads already running on Pre-Dev:
     opamp registration against signoz:4320 — the signoz/signoz single
     binary has NO OTLP listener, so an otlp exporter to it is a bug,
   - the gateway runs traces AND metrics AND logs pipelines (the pre-OBS-P1
-    config was metrics only), each starting with memory_limiter (K8-L02)
-    and including k8sattributes,
-  - the schema-migrator sync + async jobs render (they bootstrap the SigNoz
-    ClickHouse schema; nothing can be written before sync completes),
+    config was metrics only), each starting with memory_limiter (K8-L02);
+    k8sattributes runs on traces/metrics but NOT on logs (its connection-IP
+    association stamps the agent's workload identity onto log records),
+  - the schema migrator renders as ONE job whose initContainer chain
+    (ready -> bootstrap -> sync, then async as the main container) enforces
+    sequential migration — concurrent sync+async corrupts the bookkeeping —
+    and the gateway gates its own start on "migrate sync check",
+  - rendered images match the values pins (version bumps stay consistent),
   - the log agent forwards to the gateway collector, not to signoz,
   - the ClickHouse password reaches every consumer via secretKeyRef, never
     plaintext env or a ConfigMap (LC-M03),
@@ -102,16 +106,47 @@ def collector_config(documents: list[dict]) -> dict:
     return yaml.safe_load(configmap["data"]["otel-collector-config.yaml"])
 
 
+def values_defaults() -> dict:
+    with open(os.path.join(CHART_DIR, "values.yaml.default")) as handle:
+        return yaml.safe_load(handle)
+
+
+def image_of(workload: dict, container: int = 0) -> str:
+    return workload["spec"]["template"]["spec"]["containers"][container]["image"]
+
+
 def main() -> None:
     documents = render("values-pre-dev.yaml")
+    values = values_defaults()["signoz"]
 
     # --- gateway collector = SigNoz ingest layer --------------------------
     # The signoz/signoz single binary has NO OTLP listener; ingest must be
     # the signoz-otel-collector distro writing to ClickHouse directly.
     gateway = resource(documents, "Deployment", f"{RELEASE}-otel-collector")
-    gateway_image = gateway["spec"]["template"]["spec"]["containers"][0]["image"]
+    gateway_image = image_of(gateway)
     if not gateway_image.startswith("signoz/signoz-otel-collector:"):
         fail(f"gateway collector must run the signoz-otel-collector distro, got {gateway_image}")
+
+    # Version pins: the rendered images must match the values pins, and the
+    # ClickHouse tag must match what the upstream chart pairs with the
+    # collector tag (assert consistency, not literals).
+    expected_gateway = f"{values['otelCollector']['image']['repository']}:{values['otelCollector']['image']['tag']}"
+    if gateway_image != expected_gateway:
+        fail(f"gateway image {gateway_image} does not match the values pin {expected_gateway}")
+    signoz_sts = resource(documents, "StatefulSet", f"{RELEASE}-signoz")
+    expected_signoz = f"{values['image']['repository']}:{values['image']['tag']}"
+    if image_of(signoz_sts) != expected_signoz:
+        fail(f"signoz image {image_of(signoz_sts)} does not match the values pin {expected_signoz}")
+    clickhouse_sts = resource(documents, "StatefulSet", f"{RELEASE}-clickhouse")
+    expected_clickhouse = f"{values['clickhouse']['image']['repository']}:{values['clickhouse']['image']['tag']}"
+    if image_of(clickhouse_sts) != expected_clickhouse:
+        fail(f"clickhouse image {image_of(clickhouse_sts)} does not match the values pin {expected_clickhouse}")
+
+    # The removed prometheus NormalizeName feature gate must never come back
+    # (it no longer exists in signoz-otel-collector v0.144+ and fails startup).
+    gateway_args = gateway["spec"]["template"]["spec"]["containers"][0].get("args", [])
+    if any("feature-gates" in arg and "NormalizeName" in arg for arg in gateway_args):
+        fail(f"gateway args carry the removed NormalizeName feature gate: {gateway_args}")
 
     config = collector_config(documents)
 
@@ -122,8 +157,13 @@ def main() -> None:
         processors = pipelines[signal].get("processors", [])
         if not processors or processors[0] != "memory_limiter":
             fail(f"{signal} pipeline must start with memory_limiter (K8-L02), got {processors}")
-        if "k8sattributes" not in processors:
-            fail(f"{signal} pipeline must include k8sattributes, got {processors}")
+    for signal in ("traces", "metrics"):
+        if "k8sattributes" not in pipelines[signal]["processors"]:
+            fail(f"{signal} pipeline must include k8sattributes, got {pipelines[signal]['processors']}")
+    # Logs must NOT be re-stamped: the gateway's connection-IP association
+    # would attribute every record to the agent DaemonSet (seen live).
+    if "k8sattributes" in pipelines["logs"]["processors"]:
+        fail("logs pipeline must not run k8sattributes (re-stamps agent identity onto log records)")
 
     exporters = config["exporters"]
     for name, dsn_key in (
@@ -153,20 +193,56 @@ def main() -> None:
     if f"{RELEASE}-signoz" not in opamp["server_endpoint"] or ":4320" not in opamp["server_endpoint"]:
         fail(f"opamp manager must point at the SigNoz backend :4320, got {opamp['server_endpoint']}")
 
-    # --- schema migrator jobs ---------------------------------------------
-    for suffix in ("sync", "async"):
-        job = resource(documents, "Job", f"{RELEASE}-schema-migrator-{suffix}")
-        container = job["spec"]["template"]["spec"]["containers"][0]
-        if not container["image"].startswith("signoz/signoz-schema-migrator:"):
-            fail(f"schema migrator {suffix} must run signoz-schema-migrator, got {container['image']}")
-        if container["args"][0] != suffix:
-            fail(f"schema migrator {suffix} job must run the '{suffix}' command, got {container['args']}")
-        assert_password_from_secret(job, f"schema migrator {suffix} Job")
+    # --- schema migrator: ONE job, sequential by construction --------------
+    # Upstream (chart signoz-0.132.x) runs the migration phases as a single
+    # Job: initContainers ready -> bootstrap -> sync, main container async.
+    # This ordering is load-bearing: concurrent sync+async corrupted the
+    # migration bookkeeping on Pre-Dev (missing root_operations /
+    # time_series_v4 tables).
+    job = resource(documents, "Job", f"{RELEASE}-schema-migrator")
+    init_phases = [
+        (c["name"], c["args"]) for c in job["spec"]["template"]["spec"].get("initContainers", [])
+    ]
+    if [name for name, _ in init_phases] != ["ready", "bootstrap", "sync"]:
+        fail(f"schema migrator initContainers must run ready -> bootstrap -> sync, got {init_phases}")
+    if init_phases[2][1] != ["migrate", "sync", "up"]:
+        fail(f"schema migrator sync phase args wrong: {init_phases[2][1]}")
+    async_container = job["spec"]["template"]["spec"]["containers"][0]
+    if async_container["args"] != ["migrate", "async", "up"]:
+        fail(f"schema migrator main container must run 'migrate async up', got {async_container['args']}")
+    # Migrator uses the collector image (no standalone migrator image since
+    # upstream chart 0.132.x) — values-consistency, not a literal tag.
+    if async_container["image"] != expected_gateway:
+        fail(f"schema migrator must use the gateway collector image, got {async_container['image']}")
+    assert_password_from_secret(job, "schema migrator Job")
+    async_env = {e["name"]: e.get("value") for e in async_container.get("env", [])}
+    if async_env.get("SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_REPLICATION") != "false":
+        fail("migrator must keep REPLICATION=false (existing schema is non-replicated)")
+
+    # The gateway must gate its start on the schema being current.
+    gateway_inits = gateway["spec"]["template"]["spec"].get("initContainers", [])
+    check = next((c for c in gateway_inits if c.get("args") == ["migrate", "sync", "check"]), None)
+    if check is None:
+        fail("gateway collector must run a 'migrate sync check' initContainer")
 
     # --- log-collection agent -------------------------------------------
     agent = resource(documents, "DaemonSet", f"{RELEASE}-otel-agent")
     agent_configmap = resource(documents, "ConfigMap", f"{RELEASE}-otel-agent")
     agent_config = yaml.safe_load(agent_configmap["data"]["otel-agent-config.yaml"])
+
+    agent_image = image_of(agent)
+    expected_agent = f"{values['otelAgent']['image']['repository']}:{values['otelAgent']['image']['tag']}"
+    if agent_image != expected_agent:
+        fail(f"agent image {agent_image} does not match the values pin {expected_agent}")
+
+    # contrib >= 0.127 removed service.telemetry.metrics.address; probes must
+    # come from the health_check extension instead.
+    if agent_config.get("service", {}).get("telemetry", {}).get("metrics", {}).get("address"):
+        fail("agent config carries the removed service.telemetry.metrics.address field")
+    if "health_check" not in agent_config.get("extensions", {}):
+        fail("agent config must define the health_check extension for probes")
+    if "health_check" not in agent_config["service"].get("extensions", []):
+        fail("agent service.extensions must enable health_check")
 
     includes = agent_config["receivers"]["filelog"]["include"]
     if not any(path.startswith("/var/log/pods/caritas_") for path in includes):
@@ -243,10 +319,11 @@ def main() -> None:
         fail("signoz-ingress must NOT render for prod (ADV-011 dev-tooling exception)")
 
     print(
-        "OK: OBS-P1 contract holds — signoz-otel-collector ingest with 3 memory_limiter "
-        "pipelines writing to ClickHouse, schema-migrator jobs present, credentials via "
-        "secretKeyRef, agent forwards to the gateway, adoption invariants intact, "
-        "ingress Pre-Dev-only with explicit namespace"
+        "OK: OBS-P1 contract holds — signoz-otel-collector ingest (images consistent with "
+        "the values pins), memory_limiter everywhere, k8sattributes on traces/metrics only, "
+        "single sequential schema-migrator job + gateway sync-check gate, credentials via "
+        "secretKeyRef, agent (health_check probes) forwards to the gateway, adoption "
+        "invariants intact, ingress Pre-Dev-only with explicit namespace"
     )
 
 

@@ -35,21 +35,23 @@ spec:
           runAsUser: 0
           runAsGroup: 0
         ports:
-        - name: metrics
-          containerPort: 8888
+        - name: health
+          containerPort: 13133
           protocol: TCP
+        # Probes use the health_check extension: the collector's built-in
+        # /metrics-on-8888 telemetry endpoint was removed upstream.
         livenessProbe:
           httpGet:
-            path: /metrics
-            port: 8888
+            path: /
+            port: 13133
             scheme: HTTP
           initialDelaySeconds: 60
           periodSeconds: 30
           failureThreshold: 3
         readinessProbe:
           httpGet:
-            path: /metrics
-            port: 8888
+            path: /
+            port: 13133
             scheme: HTTP
           initialDelaySeconds: 30
           periodSeconds: 10

@@ -35,25 +35,30 @@ spec:
     spec:
       serviceAccountName: {{ include "signoz.otelCollector.fullname" . }}
       initContainers:
-      - name: wait-for-clickhouse
-        image: busybox:1.35
-        command: ['sh', '-c']
-        args:
-        - |
-          until nc -z {{ $chHost }} {{ .Values.signoz.clickhouse.port }}; do
-            echo "waiting for ClickHouse at {{ $chHost }}:{{ .Values.signoz.clickhouse.port }}..."
-            sleep 2
-          done
-          echo "ClickHouse is ready"
+      # Upstream (chart signoz-0.132.2) gates the collector on the schema
+      # being current: "migrate sync check" fails (and the pod retries)
+      # until the schema-migrator Job has run — no extra RBAC needed.
+      {{- if .Values.signoz.schemaMigrator.enabled }}
+      - name: check
+        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
+        imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
+        command: ["/signoz-otel-collector"]
+        args: ["migrate", "sync", "check"]
+        env:
+          {{- include "signoz.migratorEnv" . | nindent 10 }}
+      {{- end }}
       containers:
       - name: otel-collector
         image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
         imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
+        command: ["/signoz-otel-collector"]
+        # NOTE: no --feature-gates=-pkg.translator.prometheus.NormalizeName
+        # any more — upstream dropped it between charts 0.105.1 and 0.132.2
+        # (the gate no longer exists in v0.144.x and would fail startup).
         args:
         - --config=/conf/otel-collector-config.yaml
         - --manager-config=/conf/otel-collector-opamp-config.yaml
         - --copy-path=/var/tmp/collector-config.yaml
-        - --feature-gates=-pkg.translator.prometheus.NormalizeName
         env:
         - name: CLICKHOUSE_HOST
           value: {{ $chHost | quote }}

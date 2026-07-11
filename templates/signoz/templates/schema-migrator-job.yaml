@@ -1,0 +1,67 @@
+{{- if and .Values.signoz.enabled .Values.signoz.schemaMigrator.enabled }}
+{{- $chHost := include "signoz.clickhouse.host" . }}
+{{/*
+SigNoz telemetry-store (ClickHouse schema) migrator, following the upstream
+chart signoz-0.132.2: the signoz-otel-collector image runs the migration
+phases as ONE Job — initContainers ready -> bootstrap -> sync, main
+container async. The initContainer chain hard-enforces the sequential
+ordering: running sync and async concurrently corrupts the migration
+bookkeeping (async's v2 rows make sync skip the squashed base schema —
+"Could not find table" failures seen live on Pre-Dev with the old two-job
+layout).
+
+Jobs are immutable: when re-deploying via kubectl, delete the previous run
+first (see PR deploy notes). The helm hook annotations re-create it
+automatically on helm-driven upgrades.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-schema-migrator
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: schema-migrator
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app: schema-migrator
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+      - name: ready
+        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
+        imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
+        command: ["/signoz-otel-collector"]
+        args: ["migrate", "ready"]
+        env:
+          {{- include "signoz.migratorEnv" . | nindent 10 }}
+      - name: bootstrap
+        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
+        imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
+        command: ["/signoz-otel-collector"]
+        args: ["migrate", "bootstrap"]
+        env:
+          {{- include "signoz.migratorEnv" . | nindent 10 }}
+      - name: sync
+        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
+        imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
+        command: ["/signoz-otel-collector"]
+        args: ["migrate", "sync", "up"]
+        env:
+          {{- include "signoz.migratorEnv" . | nindent 10 }}
+      containers:
+      - name: async
+        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
+        imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
+        command: ["/signoz-otel-collector"]
+        args: ["migrate", "async", "up"]
+        env:
+          {{- include "signoz.migratorEnv" . | nindent 10 }}
+{{- end }}
