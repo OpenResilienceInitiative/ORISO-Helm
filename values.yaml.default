@@ -304,7 +304,9 @@ signoz:
     replicas: 1
     image:
       repository: clickhouse/clickhouse-server
-      tag: "23.8"
+      # Pinned to the version the upstream signoz-0.105.1 chart pairs with the
+      # v0.129.12 schema migrator; 23.8 cannot run its MODIFY QUERY migrations.
+      tag: "25.5.6"
       pullPolicy: IfNotPresent
     resources:
       requests:
