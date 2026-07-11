@@ -79,8 +79,8 @@ OTel log-collection agent (DaemonSet) name.
 {{- end }}
 
 {{/*
-SigNoz OTLP gRPC ingest endpoint (host:port) for collector exporters.
+NOTE: the signoz/signoz single binary has NO OTLP listener (it serves
+8080/4320/6060/9090 only). Anything that needs to ingest telemetry must go
+through the gateway collector (signoz-otel-collector); do not add helpers
+that point OTLP traffic at the signoz service.
 */}}
-{{- define "signoz.otlpGrpcEndpoint" -}}
-{{- printf "%s.%s.svc.cluster.local:%v" (include "signoz.fullname" .) (default .Release.Namespace .Values.signoz.namespace) .Values.signoz.service.otlpGrpcPort -}}
-{{- end }}

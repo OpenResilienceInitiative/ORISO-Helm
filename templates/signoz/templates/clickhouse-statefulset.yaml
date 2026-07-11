@@ -27,6 +27,9 @@ spec:
     metadata:
       labels:
         app: clickhouse
+      annotations:
+        # Roll the pod whenever the cluster/keeper drop-in changes.
+        checksum/config: {{ include (print $.Template.BasePath "/signoz/templates/clickhouse-config-configmap.yaml") . | sha256sum }}
     spec:
       containers:
       - name: clickhouse
@@ -79,6 +82,17 @@ spec:
         volumeMounts:
         - name: clickhouse-data
           mountPath: /var/lib/clickhouse
+        # Cluster + embedded Keeper drop-in for the schema migrator's
+        # ON CLUSTER DDL (single-file subPath so the stock config.d
+        # contents of the image stay intact).
+        - name: clickhouse-cluster-config
+          mountPath: /etc/clickhouse-server/config.d/cluster.xml
+          subPath: cluster.xml
+          readOnly: true
+      volumes:
+      - name: clickhouse-cluster-config
+        configMap:
+          name: {{ include "signoz.clickhouse.fullname" . }}-config
       terminationGracePeriodSeconds: 30
   {{- if .Values.signoz.clickhouse.persistence.enabled }}
   volumeClaimTemplates:

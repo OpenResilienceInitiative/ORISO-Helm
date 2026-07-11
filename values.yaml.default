@@ -320,12 +320,15 @@ signoz:
       storageClass: "local-path"
       size: 50Gi
       accessMode: ReadWriteOnce
-  # Gateway OTel collector (contrib distribution: adds k8sattributes etc.).
-  # Services send OTLP here; it forwards traces+metrics+logs to SigNoz :4317.
+  # Gateway collector = SigNoz ingest layer. The signoz/signoz single binary
+  # does NOT listen on 4317/4318; ingest is SigNoz's own collector distro,
+  # which writes to ClickHouse directly and registers over opamp (:4320).
+  # v0.129.12 is the tag the upstream chart signoz-0.105.1 pins for SigNoz
+  # v0.105.1 — keep the pair in sync when bumping either.
   otelCollector:
     image:
-      repository: otel/opentelemetry-collector-contrib
-      tag: "0.115.1"
+      repository: signoz/signoz-otel-collector
+      tag: "v0.129.12"
       pullPolicy: IfNotPresent
     replicas: 1
     memoryLimiter:
@@ -338,9 +341,24 @@ signoz:
       limits:
         cpu: 500m
         memory: 512Mi
+  # SigNoz ClickHouse schema migrator (sync + async jobs). Must complete
+  # once before the gateway collector can write. Same version pairing rule
+  # as otelCollector (upstream chart signoz-0.105.1 pins v0.129.12).
+  schemaMigrator:
+    enabled: true
+    image:
+      repository: signoz/signoz-schema-migrator
+      tag: "v0.129.12"
+      pullPolicy: IfNotPresent
   # Per-node log-collection agent (filelog on /var/log/pods, DaemonSet).
+  # Forwards to the gateway collector; uses the vanilla contrib distro
+  # (filelog + container operator only, no ClickHouse write path needed).
   otelAgent:
     enabled: true
+    image:
+      repository: otel/opentelemetry-collector-contrib
+      tag: "0.115.1"
+      pullPolicy: IfNotPresent
     # Namespace whose pod logs are collected; empty = release namespace.
     logsNamespace: ""
     memoryLimiter:

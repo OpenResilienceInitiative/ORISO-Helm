@@ -5,17 +5,23 @@ Locks the invariants that made the previously deployed stack broken or
 unsafe, plus the cluster-adoption invariants that keep a helm upgrade from
 duplicating the workloads already running on Pre-Dev:
 
-  - the gateway otel-collector runs traces AND metrics AND logs pipelines
-    (old config: metrics only),
-  - every pipeline starts with memory_limiter (K8-L02: OOMKills),
-  - OTLP export goes to the SigNoz ingest port 4317, never the 8080 query/UI
-    port (old config exported to 8080),
-  - the ClickHouse password reaches ClickHouse and SigNoz via secretKeyRef,
-    never plaintext env or a ConfigMap (LC-M03),
+  - the gateway collector is the SigNoz ingest layer: image
+    signoz/signoz-otel-collector, ClickHouse exporters (clickhousetraces /
+    signozclickhousemetrics / clickhouselogsexporter) with env-driven DSNs,
+    opamp registration against signoz:4320 — the signoz/signoz single
+    binary has NO OTLP listener, so an otlp exporter to it is a bug,
+  - the gateway runs traces AND metrics AND logs pipelines (the pre-OBS-P1
+    config was metrics only), each starting with memory_limiter (K8-L02)
+    and including k8sattributes,
+  - the schema-migrator sync + async jobs render (they bootstrap the SigNoz
+    ClickHouse schema; nothing can be written before sync completes),
+  - the log agent forwards to the gateway collector, not to signoz,
+  - the ClickHouse password reaches every consumer via secretKeyRef, never
+    plaintext env or a ConfigMap (LC-M03),
   - ClickHouse keeps the immutable identity of the running StatefulSet
     (selector app=clickhouse, serviceName <release>-clickhouse, 50Gi PVC),
-  - the SigNoz ingress renders for Pre-Dev (signoz.oriso-dev.site) and NOT
-    for prod.
+  - the SigNoz ingress renders for Pre-Dev (signoz.oriso-dev.site) with an
+    explicit metadata.namespace, and NOT for prod.
 """
 
 from __future__ import annotations
@@ -99,7 +105,14 @@ def collector_config(documents: list[dict]) -> dict:
 def main() -> None:
     documents = render("values-pre-dev.yaml")
 
-    # --- gateway collector config ---------------------------------------
+    # --- gateway collector = SigNoz ingest layer --------------------------
+    # The signoz/signoz single binary has NO OTLP listener; ingest must be
+    # the signoz-otel-collector distro writing to ClickHouse directly.
+    gateway = resource(documents, "Deployment", f"{RELEASE}-otel-collector")
+    gateway_image = gateway["spec"]["template"]["spec"]["containers"][0]["image"]
+    if not gateway_image.startswith("signoz/signoz-otel-collector:"):
+        fail(f"gateway collector must run the signoz-otel-collector distro, got {gateway_image}")
+
     config = collector_config(documents)
 
     pipelines = config["service"]["pipelines"]
@@ -109,14 +122,46 @@ def main() -> None:
         processors = pipelines[signal].get("processors", [])
         if not processors or processors[0] != "memory_limiter":
             fail(f"{signal} pipeline must start with memory_limiter (K8-L02), got {processors}")
+        if "k8sattributes" not in processors:
+            fail(f"{signal} pipeline must include k8sattributes, got {processors}")
 
-    endpoint = config["exporters"]["otlp"]["endpoint"]
-    if not endpoint.endswith(":4317"):
-        fail(f"gateway collector must export to the SigNoz OTLP port 4317, got {endpoint}")
-    if f"{RELEASE}-signoz" not in endpoint:
-        fail(f"gateway collector must export to the SigNoz service, got {endpoint}")
-    if ":8080" in endpoint:
-        fail("gateway collector exports to the SigNoz query/UI port 8080 again")
+    exporters = config["exporters"]
+    for name, dsn_key in (
+        ("clickhousetraces", "datasource"),
+        ("signozclickhousemetrics", "dsn"),
+        ("clickhouselogsexporter", "dsn"),
+    ):
+        if name not in exporters:
+            fail(f"gateway collector is missing the {name} ClickHouse exporter")
+        dsn = exporters[name][dsn_key]
+        if "${env:CLICKHOUSE_HOST}" not in dsn or "${env:CLICKHOUSE_PASSWORD}" not in dsn:
+            fail(f"{name} DSN must come from CLICKHOUSE_* env, got {dsn}")
+    if "otlp" in exporters:
+        fail("gateway collector must not export OTLP to the signoz binary (it has no OTLP listener)")
+    if pipelines["traces"]["exporters"][0] != "clickhousetraces":
+        fail("traces pipeline must export to clickhousetraces")
+    if pipelines["metrics"]["exporters"][0] != "signozclickhousemetrics":
+        fail("metrics pipeline must export to signozclickhousemetrics")
+    if pipelines["logs"]["exporters"][0] != "clickhouselogsexporter":
+        fail("logs pipeline must export to clickhouselogsexporter")
+
+    # ClickHouse credentials reach the gateway via secretKeyRef, and the
+    # opamp manager config points at the SigNoz backend (:4320).
+    assert_password_from_secret(gateway, "gateway collector Deployment")
+    gateway_configmap = resource(documents, "ConfigMap", f"{RELEASE}-otel-collector")
+    opamp = yaml.safe_load(gateway_configmap["data"]["otel-collector-opamp-config.yaml"])
+    if f"{RELEASE}-signoz" not in opamp["server_endpoint"] or ":4320" not in opamp["server_endpoint"]:
+        fail(f"opamp manager must point at the SigNoz backend :4320, got {opamp['server_endpoint']}")
+
+    # --- schema migrator jobs ---------------------------------------------
+    for suffix in ("sync", "async"):
+        job = resource(documents, "Job", f"{RELEASE}-schema-migrator-{suffix}")
+        container = job["spec"]["template"]["spec"]["containers"][0]
+        if not container["image"].startswith("signoz/signoz-schema-migrator:"):
+            fail(f"schema migrator {suffix} must run signoz-schema-migrator, got {container['image']}")
+        if container["args"][0] != suffix:
+            fail(f"schema migrator {suffix} job must run the '{suffix}' command, got {container['args']}")
+        assert_password_from_secret(job, f"schema migrator {suffix} Job")
 
     # --- log-collection agent -------------------------------------------
     agent = resource(documents, "DaemonSet", f"{RELEASE}-otel-agent")
@@ -134,7 +179,9 @@ def main() -> None:
 
     agent_endpoint = agent_config["exporters"]["otlp"]["endpoint"]
     if not agent_endpoint.endswith(":4317"):
-        fail(f"agent must export to the SigNoz OTLP port 4317, got {agent_endpoint}")
+        fail(f"agent must export OTLP on port 4317, got {agent_endpoint}")
+    if f"{RELEASE}-otel-collector" not in agent_endpoint:
+        fail(f"agent must forward to the gateway collector, not signoz directly, got {agent_endpoint}")
 
     mounts = agent["spec"]["template"]["spec"]["containers"][0]["volumeMounts"]
     log_mount = next((m for m in mounts if m["mountPath"] == "/var/log/pods"), None)
@@ -164,6 +211,18 @@ def main() -> None:
     if signoz_env["CLICKHOUSE_HOST"]["value"] != f"{RELEASE}-clickhouse":
         fail(f"SigNoz must use the in-chart ClickHouse, got {signoz_env['CLICKHOUSE_HOST']}")
 
+    # The schema migrator issues ON CLUSTER DDL: ClickHouse needs the
+    # remote_servers cluster and a (Zoo)Keeper, provided by the drop-in.
+    cluster_config = resource(documents, "ConfigMap", f"{RELEASE}-clickhouse-config")
+    cluster_xml = cluster_config["data"]["cluster.xml"]
+    if "<remote_servers>" not in cluster_xml or "<cluster>" not in cluster_xml:
+        fail("ClickHouse drop-in must define the remote_servers cluster the migrator targets")
+    if "<keeper_server>" not in cluster_xml:
+        fail("ClickHouse drop-in must enable the embedded Keeper for ON CLUSTER DDL")
+    ch_mounts = clickhouse["spec"]["template"]["spec"]["containers"][0]["volumeMounts"]
+    if not any(m["mountPath"] == "/etc/clickhouse-server/config.d/cluster.xml" for m in ch_mounts):
+        fail("ClickHouse StatefulSet must mount the cluster/keeper drop-in into config.d")
+
     # --- ingress: on for Pre-Dev, off for prod ----------------------------
     ingress = resource(documents, "Ingress", "signoz-ingress")
     if ingress["spec"]["rules"][0]["host"] != PREDEV_SIGNOZ_DOMAIN:
@@ -174,15 +233,20 @@ def main() -> None:
     annotations = ingress["metadata"].get("annotations", {})
     if annotations.get("cert-manager.io/cluster-issuer") != "letsencrypt-prod":
         fail("signoz-ingress must use the letsencrypt-prod cluster-issuer like the other ingresses")
+    # kubectl-apply from outside the namespace must not land it in "default"
+    # (nginx admission webhook duplicate-host check).
+    if not ingress["metadata"].get("namespace"):
+        fail("signoz-ingress must carry an explicit metadata.namespace")
 
     prod_documents = render("values-prod.yaml")
     if find(prod_documents, "Ingress", "signoz-ingress") is not None:
         fail("signoz-ingress must NOT render for prod (ADV-011 dev-tooling exception)")
 
     print(
-        "OK: OBS-P1 contract holds — 3 pipelines with memory_limiter, OTLP export on 4317, "
-        "ClickHouse credentials via secretKeyRef, adoption invariants intact, "
-        "ingress Pre-Dev-only"
+        "OK: OBS-P1 contract holds — signoz-otel-collector ingest with 3 memory_limiter "
+        "pipelines writing to ClickHouse, schema-migrator jobs present, credentials via "
+        "secretKeyRef, agent forwards to the gateway, adoption invariants intact, "
+        "ingress Pre-Dev-only with explicit namespace"
     )
 
 

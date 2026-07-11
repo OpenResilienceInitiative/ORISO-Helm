@@ -1,10 +1,15 @@
 {{- if .Values.signoz.enabled }}
+{{- $chHost := include "signoz.clickhouse.host" . }}
 {{/*
-Gateway OTel collector. Name and selector (app=otel-collector) deliberately
-match the Deployment already running on Pre-Dev so the helm upgrade adopts
-it in place (Deployment selectors are immutable). The image moves from the
-core otel/opentelemetry-collector distribution to -contrib, which ships the
-k8sattributes processor.
+Gateway collector = SigNoz ingest layer (signoz/signoz-otel-collector).
+Name and selector (app=otel-collector) deliberately match the Deployment
+already running on Pre-Dev so an upgrade adopts it in place (Deployment
+selectors are immutable).
+
+It writes to ClickHouse directly (the signoz/signoz backend has no OTLP
+listener) and registers with the SigNoz backend over opamp. The schema
+migrator jobs must have completed once before this pod becomes healthy; the
+collector restarts until the SigNoz schema exists.
 */}}
 apiVersion: apps/v1
 kind: Deployment
@@ -29,13 +34,58 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/signoz/templates/otel-collector-configmap.yaml") . | sha256sum }}
     spec:
       serviceAccountName: {{ include "signoz.otelCollector.fullname" . }}
+      initContainers:
+      - name: wait-for-clickhouse
+        image: busybox:1.35
+        command: ['sh', '-c']
+        args:
+        - |
+          until nc -z {{ $chHost }} {{ .Values.signoz.clickhouse.port }}; do
+            echo "waiting for ClickHouse at {{ $chHost }}:{{ .Values.signoz.clickhouse.port }}..."
+            sleep 2
+          done
+          echo "ClickHouse is ready"
       containers:
       - name: otel-collector
         image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
         imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
-        command:
-        - /otelcol-contrib
-        - --config=/etc/otel-collector-config.yaml
+        args:
+        - --config=/conf/otel-collector-config.yaml
+        - --manager-config=/conf/otel-collector-opamp-config.yaml
+        - --copy-path=/var/tmp/collector-config.yaml
+        - --feature-gates=-pkg.translator.prometheus.NormalizeName
+        env:
+        - name: CLICKHOUSE_HOST
+          value: {{ $chHost | quote }}
+        - name: CLICKHOUSE_PORT
+          value: {{ .Values.signoz.clickhouse.port | quote }}
+        - name: CLICKHOUSE_HTTP_PORT
+          value: {{ .Values.signoz.clickhouse.httpPort | quote }}
+        - name: CLICKHOUSE_CLUSTER
+          value: {{ .Values.signoz.clickhouse.cluster | quote }}
+        - name: CLICKHOUSE_USER
+          value: {{ .Values.signoz.clickhouse.user | quote }}
+        - name: CLICKHOUSE_PASSWORD
+          # LC-M03: credential comes from a Secret, never plaintext env.
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.signoz.clickhouse.secret.name }}
+              key: {{ .Values.signoz.clickhouse.secret.key }}
+        - name: CLICKHOUSE_SECURE
+          value: "false"
+        - name: CLICKHOUSE_VERIFY
+          value: "false"
+        # SigNoz signal databases (upstream chart defaults).
+        - name: CLICKHOUSE_DATABASE
+          value: "signoz_metrics"
+        - name: CLICKHOUSE_TRACE_DATABASE
+          value: "signoz_traces"
+        - name: CLICKHOUSE_LOG_DATABASE
+          value: "signoz_logs"
+        - name: CLICKHOUSE_METER_DATABASE
+          value: "signoz_meter"
+        - name: LOW_CARDINAL_EXCEPTION_GROUPING
+          value: "false"
         ports:
         - name: otlpgrpc
           containerPort: 4317
@@ -46,24 +96,27 @@ spec:
         - name: metrics
           containerPort: 8888
           protocol: TCP
+        - name: health
+          containerPort: 13133
+          protocol: TCP
         livenessProbe:
           httpGet:
-            path: /metrics
-            port: 8888
+            path: /
+            port: 13133
             scheme: HTTP
           initialDelaySeconds: 60
           periodSeconds: 30
-          failureThreshold: 3
+          failureThreshold: 6
           successThreshold: 1
           timeoutSeconds: 10
         readinessProbe:
           httpGet:
-            path: /metrics
-            port: 8888
+            path: /
+            port: 13133
             scheme: HTTP
           initialDelaySeconds: 30
           periodSeconds: 10
-          failureThreshold: 3
+          failureThreshold: 6
           successThreshold: 1
           timeoutSeconds: 5
         {{- if .Values.signoz.otelCollector.resources }}
@@ -74,8 +127,7 @@ spec:
         terminationMessagePolicy: File
         volumeMounts:
         - name: config
-          mountPath: /etc/otel-collector-config.yaml
-          subPath: otel-collector-config.yaml
+          mountPath: /conf
           readOnly: true
       volumes:
       - name: config
