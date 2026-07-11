@@ -36,7 +36,9 @@ public class OtpParameterAuthenticator extends AbstractDirectGrantAuthenticator 
   public void authenticate(AuthenticationFlowContext context) {
     String otpOfRequest = extractDecodedOtpParam(context);
 
-    if (otpOfRequest == null) {
+    // blank counts as missing, mirroring OtpMailAuthenticator — otherwise an empty
+    // otp param would skip the challenge and fail downstream without the otpType hint
+    if (otpOfRequest == null || otpOfRequest.isBlank()) {
       Challenge challengeResponse = new Challenge().error("invalid_grant")
           .errorDescription("Missing totp").otpType(OtpType.APP);
       context.failure(AuthenticationFlowError.INVALID_CREDENTIALS,

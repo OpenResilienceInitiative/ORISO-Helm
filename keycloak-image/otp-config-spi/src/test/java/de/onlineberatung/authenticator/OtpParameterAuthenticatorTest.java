@@ -92,4 +92,19 @@ public class OtpParameterAuthenticatorTest {
     authenticator.authenticate(authFlow);
     verify(authFlow).success();
   }
+
+  @Test
+  public void should_fail_with_challenge_if_otp_param_is_blank() {
+    decodedFormParams.put("otp", Collections.singletonList(" "));
+    when(authFlow.getHttpRequest()).thenReturn(httpRequest);
+
+    authenticator.authenticate(authFlow);
+
+    var responseCaptor = ArgumentCaptor.forClass(Response.class);
+    verify(authFlow).failure(eq(AuthenticationFlowError.INVALID_CREDENTIALS),
+        responseCaptor.capture());
+    assertThat(responseCaptor.getValue().getStatus()).isEqualTo(400);
+    var challenge = responseCaptor.getValue().readEntity(Challenge.class);
+    assertThat(challenge.getOtpType()).isEqualTo(OtpType.APP);
+  }
 }
