@@ -38,5 +38,49 @@ app.kubernetes.io/name: {{ include "signoz.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
+{{/*
+ClickHouse workload/service name. MUST stay "<release>-clickhouse": the
+Pre-Dev cluster already runs StatefulSet/Service "oriso-platform-clickhouse"
+(helm-owned by release "oriso-platform"), and keeping the name lets a helm
+upgrade adopt the running instance instead of duplicating it.
+*/}}
+{{- define "signoz.clickhouse.fullname" -}}
+{{- printf "%s-clickhouse" .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
 
+{{/*
+Resolved ClickHouse host: global override > signoz.clickhouse.host > the
+in-chart ClickHouse service.
+*/}}
+{{- define "signoz.clickhouse.host" -}}
+{{- $gSvc := default dict (.Values.global | default dict).services -}}
+{{- $gCh := default dict $gSvc.clickhouse -}}
+{{- $host := default .Values.signoz.clickhouse.host (default "" $gCh.host) -}}
+{{- if $host -}}
+{{- $host -}}
+{{- else -}}
+{{- include "signoz.clickhouse.fullname" . -}}
+{{- end -}}
+{{- end }}
 
+{{/*
+OTel gateway collector name. MUST stay "<release>-otel-collector" so the helm
+upgrade adopts the running Deployment/Service/ConfigMap on Pre-Dev.
+*/}}
+{{- define "signoz.otelCollector.fullname" -}}
+{{- printf "%s-otel-collector" .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+OTel log-collection agent (DaemonSet) name.
+*/}}
+{{- define "signoz.otelAgent.fullname" -}}
+{{- printf "%s-otel-agent" .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+SigNoz OTLP gRPC ingest endpoint (host:port) for collector exporters.
+*/}}
+{{- define "signoz.otlpGrpcEndpoint" -}}
+{{- printf "%s.%s.svc.cluster.local:%v" (include "signoz.fullname" .) (default .Release.Namespace .Values.signoz.namespace) .Values.signoz.service.otlpGrpcPort -}}
+{{- end }}

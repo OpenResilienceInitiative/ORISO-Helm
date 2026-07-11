@@ -1,0 +1,35 @@
+{{- $gDom := default dict (.Values.global | default dict).domains }}
+{{- $host := default "" $gDom.signoz }}
+{{- if and .Values.signoz.enabled .Values.signoz.ingress.enabled (ne $host "") }}
+{{/*
+SigNoz UI ingress. The signoz.* subdomain is an approved, documented
+dev-tooling exception to the ADR-011 single-domain rule (like matrix.*).
+Renders only when both signoz.ingress.enabled and global.domains.signoz are
+set — Pre-Dev sets them, prod does not.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+  name: signoz-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: {{ $host | quote }}
+    http:
+      paths:
+      - backend:
+          service:
+            name: {{ include "signoz.fullname" . }}
+            port:
+              number: {{ .Values.signoz.service.port }}
+        path: /
+        pathType: Prefix
+  tls:
+  - hosts:
+    - {{ $host | quote }}
+    secretName: {{ default (printf "%s-tls" ($host | replace "." "-")) .Values.signoz.ingress.tlsSecretName }}
+{{- end }}

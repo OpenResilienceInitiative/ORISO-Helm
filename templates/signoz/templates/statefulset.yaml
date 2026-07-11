@@ -1,6 +1,7 @@
+{{- if .Values.signoz.enabled -}}
 {{- $gSvc := default dict (.Values.global | default dict).services -}}
 {{- $gCh  := default dict $gSvc.clickhouse -}}
-{{- $chHost := default .Values.signoz.clickhouse.host (default "" $gCh.host) -}}
+{{- $chHost := include "signoz.clickhouse.host" . -}}
 {{- $chPort := default .Values.signoz.clickhouse.port (default 0 $gCh.port) -}}
 {{- $gDom := default dict (.Values.global | default dict).domains -}}
 {{- $extUrl := .Values.signoz.appConfig.alertmanager.signozExternalUrl -}}
@@ -61,14 +62,11 @@ spec:
         - name: CLICKHOUSE_USER
           value: {{ .Values.signoz.clickhouse.user | quote }}
         - name: CLICKHOUSE_PASSWORD
-          {{- if and .Values.signoz.clickhouse.secret.name .Values.signoz.clickhouse.secret.key }}
+          # LC-M03: credential comes from a Secret, never plaintext env.
           valueFrom:
-            configMapKeyRef:
+            secretKeyRef:
               name: {{ .Values.signoz.clickhouse.secret.name }}
               key: {{ .Values.signoz.clickhouse.secret.key }}
-          {{- else }}
-          value: {{ .Values.signoz.clickhouse.password | quote }}
-          {{- end }}
         - name: CLICKHOUSE_SECURE
           value: "false"
         - name: SIGNOZ_TELEMETRYSTORE_PROVIDER
@@ -136,3 +134,4 @@ spec:
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Retain
     whenScaled: Retain
+{{- end }}

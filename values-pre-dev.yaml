@@ -10,6 +10,8 @@
 global:
   domains:
     matrix: "matrix.oriso-dev.site"
+    # Approved dev-tooling subdomain exception to ADR-011 (like matrix.*).
+    signoz: "signoz.oriso-dev.site"
   matrix:
     matrixServerName: "matrix.oriso-dev.site"
 
@@ -23,3 +25,16 @@ userService:
   # Enables encrypted Matrix room creation only after the clean Pre-Dev
   # homeserver is configured with the stable identity above.
   matrixEncryptionEnabled: "true"
+
+# SigNoz observability stack (OBS-P1)
+signoz:
+  enabled: true
+  ingress:
+    enabled: true
+    # Reuse the TLS secret of the signoz-ingress already live on Pre-Dev so
+    # cert-manager does not have to issue a fresh certificate.
+    tlsSecretName: "signoz-oriso-site-tls"
+  otelAgent:
+    enabled: true
+    # Collect container stdout logs of the application namespace.
+    logsNamespace: "caritas"

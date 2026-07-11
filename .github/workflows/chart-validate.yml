@@ -51,6 +51,9 @@ jobs:
         run: |
           python3 -c "import yaml,sys; d=[x for x in yaml.safe_load_all(open('/tmp/oriso-rendered.yaml')) if x]; print(f'{len(d)} manifests parse'); sys.exit(0 if d else 1)"
 
+      - name: OBS-P1 SigNoz stack render contract
+        run: python3 tests/render_obs_p1_test.py
+
       - name: helm package
         run: helm package . --destination /tmp/dist && ls -lh /tmp/dist
 

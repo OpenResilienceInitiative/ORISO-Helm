@@ -1,0 +1,64 @@
+{{- if and .Values.signoz.enabled .Values.signoz.otelAgent.enabled }}
+{{- $logNs := default .Release.Namespace .Values.signoz.otelAgent.logsNamespace }}
+{{/*
+Log-collection agent (DaemonSet) configuration: tails container stdout under
+/var/log/pods for the application namespace and ships the parsed records
+straight to the SigNoz OTLP gRPC ingest (4317). The `container` operator
+parses containerd/CRI log lines and derives k8s.namespace.name /
+k8s.pod.name / k8s.container.name from the file path, so the agent needs no
+API-server access. start_at=end keeps restarts cheap (no re-ingest); the
+trade-off — lines written while the agent is down are skipped — is
+acceptable for dev tooling.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "signoz.otelAgent.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-agent
+data:
+  otel-agent-config.yaml: |
+    receivers:
+      filelog:
+        include:
+          - /var/log/pods/{{ $logNs }}_*/*/*.log
+        exclude:
+          # never ingest our own logs (feedback loop)
+          - /var/log/pods/{{ $logNs }}_{{ include "signoz.otelAgent.fullname" . }}*/*/*.log
+        start_at: end
+        include_file_path: true
+        retry_on_failure:
+          enabled: true
+        operators:
+          - type: container
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: {{ .Values.signoz.otelAgent.memoryLimiter.limitMib }}
+        spike_limit_mib: {{ .Values.signoz.otelAgent.memoryLimiter.spikeLimitMib }}
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+
+    exporters:
+      otlp:
+        # Ship logs directly to SigNoz ingest (4317). Going through the
+        # gateway would make its connection-IP-based k8sattributes processor
+        # mis-attribute every log record to the agent pod.
+        endpoint: {{ include "signoz.otlpGrpcEndpoint" . }}
+        tls:
+          insecure: true
+
+    service:
+      telemetry:
+        metrics:
+          address: 0.0.0.0:8888
+      pipelines:
+        logs:
+          receivers: [filelog]
+          processors: [memory_limiter, batch]
+          exporters: [otlp]
+{{- end }}
