@@ -14,6 +14,17 @@ global:
     signoz: "signoz.oriso-dev.site"
   matrix:
     matrixServerName: "matrix.oriso-dev.site"
+  keycloak:
+    # The otp-config SPI lives inside the realm; the realm name is fixed by
+    # realm.json, not environment-specific like authServerUrl.
+    otpUrl: "/realms/online-beratung/otp-config"
+
+# Keycloak runs the custom image (stock 26.6.3 + vendored otp-config SPI) so
+# the UserService 2FA endpoints and the direct-grant-2fa flow work. Built by
+# .github/workflows/keycloak-image.yml, see keycloak-image/README.md.
+online-counseling-keycloak:
+  imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
+  imageVersion: "26.6.3-otp"
 
 matrix:
   synapseServerName: "matrix.oriso-dev.site"
@@ -25,6 +36,13 @@ userService:
   # Enables encrypted Matrix room creation only after the clean Pre-Dev
   # homeserver is configured with the stable identity above.
   matrixEncryptionEnabled: "true"
+
+  # 2FA/OTP on Pre-Dev: counsellors and admins may set up OTP in the app
+  # (requires the oriso-keycloak image above). Askers stay off for now —
+  # product decision pending (see 2FA plan doc in the ORISO workspace).
+  otpAllowedForConsultants: "true"
+  otpAllowedForSingleTenantAdmins: "true"
+  otpAllowedForTenantSuperAdmins: "true"
 
 # SigNoz observability stack (OBS-P1)
 signoz:
