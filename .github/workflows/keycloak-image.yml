@@ -47,13 +47,21 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute tags
+        id: tags
+        # On pull_request github.ref_name is "<pr>/merge", which is not a valid
+        # image tag — PR builds only get the version tag (and are not pushed).
+        run: |
+          TAGS="$IMAGE:26.6.3-otp"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAGS="$TAGS,$IMAGE:${{ github.ref_name }}"
+          fi
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
       - name: Build (and push on branch)
         uses: docker/build-push-action@v6
         with:
           context: keycloak-image
           push: ${{ github.event_name == 'push' }}
-          tags: |
-            ${{ env.IMAGE }}:26.6.3-otp
-            ${{ env.IMAGE }}:${{ github.ref_name }}
+          tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
