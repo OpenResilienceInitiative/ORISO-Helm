@@ -1,0 +1,81 @@
+{{- if and .Values.signoz.enabled .Values.signoz.otelAgent.enabled }}
+{{/*
+Per-node log-collection agent (SigNoz "k8s-infra" style, minimal variant).
+Runs as root read-only on /var/log/pods because kubelet writes the pod log
+files 0640 root:root. Resources are deliberately modest (finding LC-M05:
+the nodes are memory-overcommitted).
+*/}}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "signoz.otelAgent.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-agent
+spec:
+  selector:
+    matchLabels:
+      app: otel-agent
+  template:
+    metadata:
+      labels:
+        app: otel-agent
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/signoz/templates/otel-agent-configmap.yaml") . | sha256sum }}
+    spec:
+      containers:
+      - name: otel-agent
+        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
+        imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
+        command:
+        - /otelcol-contrib
+        - --config=/etc/otel-agent-config.yaml
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+        ports:
+        - name: metrics
+          containerPort: 8888
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 8888
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 8888
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+        {{- if .Values.signoz.otelAgent.resources }}
+        resources:
+          {{- toYaml .Values.signoz.otelAgent.resources | nindent 10 }}
+        {{- end }}
+        volumeMounts:
+        - name: config
+          mountPath: /etc/otel-agent-config.yaml
+          subPath: otel-agent-config.yaml
+          readOnly: true
+        - name: varlogpods
+          mountPath: /var/log/pods
+          readOnly: true
+      {{- with .Values.signoz.otelAgent.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "signoz.otelAgent.fullname" . }}
+      - name: varlogpods
+        hostPath:
+          path: /var/log/pods
+      terminationGracePeriodSeconds: 30
+{{- end }}

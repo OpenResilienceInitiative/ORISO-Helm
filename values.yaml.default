@@ -256,8 +256,15 @@ healthDashboard:
   env:
     PORT: "9100"
 
-# SigNoz
+# SigNoz observability stack (OBS-P1): SigNoz backend/UI + in-chart
+# ClickHouse + OTel gateway collector + per-node log-collection agent.
+#
+# Retention note: SigNoz v0.105 does NOT expose retention as env vars or
+# config file settings; it is configured post-deploy in the UI
+# (Settings -> General -> retention period per signal, stored as ClickHouse
+# TTLs via the SigNoz API). Recommended: logs/traces 7-14d, metrics 30d.
 signoz:
+  enabled: true
   image:
     repository: signoz/signoz
     tag: "v0.105.1"
@@ -272,16 +279,81 @@ signoz:
     opampPort: 4320
     otlpGrpcPort: 4317
     otlpHttpPort: 4318
+  # SigNoz UI ingress: renders only when enabled AND global.domains.signoz is
+  # set (dev-tooling subdomain exception to ADR-011 single-domain routing).
+  ingress:
+    enabled: false
+    # Override to reuse an existing cert secret; empty derives
+    # "<domain-with-dashes>-tls" like the other ingresses.
+    tlsSecretName: ""
   clickhouse:
+    # Empty host = use the in-chart ClickHouse service
+    # ("<release>-clickhouse"); global.services.clickhouse.host overrides.
     host: ""
     port: 9000
     httpPort: 8123
     cluster: "cluster"
     user: "default"
-    password: ""
+    database: "default"
+    # Credentials Secret rendered by the chart from
+    # global.secrets.clickhousePassword (see secrets.yaml.default). Consumed
+    # via secretKeyRef by both ClickHouse and SigNoz (LC-M03).
     secret:
-      name: clickhouse-config
-      key: default-password
+      name: clickhouse-secret
+      key: password
+    replicas: 1
+    image:
+      repository: clickhouse/clickhouse-server
+      tag: "23.8"
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: "2"
+        memory: 8Gi
+    # Sized to match the instance already running on Pre-Dev. The
+    # volumeClaimTemplate is immutable on an existing StatefulSet.
+    persistence:
+      enabled: true
+      storageClass: "local-path"
+      size: 50Gi
+      accessMode: ReadWriteOnce
+  # Gateway OTel collector (contrib distribution: adds k8sattributes etc.).
+  # Services send OTLP here; it forwards traces+metrics+logs to SigNoz :4317.
+  otelCollector:
+    image:
+      repository: otel/opentelemetry-collector-contrib
+      tag: "0.115.1"
+      pullPolicy: IfNotPresent
+    replicas: 1
+    memoryLimiter:
+      limitMib: 400
+      spikeLimitMib: 100
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  # Per-node log-collection agent (filelog on /var/log/pods, DaemonSet).
+  otelAgent:
+    enabled: true
+    # Namespace whose pod logs are collected; empty = release namespace.
+    logsNamespace: ""
+    memoryLimiter:
+      limitMib: 180
+      spikeLimitMib: 50
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    tolerations: []
   appConfig:
     telemetryStore:
       provider: "clickhouse"

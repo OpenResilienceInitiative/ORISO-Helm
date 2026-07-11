@@ -1,0 +1,85 @@
+{{- if .Values.signoz.enabled }}
+{{/*
+Gateway OTel collector. Name and selector (app=otel-collector) deliberately
+match the Deployment already running on Pre-Dev so the helm upgrade adopts
+it in place (Deployment selectors are immutable). The image moves from the
+core otel/opentelemetry-collector distribution to -contrib, which ships the
+k8sattributes processor.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "signoz.otelCollector.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+spec:
+  replicas: {{ .Values.signoz.otelCollector.replicas }}
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+      annotations:
+        # Roll the pods whenever the collector config changes.
+        checksum/config: {{ include (print $.Template.BasePath "/signoz/templates/otel-collector-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "signoz.otelCollector.fullname" . }}
+      containers:
+      - name: otel-collector
+        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
+        imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
+        command:
+        - /otelcol-contrib
+        - --config=/etc/otel-collector-config.yaml
+        ports:
+        - name: otlpgrpc
+          containerPort: 4317
+          protocol: TCP
+        - name: otlphttp
+          containerPort: 4318
+          protocol: TCP
+        - name: metrics
+          containerPort: 8888
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 8888
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          failureThreshold: 3
+          successThreshold: 1
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 8888
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+          successThreshold: 1
+          timeoutSeconds: 5
+        {{- if .Values.signoz.otelCollector.resources }}
+        resources:
+          {{- toYaml .Values.signoz.otelCollector.resources | nindent 10 }}
+        {{- end }}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - name: config
+          mountPath: /etc/otel-collector-config.yaml
+          subPath: otel-collector-config.yaml
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "signoz.otelCollector.fullname" . }}
+      terminationGracePeriodSeconds: 30
+{{- end }}

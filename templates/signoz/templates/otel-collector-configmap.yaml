@@ -1,0 +1,77 @@
+{{- if .Values.signoz.enabled }}
+{{/*
+Gateway OTel collector configuration. Fixes the previously deployed config,
+which was broken by design:
+  - exported to the SigNoz query/UI port 8080 instead of the OTLP ingest
+    port 4317,
+  - only ran a metrics pipeline (traces and logs were dropped),
+  - had no memory_limiter (finding K8-L02: OOMKills under load).
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "signoz.otelCollector.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      # memory_limiter MUST run first in every pipeline (K8-L02).
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: {{ .Values.signoz.otelCollector.memoryLimiter.limitMib }}
+        spike_limit_mib: {{ .Values.signoz.otelCollector.memoryLimiter.spikeLimitMib }}
+      # Enrich telemetry with Kubernetes metadata, associated via the
+      # sending pod's connection IP (services export OTLP directly here).
+      k8sattributes:
+        passthrough: false
+        pod_association:
+          - sources:
+              - from: connection
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.deployment.name
+            - k8s.statefulset.name
+            - k8s.daemonset.name
+            - k8s.node.name
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+
+    exporters:
+      otlp:
+        # SigNoz OTLP gRPC ingest — port 4317, NOT the 8080 query/UI port.
+        endpoint: {{ include "signoz.otlpGrpcEndpoint" . }}
+        tls:
+          insecure: true
+
+    service:
+      telemetry:
+        metrics:
+          address: 0.0.0.0:8888
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, batch]
+          exporters: [otlp]
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, batch]
+          exporters: [otlp]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, batch]
+          exporters: [otlp]
+{{- end }}

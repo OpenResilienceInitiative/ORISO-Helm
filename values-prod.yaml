@@ -31,3 +31,11 @@ userService:
   otpAllowedForConsultants: "false"
   otpAllowedForSingleTenantAdmins: "false"
   otpAllowedForTenantSuperAdmins: "false"
+
+# SigNoz observability stack (OBS-P1): the stack itself may run in prod, but
+# the signoz.* UI subdomain is a dev-tooling exception (ADR-011) and is NOT
+# exposed in production. No global.domains.signoz is set here either — both
+# gates keep the ingress from rendering.
+signoz:
+  ingress:
+    enabled: false
