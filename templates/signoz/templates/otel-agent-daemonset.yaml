@@ -26,8 +26,8 @@ spec:
     spec:
       containers:
       - name: otel-agent
-        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
-        imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
+        image: "{{ .Values.signoz.otelAgent.image.repository }}:{{ .Values.signoz.otelAgent.image.tag }}"
+        imagePullPolicy: {{ .Values.signoz.otelAgent.image.pullPolicy }}
         command:
         - /otelcol-contrib
         - --config=/etc/otel-agent-config.yaml

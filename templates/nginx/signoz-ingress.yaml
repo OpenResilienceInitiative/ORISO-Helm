@@ -15,6 +15,11 @@ metadata:
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
   name: signoz-ingress
+  # Explicit namespace: the rendered manifests are also applied with plain
+  # kubectl from outside the target namespace; without this the ingress
+  # landed in "default" and tripped the nginx admission webhook's
+  # duplicate-host check against the real one in the app namespace.
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
 spec:
   ingressClassName: nginx
   rules:

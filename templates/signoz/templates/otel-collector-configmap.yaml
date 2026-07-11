@@ -1,11 +1,18 @@
 {{- if .Values.signoz.enabled }}
 {{/*
-Gateway OTel collector configuration. Fixes the previously deployed config,
-which was broken by design:
-  - exported to the SigNoz query/UI port 8080 instead of the OTLP ingest
-    port 4317,
-  - only ran a metrics pipeline (traces and logs were dropped),
-  - had no memory_limiter (finding K8-L02: OOMKills under load).
+Gateway collector configuration for the SigNoz ingest layer.
+
+The signoz/signoz single binary does NOT ingest OTLP (verified on Pre-Dev:
+it listens on 8080/4320/6060/9090 only). Ingest is SigNoz's own collector
+distribution signoz/signoz-otel-collector, which writes to ClickHouse
+directly via the clickhousetraces / signozclickhousemetrics /
+clickhouselogsexporter exporters and registers with the SigNoz backend over
+opamp (ws://signoz:4320).
+
+This config follows the upstream references paired with SigNoz v0.105.1
+(charts tag signoz-0.105.1 and deploy/docker/otel-collector-config.yaml at
+v0.105.1), minus the jaeger/httplog/prometheus receivers we do not use,
+plus the memory_limiter (K8-L02) and k8sattributes processors.
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -17,11 +24,20 @@ metadata:
     app.kubernetes.io/component: otel-collector
 data:
   otel-collector-config.yaml: |
+    connectors:
+      signozmeter:
+        metrics_flush_interval: 1h
+        dimensions:
+          - name: service.name
+          - name: deployment.environment
+          - name: host.name
+
     receivers:
       otlp:
         protocols:
           grpc:
             endpoint: 0.0.0.0:4317
+            max_recv_msg_size_mib: 16
           http:
             endpoint: 0.0.0.0:4318
 
@@ -32,7 +48,9 @@ data:
         limit_mib: {{ .Values.signoz.otelCollector.memoryLimiter.limitMib }}
         spike_limit_mib: {{ .Values.signoz.otelCollector.memoryLimiter.spikeLimitMib }}
       # Enrich telemetry with Kubernetes metadata, associated via the
-      # sending pod's connection IP (services export OTLP directly here).
+      # sending pod's connection IP (services export OTLP directly here;
+      # the log agent pre-sets its k8s attributes, which k8sattributes
+      # does not overwrite).
       k8sattributes:
         passthrough: false
         pod_association:
@@ -46,32 +64,72 @@ data:
             - k8s.statefulset.name
             - k8s.daemonset.name
             - k8s.node.name
+      # APM RED metrics derived from spans (upstream signoz-0.105.1 config).
+      signozspanmetrics/delta:
+        metrics_exporter: signozclickhousemetrics
+        latency_histogram_buckets: [100us, 1ms, 2ms, 6ms, 10ms, 50ms, 100ms, 250ms, 500ms, 1000ms, 1400ms, 2000ms, 5s, 10s, 20s, 40s, 60s]
+        dimensions_cache_size: 100000
+        aggregation_temporality: AGGREGATION_TEMPORALITY_DELTA
+        dimensions:
+          - name: service.namespace
+            default: default
+          - name: deployment.environment
+            default: default
+          - name: signoz.collector.id
       batch:
-        timeout: 10s
-        send_batch_size: 1024
+        send_batch_size: 50000
+        timeout: 1s
+      batch/meter:
+        send_batch_max_size: 25000
+        send_batch_size: 20000
+        timeout: 1s
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+      pprof:
+        endpoint: localhost:1777
 
     exporters:
-      otlp:
-        # SigNoz OTLP gRPC ingest — port 4317, NOT the 8080 query/UI port.
-        endpoint: {{ include "signoz.otlpGrpcEndpoint" . }}
-        tls:
-          insecure: true
+      clickhousetraces:
+        datasource: tcp://${env:CLICKHOUSE_USER}:${env:CLICKHOUSE_PASSWORD}@${env:CLICKHOUSE_HOST}:${env:CLICKHOUSE_PORT}/${env:CLICKHOUSE_TRACE_DATABASE}
+        low_cardinal_exception_grouping: ${env:LOW_CARDINAL_EXCEPTION_GROUPING}
+        use_new_schema: true
+      signozclickhousemetrics:
+        dsn: tcp://${env:CLICKHOUSE_USER}:${env:CLICKHOUSE_PASSWORD}@${env:CLICKHOUSE_HOST}:${env:CLICKHOUSE_PORT}/${env:CLICKHOUSE_DATABASE}
+        timeout: 45s
+      clickhouselogsexporter:
+        dsn: tcp://${env:CLICKHOUSE_USER}:${env:CLICKHOUSE_PASSWORD}@${env:CLICKHOUSE_HOST}:${env:CLICKHOUSE_PORT}/${env:CLICKHOUSE_LOG_DATABASE}
+        timeout: 10s
+        use_new_schema: true
+      signozclickhousemeter:
+        dsn: tcp://${env:CLICKHOUSE_USER}:${env:CLICKHOUSE_PASSWORD}@${env:CLICKHOUSE_HOST}:${env:CLICKHOUSE_PORT}/${env:CLICKHOUSE_METER_DATABASE}
+        timeout: 45s
+        sending_queue:
+          enabled: false
 
     service:
       telemetry:
-        metrics:
-          address: 0.0.0.0:8888
+        logs:
+          encoding: json
+      extensions: [health_check, pprof]
       pipelines:
         traces:
           receivers: [otlp]
-          processors: [memory_limiter, k8sattributes, batch]
-          exporters: [otlp]
+          processors: [memory_limiter, k8sattributes, signozspanmetrics/delta, batch]
+          exporters: [clickhousetraces, signozmeter]
         metrics:
           receivers: [otlp]
           processors: [memory_limiter, k8sattributes, batch]
-          exporters: [otlp]
+          exporters: [signozclickhousemetrics, signozmeter]
         logs:
           receivers: [otlp]
           processors: [memory_limiter, k8sattributes, batch]
-          exporters: [otlp]
+          exporters: [clickhouselogsexporter, signozmeter]
+        metrics/meter:
+          receivers: [signozmeter]
+          processors: [batch/meter]
+          exporters: [signozclickhousemeter]
+  otel-collector-opamp-config.yaml: |
+    server_endpoint: "ws://{{ include "signoz.fullname" . }}.{{ default .Release.Namespace .Values.signoz.namespace }}.svc.cluster.local:{{ .Values.signoz.service.opampPort }}/v1/opamp"
 {{- end }}
