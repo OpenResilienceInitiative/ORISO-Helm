@@ -84,3 +84,34 @@ NOTE: the signoz/signoz single binary has NO OTLP listener (it serves
 through the gateway collector (signoz-otel-collector); do not add helpers
 that point OTLP traffic at the signoz service.
 */}}
+
+{{/*
+Env for the signoz-otel-collector "migrate ..." subcommands (schema-migrator
+Job and the gateway's sync-check initContainer). Mirrors upstream
+snippet.telemetryStoreMigrator-env (chart signoz-0.132.2): ClickHouse
+credentials plus the SIGNOZ_OTEL_COLLECTOR_* migration settings.
+LC-M03: the password stays a secretKeyRef.
+*/}}
+{{- define "signoz.migratorEnv" -}}
+- name: CLICKHOUSE_HOST
+  value: {{ include "signoz.clickhouse.host" . | quote }}
+- name: CLICKHOUSE_PORT
+  value: {{ .Values.signoz.clickhouse.port | quote }}
+- name: CLICKHOUSE_CLUSTER
+  value: {{ .Values.signoz.clickhouse.cluster | quote }}
+- name: CLICKHOUSE_USER
+  value: {{ .Values.signoz.clickhouse.user | quote }}
+- name: CLICKHOUSE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.signoz.clickhouse.secret.name }}
+      key: {{ .Values.signoz.clickhouse.secret.key }}
+- name: SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_DSN
+  value: "tcp://$(CLICKHOUSE_USER):$(CLICKHOUSE_PASSWORD)@$(CLICKHOUSE_HOST):$(CLICKHOUSE_PORT)"
+- name: SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_CLUSTER
+  value: "$(CLICKHOUSE_CLUSTER)"
+- name: SIGNOZ_OTEL_COLLECTOR_TIMEOUT
+  value: {{ .Values.signoz.schemaMigrator.timeout | default "10m" | quote }}
+- name: SIGNOZ_OTEL_COLLECTOR_CLICKHOUSE_REPLICATION
+  value: {{ .Values.signoz.schemaMigrator.enableReplication | quote }}
+{{- end }}

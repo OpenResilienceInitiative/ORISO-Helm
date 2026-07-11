@@ -259,15 +259,20 @@ healthDashboard:
 # SigNoz observability stack (OBS-P1): SigNoz backend/UI + in-chart
 # ClickHouse + OTel gateway collector + per-node log-collection agent.
 #
-# Retention note: SigNoz v0.105 does NOT expose retention as env vars or
-# config file settings; it is configured post-deploy in the UI
+# VERSION PAIRING (OBS-P1.2): pins follow the upstream chart signoz-0.132.2 —
+# signoz v0.132.2 / signoz-otel-collector v0.144.5 / clickhouse-server
+# 25.12.5. Bump all of them together against a single upstream chart tag,
+# never individually.
+#
+# Retention note: SigNoz does NOT expose retention as env vars or config
+# file settings; it is configured post-deploy in the UI
 # (Settings -> General -> retention period per signal, stored as ClickHouse
 # TTLs via the SigNoz API). Recommended: logs/traces 7-14d, metrics 30d.
 signoz:
   enabled: true
   image:
     repository: signoz/signoz
-    tag: "v0.105.1"
+    tag: "v0.132.2"
     pullPolicy: IfNotPresent
   replicas: 1
   namespace: ""
@@ -304,9 +309,11 @@ signoz:
     replicas: 1
     image:
       repository: clickhouse/clickhouse-server
-      # Pinned to the version the upstream signoz-0.105.1 chart pairs with the
-      # v0.129.12 schema migrator; 23.8 cannot run its MODIFY QUERY migrations.
-      tag: "25.5.6"
+      # Upstream chart signoz-0.131.0+ requires 25.12.5: upcoming collector
+      # releases store trace attributes as ClickHouse JSON columns using
+      # settings that exist only in 25.12.5 (see the SigNoz 0.131 upgrade
+      # guide). Older versions become incompatible with future SigNoz.
+      tag: "25.12.5"
       pullPolicy: IfNotPresent
     resources:
       requests:
@@ -325,12 +332,12 @@ signoz:
   # Gateway collector = SigNoz ingest layer. The signoz/signoz single binary
   # does NOT listen on 4317/4318; ingest is SigNoz's own collector distro,
   # which writes to ClickHouse directly and registers over opamp (:4320).
-  # v0.129.12 is the tag the upstream chart signoz-0.105.1 pins for SigNoz
-  # v0.105.1 — keep the pair in sync when bumping either.
+  # v0.144.5 is the tag the upstream chart signoz-0.132.2 pins for SigNoz
+  # v0.132.2 — keep the pair in sync when bumping either.
   otelCollector:
     image:
       repository: signoz/signoz-otel-collector
-      tag: "v0.129.12"
+      tag: "v0.144.5"
       pullPolicy: IfNotPresent
     replicas: 1
     memoryLimiter:
@@ -343,15 +350,21 @@ signoz:
       limits:
         cpu: 500m
         memory: 512Mi
-  # SigNoz ClickHouse schema migrator (sync + async jobs). Must complete
-  # once before the gateway collector can write. Same version pairing rule
-  # as otelCollector (upstream chart signoz-0.105.1 pins v0.129.12).
+  # SigNoz telemetry-store (ClickHouse schema) migrator. Upstream dropped the
+  # standalone signoz-schema-migrator image: since chart signoz-0.132.x the
+  # migrator is the signoz-otel-collector image itself running
+  # "migrate ready|bootstrap|sync up|async up" as ONE Job whose initContainer
+  # chain enforces the ready -> bootstrap -> sync -> async ordering (running
+  # sync and async concurrently corrupts the migration bookkeeping — seen
+  # live on Pre-Dev). Uses otelCollector.image; no separate image pin.
   schemaMigrator:
     enabled: true
-    image:
-      repository: signoz/signoz-schema-migrator
-      tag: "v0.129.12"
-      pullPolicy: IfNotPresent
+    # Upstream default is "10m".
+    timeout: "10m"
+    # Keep false: the existing Pre-Dev schema was created without
+    # replication by the v0.129 migrator; flipping this on an existing
+    # schema mismatches table engines. (Upstream defaults to true.)
+    enableReplication: false
   # Per-node log-collection agent (filelog on /var/log/pods, DaemonSet).
   # Forwards to the gateway collector; uses the vanilla contrib distro
   # (filelog + container operator only, no ClickHouse write path needed).
@@ -359,7 +372,7 @@ signoz:
     enabled: true
     image:
       repository: otel/opentelemetry-collector-contrib
-      tag: "0.115.1"
+      tag: "0.156.0"
       pullPolicy: IfNotPresent
     # Namespace whose pod logs are collected; empty = release namespace.
     logsNamespace: ""
