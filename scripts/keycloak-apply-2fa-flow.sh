@@ -61,4 +61,9 @@ done
 $KC add-roles -r "$REALM" --uusername technical --rolename technical || true
 $KC update "realms/$REALM" -s "directGrantFlow=$FLOW"
 
-echo "2FA flow applied and bound for realm $REALM"
+# email OTP needs the `oriso` email theme (ships the otp-email.ftl template the
+# SPI mail sender renders) plus realm SMTP settings (set those separately, they
+# carry a secret).
+$KC update "realms/$REALM" -s "emailTheme=oriso"
+
+echo "2FA flow applied and bound for realm $REALM (emailTheme=oriso)"
