@@ -9,6 +9,16 @@ global:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
+  # OBS-P2: OTLP traces/metrics export from the 4 backend services to the
+  # in-cluster SigNoz gateway collector (OBS-P1). Verified against Spring
+  # Boot 4.0.1's actual source (not docs): the endpoint properties require
+  # the full signal-specific HTTP path (/v1/traces, /v1/metrics), and each
+  # exporter needs its own explicit `enabled` toggle — an unset/empty
+  # endpoint alone does NOT reliably no-op (see PLAN-observability doc).
+  observability:
+    otlpEnabled: true
+    otlpCollectorHost: "" # empty = derive from the in-chart signoz gateway service
+
 
 
   acmedomainName: "acme.your-domain.example.com"
