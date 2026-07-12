@@ -35,11 +35,18 @@ import yaml
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SERVICES = [
-    ("userservice-configmap-env", "userservice"),
-    ("agencyservice-configmap-env", "agencyservice"),
-    ("tenantservice-configmap-env", "tenantservice"),
-    ("consultingtypeservice-configmap-env", "consultingtypeservice"),
+    ("userservice-configmap-env", "userservice", "userservice"),
+    ("agencyservice-configmap-env", "agencyservice", "agencyservice"),
+    ("tenantservice-configmap-env", "tenantservice", "tenantservice"),
+    ("consultingtypeservice-configmap-env", "consultingtypeservice", "consultingtypeservice"),
 ]
+
+OTLP_KEYS = (
+    "MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT",
+    "MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED",
+    "MANAGEMENT_OTLP_METRICS_EXPORT_URL",
+    "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED",
+)
 
 WRONG_PROPERTY_ENV_NAMES = (
     "MANAGEMENT_OTLP_TRACING_ENDPOINT",
@@ -73,6 +80,34 @@ def find_configmap(docs: list[dict], name: str) -> dict:
             return doc
     fail(f"ConfigMap {name} not found in render output")
     raise AssertionError  # unreachable, satisfies type checkers
+
+
+def find_deployment(docs: list[dict], name: str) -> dict:
+    for doc in docs:
+        if doc and doc.get("kind") == "Deployment" and doc.get("metadata", {}).get("name") == name:
+            return doc
+    fail(f"Deployment {name} not found in render output")
+    raise AssertionError  # unreachable, satisfies type checkers
+
+
+def check_deployment_wires_configmap_keys(deployment: dict, configmap_name: str, service_label: str) -> None:
+    # This chart wires env vars per-key via configMapKeyRef, NOT a blanket
+    # envFrom — a key existing in the ConfigMap's data does nothing on the
+    # pod unless the Deployment's container also lists it under `env:`.
+    # (Found live: OBS-P2's first deploy pass added the 4 keys to the
+    # ConfigMap only, and none of them reached a running pod.)
+    containers = deployment["spec"]["template"]["spec"]["containers"]
+    env_list = containers[0].get("env", [])
+    wired = {
+        e["name"]
+        for e in env_list
+        if e.get("valueFrom", {}).get("configMapKeyRef", {}).get("name") == configmap_name
+    }
+    missing = [k for k in OTLP_KEYS if k not in wired]
+    if missing:
+        fail(f"{service_label}: Deployment does not reference {missing} via configMapKeyRef "
+             f"(name={configmap_name}) — the ConfigMap having these keys is not enough, the "
+             f"container's env: list must also list them")
 
 
 def check_env(data: dict, service_label: str, expect_enabled: bool) -> None:
@@ -117,12 +152,15 @@ def main() -> None:
     predev_docs = render("values.yaml.default", "values-pre-dev.yaml")
     prod_docs = render("values.yaml.default", "values-prod.yaml")
 
-    for cm_name, label in SERVICES:
+    for cm_name, deploy_name, label in SERVICES:
         predev_cm = find_configmap(predev_docs, cm_name)
         check_env(predev_cm["data"], f"pre-dev/{label}", expect_enabled=True)
 
         prod_cm = find_configmap(prod_docs, cm_name)
         check_env(prod_cm["data"], f"prod/{label}", expect_enabled=False)
+
+        predev_deploy = find_deployment(predev_docs, deploy_name)
+        check_deployment_wires_configmap_keys(predev_deploy, cm_name, f"pre-dev/{label}")
 
     print("OK: OBS-P2 contract holds — all 4 backend services wire the real Spring Boot 4.0.1 "
           "OTLP properties (not the non-existent Boot-3-era names) with full /v1/traces and "
