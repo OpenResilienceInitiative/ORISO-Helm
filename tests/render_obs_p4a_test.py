@@ -95,8 +95,8 @@ def main() -> None:
     # widget's aggregation.metricName in both dashboard JSONs is k8s.pod.* or
     # k8s.node.*, which only kubeletstats' metric_groups produce.
     kubeletstats = receivers["kubeletstats"]
-    if kubeletstats.get("auth_type") != "serviceAccountToken":
-        fail(f"kubeletstats must use auth_type serviceAccountToken, got {kubeletstats.get('auth_type')}")
+    if kubeletstats.get("auth_type") != "serviceAccount":
+        fail(f"kubeletstats must use auth_type serviceAccount, got {kubeletstats.get('auth_type')}")
     groups = kubeletstats.get("metric_groups", [])
     for required in ("node", "pod"):
         if required not in groups:
