@@ -38,7 +38,77 @@ data:
         operators:
           - type: container
 
+      # Per-node host metrics (OBS-P4a): cpu/disk/load/filesystem/memory/
+      # network/paging, matching the upstream SigNoz k8s-infra chart's
+      # hostmetrics scraper set. Reads through the /hostfs bind-mount so the
+      # gopsutil scrapers see the NODE's /proc, /sys, /dev, not the agent
+      # container's own (empty) view of them.
+      hostmetrics:
+        collection_interval: 30s
+        root_path: /hostfs
+        scrapers:
+          cpu: {}
+          disk: {}
+          load: {}
+          filesystem:
+            exclude_mount_points:
+              match_type: regexp
+              mount_points:
+                - /dev/*
+                - /proc/*
+                - /sys/*
+                - /var/lib/docker/*
+                - /var/lib/kubelet/*
+                - /snap/*
+            exclude_fs_types:
+              match_type: strict
+              fs_types:
+                - autofs
+                - binfmt_misc
+                - bpf
+                - cgroup2
+                - configfs
+                - debugfs
+                - devpts
+                - devtmpfs
+                - fusectl
+                - hugetlbfs
+                - mqueue
+                - nsfs
+                - overlay
+                - proc
+                - pstore
+                - rpc_pipefs
+                - securityfs
+                - sysfs
+                - tracefs
+          memory: {}
+          network: {}
+          paging: {}
+
+      # Per-node kubelet-API metrics (OBS-P4a): k8s.pod.* / k8s.node.* /
+      # k8s.container.* / k8s.volume.* — this is what the imported
+      # "Kubernetes Pod Metrics" and "Kubernetes Node Metrics" dashboards
+      # actually query (verified against the dashboard JSONs: every
+      # aggregation.metricName is k8s.pod.* or k8s.node.*, nothing from
+      # hostmetrics' system.* namespace). Requires the ServiceAccount's
+      # token to be authorized for nodes/stats (otel-agent-rbac.yaml) and
+      # the node's kubelet API to accept it — self-signed kubelet serving
+      # certs on this cluster, hence insecure_skip_verify.
+      kubeletstats:
+        collection_interval: 30s
+        auth_type: serviceAccountToken
+        endpoint: "https://${env:K8S_NODE_IP}:10250"
+        insecure_skip_verify: true
+        metric_groups:
+          - node
+          - pod
+          - container
+          - volume
+
     processors:
+      # memory_limiter MUST run first in every pipeline (K8-L02) — same
+      # instance definition, one per pipeline invocation.
       memory_limiter:
         check_interval: 1s
         limit_mib: {{ .Values.signoz.otelAgent.memoryLimiter.limitMib }}
@@ -46,12 +116,19 @@ data:
       batch:
         timeout: 10s
         send_batch_size: 1024
+      batch/metrics:
+        timeout: 10s
+        send_batch_size: 1024
 
     exporters:
       otlp:
         # Forward to the gateway collector, which owns the ClickHouse write
         # path. Log records leave here with their k8s attributes final (the
-        # gateway's logs pipeline adds none).
+        # gateway's logs pipeline adds none). The metrics pipeline below
+        # reuses this SAME exporter instance — the gateway's existing
+        # `metrics` pipeline (otel-collector-configmap.yaml) already writes
+        # OTLP metrics to signozclickhousemetrics/signozmeter, so there is
+        # nothing to duplicate here.
         endpoint: {{ include "signoz.otelCollector.fullname" . }}.{{ default .Release.Namespace .Values.signoz.namespace }}.svc.cluster.local:4317
         tls:
           insecure: true
@@ -69,5 +146,9 @@ data:
         logs:
           receivers: [filelog]
           processors: [memory_limiter, batch]
+          exporters: [otlp]
+        metrics:
+          receivers: [hostmetrics, kubeletstats]
+          processors: [memory_limiter, batch/metrics]
           exporters: [otlp]
 {{- end }}
