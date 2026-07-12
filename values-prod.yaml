@@ -13,6 +13,11 @@
 
 global:
   initializeDummyData: false
+  # OBS-P2: OTLP traces/metrics export is dev/pre-dev-only for now. Prod
+  # stays off until OBS-P6 (pseudonymisation collector pipeline, KDG-safe
+  # attribute scrubbing) lands — see PLAN-observability-two-track-2026-07-11.md.
+  observability:
+    otlpEnabled: false
 
 agencyService:
   springProfilesActive: "prod"
