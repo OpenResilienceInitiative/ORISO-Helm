@@ -1,9 +1,12 @@
 {{- if and .Values.signoz.enabled .Values.signoz.otelAgent.enabled }}
 {{/*
-Per-node log-collection agent (SigNoz "k8s-infra" style, minimal variant).
-Runs as root read-only on /var/log/pods because kubelet writes the pod log
-files 0640 root:root. Resources are deliberately modest (finding LC-M05:
-the nodes are memory-overcommitted).
+Per-node agent (SigNoz "k8s-infra" style, minimal variant): log collection
+plus, since OBS-P4a, host + kubelet metrics for the imported "Kubernetes Pod
+Metrics" / "Kubernetes Node Metrics" community dashboards. Runs as root
+read-only on /var/log/pods (kubelet writes pod log files 0640 root:root) and
+read-only on /hostfs (hostmetrics scrapers need the node's /proc,/sys,/dev).
+Resources are deliberately modest (finding LC-M05: the nodes are
+memory-overcommitted).
 */}}
 apiVersion: apps/v1
 kind: DaemonSet
@@ -24,6 +27,12 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/signoz/templates/otel-agent-configmap.yaml") . | sha256sum }}
     spec:
+      serviceAccountName: {{ include "signoz.otelAgent.fullname" . }}
+      # No hostNetwork/hostPID needed: kubeletstats dials out to the node's
+      # kubelet API over the normal pod network (node IPs are always
+      # pod-routable in Kubernetes), and hostmetrics reads the node's
+      # /proc,/sys,/dev through the /hostfs bind-mount below, not through a
+      # shared network/PID namespace.
       containers:
       - name: otel-agent
         image: "{{ .Values.signoz.otelAgent.image.repository }}:{{ .Values.signoz.otelAgent.image.tag }}"
@@ -34,6 +43,20 @@ spec:
         securityContext:
           runAsUser: 0
           runAsGroup: 0
+        env:
+        # Downward-API node identity for kubeletstats (OBS-P4a): the kubelet
+        # API is per-node, so the receiver must dial THIS pod's node, not
+        # rely on a name that may not be cluster-DNS-resolvable. hostIP is
+        # always a routable address; the node name is exported too since
+        # it's useful for troubleshooting even though the endpoint uses the IP.
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
         ports:
         - name: health
           containerPort: 13133
@@ -68,6 +91,9 @@ spec:
         - name: varlogpods
           mountPath: /var/log/pods
           readOnly: true
+        - name: hostfs
+          mountPath: /hostfs
+          readOnly: true
       {{- with .Values.signoz.otelAgent.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
@@ -79,5 +105,8 @@ spec:
       - name: varlogpods
         hostPath:
           path: /var/log/pods
+      - name: hostfs
+        hostPath:
+          path: /
       terminationGracePeriodSeconds: 30
 {{- end }}

@@ -54,6 +54,9 @@ jobs:
       - name: OBS-P1 SigNoz stack render contract
         run: python3 tests/render_obs_p1_test.py
 
+      - name: OBS-P4a otel-agent metrics receivers render contract
+        run: python3 tests/render_obs_p4a_test.py
+
       - name: helm package
         run: helm package . --destination /tmp/dist && ls -lh /tmp/dist
 
