@@ -8,6 +8,16 @@
 # one stable DNS identity from its first clean homeserver start (ADR-005).
 
 global:
+  # Keycloak 26 is served without the legacy `/auth` context path. The base
+  # chart intentionally contains example values, so every authentication
+  # setting consumed by TenantService must be overridden here.
+  keycloakAuthServerUrl: "http://keycloak:8080"
+  springSecurityOAuth2ResourceserverJWTIssuerURI: "https://auth.oriso-dev.site/realms/online-beratung"
+  springSecurityOAuth2ResourceserverJWTJWKSETURI: "http://keycloak:8080/realms/online-beratung/protocol/openid-connect/certs"
+  internal:
+    keycloakURL: "http://keycloak:8080"
+  external:
+    keycloakURL: "https://auth.oriso-dev.site"
   domains:
     matrix: "matrix.oriso-dev.site"
     # Approved dev-tooling subdomain exception to ADR-011 (like matrix.*).
@@ -15,9 +25,12 @@ global:
   matrix:
     matrixServerName: "matrix.oriso-dev.site"
   keycloak:
+    realm: "online-beratung"
+    authServerUrl: "https://auth.oriso-dev.site"
     # The otp-config SPI lives inside the realm; the realm name is fixed by
     # realm.json, not environment-specific like authServerUrl.
     otpUrl: "/realms/online-beratung/otp-config"
+    openidConnectUrl: "/realms/online-beratung/protocol/openid-connect"
 
 # Keycloak runs the custom image (stock 26.6.3 + vendored otp-config SPI) so
 # the UserService 2FA endpoints and the direct-grant-2fa flow work. Built by
