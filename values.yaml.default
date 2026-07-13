@@ -362,8 +362,14 @@ signoz:
   # least-privilege monitoring account (ideally PROCESS + REPLICATION CLIENT,
   # no data-schema grants) — flagged as an open question for a human with DB
   # access; this chart does not create DB users/grants.
+  #
+  # Defaults OFF for that reason: enabling this today would use an
+  # over-privileged app credential for a new purpose (metrics scraping) with
+  # no separate human decision point. Flip to true only after a dedicated
+  # least-privilege DB user exists, or after explicitly accepting the
+  # AgencyService-credential-reuse tradeoff above.
   mariadbMetrics:
-    enabled: true
+    enabled: false
     # Empty host = "mariadb.<release namespace>", matching the DSN pattern
     # every backend service's SPRING_DATASOURCE_URL already uses.
     host: ""

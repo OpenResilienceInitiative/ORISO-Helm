@@ -15,10 +15,17 @@ these receivers are live on Pre-Dev):
   - the gateway otel-collector gets a `prometheus` receiver that scrapes
     that ClickHouse endpoint by job_name "clickhouse" (the job_name becomes
     each series' service.name, which is what the dashboard groups by),
-  - the gateway gets a `mysql` receiver against MariaDB, with credentials
-    sourced via secretKeyRef from the SAME Secret an existing backend
-    Deployment already consumes (LC-M03 precedent) — NEVER a new plaintext
-    credential and NEVER the MariaDB root password,
+  - the gateway CAN get a `mysql` receiver against MariaDB (off by default —
+    see below), with credentials sourced via secretKeyRef from the SAME
+    Secret an existing backend Deployment already consumes (LC-M03
+    precedent) — NEVER a new plaintext credential and NEVER the MariaDB root
+    password,
+  - `signoz.mariadbMetrics.enabled` defaults to `false`: the only credential
+    available to reuse today is AgencyService's own app DB user (full
+    SELECT/INSERT/UPDATE/DELETE on its schema), not a dedicated
+    least-privilege monitoring account — shipping this enabled by default
+    would use an over-privileged credential for a new purpose with no
+    separate human decision point. Same off-by-default posture as OBS-P6.
   - both new receivers land in a dedicated `metrics/infra` pipeline (not the
     main `metrics` pipeline) since k8sattributes' connection-IP association
     doesn't apply to scraped/dialed-out sources, but still write through the
@@ -48,12 +55,14 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def render(*value_files: str) -> list[dict]:
+def render(*value_files: str, extra_set: list[str] | None = None) -> list[dict]:
     cmd = ["helm", "template", RELEASE, CHART_DIR, "--namespace", "caritas"]
     for vf in value_files:
         cmd += ["-f", os.path.join(CHART_DIR, vf)]
     cmd += ["-f", os.path.join(CHART_DIR, "ci", "placeholder-secrets.yaml")]
     cmd += ["--set", "global.secrets.clickhousePassword=x"]
+    for s in extra_set or []:
+        cmd += ["--set", s]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         fail(f"helm template failed for {value_files}: {result.stderr}")
@@ -117,10 +126,26 @@ def main() -> None:
     if not ch_target.endswith(":9363") or f"{RELEASE}-clickhouse" not in ch_target:
         fail(f"clickhouse scrape job must target the in-chart ClickHouse Service on :9363, got {ch_target}")
 
-    # --- Task 2: MariaDB mysql receiver, credential reuse ------------------
-    if "mysql" not in gw_receivers:
-        fail("gateway otel-collector is missing the mysql receiver")
-    mysql_recv = gw_receivers["mysql"]
+    # --- Task 2a: MariaDB mysql receiver is OFF by default ------------------
+    # See docstring: the only reusable credential today is AgencyService's
+    # over-privileged app DB user, not a dedicated monitoring account, so
+    # this must not ship enabled without a separate human decision.
+    if "mysql" in gw_receivers:
+        fail("mysql receiver must be ABSENT by default (signoz.mariadbMetrics.enabled defaults false)")
+    default_infra_pipeline = gw_cfg["service"]["pipelines"].get("metrics/infra", {})
+    if "mysql" in default_infra_pipeline.get("receivers", []):
+        fail("metrics/infra pipeline must not reference mysql when mariadbMetrics is disabled")
+
+    # --- Task 2b: when explicitly enabled, credential-reuse contract holds -
+    mysql_documents = render(
+        "values.yaml.default", "values-pre-dev.yaml",
+        extra_set=["signoz.mariadbMetrics.enabled=true"],
+    )
+    mysql_gw_cfg = gateway_config(mysql_documents)
+    mysql_gw_receivers = mysql_gw_cfg["receivers"]
+    if "mysql" not in mysql_gw_receivers:
+        fail("gateway otel-collector is missing the mysql receiver when mariadbMetrics.enabled=true")
+    mysql_recv = mysql_gw_receivers["mysql"]
     if "mariadb" not in mysql_recv.get("endpoint", ""):
         fail(f"mysql receiver must target the mariadb Service, got {mysql_recv.get('endpoint')}")
     if mysql_recv.get("username") != "${env:MARIADB_METRICS_USERNAME}":
@@ -128,19 +153,19 @@ def main() -> None:
     if mysql_recv.get("password") != "${env:MARIADB_METRICS_PASSWORD}":
         fail(f"mysql receiver password must be env-interpolated, got {mysql_recv.get('password')!r}")
 
-    gw_deploy = resource(documents, "Deployment", f"{RELEASE}-otel-collector")
-    gw_container = gw_deploy["spec"]["template"]["spec"]["containers"][0]
-    gw_env = {e["name"]: e for e in gw_container["env"]}
+    mysql_gw_deploy = resource(mysql_documents, "Deployment", f"{RELEASE}-otel-collector")
+    mysql_gw_container = mysql_gw_deploy["spec"]["template"]["spec"]["containers"][0]
+    mysql_gw_env = {e["name"]: e for e in mysql_gw_container["env"]}
     for var in ("MARIADB_METRICS_USERNAME", "MARIADB_METRICS_PASSWORD"):
-        if var not in gw_env:
-            fail(f"gateway Deployment is missing env var {var}")
-        secret_ref = gw_env[var].get("valueFrom", {}).get("secretKeyRef")
+        if var not in mysql_gw_env:
+            fail(f"gateway Deployment is missing env var {var} when mariadbMetrics.enabled=true")
+        secret_ref = mysql_gw_env[var].get("valueFrom", {}).get("secretKeyRef")
         if not secret_ref:
-            fail(f"{var} must come from a secretKeyRef (LC-M03), got {gw_env[var]}")
+            fail(f"{var} must come from a secretKeyRef (LC-M03), got {mysql_gw_env[var]}")
     # Must reuse an EXISTING backend secret, not a new one minted for this
     # purpose, and must never be the MariaDB root credential.
-    user_secret = gw_env["MARIADB_METRICS_USERNAME"]["valueFrom"]["secretKeyRef"]
-    pass_secret = gw_env["MARIADB_METRICS_PASSWORD"]["valueFrom"]["secretKeyRef"]
+    user_secret = mysql_gw_env["MARIADB_METRICS_USERNAME"]["valueFrom"]["secretKeyRef"]
+    pass_secret = mysql_gw_env["MARIADB_METRICS_PASSWORD"]["valueFrom"]["secretKeyRef"]
     if user_secret["name"] != f"{RELEASE}-agencyservice-secrets":
         fail(
             "mysql receiver username must reuse the existing AgencyService secret "
@@ -152,6 +177,9 @@ def main() -> None:
         fail(f"mysql receiver password secret name mismatch: {pass_secret['name']!r}")
     if "ROOT" in user_secret["key"].upper() or "ROOT" in pass_secret["key"].upper():
         fail("mysql receiver must NEVER use the MariaDB root credential")
+    mysql_infra_pipeline = mysql_gw_cfg["service"]["pipelines"].get("metrics/infra", {})
+    if "mysql" not in mysql_infra_pipeline.get("receivers", []):
+        fail("metrics/infra pipeline must include mysql when mariadbMetrics.enabled=true")
 
     # --- Task 3: self-monitoring (gateway + agent) --------------------------
     gw_telemetry_metrics = gw_cfg["service"].get("telemetry", {}).get("metrics")
@@ -176,9 +204,10 @@ def main() -> None:
         fail("gateway is missing the metrics/infra pipeline for ClickHouse/MariaDB/self-metrics")
     if infra_pipeline["processors"][0] != "memory_limiter":
         fail(f"metrics/infra pipeline must start with memory_limiter (K8-L02), got {infra_pipeline['processors']}")
-    for recv in ("prometheus", "mysql"):
-        if recv not in infra_pipeline["receivers"]:
-            fail(f"metrics/infra pipeline must include the {recv} receiver, got {infra_pipeline['receivers']}")
+    # mysql is intentionally absent here (mariadbMetrics defaults false —
+    # see Task 2a); its presence when explicitly enabled is checked above.
+    if "prometheus" not in infra_pipeline["receivers"]:
+        fail(f"metrics/infra pipeline must include the prometheus receiver, got {infra_pipeline['receivers']}")
     if set(infra_pipeline["exporters"]) != {"signozclickhousemetrics", "signozmeter"}:
         fail(
             "metrics/infra pipeline must reuse the SAME exporters as the main metrics pipeline "
