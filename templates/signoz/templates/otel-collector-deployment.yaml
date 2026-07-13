@@ -91,6 +91,25 @@ spec:
           value: "signoz_meter"
         - name: LOW_CARDINAL_EXCEPTION_GROUPING
           value: "false"
+        {{- if .Values.signoz.mariadbMetrics.enabled }}
+        # OBS-P4: mysql receiver credentials. LC-M03: sourced via
+        # secretKeyRef from the SAME Secret the AgencyService Deployment
+        # already uses (templates/agencyservice/agencyservice-secret.yaml) —
+        # no new plaintext credential. See the values.yaml.default comment
+        # on mariadbMetrics.existingSecret for why this is flagged as an
+        # open question (schema-scoped app credential, not a dedicated
+        # least-privilege monitoring account).
+        - name: MARIADB_METRICS_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ default (printf "%s-agencyservice-secrets" .Release.Name) .Values.signoz.mariadbMetrics.existingSecret.name }}
+              key: {{ .Values.signoz.mariadbMetrics.existingSecret.usernameKey }}
+        - name: MARIADB_METRICS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ default (printf "%s-agencyservice-secrets" .Release.Name) .Values.signoz.mariadbMetrics.existingSecret.name }}
+              key: {{ .Values.signoz.mariadbMetrics.existingSecret.passwordKey }}
+        {{- end }}
         ports:
         - name: otlpgrpc
           containerPort: 4317

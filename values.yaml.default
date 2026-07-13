@@ -339,6 +339,42 @@ signoz:
       storageClass: "local-path"
       size: 50Gi
       accessMode: ReadWriteOnce
+    # OBS-P4: ClickHouse's own Prometheus-format metrics endpoint
+    # (<prometheus> config block — system.metrics/system.events tables), the
+    # data source the already-imported-but-empty "ClickHouse Overview"
+    # community dashboard queries (ClickHouseMetrics_*/ClickHouseProfileEvents_*
+    # series, verified against the dashboard JSON). Nothing scrapes ClickHouse
+    # today, which is why that dashboard has never shown data.
+    prometheus:
+      enabled: true
+      port: 9363
+      endpoint: "/metrics"
+  # OBS-P4: OTel Collector `mysql` receiver against ORISO's MariaDB, feeding
+  # the SigNoz "MySQL" community dashboard (MySQL-wire-compatible, verified
+  # metric names are dotted `mysql.*`, not the underscored Prometheus-style
+  # names in the receiver's own readme). Credentials MUST come from an
+  # existing Secret (LC-M03 precedent) — no new plaintext credential is
+  # introduced here. See mariadbMetrics.existingSecret below: it defaults to
+  # AgencyService's app DB user (SELECT/INSERT/UPDATE/DELETE on
+  # agencyservice.* only — the narrowest-scoped app credential already
+  # wired via secretKeyRef anywhere in this chart). That is still a
+  # schema-scoped read/write application credential, not a dedicated
+  # least-privilege monitoring account (ideally PROCESS + REPLICATION CLIENT,
+  # no data-schema grants) — flagged as an open question for a human with DB
+  # access; this chart does not create DB users/grants.
+  mariadbMetrics:
+    enabled: true
+    # Empty host = "mariadb.<release namespace>", matching the DSN pattern
+    # every backend service's SPRING_DATASOURCE_URL already uses.
+    host: ""
+    port: 3306
+    collectionInterval: "30s"
+    existingSecret:
+      # Empty name = "<release>-agencyservice-secrets" (rendered by
+      # templates/agencyservice/agencyservice-secret.yaml).
+      name: ""
+      usernameKey: "AGENCYSERVICE_SPRING_DATASOURCE_USERNAME"
+      passwordKey: "AGENCYSERVICE_SPRING_DATASOURCE_PASSWORD"
   # Gateway collector = SigNoz ingest layer. The signoz/signoz single binary
   # does NOT listen on 4317/4318; ingest is SigNoz's own collector distro,
   # which writes to ClickHouse directly and registers over opamp (:4320).
@@ -360,6 +396,15 @@ signoz:
       limits:
         cpu: 500m
         memory: 512Mi
+    # OBS-P4: self-monitoring for the SigNoz "OpenTelemetry Collector"
+    # community dashboard (otelcol_receiver_*/otelcol_exporter_*/
+    # otelcol_process_* series) — auditability of the observability pipeline
+    # itself, so a silent drop in OUR telemetry doesn't go unnoticed. Exposes
+    # the collector's own Prometheus-format self-metrics on :8888 (the
+    # container/Service port was already reserved for this) and scrapes it
+    # right back into the same ClickHouse write path.
+    selfMetrics:
+      enabled: true
   # SigNoz telemetry-store (ClickHouse schema) migrator. Upstream dropped the
   # standalone signoz-schema-migrator image: since chart signoz-0.132.x the
   # migrator is the signoz-otel-collector image itself running
@@ -397,6 +442,13 @@ signoz:
         cpu: 200m
         memory: 256Mi
     tolerations: []
+    # OBS-P4: same self-monitoring as the gateway (see
+    # otelCollector.selfMetrics) — each agent pod scrapes its OWN :8888
+    # self-metrics endpoint (per-node, so a single remote scrape target
+    # can't cover every DaemonSet pod) and forwards via the existing
+    # metrics pipeline into the gateway.
+    selfMetrics:
+      enabled: true
   appConfig:
     telemetryStore:
       provider: "clickhouse"
