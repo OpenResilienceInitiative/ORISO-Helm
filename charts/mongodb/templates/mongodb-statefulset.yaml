@@ -39,22 +39,26 @@ spec:
           - rs0
           - --keyFile
           - /data/key/replica.key
-          {{- if .Values.global.initializeDummyData }}
           readinessProbe:
             exec:
               command:
                 - /bin/bash
                 - -c
-                - >
-                  if [[ ! -f /data/db/mongo-database-initialized.lock ]]; then
-                    mongosh --eval "rs.initiate({_id: 'rs0', members: [{ _id: 0, host: 'mongodb-0.mongodb.{{ .Release.Namespace }}.svc.cluster.local:27017' }]});"
-                    mongosh --eval "db = db.getSiblingDB('admin'); db.createUser({ user: '$MONGODB_USERNAME', pwd: '$MONGODB_PASSWORD', roles: [{ role: 'root', db: 'admin' }]});"
-                    touch /data/db/mongo-database-initialized.lock
-                  fi;
+                - |
+                  mongosh --username "$MONGODB_USERNAME" --password "$MONGODB_PASSWORD" --authenticationDatabase admin --eval "try { rs.status().ok } catch(e) { rs.initiate({_id: 'rs0', members: [{ _id: 0, host: 'mongodb-0.mongodb.{{ .Release.Namespace }}.svc.cluster.local:27017' }]}) }"
             timeoutSeconds: 30
-            initialDelaySeconds: 60
-          {{- end }}
+            initialDelaySeconds: 20
           env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  key: MONGO_INITDB_ROOT_USERNAME
+                  name: mongodb-secret
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: MONGO_INITDB_ROOT_PASSWORD
+                  name: mongodb-secret
             - name: MONGODB_USERNAME
               valueFrom:
                 secretKeyRef:
