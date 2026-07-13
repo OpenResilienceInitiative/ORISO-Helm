@@ -18,6 +18,18 @@ global:
   observability:
     otlpEnabled: true
     otlpCollectorHost: "" # empty = derive from the in-chart signoz gateway service
+    # OBS-P6: KDG-safe pseudonymization pipeline for the gateway collector
+    # (otel-collector-configmap.yaml) — HMAC-style keyed-hash of identifiers,
+    # attribute allow-listing (fail-closed: anything not on the allow-list is
+    # dropped, not exported), no IPs, prod log bodies replaced wholesale.
+    # This is infrastructure for a FUTURE decision, not a switch to flip now:
+    # keep this false everywhere until a human/legal sign-off explicitly
+    # turns it on for prod (see docs/observability-prod-pseudonymization.md).
+    # Independent of otlpEnabled: turning THIS on without also turning
+    # otlpEnabled on for prod does nothing (no data flows either way); the
+    # two flags are deliberately separate so pseudonymization can be
+    # reviewed and merged long before anyone flips the prod kill switch.
+    telemetryPseudonymizationEnabled: false
 
 
 

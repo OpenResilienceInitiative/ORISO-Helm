@@ -110,6 +110,16 @@ spec:
               name: {{ default (printf "%s-agencyservice-secrets" .Release.Name) .Values.signoz.mariadbMetrics.existingSecret.name }}
               key: {{ .Values.signoz.mariadbMetrics.existingSecret.passwordKey }}
         {{- end }}
+        {{- if .Values.global.observability.telemetryPseudonymizationEnabled }}
+        # OBS-P6: keyed-hash salt for the transform/pseudonymize_* processors
+        # (otel-collector-configmap.yaml). Only present when the pipeline is
+        # enabled — see otel-collector-pseudonymization-secret.yaml.
+        - name: PSEUDONYM_HMAC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "signoz.otelCollector.fullname" . }}-pseudonymization
+              key: hmacKey
+        {{- end }}
         ports:
         - name: otlpgrpc
           containerPort: 4317
