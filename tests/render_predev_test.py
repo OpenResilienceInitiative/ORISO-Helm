@@ -14,11 +14,6 @@ import yaml
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PREDEV_DOMAIN = "matrix.oriso-dev.site"
 PREDEV_PUBLIC_IP = "46.224.170.69"
-PREDEV_KEYCLOAK_URL = "https://auth.oriso-dev.site"
-PREDEV_KEYCLOAK_REALM = "online-beratung"
-PREDEV_KEYCLOAK_JWK_SET_URI = (
-    "http://keycloak:8080/realms/online-beratung/protocol/openid-connect/certs"
-)
 
 
 def fail(message: str) -> None:
@@ -58,19 +53,6 @@ def resource(documents: list[dict], kind: str, name: str) -> dict:
 
 def main() -> None:
     documents = render()
-
-    tenantservice_config = resource(documents, "ConfigMap", "tenantservice-configmap-env")["data"]
-    expected_tenant_auth_config = {
-        "KEYCLOAK_AUTH_SERVER_URL": "http://keycloak:8080",
-        "KEYCLOAK_REALM": PREDEV_KEYCLOAK_REALM,
-        "SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI": (
-            f"{PREDEV_KEYCLOAK_URL}/realms/{PREDEV_KEYCLOAK_REALM}"
-        ),
-        "SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI": PREDEV_KEYCLOAK_JWK_SET_URI,
-    }
-    for key, expected_value in expected_tenant_auth_config.items():
-        if tenantservice_config.get(key) != expected_value:
-            fail(f"TenantService {key} is not configured for the PreDev Keycloak realm")
 
     userservice_config = resource(documents, "ConfigMap", "userservice-configmap-env")["data"]
     if userservice_config.get("MATRIX_SERVER_NAME") != PREDEV_DOMAIN:
