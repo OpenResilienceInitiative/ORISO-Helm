@@ -14,10 +14,27 @@
 global:
   initializeDummyData: false
   # OBS-P2: OTLP traces/metrics export is dev/pre-dev-only for now. Prod
-  # stays off until OBS-P6 (pseudonymisation collector pipeline, KDG-safe
-  # attribute scrubbing) lands — see PLAN-observability-two-track-2026-07-11.md.
+  # stays off until a human explicitly decides to turn it on — see
+  # PLAN-observability-two-track-2026-07-11.md and
+  # docs/observability-prod-pseudonymization.md.
+  #
+  # OBS-P6 (this overlay's current state): the KDG-safe pseudonymization
+  # pipeline referenced above is now BUILT into the gateway collector config
+  # (templates/signoz/templates/otel-collector-configmap.yaml, gated by
+  # telemetryPseudonymizationEnabled below) but is left OFF here on purpose.
+  # Both flags must eventually flip together for prod telemetry to actually
+  # flow pseudonymized — otlpEnabled alone (with pseudonymization off) would
+  # export raw, unscrubbed identifiers and must never be turned on by itself.
+  # Turning either on is a decision for a human with legal/DPO sign-off, not
+  # something this chart does automatically.
   observability:
     otlpEnabled: false
+    # OBS-P6: built, verified by tests/render_obs_p6_test.py, still OFF.
+    # Do not flip this to true without reading
+    # docs/observability-prod-pseudonymization.md first — it documents
+    # exactly what is pseudonymized/dropped and the one open question
+    # (log-body handling) that still wants a second pair of eyes.
+    telemetryPseudonymizationEnabled: false
 
 agencyService:
   springProfilesActive: "prod"
