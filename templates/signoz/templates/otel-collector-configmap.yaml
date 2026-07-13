@@ -41,6 +41,63 @@ data:
           http:
             endpoint: 0.0.0.0:4318
 
+      {{- if or .Values.signoz.clickhouse.prometheus.enabled .Values.signoz.otelCollector.selfMetrics.enabled }}
+      # OBS-P4: scrapes Prometheus-format targets that have no native OTel
+      # receiver of their own. Two static jobs today:
+      #  - "clickhouse": the in-chart ClickHouse's own <prometheus> endpoint
+      #    (clickhouse-config-configmap.yaml) — feeds the already-imported
+      #    "ClickHouse Overview" dashboard, empty until now for lack of a
+      #    scraper.
+      #  - "otel-collector": this collector's OWN self-metrics (enabled
+      #    below under service.telemetry.metrics), scraped right back on
+      #    localhost — feeds the "OpenTelemetry Collector" self-monitoring
+      #    dashboard (auditability of the pipeline itself).
+      # The job_name becomes each series' service.name resource attribute,
+      # which is exactly what both dashboards filter/group by.
+      prometheus:
+        config:
+          scrape_configs:
+            {{- if .Values.signoz.clickhouse.prometheus.enabled }}
+            - job_name: "clickhouse"
+              scrape_interval: 30s
+              metrics_path: {{ .Values.signoz.clickhouse.prometheus.endpoint }}
+              static_configs:
+                - targets:
+                    - "{{ include "signoz.clickhouse.host" . }}:{{ .Values.signoz.clickhouse.prometheus.port }}"
+            {{- end }}
+            {{- if .Values.signoz.otelCollector.selfMetrics.enabled }}
+            - job_name: "otel-collector"
+              scrape_interval: 30s
+              static_configs:
+                - targets:
+                    - "localhost:8888"
+            {{- end }}
+      {{- end }}
+
+      {{- if .Values.signoz.mariadbMetrics.enabled }}
+      # OBS-P4: OTel Collector's built-in `mysql` receiver (MariaDB is
+      # MySQL-wire-compatible) — feeds the SigNoz "MySQL" community
+      # dashboard, whose panels query dotted `mysql.*` metric names with a
+      # `mysql.instance.endpoint` resource attribute (this receiver's own
+      # native naming — verified against
+      # https://github.com/SigNoz/dashboards/blob/main/mysql/mysql-otlp-v1.json,
+      # NOT the underscored Prometheus-exporter-style names in the
+      # receiver's own readme, which document a different ingestion path).
+      #
+      # Credentials: reused from the SAME Secret the AgencyService Deployment
+      # already consumes via secretKeyRef (LC-M03 precedent — no new
+      # plaintext credential). That credential is a schema-scoped app user
+      # (SELECT/INSERT/UPDATE/DELETE on agencyservice.* only), not a
+      # dedicated least-privilege monitoring account — see the values.yaml
+      # comment on mariadbMetrics.existingSecret. Flagged as an open
+      # question; this chart does not create DB users/grants.
+      mysql:
+        endpoint: "{{ if .Values.signoz.mariadbMetrics.host }}{{ .Values.signoz.mariadbMetrics.host }}{{ else }}mariadb.{{ .Release.Namespace }}{{ end }}:{{ .Values.signoz.mariadbMetrics.port }}"
+        username: ${env:MARIADB_METRICS_USERNAME}
+        password: ${env:MARIADB_METRICS_PASSWORD}
+        collection_interval: {{ .Values.signoz.mariadbMetrics.collectionInterval | quote }}
+      {{- end }}
+
     processors:
       # memory_limiter MUST run first in every pipeline (K8-L02).
       memory_limiter:
@@ -111,6 +168,22 @@ data:
       telemetry:
         logs:
           encoding: json
+        {{- if .Values.signoz.otelCollector.selfMetrics.enabled }}
+        # OBS-P4: emit the collector's own self-metrics on :8888 (the
+        # container/Service port was already reserved for this). The
+        # "readers" schema is required — service.telemetry.metrics.address
+        # was removed upstream (see the otel-agent config's note); this is
+        # its replacement, scraped straight back by the "otel-collector" job
+        # in the prometheus receiver above.
+        metrics:
+          level: normal
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8888
+        {{- end }}
       extensions: [health_check, pprof]
       pipelines:
         traces:
@@ -134,6 +207,25 @@ data:
           receivers: [signozmeter]
           processors: [batch/meter]
           exporters: [signozclickhousemeter]
+        {{- if or .Values.signoz.clickhouse.prometheus.enabled .Values.signoz.otelCollector.selfMetrics.enabled .Values.signoz.mariadbMetrics.enabled }}
+        # OBS-P4: infra/self-monitoring metrics (ClickHouse, MariaDB, this
+        # collector's own self-metrics). Kept OUT of the main `metrics`
+        # pipeline deliberately: k8sattributes' pod_association is
+        # `from: connection`, which only makes sense for inbound OTLP from a
+        # workload — these three sources are either scraped locally
+        # (prometheus) or dialed outbound (mysql), so there is no meaningful
+        # connection-IP to enrich. Same write path as the main metrics
+        # pipeline (signozclickhousemetrics/signozmeter) — no duplicated
+        # ClickHouse ingest.
+        metrics/infra:
+          receivers:
+            [
+              {{- if or .Values.signoz.clickhouse.prometheus.enabled .Values.signoz.otelCollector.selfMetrics.enabled }}prometheus,{{- end }}
+              {{- if .Values.signoz.mariadbMetrics.enabled }}mysql,{{- end }}
+            ]
+          processors: [memory_limiter, batch]
+          exporters: [signozclickhousemetrics, signozmeter]
+        {{- end }}
   otel-collector-opamp-config.yaml: |
     server_endpoint: "ws://{{ include "signoz.fullname" . }}.{{ default .Release.Namespace .Values.signoz.namespace }}.svc.cluster.local:{{ .Values.signoz.service.opampPort }}/v1/opamp"
 {{- end }}

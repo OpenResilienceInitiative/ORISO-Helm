@@ -56,4 +56,27 @@ data:
         </{{ .Values.signoz.clickhouse.cluster }}>
       </remote_servers>
     </clickhouse>
+{{- if .Values.signoz.clickhouse.prometheus.enabled }}
+  prometheus.xml: |
+    <clickhouse>
+      <!--
+      OBS-P4: native Prometheus-format metrics endpoint. Exposes
+      system.metrics as ClickHouseMetrics_* and system.events as
+      ClickHouseProfileEvents_* — those are the EXACT series names the
+      already-imported-but-empty "ClickHouse Overview" community dashboard
+      queries (verified against
+      https://github.com/SigNoz/dashboards/blob/main/clickhouse/clickhouse-overview.json).
+      That prefixing is ClickHouse's own default (derived from each source
+      system table's name), not something to override — the dashboard was
+      built against the default prefixes.
+      -->
+      <prometheus>
+        <endpoint>{{ .Values.signoz.clickhouse.prometheus.endpoint }}</endpoint>
+        <port>{{ .Values.signoz.clickhouse.prometheus.port }}</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+      </prometheus>
+    </clickhouse>
+{{- end }}
 {{- end }}

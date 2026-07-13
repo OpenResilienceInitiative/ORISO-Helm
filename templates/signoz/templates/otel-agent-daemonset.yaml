@@ -61,8 +61,16 @@ spec:
         - name: health
           containerPort: 13133
           protocol: TCP
-        # Probes use the health_check extension: the collector's built-in
-        # /metrics-on-8888 telemetry endpoint was removed upstream.
+        {{- if .Values.signoz.otelAgent.selfMetrics.enabled }}
+        # OBS-P4: self-metrics endpoint (service.telemetry.metrics in
+        # otel-agent-configmap.yaml), scraped locally by this same pod's
+        # prometheus receiver — exposed as a containerPort too for
+        # kubectl port-forward troubleshooting.
+        - name: metrics
+          containerPort: 8888
+          protocol: TCP
+        {{- end }}
+        # Probes use the health_check extension, not this metrics endpoint.
         livenessProbe:
           httpGet:
             path: /

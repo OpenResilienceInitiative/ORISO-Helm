@@ -60,6 +60,9 @@ jobs:
       - name: OBS-P2 backend OTLP traces/metrics render contract
         run: python3 tests/render_obs_p2_test.py
 
+      - name: OBS-P4 dashboard data-source render contract (ClickHouse/MariaDB/collector self-monitoring)
+        run: python3 tests/render_obs_p4_test.py
+
       - name: helm package
         run: helm package . --destination /tmp/dist && ls -lh /tmp/dist
 

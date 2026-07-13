@@ -22,6 +22,12 @@ spec:
     port: 9009
     targetPort: interserver
     protocol: TCP
+  {{- if .Values.signoz.clickhouse.prometheus.enabled }}
+  - name: metrics
+    port: {{ .Values.signoz.clickhouse.prometheus.port }}
+    targetPort: metrics
+    protocol: TCP
+  {{- end }}
   selector:
     app: clickhouse
 {{- end }}
