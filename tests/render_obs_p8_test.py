@@ -8,9 +8,9 @@ The design follows SigNoz's own self-hosted RUM guidance
 (signoz.io/docs/frontend-monitoring/web-vitals-with-metrics): the browser
 POSTs OTLP metrics directly to the gateway otel-collector's OTLP-HTTP
 receiver at `/v1/metrics`, reached over the existing signoz.oriso-dev.site
-dev-tooling subdomain (ADR-011 exception), with CORS scoped to the single
-shared ADR-011 app domain. This locks the invariants that make that ingest
-path both reachable and safely bounded:
+dev-tooling subdomain (ADR-011 exception), with CORS scoped to
+global.domains.app / global.domains.admin. This locks the invariants that
+make that ingest path both reachable and safely bounded:
 
   - a new, more-specific Ingress path (`/v1/metrics`, pathType Exact) on the
     signoz.* host routes DIRECTLY to the otel-collector gateway Service on
@@ -20,14 +20,17 @@ path both reachable and safely bounded:
     since the endpoint is unauthenticated and internet-reachable — CORS is a
     browser-only restriction and does not stop a non-browser client,
   - the otel-collector's OTLP-HTTP receiver gets a `cors.allowed_origins`
-    entry for exactly `https://<global.domainName>` — the one shared
-    ADR-011 origin Frontend and Admin both live under — never a wildcard,
+    list built from global.domains.app and global.domains.admin — Frontend
+    and Admin each live on their own subdomain on this deployment (verified
+    against the live Pre-Dev release, which has no global.domainName set at
+    all), never a wildcard,
   - both the CORS block and the new Ingress path are gated by
     `global.observability.webVitalsEnabled` (its own flag, independent of
-    `signoz.ingress.enabled`) AND require `global.domainName` /
-    `global.domains.signoz` to actually be set — neither ever renders with
-    an empty origin/host, matching how other domain-dependent blocks in
-    this chart guard against a nil `global`,
+    `signoz.ingress.enabled`) AND require at least one of
+    `global.domains.app` / `global.domains.admin` (for CORS) and
+    `global.domains.signoz` (for the ingress host) to actually be set —
+    neither ever renders with an empty origin list/host, matching how other
+    domain-dependent blocks in this chart guard against a nil `global`,
   - `values-prod.yaml`, exactly as committed today, keeps
     `webVitalsEnabled: false` — the same off-by-default-in-prod posture
     OBS-P6 established for backend telemetry (PR #65) — pending the same
@@ -90,7 +93,7 @@ def gateway_config(documents: list[dict]) -> tuple[dict, str]:
     return yaml.safe_load(raw), raw
 
 
-def check_enabled(documents: list[dict], expected_origin: str, label: str) -> None:
+def check_enabled(documents: list[dict], expected_origins: list[str], label: str) -> None:
     # --- Ingress: new path exists, targets the collector, not the UI. ------
     ing = resource(documents, "Ingress", WEBVITALS_INGRESS_NAME)
     rule = ing["spec"]["rules"][0]
@@ -144,8 +147,8 @@ def check_enabled(documents: list[dict], expected_origin: str, label: str) -> No
     if not cors:
         fail(f"{label}: otlp http receiver is missing the cors block")
     origins = cors.get("allowed_origins")
-    if origins != [expected_origin]:
-        fail(f"{label}: cors.allowed_origins must be exactly [{expected_origin!r}], "
+    if origins != expected_origins:
+        fail(f"{label}: cors.allowed_origins must be exactly {expected_origins!r}, "
              f"got {origins!r}")
     if cors.get("allowed_headers") != ["*"]:
         fail(f"{label}: cors.allowed_headers must be ['*'], got {cors.get('allowed_headers')!r}")
@@ -166,71 +169,84 @@ def check_disabled(documents: list[dict], label: str) -> None:
 
 
 def main() -> None:
-    # --- (1) Pre-dev, webVitalsEnabled default-true, real domain names set
-    # explicitly (mirrors how Pre-Dev is actually deployed: global.domainName
-    # is set at deploy time via --set, not committed in values-pre-dev.yaml).
+    # --- (1) Pre-dev, webVitalsEnabled default-true, real app/admin domains
+    # set explicitly (mirrors how Pre-Dev is actually deployed:
+    # global.domains.app/admin are set at deploy time via --set, not
+    # committed in values-pre-dev.yaml).
     predev_docs = render(
         "values.yaml.default",
         "values-pre-dev.yaml",
-        extra_set=["global.domainName=oriso-dev.site"],
+        extra_set=[
+            "global.domains.app=app.oriso-dev.site",
+            "global.domains.admin=admin.oriso-dev.site",
+        ],
     )
-    check_enabled(predev_docs, "https://oriso-dev.site", "pre-dev")
+    check_enabled(
+        predev_docs,
+        ["https://app.oriso-dev.site", "https://admin.oriso-dev.site"],
+        "pre-dev",
+    )
 
-    # --- (2) Dev (values.yaml.default only): webVitalsEnabled defaults true
-    # and domainName has its placeholder default, but the signoz.* host is
-    # unset there — the ingress must not render without a host, though CORS
-    # (which only depends on domainName + the flag, not the signoz host)
-    # still can.
+    # --- (2) Dev (values.yaml.default only): webVitalsEnabled defaults true,
+    # but neither global.domains.app nor .admin nor .signoz is set there —
+    # nothing should render at all (no ingress, no CORS), never a partial or
+    # placeholder origin.
     dev_docs = render("values.yaml.default")
     if find(dev_docs, "Ingress", WEBVITALS_INGRESS_NAME) is not None:
         fail("dev (values.yaml.default): webvitals ingress rendered without "
              "global.domains.signoz being set")
     dev_config, _ = gateway_config(dev_docs)
     dev_cors = dev_config["receivers"]["otlp"]["protocols"]["http"].get("cors")
-    if dev_cors is None or dev_cors["allowed_origins"] != ["https://your-domain.example.com"]:
-        fail(f"dev (values.yaml.default): expected cors.allowed_origins "
-             f"['https://your-domain.example.com'], got {dev_cors}")
+    if dev_cors is not None:
+        fail(f"dev (values.yaml.default): cors block rendered without "
+             f"global.domains.app/admin being set: {dev_cors}")
 
     # --- (3) Prod overlay exactly as committed: off by default. ------------
     prod_docs = render("values.yaml.default", "values-prod.yaml")
     check_disabled(prod_docs, "prod (values-prod.yaml, as committed)")
 
     # --- (4) webVitalsEnabled explicitly false on pre-dev: both the ingress
-    # and CORS must disappear even though the signoz host IS set — proves the
-    # flag is a real, independent kill switch, not cosmetic.
+    # and CORS must disappear even though app/admin/signoz domains ARE set —
+    # proves the flag is a real, independent kill switch, not cosmetic.
     predev_off_docs = render(
         "values.yaml.default",
         "values-pre-dev.yaml",
         extra_set=[
-            "global.domainName=oriso-dev.site",
+            "global.domains.app=app.oriso-dev.site",
+            "global.domains.admin=admin.oriso-dev.site",
             "global.observability.webVitalsEnabled=false",
         ],
     )
     check_disabled(predev_off_docs, "pre-dev with webVitalsEnabled=false")
 
-    # --- (5) domainName explicitly empty on pre-dev: CORS must never render
-    # with an empty origin, even though webVitalsEnabled is true and the
-    # signoz host is set (the ingress path itself is host-gated, not
-    # domainName-gated, so it still renders; only CORS must disappear).
-    predev_nodomain_docs = render(
+    # --- (5) Only ONE of app/admin set on pre-dev: CORS must render with
+    # just that one origin (not fail, not add a placeholder for the missing
+    # one) — proves each domain is independently optional, and the ingress
+    # path itself is host-gated by global.domains.signoz only, not by
+    # app/admin, so it still renders.
+    predev_app_only_docs = render(
         "values.yaml.default",
         "values-pre-dev.yaml",
-        extra_set=["global.domainName="],
+        extra_set=["global.domains.app=app.oriso-dev.site"],
     )
-    nodomain_config, _ = gateway_config(predev_nodomain_docs)
-    nodomain_cors = nodomain_config["receivers"]["otlp"]["protocols"]["http"].get("cors")
-    if nodomain_cors is not None:
-        fail(f"pre-dev with empty global.domainName: cors block rendered anyway: "
-             f"{nodomain_cors}")
+    app_only_config, _ = gateway_config(predev_app_only_docs)
+    app_only_cors = app_only_config["receivers"]["otlp"]["protocols"]["http"].get("cors")
+    if app_only_cors is None or app_only_cors["allowed_origins"] != ["https://app.oriso-dev.site"]:
+        fail(f"pre-dev with only global.domains.app set: expected cors.allowed_origins "
+             f"['https://app.oriso-dev.site'], got {app_only_cors}")
+    if find(predev_app_only_docs, "Ingress", WEBVITALS_INGRESS_NAME) is None:
+        fail("pre-dev with only global.domains.app set: webvitals ingress must still "
+             "render (gated by global.domains.signoz, not app/admin)")
 
     print("OK: OBS-P8 contract holds — signoz.oriso-dev.site/v1/metrics (Exact) routes "
           "directly to the otel-collector Service on port 4318 (never the SigNoz UI "
           "service), carries its own proxy-body-size/limit-rps abuse-guard annotations, "
-          "and the collector's otlp http receiver gets a single-origin CORS allow-list "
-          "scoped to https://<global.domainName>. Both the ingress path and CORS are off "
-          "by default in the committed prod overlay, and global.observability."
-          "webVitalsEnabled + an empty global.domainName each independently keep the "
-          "relevant piece from ever rendering with an empty/wildcard origin.")
+          "and the collector's otlp http receiver gets a CORS allow-list built from "
+          "global.domains.app and global.domains.admin (never a wildcard). Both the "
+          "ingress path and CORS are off by default in the committed prod overlay, and "
+          "global.observability.webVitalsEnabled + having neither app nor admin domain "
+          "set each independently keep CORS from ever rendering with an empty/wildcard "
+          "origin list.")
 
 
 if __name__ == "__main__":
