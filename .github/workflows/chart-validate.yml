@@ -66,6 +66,9 @@ jobs:
       - name: OBS-P6 prod telemetry pseudonymization render contract
         run: python3 tests/render_obs_p6_test.py
 
+      - name: OBS-P8 web-vitals RUM ingest render contract
+        run: python3 tests/render_obs_p8_test.py
+
       - name: helm package
         run: helm package . --destination /tmp/dist && ls -lh /tmp/dist
 

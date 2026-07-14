@@ -38,3 +38,85 @@ spec:
     - {{ $host | quote }}
     secretName: {{ default (printf "%s-tls" ($host | replace "." "-")) .Values.signoz.ingress.tlsSecretName }}
 {{- end }}
+{{- $gGlobal := default dict .Values.global }}
+{{- $gObs := default dict $gGlobal.observability }}
+{{- if and .Values.signoz.enabled .Values.signoz.ingress.enabled (default false $gObs.webVitalsEnabled) (ne $host "") }}
+---
+{{/*
+OBS-P8: browser Real User Monitoring (Web Vitals) ingest path. Routes
+DIRECTLY to the otel-collector gateway's OTLP-HTTP receiver (port 4318,
+Service port name "otlphttp" — templates/signoz/templates/otel-collector-
+service.yaml), NOT the signoz core UI/query-service Service used by the "/"
+rule above. Kept as a SEPARATE Ingress object (same host, same file) rather
+than a second path on the Ingress above deliberately: the abuse-guard
+annotations below (proxy-body-size, limit-rps) are per-location/per-Ingress
+in ingress-nginx, and must apply ONLY to this unauthenticated ingest path —
+not to the SigNoz UI's own (larger, authenticated, non-rate-limited) traffic
+on "/". ingress-nginx merges Ingress objects that share a host into one
+nginx server block and resolves the more specific path first: Exact beats
+Prefix at the same path depth, and matches Kubernetes' own Ingress path-
+precedence rule (github.com/kubernetes/ingress-nginx docs; Kubernetes
+Ingress API path-matching precedence) — this is standard, version-
+independent ingress-nginx behaviour, not something that depends on the
+exact controller build. Gated by its own flag
+(global.observability.webVitalsEnabled) so RUM ingest can be disabled
+independently of the SigNoz UI ingress — see values.yaml.default and
+values-prod.yaml (off by default in prod).
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+    # Abuse guards: this endpoint is unauthenticated and internet-reachable.
+    # CORS on the collector receiver (otel-collector-configmap.yaml) is a
+    # BROWSER-only restriction — it does not stop a non-browser client from
+    # POSTing directly here, so the ingress itself needs its own bounds.
+    #
+    # proxy-body-size: a Web Vitals batch is 5 small OTLP metric
+    # histograms/gauges (LCP/CLS/INP/TTFB/FCP) — a few hundred bytes to a
+    # few KB on the wire. 32k is generous headroom for encoding/batching
+    # overhead while still clearly bounding the request well below any
+    # legitimate payload.
+    nginx.ingress.kubernetes.io/proxy-body-size: "32k"
+    # limit-rps: per-source-IP requests/second, an ingress-nginx annotation
+    # that has been stable and documented since the project's earliest
+    # releases (github.com/kubernetes/ingress-nginx annotations reference) —
+    # not a version-specific gamble. This chart's other ingress files
+    # already rely exclusively on the nginx.ingress.kubernetes.io/*
+    # annotation namespace (ssl-redirect, cors-*, configuration-snippet,
+    # etc.), which only that controller honours, so the deployed controller
+    # being kubernetes/ingress-nginx is a safe inference — but this was NOT
+    # independently confirmed against the live Pre-Dev controller version as
+    # part of this change (no live-cluster access in scope here). 20 rps
+    # comfortably covers a page firing a handful of Web Vitals batches while
+    # still bounding a flood. If the deployed controller ever turns out to
+    # ignore this annotation, the proxy-body-size cap above is the
+    # documented fallback guard — flagging this plainly for a human to
+    # confirm rather than silently skipping the guard.
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+  name: signoz-webvitals-ingress
+  # Explicit namespace for the same reason as the UI ingress above: rendered
+  # manifests are also applied with plain kubectl from outside the target
+  # namespace.
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: {{ $host | quote }}
+    http:
+      paths:
+      - backend:
+          service:
+            name: {{ include "signoz.otelCollector.fullname" . }}
+            port:
+              number: 4318
+        path: /v1/metrics
+        pathType: Exact
+  tls:
+  - hosts:
+    - {{ $host | quote }}
+    secretName: {{ default (printf "%s-tls" ($host | replace "." "-")) .Values.signoz.ingress.tlsSecretName }}
+{{- end }}
