@@ -30,6 +30,20 @@ global:
     # two flags are deliberately separate so pseudonymization can be
     # reviewed and merged long before anyone flips the prod kill switch.
     telemetryPseudonymizationEnabled: false
+    # OBS-P8: Frontend/Admin browser Real User Monitoring (Web Vitals —
+    # LCP/CLS/INP/TTFB/FCP). Gates two things together, since neither is
+    # useful without the other: the otel-collector's OTLP-HTTP receiver CORS
+    # allow-list (otel-collector-configmap.yaml, scoped to a single origin —
+    # https://<global.domainName>, the one shared ADR-011 app domain) and the
+    # signoz.oriso-dev.site/v1/metrics ingress path that routes the browser's
+    # direct OTLP POST to that receiver (templates/nginx/signoz-ingress.yaml).
+    # Deliberately its own flag, separate from signoz.enabled/
+    # signoz.ingress.enabled, so RUM ingest can be turned off independently
+    # of the SigNoz UI itself. Default true here (dev/pre-dev); prod stays
+    # off until the same KDG-conscious review OBS-P6 got for backend
+    # telemetry (docs/observability-prod-pseudonymization.md, PR #65) — see
+    # values-prod.yaml.
+    webVitalsEnabled: true
 
 
 

@@ -1,4 +1,8 @@
 {{- if .Values.signoz.enabled }}
+{{- $gGlobal := default dict .Values.global }}
+{{- $gObs := default dict $gGlobal.observability }}
+{{- $webVitalsDomain := default "" $gGlobal.domainName }}
+{{- $webVitalsCorsEnabled := and (default false $gObs.webVitalsEnabled) (ne $webVitalsDomain "") }}
 {{/*
 Gateway collector configuration for the SigNoz ingest layer.
 
@@ -40,6 +44,28 @@ data:
             max_recv_msg_size_mib: 16
           http:
             endpoint: 0.0.0.0:4318
+            {{- if $webVitalsCorsEnabled }}
+            # OBS-P8: lets the Frontend/Admin browser bundles POST Web Vitals
+            # (LCP/CLS/INP/TTFB/FCP) OTLP metrics directly to this receiver
+            # via the signoz.oriso-dev.site/v1/metrics ingress path
+            # (templates/nginx/signoz-ingress.yaml), per SigNoz's own
+            # self-hosted RUM guidance
+            # (signoz.io/docs/frontend-monitoring/web-vitals-with-metrics).
+            # Scoped to the single shared ADR-011 app domain — Frontend and
+            # Admin both live under this one origin, so there is exactly one
+            # origin to allow. CORS is a BROWSER-ONLY restriction: it does
+            # not stop a non-browser client from POSTing here directly — see
+            # the proxy-body-size/limit-rps abuse guards on the ingress
+            # itself. Gated off whenever global.observability.webVitalsEnabled
+            # is false (prod default, pending the same KDG review OBS-P6 got
+            # — docs/observability-prod-pseudonymization.md, PR #65) or when
+            # global.domainName is unset (e.g. a bare `helm template` with no
+            # -f/--set), so this block never renders with an empty origin.
+            cors:
+              allowed_origins:
+                - https://{{ $webVitalsDomain }}
+              allowed_headers: ['*']
+            {{- end }}
 
       {{- if or .Values.signoz.clickhouse.prometheus.enabled .Values.signoz.otelCollector.selfMetrics.enabled }}
       # OBS-P4: scrapes Prometheus-format targets that have no native OTel

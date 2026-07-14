@@ -35,6 +35,12 @@ global:
     # exactly what is pseudonymized/dropped and the one open question
     # (log-body handling) that still wants a second pair of eyes.
     telemetryPseudonymizationEnabled: false
+    # OBS-P8: browser Web Vitals RUM stays off in prod for the same reason —
+    # it means capturing actual counsellor/client browser telemetry (page
+    # URLs, timing, IP-adjacent metadata via the request), which deserves
+    # the same KDG-conscious review OBS-P6 gave backend telemetry, not a
+    # silent default-on. Same off-by-default-in-prod pattern as PR #65.
+    webVitalsEnabled: false
 
 agencyService:
   springProfilesActive: "prod"
