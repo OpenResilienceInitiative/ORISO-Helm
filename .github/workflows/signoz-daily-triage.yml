@@ -52,30 +52,39 @@ jobs:
       - name: Work around stale public DNS for oriso-dev.site
         run: echo "46.224.170.69 signoz.oriso-dev.site" | sudo tee -a /etc/hosts
 
-      # Pre-Dev's *.oriso-dev.site TLS secret is signed by an internal
-      # "ORISO Dev Local CA", not a publicly-trusted root -- cert-manager's
-      # own bookkeeping still claims it's a letsencrypt-prod cert (its
-      # annotations say so), but the secret's actual content was manually
-      # replaced at some point (see ORISO-Helm#81 for the likely reason:
-      # Let's Encrypt's HTTP-01 challenge needs correct public DNS, which
-      # oriso-dev.site doesn't have). Browsers work anyway via each
-      # developer's locally-trusted CA; a GitHub-hosted runner has no such
-      # trust, so it fails TLS verification outright.
+      # Pre-Dev's *.oriso-dev.site TLS secret is a LEAF certificate signed by
+      # an internal "ORISO Dev Local CA" -- cert-manager's own bookkeeping
+      # still claims it's a letsencrypt-prod cert (its annotations say so),
+      # but the secret's actual content was manually replaced at some point
+      # (see ORISO-Helm#81 for the likely reason: Let's Encrypt's HTTP-01
+      # challenge needs correct public DNS, which oriso-dev.site doesn't
+      # have). Browsers work anyway via each developer's locally-trusted CA;
+      # a GitHub-hosted runner has none.
       #
-      # Rather than disabling verification (curl -k / verify=False), pin the
-      # EXACT certificate this known IP serves right now, fetched fresh each
-      # run -- this still catches a genuine MITM (a different, unexpected
-      # cert would fail to match), it just also trusts the one specific
-      # internal cert we already know to expect.
-      - name: Pin Pre-Dev's internal TLS certificate for this job
+      # A first attempt pinned the served LEAF cert as a trust anchor via
+      # load_verify_locations() -- that still fails (verified via this same
+      # job's own diagnostic output): a leaf isn't a valid CA, so OpenSSL
+      # can't use it to complete a chain, regardless of it being the exact
+      # cert presented. The actual CA root ("ORISO Dev Local CA" itself)
+      # isn't recoverable from the cluster -- checked the live TLS secret
+      # (single cert, no chain) and searched the Pre-Dev host filesystem for
+      # it; most likely it only ever existed on whichever laptop generated
+      # it (e.g. via mkcert), never pushed anywhere reachable from here.
+      #
+      # Fingerprint-pin instead: compute the SHA-256 fingerprint of the
+      # exact cert this known IP serves right now, and have the Python step
+      # verify the server presents that EXACT certificate before trusting
+      # any response -- this is real MITM protection (a different,
+      # unexpected certificate fails the pin) without needing a
+      # chain-of-trust root that doesn't exist anywhere we can reach.
+      - name: Pin Pre-Dev's internal TLS certificate fingerprint
         run: |
-          openssl s_client -connect 46.224.170.69:443 -servername signoz.oriso-dev.site -showcerts </dev/null 2>/tmp/s_client.err \
-            | openssl x509 -outform PEM > /tmp/oriso-predev-internal-ca.pem
-          test -s /tmp/oriso-predev-internal-ca.pem
-          echo "--- pinned cert ---"
-          openssl x509 -in /tmp/oriso-predev-internal-ca.pem -noout -subject -issuer -dates
-          echo "--- s_client stderr (diagnostic) ---"
-          cat /tmp/s_client.err || true
+          FINGERPRINT=$(openssl s_client -connect 46.224.170.69:443 -servername signoz.oriso-dev.site </dev/null 2>/dev/null \
+            | openssl x509 -noout -fingerprint -sha256 \
+            | cut -d= -f2)
+          test -n "$FINGERPRINT"
+          echo "pinned fingerprint: $FINGERPRINT"
+          echo "SIGNOZ_CERT_SHA256=$FINGERPRINT" >> "$GITHUB_ENV"
 
       - name: Query SigNoz and post triage summary
         env:
@@ -83,12 +92,15 @@ jobs:
           SIGNOZ_API_KEY: ${{ secrets.SIGNOZ_TRIAGE_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TRACKING_ISSUE: 62
-          SIGNOZ_CA_FILE: /tmp/oriso-predev-internal-ca.pem
+          SIGNOZ_CERT_SHA256: ${{ env.SIGNOZ_CERT_SHA256 }}
         run: |
           set -euo pipefail
           python3 - <<'PYEOF'
+          import hashlib
+          import http.client
           import json
           import os
+          import socket
           import ssl
           import subprocess
           import urllib.request
@@ -97,13 +109,39 @@ jobs:
           SIGNOZ_URL = os.environ["SIGNOZ_URL"]
           API_KEY = os.environ["SIGNOZ_API_KEY"]
           ISSUE = os.environ["TRACKING_ISSUE"]
-          SSL_CONTEXT = ssl.create_default_context(cafile=os.environ["SIGNOZ_CA_FILE"])
+          EXPECTED_FINGERPRINT = os.environ["SIGNOZ_CERT_SHA256"].replace(":", "").lower()
+
+          class PinnedHTTPSConnection(http.client.HTTPSConnection):
+              """Trusts exactly one known certificate (by SHA-256 fingerprint),
+              not any certificate authority -- see the workflow's own comments
+              for why a normal chain-of-trust check can't work here."""
+
+              def connect(self):
+                  sock = socket.create_connection((self.host, self.port), self.timeout)
+                  ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                  ctx.check_hostname = False
+                  ctx.verify_mode = ssl.CERT_NONE
+                  self.sock = ctx.wrap_socket(sock, server_hostname=self.host)
+                  der_cert = self.sock.getpeercert(binary_form=True)
+                  fingerprint = hashlib.sha256(der_cert).hexdigest()
+                  if fingerprint != EXPECTED_FINGERPRINT:
+                      raise ssl.SSLCertVerificationError(
+                          f"pinned-certificate mismatch for {self.host}: "
+                          f"got {fingerprint}, expected {EXPECTED_FINGERPRINT} "
+                          "-- refusing to trust this connection"
+                      )
+
+          class PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+              def https_open(self, req):
+                  return self.do_open(PinnedHTTPSConnection, req)
+
+          OPENER = urllib.request.build_opener(PinnedHTTPSHandler)
 
           def signoz_get(path):
               req = urllib.request.Request(
                   f"{SIGNOZ_URL}{path}", headers={"SIGNOZ-API-KEY": API_KEY}
               )
-              with urllib.request.urlopen(req, timeout=30, context=SSL_CONTEXT) as resp:
+              with OPENER.open(req, timeout=30) as resp:
                   return json.load(resp)
 
           def signoz_query_range(body):
@@ -116,7 +154,7 @@ jobs:
                   },
                   method="POST",
               )
-              with urllib.request.urlopen(req, timeout=30, context=SSL_CONTEXT) as resp:
+              with OPENER.open(req, timeout=30) as resp:
                   return json.load(resp)
 
           def count_metric(metric_name, filters):
