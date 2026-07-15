@@ -69,9 +69,13 @@ jobs:
       # internal cert we already know to expect.
       - name: Pin Pre-Dev's internal TLS certificate for this job
         run: |
-          openssl s_client -connect 46.224.170.69:443 -servername signoz.oriso-dev.site </dev/null 2>/dev/null \
+          openssl s_client -connect 46.224.170.69:443 -servername signoz.oriso-dev.site -showcerts </dev/null 2>/tmp/s_client.err \
             | openssl x509 -outform PEM > /tmp/oriso-predev-internal-ca.pem
           test -s /tmp/oriso-predev-internal-ca.pem
+          echo "--- pinned cert ---"
+          openssl x509 -in /tmp/oriso-predev-internal-ca.pem -noout -subject -issuer -dates
+          echo "--- s_client stderr (diagnostic) ---"
+          cat /tmp/s_client.err || true
 
       - name: Query SigNoz and post triage summary
         env:
