@@ -42,6 +42,16 @@ jobs:
   triage:
     runs-on: ubuntu-latest
     steps:
+      # oriso-dev.site's PUBLIC DNS still points at the old, retired dev
+      # server (91.99.183.160) -- everyone who reaches Pre-Dev (46.224.170.69)
+      # today does it via a local /etc/hosts override, same as this step.
+      # This is a known, pre-existing gap in the DNS zone, not something new
+      # or something this workflow can fix -- see ORISO-Helm#81. Runners are
+      # ephemeral and this only affects this one job's own resolution, so
+      # it's a safe, narrow workaround, not a real fix.
+      - name: Work around stale public DNS for oriso-dev.site
+        run: echo "46.224.170.69 signoz.oriso-dev.site" | sudo tee -a /etc/hosts
+
       - name: Query SigNoz and post triage summary
         env:
           SIGNOZ_URL: https://signoz.oriso-dev.site
