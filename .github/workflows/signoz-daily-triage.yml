@@ -1,0 +1,191 @@
+name: SigNoz daily triage (OBS-P7)
+
+# OBS-P7 (ORISO-Helm#62): a small, honest first cut of "SigNoz API -> automated
+# triage", not a general-purpose AI review bot. Runs once a day, asks SigNoz
+# three narrow, already-proven-working questions, and only opens its mouth
+# (a GitHub issue comment) when one of them says something needs attention.
+# Silence on a quiet day is the intended behavior, not a bug -- the workflow
+# run's step summary always has the full readout regardless, for anyone who
+# wants to check by hand.
+#
+# Scope, deliberately narrow for a first cut:
+#   1. Is the existing "Elevated error/exception log rate" alert currently
+#      firing? (/api/v1/rules)
+#   2. Any *permanent, bug-category* Matrix decryption failures (OBS-P9) in
+#      the last 24h? ("withheld" is excluded on purpose -- that's an expected
+#      outcome, not a bug; see ORISO-Helm's otel-collector-configmap.yaml
+#      OBS-P9 comments)
+#   3. Any CI failures reported via the OBS-P10 proof-of-concept step in the
+#      2 repos that have it wired up (ORISO-Helm, ORISO-UserService)? This is
+#      NOT full CI coverage across all 8 repos -- OBS-P10 is a POC, and this
+#      triage step inherits that same partial coverage until P10 is rolled
+#      out wider.
+#
+# Not in scope for this first cut (tracked as follow-ups on ORISO-Helm#62,
+# not silently glossed over): JVM/APM anomaly detection, Web Vitals
+# regressions, ClickHouse/collector self-monitoring health, a real LLM-driven
+# read of raw log lines. Extending this workflow is the natural way to add
+# any of those later -- the query patterns for metrics/logs/rules are now
+# proven out here.
+
+on:
+  schedule:
+    # 06:13 UTC daily -- deliberately not on the hour, see repo convention.
+    - cron: '13 6 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query SigNoz and post triage summary
+        env:
+          SIGNOZ_URL: https://signoz.oriso-dev.site
+          SIGNOZ_API_KEY: ${{ secrets.SIGNOZ_TRIAGE_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRACKING_ISSUE: 62
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import subprocess
+          import urllib.request
+          import time
+
+          SIGNOZ_URL = os.environ["SIGNOZ_URL"]
+          API_KEY = os.environ["SIGNOZ_API_KEY"]
+          ISSUE = os.environ["TRACKING_ISSUE"]
+
+          def signoz_get(path):
+              req = urllib.request.Request(
+                  f"{SIGNOZ_URL}{path}", headers={"SIGNOZ-API-KEY": API_KEY}
+              )
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.load(resp)
+
+          def signoz_query_range(body):
+              req = urllib.request.Request(
+                  f"{SIGNOZ_URL}/api/v3/query_range",
+                  data=json.dumps(body).encode(),
+                  headers={
+                      "SIGNOZ-API-KEY": API_KEY,
+                      "Content-Type": "application/json",
+                  },
+                  method="POST",
+              )
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.load(resp)
+
+          def count_metric(metric_name, filters):
+              now_ms = int(time.time() * 1000)
+              start_ms = now_ms - 24 * 60 * 60 * 1000
+              body = {
+                  "start": start_ms,
+                  "end": now_ms,
+                  "step": 3600,
+                  "dataSource": "metrics",
+                  "compositeQuery": {
+                      "queryType": "builder",
+                      "panelType": "graph",
+                      "builderQueries": {
+                          "A": {
+                              "queryName": "A",
+                              "dataSource": "metrics",
+                              "aggregateOperator": "count",
+                              "aggregateAttribute": {
+                                  "key": metric_name,
+                                  "dataType": "float64",
+                                  "type": "Sum",
+                              },
+                              "filters": {
+                                  "items": [
+                                      {"key": {"key": k}, "op": "=", "value": v}
+                                      for k, v in filters.items()
+                                  ],
+                                  "op": "AND",
+                              },
+                              "groupBy": [],
+                              "expression": "A",
+                              "disabled": False,
+                          }
+                      },
+                  },
+              }
+              result = signoz_query_range(body)
+              total = 0
+              for r in result.get("data", {}).get("result", []):
+                  for s in r.get("series", []):
+                      total += sum(float(v["value"]) for v in s["values"])
+              return int(total)
+
+          findings = []
+
+          # 1. Existing alert rule state.
+          try:
+              rules = signoz_get("/api/v1/rules")
+              rule_list = rules.get("data", {}).get("rules", rules.get("data", []))
+              for r in rule_list:
+                  if r.get("alert") == "Elevated error/exception log rate":
+                      state = r.get("state", "unknown")
+                      if state not in ("inactive", "unknown"):
+                          findings.append(
+                              f"- **Alert firing**: \"Elevated error/exception log rate\" is `{state}` right now."
+                          )
+          except Exception as e:
+              findings.append(f"- Could not check alert rule state: `{e}`")
+
+          # 2. UTD bug-category permanent failures (OBS-P9).
+          try:
+              utd_bugs = count_metric(
+                  "decryption_failure", {"outcome": "permanent", "category": "bug"}
+              )
+              if utd_bugs > 0:
+                  findings.append(
+                      f"- **{utd_bugs} permanent decryption-failure(s)** in the last 24h classified as `category=bug` "
+                      f"(not `withheld` -- see [UTD Tracker dashboard](https://signoz.oriso-dev.site/dashboard/019f62c8-a2e7-7a77-b12a-21653c023d03))."
+                  )
+          except Exception as e:
+              findings.append(f"- Could not check UTD tracker: `{e}`")
+
+          # 3. CI failures (OBS-P10 POC -- only 2 repos wired up today).
+          try:
+              ci_failures = count_metric("ci_run_result", {"conclusion": "failure"})
+              if ci_failures > 0:
+                  findings.append(
+                      f"- **{ci_failures} CI failure(s)** reported in the last 24h via the OBS-P10 proof-of-concept "
+                      f"(ORISO-Helm + ORISO-UserService only -- not full 8-repo coverage yet)."
+                  )
+          except Exception as e:
+              findings.append(f"- Could not check CI health metrics: `{e}`")
+
+          today = time.strftime("%Y-%m-%d", time.gmtime())
+          summary_lines = [f"## SigNoz daily triage -- {today}", ""]
+          if findings:
+              summary_lines.append("Needs attention:")
+              summary_lines.extend(findings)
+          else:
+              summary_lines.append("All clear: no firing alert, no bug-category UTD events, no CI failures in the last 24h.")
+
+          summary = "\n".join(summary_lines)
+
+          # Always write the full readout to the workflow's own step summary --
+          # visible in the Actions tab regardless of whether anything fired.
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(summary + "\n")
+
+          # Only comment on the tracking issue when something actually needs
+          # attention -- silence on a quiet day is intended, not a bug.
+          if findings:
+              subprocess.run(
+                  ["gh", "issue", "comment", ISSUE, "--repo", "OpenResilienceInitiative/ORISO-Helm", "--body", summary],
+                  check=True,
+              )
+              print("Findings present -- posted to issue.")
+          else:
+              print("All clear -- no issue comment posted, see step summary.")
+          PYEOF
