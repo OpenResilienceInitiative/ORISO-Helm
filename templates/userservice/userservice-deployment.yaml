@@ -251,6 +251,11 @@ spec:
                 secretKeyRef:
                   key: SERVICE_ENCRYPTION_APPKEY
                   name: userservice-secret
+            - name: STATISTICS_MESSAGE_COUNT_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: STATISTICS_MESSAGE_COUNT_HMAC_SECRET
+                  name: userservice-secret
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
