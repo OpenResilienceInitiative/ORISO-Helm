@@ -42,7 +42,8 @@ Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fi
 - `online-counseling-mariadb.dbRootPassword` — MariaDB root password
 - `livekit.api.key` / `livekit.api.secret` — LiveKit API credentials
 - `tenantService.springDatasourcePassword` / `springRabbitmqPassword`
-- `userService.rocket*Password` / `keycloakTechnicalPassword` / `serviceEncryptionAppkey`
+- `agencyService.serviceEncryptionAppkey` — AgencyService encryption key (Matrix service-account passwords)
+- `userService.rocket*Password` / `keycloakTechnicalPassword` / `serviceEncryptionAppkey` / `identityTechnicalUser*`
 
 ### 3. Install / Upgrade
 
