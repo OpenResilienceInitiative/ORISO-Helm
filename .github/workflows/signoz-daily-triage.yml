@@ -52,17 +52,40 @@ jobs:
       - name: Work around stale public DNS for oriso-dev.site
         run: echo "46.224.170.69 signoz.oriso-dev.site" | sudo tee -a /etc/hosts
 
+      # Pre-Dev's *.oriso-dev.site TLS secret is signed by an internal
+      # "ORISO Dev Local CA", not a publicly-trusted root -- cert-manager's
+      # own bookkeeping still claims it's a letsencrypt-prod cert (its
+      # annotations say so), but the secret's actual content was manually
+      # replaced at some point (see ORISO-Helm#81 for the likely reason:
+      # Let's Encrypt's HTTP-01 challenge needs correct public DNS, which
+      # oriso-dev.site doesn't have). Browsers work anyway via each
+      # developer's locally-trusted CA; a GitHub-hosted runner has no such
+      # trust, so it fails TLS verification outright.
+      #
+      # Rather than disabling verification (curl -k / verify=False), pin the
+      # EXACT certificate this known IP serves right now, fetched fresh each
+      # run -- this still catches a genuine MITM (a different, unexpected
+      # cert would fail to match), it just also trusts the one specific
+      # internal cert we already know to expect.
+      - name: Pin Pre-Dev's internal TLS certificate for this job
+        run: |
+          openssl s_client -connect 46.224.170.69:443 -servername signoz.oriso-dev.site </dev/null 2>/dev/null \
+            | openssl x509 -outform PEM > /tmp/oriso-predev-internal-ca.pem
+          test -s /tmp/oriso-predev-internal-ca.pem
+
       - name: Query SigNoz and post triage summary
         env:
           SIGNOZ_URL: https://signoz.oriso-dev.site
           SIGNOZ_API_KEY: ${{ secrets.SIGNOZ_TRIAGE_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TRACKING_ISSUE: 62
+          SIGNOZ_CA_FILE: /tmp/oriso-predev-internal-ca.pem
         run: |
           set -euo pipefail
           python3 - <<'PYEOF'
           import json
           import os
+          import ssl
           import subprocess
           import urllib.request
           import time
@@ -70,12 +93,13 @@ jobs:
           SIGNOZ_URL = os.environ["SIGNOZ_URL"]
           API_KEY = os.environ["SIGNOZ_API_KEY"]
           ISSUE = os.environ["TRACKING_ISSUE"]
+          SSL_CONTEXT = ssl.create_default_context(cafile=os.environ["SIGNOZ_CA_FILE"])
 
           def signoz_get(path):
               req = urllib.request.Request(
                   f"{SIGNOZ_URL}{path}", headers={"SIGNOZ-API-KEY": API_KEY}
               )
-              with urllib.request.urlopen(req, timeout=30) as resp:
+              with urllib.request.urlopen(req, timeout=30, context=SSL_CONTEXT) as resp:
                   return json.load(resp)
 
           def signoz_query_range(body):
@@ -88,7 +112,7 @@ jobs:
                   },
                   method="POST",
               )
-              with urllib.request.urlopen(req, timeout=30) as resp:
+              with urllib.request.urlopen(req, timeout=30, context=SSL_CONTEXT) as resp:
                   return json.load(resp)
 
           def count_metric(metric_name, filters):
