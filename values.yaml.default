@@ -95,7 +95,7 @@ matrix:
 
 admin:
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "latest"
+  imageVersion: "2.0.1"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -111,7 +111,7 @@ tokenService:
   replicas: 2
   image:
     repository: ghcr.io/openresilienceinitiative/livekit-token-service
-    tag: "latest"
+    tag: "2.0.1"
     pullPolicy: Always
   service:
     port: 3010
@@ -151,7 +151,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-agencyservice"
-  imageVersion: "latest"
+  imageVersion: "2.0.1"
 
   keycloakResource: "agency-service"
 
@@ -165,7 +165,7 @@ agencyService:
 # ConsultingType service
 consultingTypeService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "latest"
+  imageVersion: "2.0.1"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -176,7 +176,7 @@ consultingTypeService:
 # Tenant Service
 tenantService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "latest"  
+  imageVersion: "2.0.1"  
   springProfilesActive: "prod"
   springDatasourceURL: "jdbc:mariadb://mariadb:3306/tenantservice"
   springRabbitmqHost: "rabbitmq"
@@ -187,7 +187,7 @@ tenantService:
 # User service
 userService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-userservice"
-  imageVersion: "latest"
+  imageVersion: "2.0.1"
   serviceURL: "http://userservice:8080"
  
   keycloakResource: "user-service"
@@ -230,6 +230,13 @@ frontend:
   imageName: "ghcr.io/openresilienceinitiative/oriso-frontend"
   imageVersion: "2.0.1"
 
+# Element Call
+elementCall:
+  image:
+    repository: ghcr.io/openresilienceinitiative/element-call
+    tag: "2.0.1"
+    pullPolicy: Always
+
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
 
@@ -237,8 +244,8 @@ frontend:
 healthDashboard:
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: rebuild
-    pullPolicy: Never
+    tag: "2.0.1"
+    pullPolicy: Always
   replicas: 1
   namespace: ""
   resources: {}
