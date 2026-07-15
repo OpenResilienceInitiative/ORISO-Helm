@@ -2,7 +2,7 @@
 {{- $chHost := include "signoz.clickhouse.host" . }}
 {{/*
 SigNoz telemetry-store (ClickHouse schema) migrator, following the upstream
-chart signoz-0.132.2: the signoz-otel-collector image runs the migration
+chart signoz-0.133.0: the signoz-otel-collector image runs the migration
 phases as ONE Job — initContainers ready -> bootstrap -> sync, main
 container async. The initContainer chain hard-enforces the sequential
 ordering: running sync and async concurrently corrupts the migration

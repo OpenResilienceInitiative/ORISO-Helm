@@ -296,8 +296,8 @@ healthDashboard:
 # SigNoz observability stack (OBS-P1): SigNoz backend/UI + in-chart
 # ClickHouse + OTel gateway collector + per-node log-collection agent.
 #
-# VERSION PAIRING (OBS-P1.2): pins follow the upstream chart signoz-0.132.2 —
-# signoz v0.132.2 / signoz-otel-collector v0.144.5 / clickhouse-server
+# VERSION PAIRING (OBS-P1.2): pins follow the upstream chart signoz-0.133.0 —
+# signoz v0.133.0 / signoz-otel-collector v0.144.6 / clickhouse-server
 # 25.12.5. Bump all of them together against a single upstream chart tag,
 # never individually.
 #
@@ -309,7 +309,7 @@ signoz:
   enabled: true
   image:
     repository: signoz/signoz
-    tag: "v0.132.2"
+    tag: "v0.133.0"
     pullPolicy: IfNotPresent
   replicas: 1
   namespace: ""
@@ -411,12 +411,12 @@ signoz:
   # Gateway collector = SigNoz ingest layer. The signoz/signoz single binary
   # does NOT listen on 4317/4318; ingest is SigNoz's own collector distro,
   # which writes to ClickHouse directly and registers over opamp (:4320).
-  # v0.144.5 is the tag the upstream chart signoz-0.132.2 pins for SigNoz
-  # v0.132.2 — keep the pair in sync when bumping either.
+  # v0.144.6 is the tag the upstream chart signoz-0.133.0 pins for SigNoz
+  # v0.133.0 — keep the pair in sync when bumping either.
   otelCollector:
     image:
       repository: signoz/signoz-otel-collector
-      tag: "v0.144.5"
+      tag: "v0.144.6"
       pullPolicy: IfNotPresent
     replicas: 1
     memoryLimiter:

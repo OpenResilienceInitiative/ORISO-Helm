@@ -16,6 +16,8 @@ on:
       - "values.yaml*"
       - "values-*.yaml"
       - "ci/**"
+      - "scripts/signoz_upgrade_guard.py"
+      - "tests/**"
       - ".github/workflows/chart-validate.yml"
       - ".github/workflows/release-helm-chart.yml"
   push:
@@ -51,8 +53,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install PyYAML
-        run: python -m pip install --upgrade pyyaml
+      - name: Install Python validation dependencies
+        run: python -m pip install --upgrade pyyaml pytest
 
       - name: rendered manifests are valid YAML
         run: |
@@ -60,6 +62,9 @@ jobs:
 
       - name: OBS-P1 SigNoz stack render contract
         run: python3 tests/render_obs_p1_test.py
+
+      - name: SigNoz v0.133 upgrade and rollback contracts
+        run: python3 -m pytest -q tests/test_signoz_0133_upgrade_contract.py tests/test_signoz_upgrade_guard.py
 
       - name: OBS-P4a otel-agent metrics receivers render contract
         run: python3 tests/render_obs_p4a_test.py

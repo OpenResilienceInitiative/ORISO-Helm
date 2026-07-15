@@ -194,7 +194,7 @@ def main() -> None:
         fail(f"opamp manager must point at the SigNoz backend :4320, got {opamp['server_endpoint']}")
 
     # --- schema migrator: ONE job, sequential by construction --------------
-    # Upstream (chart signoz-0.132.x) runs the migration phases as a single
+    # Upstream (chart signoz-0.133.0) runs the migration phases as a single
     # Job: initContainers ready -> bootstrap -> sync, main container async.
     # This ordering is load-bearing: concurrent sync+async corrupted the
     # migration bookkeeping on Pre-Dev (missing root_operations /
@@ -211,7 +211,7 @@ def main() -> None:
     if async_container["args"] != ["migrate", "async", "up"]:
         fail(f"schema migrator main container must run 'migrate async up', got {async_container['args']}")
     # Migrator uses the collector image (no standalone migrator image since
-    # upstream chart 0.132.x) — values-consistency, not a literal tag.
+    # upstream chart 0.133.0) — values-consistency, not a literal tag.
     if async_container["image"] != expected_gateway:
         fail(f"schema migrator must use the gateway collector image, got {async_container['image']}")
     assert_password_from_secret(job, "schema migrator Job")
