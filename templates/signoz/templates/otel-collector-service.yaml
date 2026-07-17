@@ -1,0 +1,27 @@
+{{- if .Values.signoz.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "signoz.otelCollector.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+spec:
+  type: ClusterIP
+  ports:
+  - name: otlpgrpc
+    port: 4317
+    targetPort: otlpgrpc
+    protocol: TCP
+  - name: otlphttp
+    port: 4318
+    targetPort: otlphttp
+    protocol: TCP
+  - name: metrics
+    port: 8888
+    targetPort: metrics
+    protocol: TCP
+  selector:
+    app: otel-collector
+{{- end }}

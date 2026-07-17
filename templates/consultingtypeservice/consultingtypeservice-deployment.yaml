@@ -138,6 +138,26 @@ spec:
                 configMapKeyRef:
                   key: SETTING_MAIN_TENANT_SUBDOMAIN_FOR_SINGLE_DOMAIN_MULTITENANCY
                   name: consultingtypeservice-configmap-env
+            - name: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+                  name: consultingtypeservice-configmap-env
+            - name: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+                  name: consultingtypeservice-configmap-env
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+                  name: consultingtypeservice-configmap-env
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+                  name: consultingtypeservice-configmap-env
           ports:
             - containerPort: 8080
           volumeMounts:

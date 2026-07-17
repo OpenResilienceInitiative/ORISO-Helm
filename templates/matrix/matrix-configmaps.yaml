@@ -72,7 +72,7 @@ data:
   default.conf: |
     server {
         listen 8090;
-        server_name 91.99.219.182;
+        server_name {{ .Values.matrix.matrixServerName }};
 
         location /well-known-matrix-server {
             alias /usr/share/nginx/html/.well-known/matrix/server/caritas.local;
@@ -93,11 +93,11 @@ apiVersion: v1
 data:
   caritas.local: |
     {
-      "m.server": "91.99.219.182:8448"
+      "m.server": "{{ .Values.matrix.matrixServerName }}:8448"
     }
   caritas2.local: |
     {
-      "m.server": "91.99.219.182:8449"
+      "m.server": "{{ .Values.matrix.matrixServerName }}:8449"
     }
 kind: ConfigMap
 metadata: 
@@ -107,8 +107,13 @@ metadata:
 apiVersion: v1
 data:
   homeserver.yaml: |
-    server_name: {{ .Values.matrix.matrixServerName }}  
+    server_name: {{ .Values.matrix.matrixServerName }}
     pid_file: /data/homeserver.pid
+
+    # ADR-005: this homeserver is NOT federated — every account is local, managed
+    # via Keycloak/UserService. An empty whitelist federates with nobody.
+    federation_domain_whitelist: []
+    allow_public_rooms_over_federation: false
 
     listeners:
       - port: 8008
@@ -205,11 +210,13 @@ data:
         per_second: 100000
         burst_count: 100000
 
-    # Exempt internal network from rate limiting
+    # Exempt internal network from rate limiting. serverPublicIp is optional —
+    # `compact` drops it when unset, so there is a single render path and no
+    # whitespace-trimming edge case inside this block scalar.
     exempt_from_ratelimiting:
-      - "10.42.0.0/16"
-      - "91.99.219.182"
-      - "127.0.0.1"
+      {{- range compact (list "10.42.0.0/16" .Values.matrix.serverPublicIp "127.0.0.1") }}
+      - {{ . | quote }}
+      {{- end }}
 
     # Enable Sliding Sync (Matrix 2.0) for INSTANT real-time synchronization
     experimental_features:

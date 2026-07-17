@@ -1,0 +1,45 @@
+{{- if .Values.signoz.enabled }}
+{{/*
+RBAC for the k8sattributes processor in the gateway collector: it watches
+pods/namespaces/nodes and resolves ReplicaSets to Deployment names.
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "signoz.otelCollector.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "signoz.otelCollector.fullname" . }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+rules:
+- apiGroups: [""]
+  resources: ["pods", "namespaces", "nodes"]
+  verbs: ["get", "watch", "list"]
+- apiGroups: ["apps"]
+  resources: ["replicasets"]
+  verbs: ["get", "watch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "signoz.otelCollector.fullname" . }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "signoz.otelCollector.fullname" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "signoz.otelCollector.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+{{- end }}

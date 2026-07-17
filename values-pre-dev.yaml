@@ -1,0 +1,71 @@
+# Pre-Dev environment deltas.
+#
+# Apply after the base values and before the secret overlay:
+#   helm upgrade --install oriso ./ -n oriso \
+#     -f values.yaml -f values-pre-dev.yaml -f secrets.yaml
+#
+# Matrix identity is immutable inside MXIDs and room IDs. Pre-Dev therefore owns
+# one stable DNS identity from its first clean homeserver start (ADR-005).
+
+global:
+  # Keycloak 26 is served without the legacy `/auth` context path. The base
+  # chart intentionally contains example values, so every authentication
+  # setting consumed by TenantService must be overridden here.
+  keycloakAuthServerUrl: "http://keycloak:8080"
+  springSecurityOAuth2ResourceserverJWTIssuerURI: "https://auth.oriso-dev.site/realms/online-beratung"
+  springSecurityOAuth2ResourceserverJWTJWKSETURI: "http://keycloak:8080/realms/online-beratung/protocol/openid-connect/certs"
+  internal:
+    keycloakURL: "http://keycloak:8080"
+  external:
+    keycloakURL: "https://auth.oriso-dev.site"
+  domains:
+    matrix: "matrix.oriso-dev.site"
+    # Approved dev-tooling subdomain exception to ADR-011 (like matrix.*).
+    signoz: "signoz.oriso-dev.site"
+  matrix:
+    matrixServerName: "matrix.oriso-dev.site"
+  keycloak:
+    realm: "online-beratung"
+    authServerUrl: "https://auth.oriso-dev.site"
+    # The otp-config SPI lives inside the realm; the realm name is fixed by
+    # realm.json, not environment-specific like authServerUrl.
+    otpUrl: "/realms/online-beratung/otp-config"
+    openidConnectUrl: "/realms/online-beratung/protocol/openid-connect"
+
+# Keycloak runs the custom image (stock 26.6.3 + vendored otp-config SPI) so
+# the UserService 2FA endpoints and the direct-grant-2fa flow work. Built by
+# .github/workflows/keycloak-image.yml, see keycloak-image/README.md.
+online-counseling-keycloak:
+  imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
+  imageVersion: "26.6.3-otp"
+
+matrix:
+  synapseServerName: "matrix.oriso-dev.site"
+  matrixServerName: "matrix.oriso-dev.site"
+  matrixApiUrl: "https://matrix.oriso-dev.site"
+  serverPublicIp: "46.224.170.69"
+
+userService:
+  # Enables encrypted Matrix room creation only after the clean Pre-Dev
+  # homeserver is configured with the stable identity above.
+  matrixEncryptionEnabled: "true"
+
+  # 2FA/OTP on Pre-Dev: counsellors and admins may set up OTP in the app
+  # (requires the oriso-keycloak image above). Askers stay off for now —
+  # product decision pending (see 2FA plan doc in the ORISO workspace).
+  otpAllowedForConsultants: "true"
+  otpAllowedForSingleTenantAdmins: "true"
+  otpAllowedForTenantSuperAdmins: "true"
+
+# SigNoz observability stack (OBS-P1)
+signoz:
+  enabled: true
+  ingress:
+    enabled: true
+    # Reuse the TLS secret of the signoz-ingress already live on Pre-Dev so
+    # cert-manager does not have to issue a fresh certificate.
+    tlsSecretName: "signoz-oriso-site-tls"
+  otelAgent:
+    enabled: true
+    # Collect container stdout logs of the application namespace.
+    logsNamespace: "caritas"

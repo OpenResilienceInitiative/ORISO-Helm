@@ -1,0 +1,182 @@
+name: chart-validate
+
+# The release workflow (release-helm-chart.yml) is `workflow_dispatch`-only, so its
+# "Validate Helm chart" step never runs on a PR. It had silently rotted: `helm lint`
+# and `helm template` both aborted on nil `global.secrets.*` because the chart ships
+# no committed `values.yaml`, and nobody noticed until a release was cut.
+#
+# This job runs exactly the same commands on every PR, so the chart can never again
+# become unrenderable without CI saying so.
+on:
+  pull_request:
+    paths:
+      - "Chart.yaml"
+      - "templates/**"
+      - "charts/**"
+      - "values.yaml*"
+      - "values-*.yaml"
+      - "ci/**"
+      - ".github/workflows/chart-validate.yml"
+      - ".github/workflows/release-helm-chart.yml"
+  push:
+    branches: [dev, pre-dev, main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      # OBS-P10 PoC (ORISO-Helm#62): capture job start time so the final step
+      # can report a real elapsed-seconds duration to SigNoz. Placed before
+      # checkout so the reported duration covers the whole job.
+      - name: Record CI health start time (OBS-P10)
+        id: ci_health_start
+        run: echo "start=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          # Keep in sync with release-helm-chart.yml so CI and release render identically.
+          version: v4.2.2
+
+      - name: helm lint (same command as the release workflow)
+        run: helm lint . -f values.yaml.default -f ci/placeholder-secrets.yaml
+
+      - name: helm template (same command as the release workflow)
+        run: helm template oriso . -f values.yaml.default -f ci/placeholder-secrets.yaml >/tmp/oriso-rendered.yaml
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install --upgrade pyyaml
+
+      - name: rendered manifests are valid YAML
+        run: |
+          python3 -c "import yaml,sys; d=[x for x in yaml.safe_load_all(open('/tmp/oriso-rendered.yaml')) if x]; print(f'{len(d)} manifests parse'); sys.exit(0 if d else 1)"
+
+      - name: OBS-P1 SigNoz stack render contract
+        run: python3 tests/render_obs_p1_test.py
+
+      - name: OBS-P4a otel-agent metrics receivers render contract
+        run: python3 tests/render_obs_p4a_test.py
+
+      - name: OBS-P2 backend OTLP traces/metrics render contract
+        run: python3 tests/render_obs_p2_test.py
+
+      - name: OBS-P4 dashboard data-source render contract (ClickHouse/MariaDB/collector self-monitoring)
+        run: python3 tests/render_obs_p4_test.py
+
+      - name: OBS-P6 prod telemetry pseudonymization render contract
+        run: python3 tests/render_obs_p6_test.py
+
+      - name: OBS-P8 web-vitals RUM ingest render contract
+        run: python3 tests/render_obs_p8_test.py
+
+      - name: helm package
+        run: helm package . --destination /tmp/dist && ls -lh /tmp/dist
+
+      - name: placeholder file must contain no real credentials
+        run: |
+          set -euo pipefail
+          # Every non-comment, non-key-only line must carry the placeholder token.
+          if grep -vE '^\s*#|ci-placeholder|^\s*$|:\s*$' ci/placeholder-secrets.yaml; then
+            echo "::error::ci/placeholder-secrets.yaml contains a value that is not a placeholder"
+            exit 1
+          fi
+          echo "OK: every value is a placeholder"
+
+      # OBS-P10 PoC (ORISO-Helm#62): CI/test-health visibility. Fires as the
+      # LAST step, always (pass or fail), and POSTs a tiny OTLP/HTTP JSON
+      # metrics payload straight to the SigNoz otel-collector's public
+      # ingest path (OBS-P8 already opened /v1/metrics for browser RUM; CORS
+      # is browser-only and does not block this server-to-server POST — see
+      # templates/nginx/signoz-ingress.yaml). No new infra, no new
+      # dependency: plain curl. Values come only from GitHub Actions' own
+      # context (repo name, workflow name, job status) — no commit SHA,
+      # branch, actor, or PR number, to keep this an aggregate health signal
+      # rather than an audit trail.
+      #
+      # Metric shapes (dashboard will be built against these exact names):
+      #   ci_run_result (Sum, cumulative temporality, isMonotonic: true,
+      #     value always 1) — chosen over delta temporality because it's the
+      #     simpler internally-consistent choice for a fire-once-per-run
+      #     counter with no state carried between runs.
+      #   ci_run_duration_seconds (Gauge, elapsed wall-clock seconds).
+      # Both scoped under scope.name "ci-health", resource service.name
+      # "ci-cd", attributes repo/workflow/conclusion only.
+      - name: Report CI health metrics to SigNoz (OBS-P10, non-blocking)
+        if: always()
+        env:
+          REPO: ${{ github.event.repository.name }}
+          WORKFLOW: ${{ github.workflow }}
+          # job.status is already exactly success | failure | cancelled —
+          # cancelled is kept as its own value, not folded into failure,
+          # since collapsing it would misrepresent the health signal.
+          CONCLUSION: ${{ job.status }}
+          START_EPOCH: ${{ steps.ci_health_start.outputs.start }}
+        run: |
+          set +e
+          end_epoch=$(date +%s)
+          duration=$(( end_epoch - START_EPOCH ))
+          # Real current Unix nanosecond timestamp — a stale/wrong one
+          # silently pushes the point outside any dashboard's default time
+          # range and looks like nothing arrived.
+          now_ns=$(( end_epoch * 1000000000 ))
+
+          payload=$(cat <<EOF
+          {
+            "resourceMetrics": [{
+              "resource": {
+                "attributes": [{"key": "service.name", "value": {"stringValue": "ci-cd"}}]
+              },
+              "scopeMetrics": [{
+                "scope": {"name": "ci-health"},
+                "metrics": [
+                  {
+                    "name": "ci_run_result",
+                    "sum": {
+                      "dataPoints": [{
+                        "attributes": [
+                          {"key": "repo", "value": {"stringValue": "${REPO}"}},
+                          {"key": "workflow", "value": {"stringValue": "${WORKFLOW}"}},
+                          {"key": "conclusion", "value": {"stringValue": "${CONCLUSION}"}}
+                        ],
+                        "startTimeUnixNano": "${now_ns}",
+                        "timeUnixNano": "${now_ns}",
+                        "asInt": "1"
+                      }],
+                      "aggregationTemporality": 2,
+                      "isMonotonic": true
+                    }
+                  },
+                  {
+                    "name": "ci_run_duration_seconds",
+                    "gauge": {
+                      "dataPoints": [{
+                        "attributes": [
+                          {"key": "repo", "value": {"stringValue": "${REPO}"}},
+                          {"key": "workflow", "value": {"stringValue": "${WORKFLOW}"}},
+                          {"key": "conclusion", "value": {"stringValue": "${CONCLUSION}"}}
+                        ],
+                        "timeUnixNano": "${now_ns}",
+                        "asDouble": ${duration}
+                      }]
+                    }
+                  }
+                ]
+              }]
+            }]
+          }
+          EOF
+          )
+
+          curl -s -o /dev/null -w 'CI health metrics POST: HTTP %{http_code}\n' \
+            -X POST "https://signoz.oriso-dev.site/v1/metrics" \
+            -H "Content-Type: application/json" \
+            -d "${payload}" \
+            || echo "::warning::Failed to POST CI health metrics to SigNoz (non-blocking, telemetry only)"
+          true

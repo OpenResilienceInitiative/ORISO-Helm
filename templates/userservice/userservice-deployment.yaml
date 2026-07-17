@@ -51,6 +51,26 @@ spec:
                 configMapKeyRef:
                   key: ROCKET_CHAT_MONGO_URL
                   name: userservice-configmap-env
+            - name: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+                  name: userservice-configmap-env
+            - name: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+                  name: userservice-configmap-env
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+                  name: userservice-configmap-env
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+                  name: userservice-configmap-env
             - name: ROCKET_CHAT_BASE_URL
               value: "http://rocketchat.caritas:3000"
             - name: ROCKET_TECHNICAL_USERNAME
@@ -231,6 +251,11 @@ spec:
                 secretKeyRef:
                   key: SERVICE_ENCRYPTION_APPKEY
                   name: userservice-secret
+            - name: STATISTICS_MESSAGE_COUNT_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: STATISTICS_MESSAGE_COUNT_HMAC_SECRET
+                  name: userservice-secret
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -404,6 +429,11 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   key: MATRIX_SERVER_NAME
+                  name: userservice-configmap-env
+            - name: MATRIX_ENCRYPTION_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: MATRIX_ENCRYPTION_ENABLED
                   name: userservice-configmap-env
             - name: MATRIX_MIGRATION_ENABLED
               valueFrom:

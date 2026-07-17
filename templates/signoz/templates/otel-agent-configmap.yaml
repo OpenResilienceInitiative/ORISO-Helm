@@ -1,0 +1,191 @@
+{{- if and .Values.signoz.enabled .Values.signoz.otelAgent.enabled }}
+{{- $logNs := default .Release.Namespace .Values.signoz.otelAgent.logsNamespace }}
+{{/*
+Log-collection agent (DaemonSet) configuration: tails container stdout under
+/var/log/pods for the application namespace and forwards the parsed records
+to the gateway collector (the signoz/signoz backend has no OTLP listener;
+only the gateway's signoz-otel-collector can write to ClickHouse). The
+`container` operator parses containerd/CRI log lines and derives
+k8s.namespace.name / k8s.pod.name / k8s.container.name from the file path,
+so the agent needs no API-server access. The agent is the single source of
+k8s attributes for logs — the gateway's logs pipeline runs no k8sattributes
+(its connection-IP association would stamp the agent's identity).
+start_at=end keeps restarts cheap (no re-ingest); the trade-off — lines
+written while the agent is down are skipped — is acceptable for dev tooling.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "signoz.otelAgent.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-agent
+data:
+  otel-agent-config.yaml: |
+    receivers:
+      filelog:
+        include:
+          - /var/log/pods/{{ $logNs }}_*/*/*.log
+        exclude:
+          # never ingest the observability pipeline's own logs (feedback loop)
+          - /var/log/pods/{{ $logNs }}_{{ include "signoz.otelAgent.fullname" . }}*/*/*.log
+          - /var/log/pods/{{ $logNs }}_{{ include "signoz.otelCollector.fullname" . }}*/*/*.log
+        start_at: end
+        include_file_path: true
+        retry_on_failure:
+          enabled: true
+        operators:
+          - type: container
+
+      # Per-node host metrics (OBS-P4a): cpu/disk/load/filesystem/memory/
+      # network/paging, matching the upstream SigNoz k8s-infra chart's
+      # hostmetrics scraper set. Reads through the /hostfs bind-mount so the
+      # gopsutil scrapers see the NODE's /proc, /sys, /dev, not the agent
+      # container's own (empty) view of them.
+      hostmetrics:
+        collection_interval: 30s
+        root_path: /hostfs
+        scrapers:
+          cpu: {}
+          disk: {}
+          load: {}
+          filesystem:
+            exclude_mount_points:
+              match_type: regexp
+              mount_points:
+                - /dev/*
+                - /proc/*
+                - /sys/*
+                - /var/lib/docker/*
+                - /var/lib/kubelet/*
+                - /snap/*
+            exclude_fs_types:
+              match_type: strict
+              fs_types:
+                - autofs
+                - binfmt_misc
+                - bpf
+                - cgroup2
+                - configfs
+                - debugfs
+                - devpts
+                - devtmpfs
+                - fusectl
+                - hugetlbfs
+                - mqueue
+                - nsfs
+                - overlay
+                - proc
+                - pstore
+                - rpc_pipefs
+                - securityfs
+                - sysfs
+                - tracefs
+          memory: {}
+          network: {}
+          paging: {}
+
+      # Per-node kubelet-API metrics (OBS-P4a): k8s.pod.* / k8s.node.* /
+      # k8s.container.* / k8s.volume.* — this is what the imported
+      # "Kubernetes Pod Metrics" and "Kubernetes Node Metrics" dashboards
+      # actually query (verified against the dashboard JSONs: every
+      # aggregation.metricName is k8s.pod.* or k8s.node.*, nothing from
+      # hostmetrics' system.* namespace). Requires the ServiceAccount's
+      # token to be authorized for nodes/stats (otel-agent-rbac.yaml) and
+      # the node's kubelet API to accept it — self-signed kubelet serving
+      # certs on this cluster, hence insecure_skip_verify.
+      kubeletstats:
+        collection_interval: 30s
+        auth_type: serviceAccount
+        endpoint: "https://${env:K8S_NODE_IP}:10250"
+        insecure_skip_verify: true
+        metric_groups:
+          - node
+          - pod
+          - container
+          - volume
+
+      {{- if .Values.signoz.otelAgent.selfMetrics.enabled }}
+      # OBS-P4: self-monitoring, mirrors the gateway (otel-collector-
+      # configmap.yaml). Each agent pod scrapes its OWN :8888 self-metrics
+      # endpoint (enabled below under service.telemetry.metrics) — a
+      # DaemonSet has no single stable address a remote scraper could target,
+      # so the scrape has to happen locally, same as hostmetrics/kubeletstats
+      # already do. Feeds the "OpenTelemetry Collector" self-monitoring
+      # dashboard alongside the gateway's own job.
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: "otel-agent"
+              scrape_interval: 30s
+              static_configs:
+                - targets:
+                    - "localhost:8888"
+      {{- end }}
+
+    processors:
+      # memory_limiter MUST run first in every pipeline (K8-L02) — same
+      # instance definition, one per pipeline invocation.
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: {{ .Values.signoz.otelAgent.memoryLimiter.limitMib }}
+        spike_limit_mib: {{ .Values.signoz.otelAgent.memoryLimiter.spikeLimitMib }}
+      batch:
+        timeout: 10s
+        send_batch_size: 1024
+      batch/metrics:
+        timeout: 10s
+        send_batch_size: 1024
+
+    exporters:
+      otlp:
+        # Forward to the gateway collector, which owns the ClickHouse write
+        # path. Log records leave here with their k8s attributes final (the
+        # gateway's logs pipeline adds none). The metrics pipeline below
+        # reuses this SAME exporter instance — the gateway's existing
+        # `metrics` pipeline (otel-collector-configmap.yaml) already writes
+        # OTLP metrics to signozclickhousemetrics/signozmeter, so there is
+        # nothing to duplicate here.
+        endpoint: {{ include "signoz.otelCollector.fullname" . }}.{{ default .Release.Namespace .Values.signoz.namespace }}.svc.cluster.local:4317
+        tls:
+          insecure: true
+
+    extensions:
+      # Probe endpoint. service.telemetry.metrics.address (the old way to
+      # expose self-metrics) was REMOVED from the collector core (deprecated
+      # in 0.111, gone before contrib 0.156) — probes use health_check
+      # instead. Self-metrics are back below (OBS-P4) via the current
+      # "readers" schema, purely for the prometheus receiver above to scrape;
+      # probes are unaffected.
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    service:
+      {{- if .Values.signoz.otelAgent.selfMetrics.enabled }}
+      telemetry:
+        metrics:
+          level: normal
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8888
+      {{- end }}
+      extensions: [health_check]
+      pipelines:
+        logs:
+          receivers: [filelog]
+          processors: [memory_limiter, batch]
+          exporters: [otlp]
+        metrics:
+          receivers:
+            [
+              hostmetrics,
+              kubeletstats,
+              {{- if .Values.signoz.otelAgent.selfMetrics.enabled }}prometheus,{{- end }}
+            ]
+          processors: [memory_limiter, batch/metrics]
+          exporters: [otlp]
+{{- end }}
