@@ -22,8 +22,6 @@ userService:
   # OTP stays off in dev so backend-seeded test users log in with just a
   # password (rapid testing). Flip any of these to "true" to exercise the 2FA
   # flows. This is login posture only — not encryption.
-  twoFactorAuthUserEnabled: "false"
-  twoFactorAuthConsultantEnabled: "true"
   otpAllowedForUsers: "false"
   otpAllowedForConsultants: "true"
   otpAllowedForSingleTenantAdmins: "false"

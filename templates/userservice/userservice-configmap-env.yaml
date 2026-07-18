@@ -90,8 +90,8 @@ data:
   # prod overlay). Defaults preserve the previous hardcoded "false" behaviour.
   # NOTE: this is 2FA/OTP login posture only; it is NOT encryption. Encryption
   # is never toggled here — see docs/infrastructure-report-2026-07.md §7.
-  TWOFACTORAUTH_USER_ENABLED: {{ .Values.userService.twoFactorAuthUserEnabled | default "false" | quote }}
-  TWOFACTORAUTH_CONSULTANT_ENABLED: {{ .Values.userService.twoFactorAuthConsultantEnabled | default "false" | quote }}
+  TWOFACTORAUTH_USER_ENABLED: {{ .Values.userService.otpAllowedForUsers | default "false" | quote }}
+  TWOFACTORAUTH_CONSULTANT_ENABLED: {{ .Values.userService.otpAllowedForConsultants | default "false" | quote }}
   IDENTITY_OTP_ALLOWED_FOR_USERS: {{ .Values.userService.otpAllowedForUsers | default "false" | quote }}
   IDENTITY_OTP_ALLOWED_FOR_CONSULTANTS: {{ .Values.userService.otpAllowedForConsultants | default "false" | quote }}
   IDENTITY_OTP_ALLOWED_FOR_SINGLE_TENANT_ADMINS: {{ .Values.userService.otpAllowedForSingleTenantAdmins | default "false" | quote }}
