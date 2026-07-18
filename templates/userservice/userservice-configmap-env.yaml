@@ -75,11 +75,11 @@ data:
   TENANT_SERVICE_API_URL: "http://tenantservice.{{ .Release.Namespace }}:8081"
   # 2fa
   TWOFACTORAUTH_USER_ENABLED: "false"
-  TWOFACTORAUTH_CONSULTANT_ENABLED: "false"
-  IDENTITY_OTP_ALLOWED_FOR_USERS: "false"
-  IDENTITY_OTP_ALLOWED_FOR_CONSULTANTS: "false"
-  IDENTITY_OTP_ALLOWED_FOR_SINGLE_TENANT_ADMINS: "false"
-  IDENTITY_OTP_ALLOWED_FOR_TENANT_SUPER_ADMINS: "false"
+  TWOFACTORAUTH_CONSULTANT_ENABLED: {{ .Values.userService.otpAllowedForConsultants | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_USERS: {{ .Values.userService.otpAllowedForUsers | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_CONSULTANTS: {{ .Values.userService.otpAllowedForConsultants | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_SINGLE_TENANT_ADMINS: {{ .Values.userService.otpAllowedForSingleTenantAdmins | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_TENANT_SUPER_ADMINS: {{ .Values.userService.otpAllowedForTenantSuperAdmins | quote }}
   # logstash
   LOGSTASH_HOST: {{ .Values.global.logstashHost }}
   FEATURE_APPOINTMENT_ENABLED: "false"

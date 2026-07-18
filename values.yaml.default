@@ -66,7 +66,7 @@ global:
 
   keycloak:
     realm: "your-realm"
-    authServerUrl: "https://your-domain.example.com/auth"
+    authServerUrl: "https://your-domain.example.com"
     otpUrl: "/realms/your-realm/otp-config"
     openidConnectUrl: "/realms/your-realm/protocol/openid-connect"
     loginSuffix: "/token"
@@ -191,6 +191,11 @@ userService:
   keycloakResource: "user-service"
 
   springProfilesActive: "dev"
+
+  otpAllowedForUsers: "false"
+  otpAllowedForConsultants: "true"
+  otpAllowedForSingleTenantAdmins: "false"
+  otpAllowedForTenantSuperAdmins: "false"
 
   firebaseConfigurationCredentialsFilePath: "/firebase/firebase-credentials.json"
   firebaseConfigurationNotificationMessage: "Du hast eine neue Nachricht erhalten"
