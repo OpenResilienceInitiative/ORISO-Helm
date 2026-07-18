@@ -57,6 +57,12 @@ userService:
   otpAllowedForSingleTenantAdmins: "true"
   otpAllowedForTenantSuperAdmins: "true"
 
+  # The base values default (https://app.oriso.org) does not resolve — Pre-Dev's
+  # actual live frontend is app.oriso-dev.site (verified 200 OK). Without this,
+  # Magic Link emails a broken link and password reset sends no email at all.
+  magicLinkFrontendBaseUrl: "https://app.oriso-dev.site"
+  passwordResetFrontendBaseUrl: "https://app.oriso-dev.site"
+
 # SigNoz observability stack (OBS-P1)
 signoz:
   enabled: true

@@ -29,3 +29,13 @@ userService:
   otpAllowedForConsultants: "false"
   otpAllowedForSingleTenantAdmins: "false"
   otpAllowedForTenantSuperAdmins: "false"
+
+  # DECISION/VERIFICATION REQUIRED: this environment's actual live frontend
+  # URL was not confirmed while fixing the same gap for Pre-Dev (which uses
+  # https://app.oriso-dev.site, verified 200 OK) — set this once confirmed,
+  # the same way values-pre-dev.yaml does. Until then, Magic Link login and
+  # password-reset emails on this environment link to / require the base
+  # values default, which does not resolve (password reset fails closed —
+  # no email sent at all; Magic Link emails a broken link).
+  # magicLinkFrontendBaseUrl: "https://TODO-confirm-dev-frontend-domain"
+  # passwordResetFrontendBaseUrl: "https://TODO-confirm-dev-frontend-domain"

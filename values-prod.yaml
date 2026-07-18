@@ -60,6 +60,16 @@ userService:
   otpAllowedForSingleTenantAdmins: "false"
   otpAllowedForTenantSuperAdmins: "false"
 
+  # DECISION REQUIRED: production frontend domain for Magic Link login and
+  # password-reset email links. Not guessed here — go-live is 2026-10-01 and
+  # the domain isn't live yet (https://app.oriso.org currently fails TLS
+  # verification). Set both to the real production frontend URL before
+  # go-live, the same way values-pre-dev.yaml sets them to
+  # https://app.oriso-dev.site. Until set, password reset fails closed (no
+  # email sent); Magic Link emails a broken link.
+  # magicLinkFrontendBaseUrl: "https://TODO-set-before-go-live"
+  # passwordResetFrontendBaseUrl: "https://TODO-set-before-go-live"
+
 # SigNoz observability stack (OBS-P1): the stack itself may run in prod, but
 # the signoz.* UI subdomain is a dev-tooling exception (ADR-011) and is NOT
 # exposed in production. No global.domains.signoz is set here either — both
