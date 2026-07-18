@@ -1,0 +1,40 @@
+# Development overlay for the ORISO chart.
+#
+# Apply ON TOP of your base values, e.g.:
+#   helm upgrade --install caritas ./ -n caritas --create-namespace \
+#     -f values.yaml -f values-dev.yaml -f secrets.yaml
+#
+# Only environment DELTAS belong here. This overlay lowers *test friction*
+# only. Matrix room encryption rollout is configured separately per environment;
+# this generic dev overlay does not opt in. See docs/infrastructure-report-2026-07.md §7.
+
+global:
+  # Seed dummy tenants/users so the app is immediately explorable in dev.
+  initializeDummyData: true
+
+# Spring "dev" profile for the backend services (verbose errors, dev wiring).
+agencyService:
+  springProfilesActive: "dev"
+tenantService:
+  springProfilesActive: "dev"
+userService:
+  springProfilesActive: "dev"
+  # OTP stays off in dev so backend-seeded test users log in with just a
+  # password (rapid testing). Flip any of these to "true" to exercise the 2FA
+  # flows. This is login posture only — not encryption.
+  twoFactorAuthUserEnabled: "false"
+  twoFactorAuthConsultantEnabled: "true"
+  otpAllowedForUsers: "false"
+  otpAllowedForConsultants: "true"
+  otpAllowedForSingleTenantAdmins: "false"
+  otpAllowedForTenantSuperAdmins: "false"
+
+  # DECISION/VERIFICATION REQUIRED: this environment's actual live frontend
+  # URL was not confirmed while fixing the same gap for Pre-Dev. Set this once
+  # confirmed in the deployment values. Until then, Magic Link login and
+  # password-reset emails on this environment link to / require the base
+  # values default, which does not resolve (password reset fails closed —
+  # no email sent at all; Magic Link emails a broken link).
+  # magicLinkFrontendBaseUrl: "https://TODO-confirm-dev-frontend-domain"
+  # passwordResetFrontendBaseUrl: "https://TODO-confirm-dev-frontend-domain"
+  # passwordResetAdminFrontendBaseUrl: "https://TODO-confirm-dev-admin-domain/admin"

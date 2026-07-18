@@ -1,0 +1,72 @@
+# Production overlay for the ORISO chart.
+#
+# Apply ON TOP of your base values, e.g.:
+#   helm upgrade --install caritas ./ -n caritas --create-namespace \
+#     -f values.yaml -f values-prod.yaml -f secrets.yaml
+#
+# The base values.yaml.default is already prod-safe (springProfilesActive:prod,
+# initializeDummyData:false), so this overlay is mostly explicit re-assertion +
+# the decisions a production operator must make. Tracking: #24.
+#
+# The production hoster runs this via ArgoCD on gridscale; align the values
+# below (and ingress/cert-manager toggles) with them — see issue #25.
+
+global:
+  initializeDummyData: false
+  # OBS-P2: OTLP traces/metrics export is dev/pre-dev-only for now. Prod
+  # stays off until a human explicitly decides to turn it on — see
+  # PLAN-observability-two-track-2026-07-11.md and
+  # docs/observability-prod-pseudonymization.md.
+  #
+  # OBS-P6 (this overlay's current state): the KDG-safe pseudonymization
+  # pipeline referenced above is now BUILT into the gateway collector config
+  # (templates/signoz/templates/otel-collector-configmap.yaml, gated by
+  # telemetryPseudonymizationEnabled below) but is left OFF here on purpose.
+  # Both flags must eventually flip together for prod telemetry to actually
+  # flow pseudonymized — otlpEnabled alone (with pseudonymization off) would
+  # export raw, unscrubbed identifiers and must never be turned on by itself.
+  # Turning either on is a decision for a human with legal/DPO sign-off, not
+  # something this chart does automatically.
+  observability:
+    otlpEnabled: false
+    # OBS-P6: built, verified by tests/render_obs_p6_test.py, still OFF.
+    # Do not flip this to true without reading
+    # docs/observability-prod-pseudonymization.md first — it documents
+    # exactly what is pseudonymized/dropped and the one open question
+    # (log-body handling) that still wants a second pair of eyes.
+    telemetryPseudonymizationEnabled: false
+    # OBS-P8: browser Web Vitals RUM stays off in prod for the same reason —
+    # it means capturing actual counsellor/client browser telemetry (page
+    # URLs, timing, IP-adjacent metadata via the request), which deserves
+    # the same KDG-conscious review OBS-P6 gave backend telemetry, not a
+    # silent default-on. Same off-by-default-in-prod pattern as PR #65.
+    webVitalsEnabled: false
+
+agencyService:
+  springProfilesActive: "prod"
+tenantService:
+  springProfilesActive: "prod"
+userService:
+  springProfilesActive: "prod"
+  # DECISION REQUIRED: production 2FA/OTP posture. This is a product/security
+  # policy choice (enabling OTP forces users to enrol TOTP), so it is left at
+  # the safe, behaviour-preserving default of "false" rather than guessed here.
+  # Set the relevant flags to "true" once the policy is agreed. This is login
+  # posture only and is unrelated to message/data encryption (always on).
+  twoFactorAuthUserEnabled: "false"
+  twoFactorAuthConsultantEnabled: "false"
+  otpAllowedForUsers: "false"
+  otpAllowedForConsultants: "false"
+  otpAllowedForSingleTenantAdmins: "false"
+  otpAllowedForTenantSuperAdmins: "false"
+
+  # DECISION REQUIRED: production frontend domain for Magic Link login and
+  # password-reset email links. Not guessed here — go-live is 2026-10-01 and
+  # the domain isn't live yet (https://app.oriso.org currently fails TLS
+  # verification). Set both to the real production frontend URL before
+  # go-live, the same way environment deployment values set them to
+  # https://app.oriso-dev.site. Until set, password reset fails closed (no
+  # email sent); Magic Link emails a broken link.
+  # magicLinkFrontendBaseUrl: "https://TODO-set-before-go-live"
+  # passwordResetFrontendBaseUrl: "https://TODO-set-before-go-live"
+  # passwordResetAdminFrontendBaseUrl: "https://TODO-set-before-go-live/admin"

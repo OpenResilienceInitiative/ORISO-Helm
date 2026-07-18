@@ -2,3 +2,13 @@ secrets.yaml
 .idea/
 values.yaml
 .claude/
+
+# helm dependency update artifacts (subcharts are vendored unpacked)
+charts/*.tgz
+
+# decrypted test-credential store — only *.enc.json is ever committed
+test-data/*.plain.json
+test-data/test-users.json
+# age private keys, wherever they land
+*.age
+keys.txt

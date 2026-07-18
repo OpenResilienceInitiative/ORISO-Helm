@@ -1,0 +1,120 @@
+{{- if and .Values.signoz.enabled .Values.signoz.otelAgent.enabled }}
+{{/*
+Per-node agent (SigNoz "k8s-infra" style, minimal variant): log collection
+plus, since OBS-P4a, host + kubelet metrics for the imported "Kubernetes Pod
+Metrics" / "Kubernetes Node Metrics" community dashboards. Runs as root
+read-only on /var/log/pods (kubelet writes pod log files 0640 root:root) and
+read-only on /hostfs (hostmetrics scrapers need the node's /proc,/sys,/dev).
+Resources are deliberately modest (finding LC-M05: the nodes are
+memory-overcommitted).
+*/}}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "signoz.otelAgent.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-agent
+spec:
+  selector:
+    matchLabels:
+      app: otel-agent
+  template:
+    metadata:
+      labels:
+        app: otel-agent
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/signoz/templates/otel-agent-configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "signoz.otelAgent.fullname" . }}
+      # No hostNetwork/hostPID needed: kubeletstats dials out to the node's
+      # kubelet API over the normal pod network (node IPs are always
+      # pod-routable in Kubernetes), and hostmetrics reads the node's
+      # /proc,/sys,/dev through the /hostfs bind-mount below, not through a
+      # shared network/PID namespace.
+      containers:
+      - name: otel-agent
+        image: "{{ .Values.signoz.otelAgent.image.repository }}:{{ .Values.signoz.otelAgent.image.tag }}"
+        imagePullPolicy: {{ .Values.signoz.otelAgent.image.pullPolicy }}
+        command:
+        - /otelcol-contrib
+        - --config=/etc/otel-agent-config.yaml
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+        env:
+        # Downward-API node identity for kubeletstats (OBS-P4a): the kubelet
+        # API is per-node, so the receiver must dial THIS pod's node, not
+        # rely on a name that may not be cluster-DNS-resolvable. hostIP is
+        # always a routable address; the node name is exported too since
+        # it's useful for troubleshooting even though the endpoint uses the IP.
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: K8S_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        ports:
+        - name: health
+          containerPort: 13133
+          protocol: TCP
+        {{- if .Values.signoz.otelAgent.selfMetrics.enabled }}
+        # OBS-P4: self-metrics endpoint (service.telemetry.metrics in
+        # otel-agent-configmap.yaml), scraped locally by this same pod's
+        # prometheus receiver — exposed as a containerPort too for
+        # kubectl port-forward troubleshooting.
+        - name: metrics
+          containerPort: 8888
+          protocol: TCP
+        {{- end }}
+        # Probes use the health_check extension, not this metrics endpoint.
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 13133
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 13133
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+        {{- if .Values.signoz.otelAgent.resources }}
+        resources:
+          {{- toYaml .Values.signoz.otelAgent.resources | nindent 10 }}
+        {{- end }}
+        volumeMounts:
+        - name: config
+          mountPath: /etc/otel-agent-config.yaml
+          subPath: otel-agent-config.yaml
+          readOnly: true
+        - name: varlogpods
+          mountPath: /var/log/pods
+          readOnly: true
+        - name: hostfs
+          mountPath: /hostfs
+          readOnly: true
+      {{- with .Values.signoz.otelAgent.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "signoz.otelAgent.fullname" . }}
+      - name: varlogpods
+        hostPath:
+          path: /var/log/pods
+      - name: hostfs
+        hostPath:
+          path: /
+      terminationGracePeriodSeconds: 30
+{{- end }}

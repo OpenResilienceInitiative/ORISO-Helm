@@ -46,6 +46,19 @@ data:
   LIVE_SERVICE_API_URL: "http://liveservice.{{ .Release.Namespace }}:8080"
   CONSULTING_TYPE_SERVICE_API_URL: "http://consultingtypeservice.{{ .Release.Namespace }}:8080"
   APPOINTMENT_SERVICE_API_URL: "http://appointmentservice.{{ .Release.Namespace }}:8080"
+  # Frontend base URL for the one-time links in the Magic Link login email
+  # and the self-service password-reset email. Omitted entirely (rather than
+  # rendered empty) when an environment hasn't set it, so the app's own
+  # @Value fallback behaviour applies instead of an empty string overriding it.
+  {{- if .Values.userService.magicLinkFrontendBaseUrl }}
+  MAGIC_LINK_FRONTEND_BASE_URL: {{ .Values.userService.magicLinkFrontendBaseUrl | quote }}
+  {{- end }}
+  {{- if .Values.userService.passwordResetFrontendBaseUrl }}
+  PASSWORD_RESET_FRONTEND_BASE_URL: {{ .Values.userService.passwordResetFrontendBaseUrl | quote }}
+  {{- end }}
+  {{- if .Values.userService.passwordResetAdminFrontendBaseUrl }}
+  PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL: {{ .Values.userService.passwordResetAdminFrontendBaseUrl | quote }}
+  {{- end }}
   # CSRF
   CSRF_HEADER_PROPERTY: {{ .Values.global.csrfHeaderProperty}}
   CSRF_WHITELIST_HEADER_PROPERTY: {{ .Values.global.csrfWhitelistHeaderProperty}}
@@ -73,19 +86,23 @@ data:
   FEATURE_TOPICS_ENABLED: {{ .Values.global.topicsEnabled | quote }}
   FEATURE_DEMOGRAPHICS_ENABLED: {{ .Values.global.demographicsEnabled | quote }}
   TENANT_SERVICE_API_URL: "http://tenantservice.{{ .Release.Namespace }}:8081"
-  # 2fa
-  TWOFACTORAUTH_USER_ENABLED: "false"
-  TWOFACTORAUTH_CONSULTANT_ENABLED: {{ .Values.userService.otpAllowedForConsultants | quote }}
-  IDENTITY_OTP_ALLOWED_FOR_USERS: {{ .Values.userService.otpAllowedForUsers | quote }}
-  IDENTITY_OTP_ALLOWED_FOR_CONSULTANTS: {{ .Values.userService.otpAllowedForConsultants | quote }}
-  IDENTITY_OTP_ALLOWED_FOR_SINGLE_TENANT_ADMINS: {{ .Values.userService.otpAllowedForSingleTenantAdmins | quote }}
-  IDENTITY_OTP_ALLOWED_FOR_TENANT_SUPER_ADMINS: {{ .Values.userService.otpAllowedForTenantSuperAdmins | quote }}
+  # 2fa — value-driven so the OTP posture can differ per environment (dev vs
+  # prod overlay). Defaults preserve the previous hardcoded "false" behaviour.
+  # NOTE: this is 2FA/OTP login posture only; it is NOT encryption. Encryption
+  # is never toggled here — see docs/infrastructure-report-2026-07.md §7.
+  TWOFACTORAUTH_USER_ENABLED: {{ .Values.userService.twoFactorAuthUserEnabled | default "false" | quote }}
+  TWOFACTORAUTH_CONSULTANT_ENABLED: {{ .Values.userService.twoFactorAuthConsultantEnabled | default "false" | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_USERS: {{ .Values.userService.otpAllowedForUsers | default "false" | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_CONSULTANTS: {{ .Values.userService.otpAllowedForConsultants | default "false" | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_SINGLE_TENANT_ADMINS: {{ .Values.userService.otpAllowedForSingleTenantAdmins | default "false" | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_TENANT_SUPER_ADMINS: {{ .Values.userService.otpAllowedForTenantSuperAdmins | default "false" | quote }}
   # logstash
   LOGSTASH_HOST: {{ .Values.global.logstashHost }}
   FEATURE_APPOINTMENT_ENABLED: "false"
   FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED: {{ .Values.global.multitenancyWithSingleDomainEnabled | quote }}
   MATRIX_API_URL: {{ .Values.matrix.matrixApiUrl }}
   MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}
+  MATRIX_ENCRYPTION_ENABLED: {{ .Values.userService.matrixEncryptionEnabled | default "false" | quote }}
   MATRIX_MIGRATION_ENABLED: "true"
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: "{{ .Values.global.keycloak.authServerUrl }}/realms/{{ .Values.global.keycloak.realm }}"
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: "{{ .Values.global.keycloak.authServerUrl }}{{ .Values.global.keycloak.openidConnectUrl }}/certs"
@@ -95,3 +112,11 @@ data:
   ROCKET_CHAT_API_URL: "http://rocketchat.{{ .Release.Namespace }}:3000/api/v1"
   ROCKET_SYSTEMUSER_ID: {{ .Values.userService.rocketSystemuserId }}
   ROCKET_CREDENTIALSCHEDULER_CRON: {{ .Values.userService.rocketCredentialschedulerCron }}
+  # OBS-P2: OTLP traces/metrics to the SigNoz gateway collector. Property
+  # names + full /v1/{traces,metrics} paths verified against Spring Boot
+  # 4.0.1 source directly (management.otlp.tracing.endpoint does NOT exist
+  # in this version).
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}:4318/v1/traces"
+  MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
+  MANAGEMENT_OTLP_METRICS_EXPORT_URL: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}:4318/v1/metrics"
+  MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}

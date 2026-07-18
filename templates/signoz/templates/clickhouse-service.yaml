@@ -1,0 +1,33 @@
+{{- if .Values.signoz.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "signoz.clickhouse.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: {{ .Values.signoz.clickhouse.httpPort }}
+    targetPort: http
+    protocol: TCP
+  - name: native
+    port: {{ .Values.signoz.clickhouse.port }}
+    targetPort: native
+    protocol: TCP
+  - name: interserver
+    port: 9009
+    targetPort: interserver
+    protocol: TCP
+  {{- if .Values.signoz.clickhouse.prometheus.enabled }}
+  - name: metrics
+    port: {{ .Values.signoz.clickhouse.prometheus.port }}
+    targetPort: metrics
+    protocol: TCP
+  {{- end }}
+  selector:
+    app: clickhouse
+{{- end }}

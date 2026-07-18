@@ -1,0 +1,82 @@
+{{- if .Values.signoz.enabled }}
+{{/*
+ClickHouse config drop-in required by the SigNoz schema migrator: it issues
+ON CLUSTER "{{ .Values.signoz.clickhouse.cluster }}" DDL, which needs
+(a) a remote_servers cluster of that name and (b) a (Zoo)Keeper for the
+distributed DDL queue. Vanilla clickhouse-server ships neither. The embedded
+ClickHouse Keeper replaces the separate zookeeper of the official SigNoz
+setup — fine for our single-node instance.
+
+The replica host must be a LOCAL address (127.0.0.1), not the Service name:
+the DDL worker only executes ON CLUSTER tasks for hosts it recognizes as
+itself, and a Service ClusterIP is never local to the pod.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "signoz.clickhouse.fullname" . }}-config
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+data:
+  cluster.xml: |
+    <clickhouse>
+      <keeper_server>
+        <tcp_port>9181</tcp_port>
+        <server_id>1</server_id>
+        <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+        <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+        <coordination_settings>
+          <operation_timeout_ms>10000</operation_timeout_ms>
+          <session_timeout_ms>30000</session_timeout_ms>
+        </coordination_settings>
+        <raft_configuration>
+          <server>
+            <id>1</id>
+            <hostname>localhost</hostname>
+            <port>9234</port>
+          </server>
+        </raft_configuration>
+      </keeper_server>
+      <zookeeper>
+        <node>
+          <host>localhost</host>
+          <port>9181</port>
+        </node>
+      </zookeeper>
+      <remote_servers>
+        <{{ .Values.signoz.clickhouse.cluster }}>
+          <shard>
+            <replica>
+              <host>127.0.0.1</host>
+              <port>{{ .Values.signoz.clickhouse.port }}</port>
+            </replica>
+          </shard>
+        </{{ .Values.signoz.clickhouse.cluster }}>
+      </remote_servers>
+    </clickhouse>
+{{- if .Values.signoz.clickhouse.prometheus.enabled }}
+  prometheus.xml: |
+    <clickhouse>
+      <!--
+      OBS-P4: native Prometheus-format metrics endpoint. Exposes
+      system.metrics as ClickHouseMetrics_* and system.events as
+      ClickHouseProfileEvents_* — those are the EXACT series names the
+      already-imported-but-empty "ClickHouse Overview" community dashboard
+      queries (verified against
+      https://github.com/SigNoz/dashboards/blob/main/clickhouse/clickhouse-overview.json).
+      That prefixing is ClickHouse's own default (derived from each source
+      system table's name), not something to override — the dashboard was
+      built against the default prefixes.
+      -->
+      <prometheus>
+        <endpoint>{{ .Values.signoz.clickhouse.prometheus.endpoint }}</endpoint>
+        <port>{{ .Values.signoz.clickhouse.prometheus.port }}</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+      </prometheus>
+    </clickhouse>
+{{- end }}
+{{- end }}

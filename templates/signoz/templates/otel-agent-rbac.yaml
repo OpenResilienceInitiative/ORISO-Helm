@@ -1,0 +1,50 @@
+{{- if and .Values.signoz.enabled .Values.signoz.otelAgent.enabled }}
+{{/*
+RBAC for the otel-agent DaemonSet's kubeletstats receiver (OBS-P4a).
+
+kubeletstats authenticates to the node's kubelet API (https://<nodeIP>:10250)
+with the pod's own ServiceAccount token (auth_type: serviceAccountToken); the
+kubelet then asks the API server to authorize that token via a
+SubjectAccessReview against the "nodes/stats" subresource. That is the ONLY
+RBAC grant the receiver needs (upstream opentelemetry-collector-contrib
+kubeletstatsreceiver README) — no "nodes"/"pods" get/list/watch is required
+because the receiver talks to the kubelet, not the K8s API server, for the
+actual metric data. Kept to that single verb (principle of least privilege).
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "signoz.otelAgent.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "signoz.otelAgent.fullname" . }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-agent
+rules:
+- apiGroups: [""]
+  resources: ["nodes/stats"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "signoz.otelAgent.fullname" . }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "signoz.otelAgent.fullname" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "signoz.otelAgent.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+{{- end }}

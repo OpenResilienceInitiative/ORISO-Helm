@@ -9,6 +9,43 @@ global:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
+  # OBS-P2: OTLP traces/metrics export from the 4 backend services to the
+  # in-cluster SigNoz gateway collector (OBS-P1). Verified against Spring
+  # Boot 4.0.1's actual source (not docs): the endpoint properties require
+  # the full signal-specific HTTP path (/v1/traces, /v1/metrics), and each
+  # exporter needs its own explicit `enabled` toggle — an unset/empty
+  # endpoint alone does NOT reliably no-op (see PLAN-observability doc).
+  observability:
+    otlpEnabled: false
+    otlpCollectorHost: "" # empty = derive from the in-chart signoz gateway service
+    # OBS-P6: KDG-safe pseudonymization pipeline for the gateway collector
+    # (otel-collector-configmap.yaml) — HMAC-style keyed-hash of identifiers,
+    # attribute allow-listing (fail-closed: anything not on the allow-list is
+    # dropped, not exported), no IPs, prod log bodies replaced wholesale.
+    # This is infrastructure for a FUTURE decision, not a switch to flip now:
+    # keep this false everywhere until a human/legal sign-off explicitly
+    # turns it on for prod (see docs/observability-prod-pseudonymization.md).
+    # Independent of otlpEnabled: turning THIS on without also turning
+    # otlpEnabled on for prod does nothing (no data flows either way); the
+    # two flags are deliberately separate so pseudonymization can be
+    # reviewed and merged long before anyone flips the prod kill switch.
+    telemetryPseudonymizationEnabled: false
+    # OBS-P8: Frontend/Admin browser Real User Monitoring (Web Vitals —
+    # LCP/CLS/INP/TTFB/FCP). Gates two things together, since neither is
+    # useful without the other: the otel-collector's OTLP-HTTP receiver CORS
+    # allow-list (otel-collector-configmap.yaml, scoped to global.domains.app
+    # / global.domains.admin — Frontend and Admin each live on their own
+    # subdomain on this deployment, not a single shared domain) and the
+    # signoz.* /v1/metrics ingress path that routes the browser's
+    # direct OTLP POST to that receiver (templates/nginx/signoz-ingress.yaml).
+    # Deliberately its own flag, separate from signoz.enabled/
+    # signoz.ingress.enabled, so RUM ingest can be turned off independently
+    # of the SigNoz UI itself. Default true here (dev/pre-dev); prod stays
+    # off until the same KDG-conscious review OBS-P6 got for backend
+    # telemetry (docs/observability-prod-pseudonymization.md, PR #65) — see
+    # values-prod.yaml.
+    webVitalsEnabled: true
+
 
 
   acmedomainName: "acme.your-domain.example.com"
@@ -52,14 +89,16 @@ global:
   statisticsEnabled: "true"
   demographicsEnabled: "false"
 
-  initializeDummyData: true
+  # Prod-safe baseline: no dummy seeding. The dev overlay (values-dev.yaml)
+  # turns this on. See docs/infrastructure-report-2026-07.md §7.
+  initializeDummyData: false
 
   logstashHost: "http://logstash.default:8080"
 
   # Matrix values needed by subcharts (subcharts cannot see the top-level `matrix:` block).
   # matrixAdminUsername / matrixAdminPassword must be set under global.matrix in secrets.yaml.
   matrix:
-    matrixServerName: "your-server.local"
+    matrixServerName: "matrix.oriso.org"
 
   # Keycloak connection
 
@@ -78,11 +117,14 @@ global:
 
 
 matrix:
-  synapseServerName: "your-server.local"
+  synapseServerName: "matrix.oriso.org"
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"
   matrixApiUrl: "http://matrix-synapse:8008"
-  matrixServerName: "your-server.local"
+  matrixServerName: "matrix.oriso.org"
+  # Server's own public IP, exempted from Synapse rate limiting. Supplied by the
+  # per-environment overlay — never hardcode an IP in the chart (ADR-005 / DB-M04).
+  serverPublicIp: ""
 
 
 
@@ -153,7 +195,7 @@ agencyService:
 
   keycloakResource: "agency-service"
 
-  springProfilesActive: "dev"
+  springProfilesActive: "prod"
 
   topicEnrichmentEnabled: "false"
 
@@ -175,7 +217,7 @@ consultingTypeService:
 tenantService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
   imageVersion: "latest"  
-  springProfilesActive: "dev"
+  springProfilesActive: "prod"
   springDatasourceURL: "jdbc:mariadb://mariadb:3306/tenantservice"
   springRabbitmqHost: "rabbitmq"
   springRabbitmqPort: "5672"
@@ -190,12 +232,31 @@ userService:
  
   keycloakResource: "user-service"
 
-  springProfilesActive: "dev"
+  springProfilesActive: "prod"
 
+  # Rollout-safe server-side switch for encrypted Matrix room creation.
+  # Environment overlays opt in only after their stable homeserver identity is ready.
+  matrixEncryptionEnabled: "false"
+
+  # 2FA / OTP login posture (independent from Matrix room encryption).
+  # Defaults keep OTP off; the dev overlay leaves it off for fast test-user
+  # creation, and prod's posture is a deliberate choice (see values-prod.yaml).
+  twoFactorAuthUserEnabled: "false"
+  twoFactorAuthConsultantEnabled: "true"
   otpAllowedForUsers: "false"
   otpAllowedForConsultants: "true"
   otpAllowedForSingleTenantAdmins: "false"
   otpAllowedForTenantSuperAdmins: "false"
+
+  # Base URL of the deployed frontend the one-time links in the Magic Link
+  # login email and the self-service password-reset email point back to.
+  # Must be overridden by the environment deployment values — the sample
+  # default (https://app.oriso.org) does not resolve. Password reset fails
+  # closed (no email sent) if left unset; Magic Link falls back to the
+  # broken app default, so both must be set together.
+  magicLinkFrontendBaseUrl: "https://your-domain.example.com"
+  passwordResetFrontendBaseUrl: "https://your-domain.example.com"
+  passwordResetAdminFrontendBaseUrl: "https://admin.your-domain.example.com/admin"
 
   firebaseConfigurationCredentialsFilePath: "/firebase/firebase-credentials.json"
   firebaseConfigurationNotificationMessage: "Du hast eine neue Nachricht erhalten"
@@ -242,11 +303,23 @@ healthDashboard:
   env:
     PORT: "9100"
 
-# SigNoz
+# SigNoz observability stack (OBS-P1): SigNoz backend/UI + in-chart
+# ClickHouse + OTel gateway collector + per-node log-collection agent.
+#
+# VERSION PAIRING (OBS-P1.2): pins follow the upstream chart signoz-0.132.2 —
+# signoz v0.132.2 / signoz-otel-collector v0.144.5 / clickhouse-server
+# 25.12.5. Bump all of them together against a single upstream chart tag,
+# never individually.
+#
+# Retention note: SigNoz does NOT expose retention as env vars or config
+# file settings; it is configured post-deploy in the UI
+# (Settings -> General -> retention period per signal, stored as ClickHouse
+# TTLs via the SigNoz API). Recommended: logs/traces 7-14d, metrics 30d.
 signoz:
+  enabled: false
   image:
     repository: signoz/signoz
-    tag: "v0.105.1"
+    tag: "v0.132.2"
     pullPolicy: IfNotPresent
   replicas: 1
   namespace: ""
@@ -258,16 +331,167 @@ signoz:
     opampPort: 4320
     otlpGrpcPort: 4317
     otlpHttpPort: 4318
+  # SigNoz UI ingress: renders only when enabled AND global.domains.signoz is
+  # set (dev-tooling subdomain exception to ADR-011 single-domain routing).
+  ingress:
+    enabled: false
+    # Override to reuse an existing cert secret; empty derives
+    # "<domain-with-dashes>-tls" like the other ingresses.
+    tlsSecretName: ""
   clickhouse:
+    # Empty host = use the in-chart ClickHouse service
+    # ("<release>-clickhouse"); global.services.clickhouse.host overrides.
     host: ""
     port: 9000
     httpPort: 8123
     cluster: "cluster"
     user: "default"
-    password: ""
+    database: "default"
+    # Credentials Secret rendered by the chart from
+    # global.secrets.clickhousePassword (see secrets.yaml.default). Consumed
+    # via secretKeyRef by both ClickHouse and SigNoz (LC-M03).
     secret:
-      name: clickhouse-config
-      key: default-password
+      name: clickhouse-secret
+      key: password
+    replicas: 1
+    image:
+      repository: clickhouse/clickhouse-server
+      # Upstream chart signoz-0.131.0+ requires 25.12.5: upcoming collector
+      # releases store trace attributes as ClickHouse JSON columns using
+      # settings that exist only in 25.12.5 (see the SigNoz 0.131 upgrade
+      # guide). Older versions become incompatible with future SigNoz.
+      tag: "25.12.5"
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 500m
+        memory: 2Gi
+      limits:
+        cpu: "2"
+        memory: 8Gi
+    # Sized to match the instance already running on Pre-Dev. The
+    # volumeClaimTemplate is immutable on an existing StatefulSet.
+    persistence:
+      enabled: true
+      storageClass: "local-path"
+      size: 50Gi
+      accessMode: ReadWriteOnce
+    # OBS-P4: ClickHouse's own Prometheus-format metrics endpoint
+    # (<prometheus> config block — system.metrics/system.events tables), the
+    # data source the already-imported-but-empty "ClickHouse Overview"
+    # community dashboard queries (ClickHouseMetrics_*/ClickHouseProfileEvents_*
+    # series, verified against the dashboard JSON). Nothing scrapes ClickHouse
+    # today, which is why that dashboard has never shown data.
+    prometheus:
+      enabled: true
+      port: 9363
+      endpoint: "/metrics"
+  # OBS-P4: OTel Collector `mysql` receiver against ORISO's MariaDB, feeding
+  # the SigNoz "MySQL" community dashboard (MySQL-wire-compatible, verified
+  # metric names are dotted `mysql.*`, not the underscored Prometheus-style
+  # names in the receiver's own readme). Credentials MUST come from an
+  # existing Secret (LC-M03 precedent) — no new plaintext credential is
+  # introduced here. See mariadbMetrics.existingSecret below: it defaults to
+  # AgencyService's app DB user (SELECT/INSERT/UPDATE/DELETE on
+  # agencyservice.* only — the narrowest-scoped app credential already
+  # wired via secretKeyRef anywhere in this chart). That is still a
+  # schema-scoped read/write application credential, not a dedicated
+  # least-privilege monitoring account (ideally PROCESS + REPLICATION CLIENT,
+  # no data-schema grants) — flagged as an open question for a human with DB
+  # access; this chart does not create DB users/grants.
+  #
+  # Defaults OFF for that reason: enabling this today would use an
+  # over-privileged app credential for a new purpose (metrics scraping) with
+  # no separate human decision point. Flip to true only after a dedicated
+  # least-privilege DB user exists, or after explicitly accepting the
+  # AgencyService-credential-reuse tradeoff above.
+  mariadbMetrics:
+    enabled: false
+    # Empty host = "mariadb.<release namespace>", matching the DSN pattern
+    # every backend service's SPRING_DATASOURCE_URL already uses.
+    host: ""
+    port: 3306
+    collectionInterval: "30s"
+    existingSecret:
+      # Empty name = "<release>-agencyservice-secrets" (rendered by
+      # templates/agencyservice/agencyservice-secret.yaml).
+      name: ""
+      usernameKey: "AGENCYSERVICE_SPRING_DATASOURCE_USERNAME"
+      passwordKey: "AGENCYSERVICE_SPRING_DATASOURCE_PASSWORD"
+  # Gateway collector = SigNoz ingest layer. The signoz/signoz single binary
+  # does NOT listen on 4317/4318; ingest is SigNoz's own collector distro,
+  # which writes to ClickHouse directly and registers over opamp (:4320).
+  # v0.144.5 is the tag the upstream chart signoz-0.132.2 pins for SigNoz
+  # v0.132.2 — keep the pair in sync when bumping either.
+  otelCollector:
+    image:
+      repository: signoz/signoz-otel-collector
+      tag: "v0.144.5"
+      pullPolicy: IfNotPresent
+    replicas: 1
+    memoryLimiter:
+      limitMib: 400
+      spikeLimitMib: 100
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    # OBS-P4: self-monitoring for the SigNoz "OpenTelemetry Collector"
+    # community dashboard (otelcol_receiver_*/otelcol_exporter_*/
+    # otelcol_process_* series) — auditability of the observability pipeline
+    # itself, so a silent drop in OUR telemetry doesn't go unnoticed. Exposes
+    # the collector's own Prometheus-format self-metrics on :8888 (the
+    # container/Service port was already reserved for this) and scrapes it
+    # right back into the same ClickHouse write path.
+    selfMetrics:
+      enabled: true
+  # SigNoz telemetry-store (ClickHouse schema) migrator. Upstream dropped the
+  # standalone signoz-schema-migrator image: since chart signoz-0.132.x the
+  # migrator is the signoz-otel-collector image itself running
+  # "migrate ready|bootstrap|sync up|async up" as ONE Job whose initContainer
+  # chain enforces the ready -> bootstrap -> sync -> async ordering (running
+  # sync and async concurrently corrupts the migration bookkeeping — seen
+  # live on Pre-Dev). Uses otelCollector.image; no separate image pin.
+  schemaMigrator:
+    enabled: true
+    # Upstream default is "10m".
+    timeout: "10m"
+    # Keep false: the existing Pre-Dev schema was created without
+    # replication by the v0.129 migrator; flipping this on an existing
+    # schema mismatches table engines. (Upstream defaults to true.)
+    enableReplication: false
+  # Per-node log-collection agent (filelog on /var/log/pods, DaemonSet).
+  # Forwards to the gateway collector; uses the vanilla contrib distro
+  # (filelog + container operator only, no ClickHouse write path needed).
+  otelAgent:
+    enabled: true
+    image:
+      repository: otel/opentelemetry-collector-contrib
+      tag: "0.156.0"
+      pullPolicy: IfNotPresent
+    # Namespace whose pod logs are collected; empty = release namespace.
+    logsNamespace: ""
+    memoryLimiter:
+      limitMib: 180
+      spikeLimitMib: 50
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+    tolerations: []
+    # OBS-P4: same self-monitoring as the gateway (see
+    # otelCollector.selfMetrics) — each agent pod scrapes its OWN :8888
+    # self-metrics endpoint (per-node, so a single remote scrape target
+    # can't cover every DaemonSet pod) and forwards via the existing
+    # metrics pipeline into the gateway.
+    selfMetrics:
+      enabled: true
   appConfig:
     telemetryStore:
       provider: "clickhouse"
