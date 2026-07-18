@@ -16,7 +16,7 @@ global:
   # exporter needs its own explicit `enabled` toggle — an unset/empty
   # endpoint alone does NOT reliably no-op (see PLAN-observability doc).
   observability:
-    otlpEnabled: true
+    otlpEnabled: false
     otlpCollectorHost: "" # empty = derive from the in-chart signoz gateway service
     # OBS-P6: KDG-safe pseudonymization pipeline for the gateway collector
     # (otel-collector-configmap.yaml) — HMAC-style keyed-hash of identifiers,
