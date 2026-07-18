@@ -21,7 +21,9 @@ reviews:
       - "dev"
 
   path_filters:
-    - "!charts/**"
+    # charts/ holds real ORISO-maintained subcharts (keycloak, mariadb,
+    # mongodb, rabbitmq, redis) — keep them in review scope.
+    - "charts/**"
     - "templates/**"
     - "values.yaml*"
     - "values-*.yaml"
@@ -39,6 +41,11 @@ reviews:
         IPv4 there is a defect (ADR-005 / finding DB-M04). Watch whitespace-trimming
         inside YAML block scalars: `{{-` can concatenate lines and silently produce
         invalid config.
+    - path: "charts/**/templates/**"
+      instructions: |
+        Same rules as the top-level templates: environment-driven values only, no
+        hardcoded hosts/IPs/credentials, and careful `{{-` whitespace trimming in
+        block scalars.
     - path: "ci/**"
       instructions: |
         These are CI placeholders, never real credentials. Flag any value that looks
