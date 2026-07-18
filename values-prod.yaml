@@ -69,3 +69,4 @@ userService:
   # email sent); Magic Link emails a broken link.
   # magicLinkFrontendBaseUrl: "https://TODO-set-before-go-live"
   # passwordResetFrontendBaseUrl: "https://TODO-set-before-go-live"
+  # passwordResetAdminFrontendBaseUrl: "https://TODO-set-before-go-live/admin"

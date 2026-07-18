@@ -250,12 +250,13 @@ userService:
 
   # Base URL of the deployed frontend the one-time links in the Magic Link
   # login email and the self-service password-reset email point back to.
-  # Must be overridden per environment (see values-pre-dev.yaml) — the app
+  # Must be overridden by the environment deployment values — the sample
   # default (https://app.oriso.org) does not resolve. Password reset fails
   # closed (no email sent) if left unset; Magic Link falls back to the
   # broken app default, so both must be set together.
   magicLinkFrontendBaseUrl: "https://your-domain.example.com"
   passwordResetFrontendBaseUrl: "https://your-domain.example.com"
+  passwordResetAdminFrontendBaseUrl: "https://admin.your-domain.example.com/admin"
 
   firebaseConfigurationCredentialsFilePath: "/firebase/firebase-credentials.json"
   firebaseConfigurationNotificationMessage: "Du hast eine neue Nachricht erhalten"
