@@ -241,10 +241,8 @@ userService:
   # 2FA / OTP login posture (independent from Matrix room encryption).
   # Defaults keep OTP off; the dev overlay leaves it off for fast test-user
   # creation, and prod's posture is a deliberate choice (see values-prod.yaml).
-  twoFactorAuthUserEnabled: "false"
-  twoFactorAuthConsultantEnabled: "false"
   otpAllowedForUsers: "false"
-  otpAllowedForConsultants: "false"
+  otpAllowedForConsultants: "true"
   otpAllowedForSingleTenantAdmins: "false"
   otpAllowedForTenantSuperAdmins: "false"
 

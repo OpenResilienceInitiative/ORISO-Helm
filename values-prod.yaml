@@ -53,8 +53,6 @@ userService:
   # the safe, behaviour-preserving default of "false" rather than guessed here.
   # Set the relevant flags to "true" once the policy is agreed. This is login
   # posture only and is unrelated to message/data encryption (always on).
-  twoFactorAuthUserEnabled: "false"
-  twoFactorAuthConsultantEnabled: "false"
   otpAllowedForUsers: "false"
   otpAllowedForConsultants: "false"
   otpAllowedForSingleTenantAdmins: "false"
