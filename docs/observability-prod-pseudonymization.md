@@ -164,7 +164,7 @@ yet is dropped by default, not exported by default.
 
 ## What is verified by test
 
-`tests/render_obs_p6_test.py` (run in CI via `.github/workflows/chart-validate.yml`):
+`tests/render_obs_p6_test.py` verifies:
 
 - the pipeline is fully absent (no processor, no Secret, no env var) on dev,
   pre-dev, and the prod overlay as committed today — confirming "off by

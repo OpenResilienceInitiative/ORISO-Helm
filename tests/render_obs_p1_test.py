@@ -62,7 +62,7 @@ def render(overlay: str) -> list[dict]:
         "-f",
         overlay_path,
         "-f",
-        os.path.join(CHART_DIR, "ci/placeholder-secrets.yaml"),
+        os.path.join(CHART_DIR, "secrets.yaml.default"),
     ]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:

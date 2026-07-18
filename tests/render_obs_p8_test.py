@@ -63,7 +63,7 @@ def render(*value_files: str, extra_set: list[str] | None = None) -> list[dict]:
     cmd = ["helm", "template", RELEASE, CHART_DIR, "--namespace", "caritas"]
     for vf in value_files:
         cmd += ["-f", os.path.join(CHART_DIR, vf)]
-    cmd += ["-f", os.path.join(CHART_DIR, "ci", "placeholder-secrets.yaml")]
+    cmd += ["-f", os.path.join(CHART_DIR, "secrets.yaml.default")]
     cmd += ["--set", "global.secrets.clickhousePassword=x"]
     for s in extra_set or []:
         cmd += ["--set", s]
