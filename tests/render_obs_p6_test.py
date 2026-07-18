@@ -277,9 +277,6 @@ def main() -> None:
     dev_docs = render("values.yaml.default")
     check_off_by_default(dev_docs, "dev (values.yaml.default)")
 
-    predev_docs = render("values.yaml.default", "values-pre-dev.yaml")
-    check_off_by_default(predev_docs, "pre-dev")
-
     prod_docs = render("values.yaml.default", "values-prod.yaml")
     check_off_by_default(prod_docs, "prod (values-prod.yaml) — must stay off pending sign-off")
 
@@ -296,7 +293,7 @@ def main() -> None:
     check_enabled_pipeline(enabled_docs)
 
     print("OK: OBS-P6 contract holds — pseudonymization pipeline stays off by default "
-          "on dev/pre-dev/prod; when explicitly enabled, all three pipelines (traces/"
+          "on default/prod; when explicitly enabled, all three pipelines (traces/"
           "metrics/logs) fail-closed (error_mode: propagate), pseudonymize immediately "
           "after memory_limiter, never allow-list a raw identifier verbatim, keep prod "
           "metrics free of high-cardinality labels, and source the HMAC salt from a "

@@ -56,11 +56,7 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def render(overlay: str, extra_set: list[str] | None = None) -> list[dict]:
-    overlay_path = os.path.join(CHART_DIR, overlay)
-    if not os.path.isfile(overlay_path):
-        fail(f"{overlay} is missing")
-
+def render(overlay: str | None = None, extra_set: list[str] | None = None) -> list[dict]:
     command = [
         "helm",
         "template",
@@ -69,10 +65,13 @@ def render(overlay: str, extra_set: list[str] | None = None) -> list[dict]:
         "-f",
         os.path.join(CHART_DIR, "values.yaml.default"),
         "-f",
-        overlay_path,
-        "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
     ]
+    if overlay:
+        overlay_path = os.path.join(CHART_DIR, overlay)
+        if not os.path.isfile(overlay_path):
+            fail(f"{overlay} is missing")
+        command += ["-f", overlay_path]
     for setting in extra_set or []:
         command += ["--set", setting]
     result = subprocess.run(command, capture_output=True, text=True)
@@ -127,7 +126,7 @@ def image_of(workload: dict, container: int = 0) -> str:
 
 
 def main() -> None:
-    documents = render("values-pre-dev.yaml", extra_set=SIGNOZ_TEST_SET)
+    documents = render(extra_set=SIGNOZ_TEST_SET)
     values = values_defaults()["signoz"]
 
     # --- gateway collector = SigNoz ingest layer --------------------------

@@ -18,7 +18,7 @@ exporters require the full signal-specific HTTP path, /v1/traces and
     gated by @ConditionalOnProperty with no havingValue, which Spring treats
     as satisfied by an empty string; Micrometer's OTLP metrics registry has
     its own default endpoint fallback),
-  - default/pre-dev/prod keep OTLP export disabled unless explicitly enabled
+  - default/prod keep OTLP export disabled unless explicitly enabled
     together with a deployed collector,
   - the endpoint host resolves to the same gateway service OBS-P1 deployed
     (signoz.otelCollector.fullname), not a hardcoded or divergent name.
@@ -149,17 +149,16 @@ def check_env(data: dict, service_label: str, expect_enabled: bool) -> None:
 
 
 def main() -> None:
-    predev_docs = render("values.yaml.default", "values-pre-dev.yaml")
+    default_docs = render("values.yaml.default")
     prod_docs = render("values.yaml.default", "values-prod.yaml")
     enabled_docs = render(
         "values.yaml.default",
-        "values-pre-dev.yaml",
         extra_set=["global.observability.otlpEnabled=true"],
     )
 
     for cm_name, deploy_name, label in SERVICES:
-        predev_cm = find_configmap(predev_docs, cm_name)
-        check_env(predev_cm["data"], f"pre-dev/{label}", expect_enabled=False)
+        default_cm = find_configmap(default_docs, cm_name)
+        check_env(default_cm["data"], f"default/{label}", expect_enabled=False)
 
         prod_cm = find_configmap(prod_docs, cm_name)
         check_env(prod_cm["data"], f"prod/{label}", expect_enabled=False)
@@ -167,8 +166,8 @@ def main() -> None:
         enabled_cm = find_configmap(enabled_docs, cm_name)
         check_env(enabled_cm["data"], f"explicitly-enabled/{label}", expect_enabled=True)
 
-        predev_deploy = find_deployment(predev_docs, deploy_name)
-        check_deployment_wires_configmap_keys(predev_deploy, cm_name, f"pre-dev/{label}")
+        default_deploy = find_deployment(default_docs, deploy_name)
+        check_deployment_wires_configmap_keys(default_deploy, cm_name, f"default/{label}")
 
     print("OK: OBS-P2 contract holds — all 4 backend services wire the real Spring Boot 4.0.1 "
           "OTLP properties (not the non-existent Boot-3-era names) with full /v1/traces and "

@@ -23,7 +23,7 @@ a second, separate decision after this pipeline has been reviewed.
 
 | Flag | Default | What it does |
 |---|---|---|
-| `global.observability.otlpEnabled` | `true` (dev/pre-dev), `false` (prod) | Master kill switch: do the 4 backend services export OTLP traces/metrics at all. |
+| `global.observability.otlpEnabled` | `false` by default and in prod | Master kill switch: do the 4 backend services export OTLP traces/metrics at all. |
 | `global.observability.telemetryPseudonymizationEnabled` | `false` everywhere | Adds the pseudonymization/allow-list processors to the gateway collector (`templates/signoz/templates/otel-collector-configmap.yaml`). |
 
 They are independent on purpose. Pseudonymization can be reviewed and merged
@@ -167,7 +167,7 @@ yet is dropped by default, not exported by default.
 `tests/render_obs_p6_test.py` verifies:
 
 - the pipeline is fully absent (no processor, no Secret, no env var) on dev,
-  pre-dev, and the prod overlay as committed today — confirming "off by
+  default values and the prod overlay as committed today — confirming "off by
   default" actually holds,
 - when explicitly turned on, all three transform processors exist, each with
   `error_mode: propagate`, wired immediately after `memory_limiter`,

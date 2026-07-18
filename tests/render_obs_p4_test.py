@@ -94,7 +94,7 @@ def agent_config(documents: list[dict]) -> dict:
 
 
 def main() -> None:
-    documents = render("values.yaml.default", "values-pre-dev.yaml")
+    documents = render("values.yaml.default")
 
     # --- Task 1: ClickHouse Prometheus endpoint ----------------------------
     ch_cm = resource(documents, "ConfigMap", f"{RELEASE}-clickhouse-config")
@@ -145,7 +145,7 @@ def main() -> None:
 
     # --- Task 2b: when explicitly enabled, credential-reuse contract holds -
     mysql_documents = render(
-        "values.yaml.default", "values-pre-dev.yaml",
+        "values.yaml.default",
         extra_set=["signoz.mariadbMetrics.enabled=true"],
     )
     mysql_gw_cfg = gateway_config(mysql_documents)

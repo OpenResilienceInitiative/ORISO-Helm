@@ -48,11 +48,7 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def render(overlay: str) -> list[dict]:
-    overlay_path = os.path.join(CHART_DIR, overlay)
-    if not os.path.isfile(overlay_path):
-        fail(f"{overlay} is missing")
-
+def render() -> list[dict]:
     command = [
         "helm",
         "template",
@@ -61,15 +57,13 @@ def render(overlay: str) -> list[dict]:
         "-f",
         os.path.join(CHART_DIR, "values.yaml.default"),
         "-f",
-        overlay_path,
-        "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
     ]
     for setting in SIGNOZ_TEST_SET:
         command += ["--set", setting]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
-        fail(f"chart render with {overlay} failed:\n{result.stderr}")
+        fail(f"chart render failed:\n{result.stderr}")
     return [document for document in yaml.safe_load_all(result.stdout) if isinstance(document, dict)]
 
 
@@ -86,7 +80,7 @@ def agent_config(documents: list[dict]) -> dict:
 
 
 def main() -> None:
-    documents = render("values-pre-dev.yaml")
+    documents = render()
     config = agent_config(documents)
 
     # --- receivers: hostmetrics + kubeletstats present --------------------

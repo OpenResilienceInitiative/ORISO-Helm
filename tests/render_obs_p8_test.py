@@ -177,12 +177,10 @@ def check_disabled(documents: list[dict], label: str) -> None:
 
 def main() -> None:
     # --- (1) Pre-dev, webVitalsEnabled default-true, real app/admin domains
-    # set explicitly (mirrors how Pre-Dev is actually deployed:
-    # global.domains.app/admin are set at deploy time via --set, not
-    # committed in values-pre-dev.yaml).
-    predev_docs = render(
+    # set explicitly (mirrors environment deployment values supplied outside
+    # this chart file).
+    env_docs = render(
         "values.yaml.default",
-        "values-pre-dev.yaml",
         extra_set=[
             "global.domains.app=app.oriso-dev.site",
             "global.domains.admin=admin.oriso-dev.site",
@@ -190,9 +188,9 @@ def main() -> None:
         ],
     )
     check_enabled(
-        predev_docs,
+        env_docs,
         ["https://app.oriso-dev.site", "https://admin.oriso-dev.site"],
-        "pre-dev",
+        "explicit environment domains",
     )
 
     # --- (2) Dev with SigNoz explicitly enabled: webVitalsEnabled defaults
@@ -217,12 +215,11 @@ def main() -> None:
     )
     check_disabled(prod_docs, "prod (values-prod.yaml, as committed)")
 
-    # --- (4) webVitalsEnabled explicitly false on pre-dev: both the ingress
+    # --- (4) webVitalsEnabled explicitly false: both the ingress
     # and CORS must disappear even though app/admin/signoz domains ARE set —
     # proves the flag is a real, independent kill switch, not cosmetic.
-    predev_off_docs = render(
+    env_off_docs = render(
         "values.yaml.default",
-        "values-pre-dev.yaml",
         extra_set=[
             "global.domains.app=app.oriso-dev.site",
             "global.domains.admin=admin.oriso-dev.site",
@@ -230,28 +227,27 @@ def main() -> None:
             *SIGNOZ_TEST_SET,
         ],
     )
-    check_disabled(predev_off_docs, "pre-dev with webVitalsEnabled=false")
+    check_disabled(env_off_docs, "explicit environment domains with webVitalsEnabled=false")
 
-    # --- (5) Only ONE of app/admin set on pre-dev: CORS must render with
+    # --- (5) Only ONE of app/admin set: CORS must render with
     # just that one origin (not fail, not add a placeholder for the missing
     # one) — proves each domain is independently optional, and the ingress
     # path itself is host-gated by global.domains.signoz only, not by
     # app/admin, so it still renders.
-    predev_app_only_docs = render(
+    env_app_only_docs = render(
         "values.yaml.default",
-        "values-pre-dev.yaml",
         extra_set=[
             "global.domains.app=app.oriso-dev.site",
             *SIGNOZ_TEST_SET,
         ],
     )
-    app_only_config, _ = gateway_config(predev_app_only_docs)
+    app_only_config, _ = gateway_config(env_app_only_docs)
     app_only_cors = app_only_config["receivers"]["otlp"]["protocols"]["http"].get("cors")
     if app_only_cors is None or app_only_cors["allowed_origins"] != ["https://app.oriso-dev.site"]:
-        fail(f"pre-dev with only global.domains.app set: expected cors.allowed_origins "
+        fail(f"explicit app domain only: expected cors.allowed_origins "
              f"['https://app.oriso-dev.site'], got {app_only_cors}")
-    if find(predev_app_only_docs, "Ingress", WEBVITALS_INGRESS_NAME) is None:
-        fail("pre-dev with only global.domains.app set: webvitals ingress must still "
+    if find(env_app_only_docs, "Ingress", WEBVITALS_INGRESS_NAME) is None:
+        fail("explicit app domain only: webvitals ingress must still "
              "render (gated by global.domains.signoz, not app/admin)")
 
     print("OK: OBS-P8 contract holds — signoz.example.test/v1/metrics (Exact) routes "
