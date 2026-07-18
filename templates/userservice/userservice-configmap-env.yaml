@@ -46,6 +46,16 @@ data:
   LIVE_SERVICE_API_URL: "http://liveservice.{{ .Release.Namespace }}:8080"
   CONSULTING_TYPE_SERVICE_API_URL: "http://consultingtypeservice.{{ .Release.Namespace }}:8080"
   APPOINTMENT_SERVICE_API_URL: "http://appointmentservice.{{ .Release.Namespace }}:8080"
+  # Frontend base URL for the one-time links in the Magic Link login email
+  # and the self-service password-reset email. Omitted entirely (rather than
+  # rendered empty) when an environment hasn't set it, so the app's own
+  # @Value fallback behaviour applies instead of an empty string overriding it.
+  {{- if .Values.userService.magicLinkFrontendBaseUrl }}
+  MAGIC_LINK_FRONTEND_BASE_URL: {{ .Values.userService.magicLinkFrontendBaseUrl | quote }}
+  {{- end }}
+  {{- if .Values.userService.passwordResetFrontendBaseUrl }}
+  PASSWORD_RESET_FRONTEND_BASE_URL: {{ .Values.userService.passwordResetFrontendBaseUrl | quote }}
+  {{- end }}
   # CSRF
   CSRF_HEADER_PROPERTY: {{ .Values.global.csrfHeaderProperty}}
   CSRF_WHITELIST_HEADER_PROPERTY: {{ .Values.global.csrfWhitelistHeaderProperty}}

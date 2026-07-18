@@ -78,6 +78,17 @@ def main() -> None:
     if userservice_config.get("MATRIX_ENCRYPTION_ENABLED") != "true":
         fail("UserService MATRIX_ENCRYPTION_ENABLED is not true in PreDev")
 
+    # Magic Link login and password-reset emails link back to this frontend URL.
+    # The chart default (https://app.oriso.org) does not resolve, so PreDev must
+    # override it — password reset otherwise fails closed (no email sent) and
+    # Magic Link emails a broken link. See ORISO-UserService PasswordResetService
+    # / MagicLinkLoginService.
+    PREDEV_FRONTEND_URL = "https://app.oriso-dev.site"
+    if userservice_config.get("MAGIC_LINK_FRONTEND_BASE_URL") != PREDEV_FRONTEND_URL:
+        fail("UserService MAGIC_LINK_FRONTEND_BASE_URL is not the PreDev frontend URL")
+    if userservice_config.get("PASSWORD_RESET_FRONTEND_BASE_URL") != PREDEV_FRONTEND_URL:
+        fail("UserService PASSWORD_RESET_FRONTEND_BASE_URL is not the PreDev frontend URL")
+
     userservice = resource(documents, "Deployment", "userservice")
     environment = userservice["spec"]["template"]["spec"]["containers"][0]["env"]
     encryption_variable = next(
