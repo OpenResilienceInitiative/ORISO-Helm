@@ -105,7 +105,11 @@ global:
 
   keycloak:
     realm: "your-realm"
-    authServerUrl: "https://your-domain.example.com/auth"
+    # NOTE: modern Keycloak (17+) serves at the root — no /auth prefix. Only append
+    # /auth when running a legacy Keycloak or an /auth-rewriting ingress. A wrong
+    # authServerUrl+otpUrl silently disables 2FA (the UserService's otp-config call
+    # fails and the profile toggle is hidden).
+    authServerUrl: "https://auth.your-domain.example.com"
     otpUrl: "/realms/your-realm/otp-config"
     openidConnectUrl: "/realms/your-realm/protocol/openid-connect"
     loginSuffix: "/token"
@@ -237,6 +241,16 @@ userService:
   # Rollout-safe server-side switch for encrypted Matrix room creation.
   # Environment overlays opt in only after their stable homeserver identity is ready.
   matrixEncryptionEnabled: "false"
+
+  # 2FA/OTP self-service in the profile (Settings tab). When true, the UserService
+  # exposes the OTP state via /users/data and the frontend shows the 2FA toggle.
+  # Requires the oriso-keycloak image (bundles the otp-config SPI) and a correct
+  # global.keycloak.authServerUrl/otpUrl (modern Keycloak has NO /auth prefix —
+  # a wrong URL makes the backend hide 2FA silently).
+  otpAllowedForUsers: "false"
+  otpAllowedForConsultants: "true"
+  otpAllowedForSingleTenantAdmins: "false"
+  otpAllowedForTenantSuperAdmins: "false"
 
   # 2FA / OTP login posture (independent from Matrix room encryption).
   # Defaults keep OTP off; the dev overlay leaves it off for fast test-user
