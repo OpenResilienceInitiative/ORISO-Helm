@@ -141,7 +141,7 @@ ConfigMap). This is a **keyed/salted hash** — an attacker without the salt
 cannot dictionary/rainbow-table their way back to the real ID — but it is
 not textbook HMAC-SHA256 (which requires two padded hash passes over
 inner/outer keys). The OTTL function library shipped with
-`signoz-otel-collector` v0.144.5 (pinned in `values.yaml.default`) has no
+`signoz-otel-collector` v0.144.6 (pinned in `values.yaml.default`) has no
 literal HMAC construction, only `SHA256`/`Concat`. **If pkg/ottl ever adds a
 real HMAC function, switch to it** rather than the current
 salt-then-hash construction.

@@ -35,7 +35,7 @@ spec:
     spec:
       serviceAccountName: {{ include "signoz.otelCollector.fullname" . }}
       initContainers:
-      # Upstream (chart signoz-0.132.2) gates the collector on the schema
+      # Upstream (chart signoz-0.133.0) gates the collector on the schema
       # being current: "migrate sync check" fails (and the pod retries)
       # until the schema-migrator Job has run — no extra RBAC needed.
       {{- if .Values.signoz.schemaMigrator.enabled }}

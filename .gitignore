@@ -12,3 +12,7 @@ test-data/test-users.json
 # age private keys, wherever they land
 *.age
 keys.txt
+
+# local Python validation cache
+__pycache__/
+.pytest_cache/

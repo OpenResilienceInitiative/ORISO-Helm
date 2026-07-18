@@ -26,8 +26,8 @@ directly via the clickhousetraces / signozclickhousemetrics /
 clickhouselogsexporter exporters and registers with the SigNoz backend over
 opamp (ws://signoz:4320).
 
-This config follows the upstream reference paired with SigNoz v0.132.2
-(charts tag signoz-0.132.2; the exporter/pipeline schema is unchanged since
+This config follows the upstream reference paired with SigNoz v0.133.0
+(charts tag signoz-0.133.0; the exporter/pipeline schema is unchanged since
 signoz-0.105.1), minus the jaeger/httplog receivers we do not use, plus the
 memory_limiter (K8-L02) and k8sattributes (traces/metrics only) processors.
 */}}
@@ -161,7 +161,7 @@ data:
             - k8s.statefulset.name
             - k8s.daemonset.name
             - k8s.node.name
-      # APM RED metrics derived from spans (upstream signoz-0.132.2 config).
+      # APM RED metrics derived from spans (upstream signoz-0.133.0 config).
       signozspanmetrics/delta:
         metrics_exporter: signozclickhousemetrics
         latency_histogram_buckets: [100us, 1ms, 2ms, 6ms, 10ms, 50ms, 100ms, 250ms, 500ms, 1000ms, 1400ms, 2000ms, 5s, 10s, 20s, 40s, 60s]
@@ -221,7 +221,7 @@ data:
               # PSEUDONYM_HMAC_KEY) — not a bare hash, so it cannot be
               # dictionary/rainbow-table attacked back to the real ID by
               # anyone without the salt. NOTE: the OTTL function library
-              # shipped in signoz-otel-collector v0.144.5 has no literal
+              # shipped in signoz-otel-collector v0.144.6 has no literal
               # HMAC construction (no padded inner/outer key), so this is
               # SHA-256(id || ":" || secret) rather than textbook
               # HMAC-SHA256. It is still a *keyed* hash — see the doc for

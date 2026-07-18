@@ -88,7 +88,7 @@ that point OTLP traffic at the signoz service.
 {{/*
 Env for the signoz-otel-collector "migrate ..." subcommands (schema-migrator
 Job and the gateway's sync-check initContainer). Mirrors upstream
-snippet.telemetryStoreMigrator-env (chart signoz-0.132.2): ClickHouse
+snippet.telemetryStoreMigrator-env (chart signoz-0.133.0): ClickHouse
 credentials plus the SIGNOZ_OTEL_COLLECTOR_* migration settings.
 LC-M03: the password stays a secretKeyRef.
 */}}
