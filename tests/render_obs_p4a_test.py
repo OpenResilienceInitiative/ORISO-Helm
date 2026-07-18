@@ -36,6 +36,11 @@ import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RELEASE = "oriso"
+SIGNOZ_TEST_SET = [
+    "signoz.enabled=true",
+    "signoz.otelAgent.enabled=true",
+    "signoz.otelAgent.logsNamespace=caritas",
+]
 
 
 def fail(message: str) -> None:
@@ -60,6 +65,8 @@ def render(overlay: str) -> list[dict]:
         "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
     ]
+    for setting in SIGNOZ_TEST_SET:
+        command += ["--set", setting]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
         fail(f"chart render with {overlay} failed:\n{result.stderr}")

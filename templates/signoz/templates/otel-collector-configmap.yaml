@@ -60,7 +60,7 @@ data:
             {{- if $webVitalsCorsEnabled }}
             # OBS-P8: lets the Frontend/Admin browser bundles POST Web Vitals
             # (LCP/CLS/INP/TTFB/FCP) OTLP metrics directly to this receiver
-            # via the signoz.oriso-dev.site/v1/metrics ingress path
+            # via the configured signoz.* /v1/metrics ingress path
             # (templates/nginx/signoz-ingress.yaml), per SigNoz's own
             # self-hosted RUM guidance
             # (signoz.io/docs/frontend-monitoring/web-vitals-with-metrics).

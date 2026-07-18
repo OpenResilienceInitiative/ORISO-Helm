@@ -36,7 +36,7 @@ global:
     # allow-list (otel-collector-configmap.yaml, scoped to global.domains.app
     # / global.domains.admin — Frontend and Admin each live on their own
     # subdomain on this deployment, not a single shared domain) and the
-    # signoz.oriso-dev.site/v1/metrics ingress path that routes the browser's
+    # signoz.* /v1/metrics ingress path that routes the browser's
     # direct OTLP POST to that receiver (templates/nginx/signoz-ingress.yaml).
     # Deliberately its own flag, separate from signoz.enabled/
     # signoz.ingress.enabled, so RUM ingest can be turned off independently
@@ -315,7 +315,7 @@ healthDashboard:
 # (Settings -> General -> retention period per signal, stored as ClickHouse
 # TTLs via the SigNoz API). Recommended: logs/traces 7-14d, metrics 30d.
 signoz:
-  enabled: true
+  enabled: false
   image:
     repository: signoz/signoz
     tag: "v0.132.2"

@@ -51,6 +51,11 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COLLECTOR_CONFIGMAP_NAME = "oriso-platform-otel-collector"
 COLLECTOR_DEPLOYMENT_NAME = "oriso-platform-otel-collector"
 COLLECTOR_SECRET_NAME = "oriso-platform-otel-collector-pseudonymization"
+SIGNOZ_TEST_SET = [
+    "signoz.enabled=true",
+    "signoz.otelAgent.enabled=true",
+    "signoz.otelAgent.logsNamespace=caritas",
+]
 
 TRANSFORM_PROCESSORS = (
     "transform/pseudonymize_traces",
@@ -113,6 +118,8 @@ def render(*value_files: str, extra_set: list[str] | None = None) -> list[dict]:
         cmd += ["-f", os.path.join(CHART_DIR, vf)]
     cmd += ["-f", os.path.join(CHART_DIR, "secrets.yaml.default")]
     cmd += ["--set", "global.secrets.clickhousePassword=x"]
+    for kv in SIGNOZ_TEST_SET:
+        cmd += ["--set", kv]
     if extra_set:
         for kv in extra_set:
             cmd += ["--set", kv]

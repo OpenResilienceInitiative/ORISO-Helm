@@ -7,7 +7,7 @@ Full context: https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/62
 The design follows SigNoz's own self-hosted RUM guidance
 (signoz.io/docs/frontend-monitoring/web-vitals-with-metrics): the browser
 POSTs OTLP metrics directly to the gateway otel-collector's OTLP-HTTP
-receiver at `/v1/metrics`, reached over the existing signoz.oriso-dev.site
+receiver at `/v1/metrics`, reached over an explicitly configured signoz.*
 dev-tooling subdomain (ADR-011 exception), with CORS scoped to
 global.domains.app / global.domains.admin. This locks the invariants that
 make that ingest path both reachable and safely bounded:
@@ -52,6 +52,13 @@ COLLECTOR_CONFIGMAP_NAME = f"{RELEASE}-otel-collector"
 COLLECTOR_SERVICE_NAME = f"{RELEASE}-otel-collector"
 WEBVITALS_INGRESS_NAME = "signoz-webvitals-ingress"
 UI_INGRESS_NAME = "signoz-ingress"
+TEST_SIGNOZ_DOMAIN = "signoz.example.test"
+SIGNOZ_TEST_SET = [
+    "signoz.enabled=true",
+    "signoz.ingress.enabled=true",
+    f"global.domains.signoz={TEST_SIGNOZ_DOMAIN}",
+]
+SIGNOZ_MANIFEST_TEST_SET = ["signoz.enabled=true"]
 
 
 def fail(message: str) -> None:
@@ -179,6 +186,7 @@ def main() -> None:
         extra_set=[
             "global.domains.app=app.oriso-dev.site",
             "global.domains.admin=admin.oriso-dev.site",
+            *SIGNOZ_TEST_SET,
         ],
     )
     check_enabled(
@@ -187,11 +195,11 @@ def main() -> None:
         "pre-dev",
     )
 
-    # --- (2) Dev (values.yaml.default only): webVitalsEnabled defaults true,
-    # but neither global.domains.app nor .admin nor .signoz is set there —
-    # nothing should render at all (no ingress, no CORS), never a partial or
-    # placeholder origin.
-    dev_docs = render("values.yaml.default")
+    # --- (2) Dev with SigNoz explicitly enabled: webVitalsEnabled defaults
+    # true, but neither global.domains.app nor .admin nor .signoz is set
+    # there — nothing should render at all (no ingress, no CORS), never a
+    # partial or placeholder origin.
+    dev_docs = render("values.yaml.default", extra_set=SIGNOZ_MANIFEST_TEST_SET)
     if find(dev_docs, "Ingress", WEBVITALS_INGRESS_NAME) is not None:
         fail("dev (values.yaml.default): webvitals ingress rendered without "
              "global.domains.signoz being set")
@@ -202,7 +210,11 @@ def main() -> None:
              f"global.domains.app/admin being set: {dev_cors}")
 
     # --- (3) Prod overlay exactly as committed: off by default. ------------
-    prod_docs = render("values.yaml.default", "values-prod.yaml")
+    prod_docs = render(
+        "values.yaml.default",
+        "values-prod.yaml",
+        extra_set=SIGNOZ_TEST_SET,
+    )
     check_disabled(prod_docs, "prod (values-prod.yaml, as committed)")
 
     # --- (4) webVitalsEnabled explicitly false on pre-dev: both the ingress
@@ -215,6 +227,7 @@ def main() -> None:
             "global.domains.app=app.oriso-dev.site",
             "global.domains.admin=admin.oriso-dev.site",
             "global.observability.webVitalsEnabled=false",
+            *SIGNOZ_TEST_SET,
         ],
     )
     check_disabled(predev_off_docs, "pre-dev with webVitalsEnabled=false")
@@ -227,7 +240,10 @@ def main() -> None:
     predev_app_only_docs = render(
         "values.yaml.default",
         "values-pre-dev.yaml",
-        extra_set=["global.domains.app=app.oriso-dev.site"],
+        extra_set=[
+            "global.domains.app=app.oriso-dev.site",
+            *SIGNOZ_TEST_SET,
+        ],
     )
     app_only_config, _ = gateway_config(predev_app_only_docs)
     app_only_cors = app_only_config["receivers"]["otlp"]["protocols"]["http"].get("cors")
@@ -238,7 +254,7 @@ def main() -> None:
         fail("pre-dev with only global.domains.app set: webvitals ingress must still "
              "render (gated by global.domains.signoz, not app/admin)")
 
-    print("OK: OBS-P8 contract holds — signoz.oriso-dev.site/v1/metrics (Exact) routes "
+    print("OK: OBS-P8 contract holds — signoz.example.test/v1/metrics (Exact) routes "
           "directly to the otel-collector Service on port 4318 (never the SigNoz UI "
           "service), carries its own proxy-body-size/limit-rps abuse-guard annotations, "
           "and the collector's otlp http receiver gets a CORS allow-list built from "

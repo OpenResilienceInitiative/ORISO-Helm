@@ -24,8 +24,8 @@ duplicating the workloads already running on Pre-Dev:
     plaintext env or a ConfigMap (LC-M03),
   - ClickHouse keeps the immutable identity of the running StatefulSet
     (selector app=clickhouse, serviceName <release>-clickhouse, 50Gi PVC),
-  - the SigNoz ingress renders for Pre-Dev (signoz.oriso-dev.site) with an
-    explicit metadata.namespace, and NOT for prod.
+  - the SigNoz ingress renders only when explicitly enabled with a host, and
+    does NOT render from the committed prod overlay.
 """
 
 from __future__ import annotations
@@ -39,7 +39,16 @@ import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RELEASE = "oriso"
-PREDEV_SIGNOZ_DOMAIN = "signoz.oriso-dev.site"
+TEST_SIGNOZ_DOMAIN = "signoz.example.test"
+TEST_SIGNOZ_TLS_SECRET = "signoz-test-tls"
+SIGNOZ_TEST_SET = [
+    "signoz.enabled=true",
+    "signoz.ingress.enabled=true",
+    f"global.domains.signoz={TEST_SIGNOZ_DOMAIN}",
+    f"signoz.ingress.tlsSecretName={TEST_SIGNOZ_TLS_SECRET}",
+    "signoz.otelAgent.enabled=true",
+    "signoz.otelAgent.logsNamespace=caritas",
+]
 
 
 def fail(message: str) -> None:
@@ -47,7 +56,7 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def render(overlay: str) -> list[dict]:
+def render(overlay: str, extra_set: list[str] | None = None) -> list[dict]:
     overlay_path = os.path.join(CHART_DIR, overlay)
     if not os.path.isfile(overlay_path):
         fail(f"{overlay} is missing")
@@ -64,6 +73,8 @@ def render(overlay: str) -> list[dict]:
         "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
     ]
+    for setting in extra_set or []:
+        command += ["--set", setting]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
         fail(f"chart render with {overlay} failed:\n{result.stderr}")
@@ -116,7 +127,7 @@ def image_of(workload: dict, container: int = 0) -> str:
 
 
 def main() -> None:
-    documents = render("values-pre-dev.yaml")
+    documents = render("values-pre-dev.yaml", extra_set=SIGNOZ_TEST_SET)
     values = values_defaults()["signoz"]
 
     # --- gateway collector = SigNoz ingest layer --------------------------
@@ -299,13 +310,13 @@ def main() -> None:
     if not any(m["mountPath"] == "/etc/clickhouse-server/config.d/cluster.xml" for m in ch_mounts):
         fail("ClickHouse StatefulSet must mount the cluster/keeper drop-in into config.d")
 
-    # --- ingress: on for Pre-Dev, off for prod ----------------------------
+    # --- ingress: on only when explicitly configured, off for prod ---------
     ingress = resource(documents, "Ingress", "signoz-ingress")
-    if ingress["spec"]["rules"][0]["host"] != PREDEV_SIGNOZ_DOMAIN:
-        fail("Pre-Dev signoz-ingress must serve signoz.oriso-dev.site")
+    if ingress["spec"]["rules"][0]["host"] != TEST_SIGNOZ_DOMAIN:
+        fail("signoz-ingress must serve the explicitly configured host")
     tls = ingress["spec"]["tls"][0]
-    if tls["secretName"] != "signoz-oriso-site-tls":
-        fail("Pre-Dev signoz-ingress must reuse the live TLS secret signoz-oriso-site-tls")
+    if tls["secretName"] != TEST_SIGNOZ_TLS_SECRET:
+        fail("signoz-ingress must use the explicitly configured TLS secret")
     annotations = ingress["metadata"].get("annotations", {})
     if annotations.get("cert-manager.io/cluster-issuer") != "letsencrypt-prod":
         fail("signoz-ingress must use the letsencrypt-prod cluster-issuer like the other ingresses")

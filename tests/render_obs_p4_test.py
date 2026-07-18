@@ -48,6 +48,11 @@ import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RELEASE = "oriso-platform"
+SIGNOZ_TEST_SET = [
+    "signoz.enabled=true",
+    "signoz.otelAgent.enabled=true",
+    "signoz.otelAgent.logsNamespace=caritas",
+]
 
 
 def fail(message: str) -> None:
@@ -61,6 +66,8 @@ def render(*value_files: str, extra_set: list[str] | None = None) -> list[dict]:
         cmd += ["-f", os.path.join(CHART_DIR, vf)]
     cmd += ["-f", os.path.join(CHART_DIR, "secrets.yaml.default")]
     cmd += ["--set", "global.secrets.clickhousePassword=x"]
+    for s in SIGNOZ_TEST_SET:
+        cmd += ["--set", s]
     for s in extra_set or []:
         cmd += ["--set", s]
     result = subprocess.run(cmd, capture_output=True, text=True)
