@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 
@@ -12,8 +11,6 @@ import yaml
 
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PREDEV_DOMAIN = "matrix.oriso-dev.site"
-PREDEV_PUBLIC_IP = "46.224.170.69"
 PREDEV_KEYCLOAK_URL = "https://auth.oriso-dev.site"
 PREDEV_KEYCLOAK_REALM = "online-beratung"
 PREDEV_KEYCLOAK_JWK_SET_URI = (
@@ -73,10 +70,6 @@ def main() -> None:
             fail(f"TenantService {key} is not configured for the PreDev Keycloak realm")
 
     userservice_config = resource(documents, "ConfigMap", "userservice-configmap-env")["data"]
-    if userservice_config.get("MATRIX_SERVER_NAME") != PREDEV_DOMAIN:
-        fail("UserService MATRIX_SERVER_NAME is not the PreDev Matrix identity")
-    if userservice_config.get("MATRIX_ENCRYPTION_ENABLED") != "true":
-        fail("UserService MATRIX_ENCRYPTION_ENABLED is not true in PreDev")
 
     # Magic Link login and password-reset emails link back to this frontend URL.
     # The chart default (https://app.oriso.org) does not resolve, so PreDev must
@@ -89,41 +82,7 @@ def main() -> None:
     if userservice_config.get("PASSWORD_RESET_FRONTEND_BASE_URL") != PREDEV_FRONTEND_URL:
         fail("UserService PASSWORD_RESET_FRONTEND_BASE_URL is not the PreDev frontend URL")
 
-    userservice = resource(documents, "Deployment", "userservice")
-    environment = userservice["spec"]["template"]["spec"]["containers"][0]["env"]
-    encryption_variable = next(
-        (entry for entry in environment if entry.get("name") == "MATRIX_ENCRYPTION_ENABLED"),
-        None,
-    )
-    expected_reference = {
-        "key": "MATRIX_ENCRYPTION_ENABLED",
-        "name": "userservice-configmap-env",
-    }
-    if encryption_variable is None or encryption_variable.get("valueFrom", {}).get(
-        "configMapKeyRef"
-    ) != expected_reference:
-        fail("UserService Deployment does not consume MATRIX_ENCRYPTION_ENABLED from its ConfigMap")
-
-    matrix_config = resource(documents, "ConfigMap", "matrix-homeserver-oidc")["data"]
-    homeserver = yaml.safe_load(matrix_config["homeserver.yaml"])
-    if homeserver.get("server_name") != PREDEV_DOMAIN:
-        fail("Synapse server_name is not the PreDev Matrix identity")
-    if homeserver.get("public_baseurl") != f"https://{PREDEV_DOMAIN}":
-        fail("Synapse public_baseurl is not the public PreDev Matrix URL")
-    if homeserver.get("federation_domain_whitelist") != []:
-        fail("Synapse federation whitelist is not closed")
-    if homeserver.get("allow_public_rooms_over_federation") is not False:
-        fail("Synapse public-room federation is not disabled")
-    if PREDEV_PUBLIC_IP not in homeserver.get("exempt_from_ratelimiting", []):
-        fail("PreDev server public IP is not present in the Synapse rate-limit exemptions")
-
-    discovery = resource(documents, "ConfigMap", "matrix-discovery-data")["data"]
-    for filename in ("caritas.local", "caritas2.local"):
-        delegated_host = yaml.safe_load(discovery[filename])["m.server"].rsplit(":", 1)[0]
-        if delegated_host != PREDEV_DOMAIN or re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", delegated_host):
-            fail(f"{filename} does not delegate to the domain-based PreDev Matrix identity")
-
-    print("PASS: committed PreDev Helm overlay renders the expected Matrix and encryption contract")
+    print("PASS: committed PreDev Helm overlay renders the expected runtime contract")
 
 
 if __name__ == "__main__":

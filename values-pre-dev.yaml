@@ -4,9 +4,6 @@
 #   helm upgrade --install oriso ./ -n oriso \
 #     -f values.yaml -f values-pre-dev.yaml -f secrets.yaml
 #
-# Matrix identity is immutable inside MXIDs and room IDs. Pre-Dev therefore owns
-# one stable DNS identity from its first clean homeserver start (ADR-005).
-
 global:
   # Keycloak 26 is served without the legacy `/auth` context path. The base
   # chart intentionally contains example values, so every authentication
@@ -19,11 +16,8 @@ global:
   external:
     keycloakURL: "https://auth.oriso-dev.site"
   domains:
-    matrix: "matrix.oriso-dev.site"
     # Approved dev-tooling subdomain exception to ADR-011 (like matrix.*).
     signoz: "signoz.oriso-dev.site"
-  matrix:
-    matrixServerName: "matrix.oriso-dev.site"
   keycloak:
     realm: "online-beratung"
     authServerUrl: "https://auth.oriso-dev.site"
@@ -39,17 +33,7 @@ online-counseling-keycloak:
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
   imageVersion: "26.6.3-otp"
 
-matrix:
-  synapseServerName: "matrix.oriso-dev.site"
-  matrixServerName: "matrix.oriso-dev.site"
-  matrixApiUrl: "https://matrix.oriso-dev.site"
-  serverPublicIp: "46.224.170.69"
-
 userService:
-  # Enables encrypted Matrix room creation only after the clean Pre-Dev
-  # homeserver is configured with the stable identity above.
-  matrixEncryptionEnabled: "true"
-
   # 2FA/OTP on Pre-Dev: counsellors and admins may set up OTP in the app
   # (requires the oriso-keycloak image above). Askers stay off for now —
   # product decision pending (see 2FA plan doc in the ORISO workspace).
