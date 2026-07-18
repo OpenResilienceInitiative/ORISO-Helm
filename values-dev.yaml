@@ -37,3 +37,4 @@ userService:
   # no email sent at all; Magic Link emails a broken link).
   # magicLinkFrontendBaseUrl: "https://TODO-confirm-dev-frontend-domain"
   # passwordResetFrontendBaseUrl: "https://TODO-confirm-dev-frontend-domain"
+  # passwordResetAdminFrontendBaseUrl: "https://TODO-confirm-dev-admin-domain/admin"
