@@ -1,0 +1,109 @@
+{{- if .Values.mediaScanner.enabled }}
+# WP-5 (epic ORISO-Admin#366, ADR-014): matrix-content-scanner sits in front of
+# media downloads. A client only receives a file after the scanner clears it;
+# the actual verdict comes from the scan script below, which chains ClamAV (virus)
+# and a Mistral vision check (nudity / harmful content). Fail-closed everywhere:
+# any unreachable/uncertain/errored check exits non-zero, which the scanner
+# treats as "do not release" — the file then only sits in the media repo,
+# undownloadable, exactly as decided in the grilling session.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: media-scanner-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: media-scanner
+data:
+  config.yaml: |
+    # NOTE: validate these keys against the pinned matrix-content-scanner image
+    # ({{ .Values.mediaScanner.image }}) before promoting past the PoC — the
+    # upstream config schema evolves between releases.
+    server:
+      host: 0.0.0.0
+      port: 8080
+    scan:
+      # The scanner runs this script once per media file. A zero exit code
+      # releases the file; any non-zero exit blocks it (fail-closed).
+      script: /scripts/scan.sh
+      # Never serve a file whose scan failed or timed out.
+      removal_only_on_clean: true
+      temp_directory: /tmp/mcs
+    crypto:
+      # Encrypted-media support (Matrix E2EE is ON, see chat rebuild epic): the
+      # scanner is handed the decryption key per request so it can inspect the
+      # plaintext, then discards it. Keys live in the mounted secret.
+      pickle_path: /crypto/mcs.pickle
+      pickle_key_path: /crypto/pickle.key
+    result_cache:
+      max_size: 1024
+      ttl: 3600
+  scan.sh: |
+    #!/usr/bin/env sh
+    # Fail-closed media scan (ADR-014). $1 = path to the decrypted media file.
+    # Exit 0 = clean/allow, non-zero = block. ANY error path blocks.
+    set -u
+    FILE="$1"
+    if [ -z "$FILE" ] || [ ! -s "$FILE" ]; then
+      echo "scan: missing or empty file -> block" >&2
+      exit 1
+    fi
+
+    # 1) Virus scan via the ClamAV sidecar (clamd on localhost). A non-zero
+    #    clamdscan exit means infected OR scan error -> block either way.
+    if ! clamdscan --no-summary --stdout "$FILE" >/dev/null 2>&1; then
+      echo "scan: clamav flagged or errored -> block" >&2
+      exit 1
+    fi
+
+    # 2) AI content check (nudity / harmful) — only for images, and only when
+    #    the AI family is switched on for the tenant/chat type. The wrapper
+    #    below is fail-closed: unreachable, timeout, non-2xx, or an unparseable
+    #    answer all exit non-zero.
+    if [ "{{ .Values.mediaScanner.aiCheck.enabled }}" = "true" ]; then
+      MIME=$(head -c 32 "$FILE" | file --mime-type -b - 2>/dev/null || echo unknown)
+      case "$MIME" in
+        image/*)
+          if ! /scripts/ai-check.sh "$FILE"; then
+            echo "scan: ai check flagged or failed -> block" >&2
+            exit 1
+          fi
+          ;;
+      esac
+    fi
+
+    echo "scan: clean -> allow" >&2
+    exit 0
+  ai-check.sh: |
+    #!/usr/bin/env sh
+    # Mistral vision harmful/nudity check, fail-closed. Exit 0 = safe, else block.
+    # PoC: EU provider, zero-retention header; recorded as a KDG/AVV sub-processor
+    # (docs/media-scanner-poc.md). This script is the swap point for a later
+    # self-hosted model — nothing else in the pipeline changes.
+    set -u
+    FILE="$1"
+    API_KEY=$(cat /secrets/mistral-api-key 2>/dev/null || echo "")
+    if [ -z "$API_KEY" ]; then
+      echo "ai-check: no API key -> block" >&2
+      exit 1
+    fi
+    B64=$(base64 -w0 "$FILE" 2>/dev/null || base64 "$FILE" | tr -d '\n')
+    RESP=$(curl -sS --max-time "{{ .Values.mediaScanner.aiCheck.timeoutSeconds }}" \
+      -H "Authorization: Bearer ${API_KEY}" \
+      -H "Content-Type: application/json" \
+      -H "X-Zero-Retention: true" \
+      -X POST "{{ .Values.mediaScanner.aiCheck.endpoint }}" \
+      -d "{\"model\":\"{{ .Values.mediaScanner.aiCheck.model }}\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Answer with exactly SAFE or UNSAFE. UNSAFE = nudity, sexual, or otherwise harmful imagery.\"},{\"type\":\"image_url\",\"image_url\":\"data:image/jpeg;base64,${B64}\"}]}]}" \
+      2>/dev/null)
+    # Any transport failure -> block (fail-closed).
+    if [ -z "$RESP" ]; then
+      echo "ai-check: no/timed-out response -> block" >&2
+      exit 1
+    fi
+    VERDICT=$(printf '%s' "$RESP" | tr '[:lower:]' '[:upper:]')
+    # Only an explicit SAFE without UNSAFE releases the file.
+    case "$VERDICT" in
+      *UNSAFE*) echo "ai-check: UNSAFE -> block" >&2; exit 1 ;;
+      *SAFE*)   exit 0 ;;
+      *)        echo "ai-check: unparseable answer -> block" >&2; exit 1 ;;
+    esac
+{{- end }}
