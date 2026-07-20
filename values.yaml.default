@@ -131,6 +131,49 @@ matrix:
 
 
 
+
+# ---------- Media security (WP-5, epic ORISO-Admin#366) ---------------------------------------------------------
+
+# WP-5: matrix-content-scanner in front of media downloads (ADR-014). Chains
+# ClamAV (virus) + a Mistral vision check (nudity/harmful), fail-closed: an
+# unchecked/failed file is never released. OFF by default — a PoC that must be
+# enabled per environment after the images and the Mistral sub-processor are
+# signed off (KDG/AVV). Independent of the per-tenant featureMediaAiScan* flag,
+# which gates whether the app asks the scanner for an AI verdict at all.
+mediaScanner:
+  enabled: false
+  # Pin a real, validated tag before promoting past the PoC.
+  image: "ghcr.io/matrix-org/matrix-content-scanner:latest"
+  clamavImage: "clamav/clamav:latest"
+  # Where the scanner fetches the original media from (Synapse media repo).
+  matrixApiUrl: "http://matrix-synapse:8008"
+  aiCheck:
+    enabled: false
+    endpoint: "https://api.mistral.ai/v1/chat/completions"
+    model: "pixtral-12b-2409"
+    timeoutSeconds: 20
+    # Supply the key out-of-band in real environments:
+    #   existingSecret: my-sealed-secret   (key: mistral-api-key)
+    # The inline apiKey + createSecret path is for local/PoC only.
+    existingSecret: ""
+    createSecret: false
+    apiKey: ""
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  clamavResources:
+    requests:
+      cpu: "200m"
+      memory: "1Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+
+
 # ---------- Infrastructure Services ----------------------------------------------------------------------------------
 
 admin:

@@ -1,0 +1,90 @@
+{{- if .Values.mediaScanner.enabled }}
+# matrix-content-scanner + ClamAV sidecar (WP-5, ADR-014). The scanner reaches
+# clamd on localhost:3310; the scan script is fail-closed (see the configmap).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: media-scanner
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: media-scanner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: media-scanner
+  template:
+    metadata:
+      labels:
+        app: media-scanner
+    spec:
+      containers:
+        - name: content-scanner
+          image: {{ .Values.mediaScanner.image | quote }}
+          imagePullPolicy: IfNotPresent
+          args: ["-c", "/config/config.yaml"]
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            - name: MCS_DOWNSTREAM_BASE_URL
+              value: {{ .Values.mediaScanner.matrixApiUrl | quote }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: scripts
+              mountPath: /scripts
+            {{- if .Values.mediaScanner.aiCheck.enabled }}
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp/mcs
+          resources:
+            {{- toYaml .Values.mediaScanner.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+        - name: clamav
+          image: {{ .Values.mediaScanner.clamavImage | quote }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3310
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.mediaScanner.clamavResources | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: 3310
+            # ClamAV loads its signature DB on boot; give it time before ready.
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 10
+      volumes:
+        - name: config
+          configMap:
+            name: media-scanner-config
+            items:
+              - key: config.yaml
+                path: config.yaml
+        - name: scripts
+          configMap:
+            name: media-scanner-config
+            defaultMode: 0555
+            items:
+              - key: scan.sh
+                path: scan.sh
+              - key: ai-check.sh
+                path: ai-check.sh
+        {{- if .Values.mediaScanner.aiCheck.enabled }}
+        - name: secrets
+          secret:
+            secretName: {{ .Values.mediaScanner.aiCheck.existingSecret | default "media-scanner-secrets" | quote }}
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+{{- end }}
