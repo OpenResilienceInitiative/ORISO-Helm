@@ -420,6 +420,26 @@ spec:
                 configMapKeyRef:
                   key: SPRING_LIQUIBASE_ENABLED
                   name: userservice-configmap-env
+            - name: SPRING_DATA_REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_DATA_REDIS_HOST
+                  name: userservice-configmap-env
+            - name: SPRING_DATA_REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_DATA_REDIS_PORT
+                  name: userservice-configmap-env
+            - name: SPRING_DATA_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: REDIS_DEFAULT_PASS
+                  name: redis-secret
+            - name: CONSULTANT_AVAILABILITY_REDIS_TTL_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  key: CONSULTANT_AVAILABILITY_REDIS_TTL_SECONDS
+                  name: userservice-configmap-env
             - name: MATRIX_API_URL
               valueFrom:
                 configMapKeyRef:

@@ -100,6 +100,11 @@ data:
   LOGSTASH_HOST: {{ .Values.global.logstashHost }}
   FEATURE_APPOINTMENT_ENABLED: "false"
   FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED: {{ .Values.global.multitenancyWithSingleDomainEnabled | quote }}
+  # Shared consultant availability lease store. The password remains in the
+  # existing redis-secret and is referenced directly by the Deployment.
+  SPRING_DATA_REDIS_HOST: "redis"
+  SPRING_DATA_REDIS_PORT: "6379"
+  CONSULTANT_AVAILABILITY_REDIS_TTL_SECONDS: {{ .Values.userService.consultantAvailabilityRedisTtlSeconds | default 120 | quote }}
   MATRIX_API_URL: {{ .Values.matrix.matrixApiUrl }}
   MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}
   MATRIX_ENCRYPTION_ENABLED: {{ .Values.userService.matrixEncryptionEnabled | default "false" | quote }}
