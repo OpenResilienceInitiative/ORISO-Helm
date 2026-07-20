@@ -1,0 +1,49 @@
+{{- if .Values.altcha.enabled }}
+# WP-6 (epic ORISO-Admin#366): self-hosted, invisible ALTCHA (proof-of-work).
+# The browser solves a small PoW challenge in the background — no image puzzles
+# (privacy, a11y, U25). Gates entry to the anonymous live chat before a session
+# is created; combined with the upstream upload rate limit it keeps the
+# registration-less chat from becoming an anonymous dumping ground.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: altcha-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: altcha-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: altcha-server
+  template:
+    metadata:
+      labels:
+        app: altcha-server
+    spec:
+      containers:
+        - name: altcha-server
+          image: {{ .Values.altcha.image | quote }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            # HMAC key the server signs/verifies challenges with — supplied
+            # out-of-band via a secret, never inline in a committed values file.
+            - name: ALTCHA_HMAC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.altcha.existingSecret | default "altcha-secrets" | quote }}
+                  key: hmac-key
+            - name: ALTCHA_COMPLEXITY
+              value: {{ .Values.altcha.complexity | quote }}
+          resources:
+            {{- toYaml .Values.altcha.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+{{- end }}

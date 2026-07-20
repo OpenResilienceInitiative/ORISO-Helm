@@ -1,0 +1,18 @@
+{{- if .Values.altcha.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: altcha-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: altcha-server
+spec:
+  type: ClusterIP
+  selector:
+    app: altcha-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+{{- end }}
