@@ -1,0 +1,21 @@
+{{- if and .Values.altcha.enabled .Values.altcha.rateLimit.enabled }}
+# WP-6: server-side upload rate limit for the registration-less live chat.
+# nginx limit_req snippet — the anonymous-session / media-upload ingress
+# references this via its `nginx.ingress.kubernetes.io/configuration-snippet`
+# (wiring is environment-specific; see docs/altcha-bot-protection.md).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: altcha-ratelimit-snippet
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: altcha-server
+data:
+  limit-req-zone.conf: |
+    # Add to the nginx http context (controller config http-snippet):
+    limit_req_zone $binary_remote_addr zone=anon_media:10m rate={{ .Values.altcha.rateLimit.requestsPerSecond }}r/s;
+  location-snippet.conf: |
+    # Add to the guarded ingress (configuration-snippet):
+    limit_req zone=anon_media burst={{ .Values.altcha.rateLimit.burst }} nodelay;
+    limit_req_status 429;
+{{- end }}
