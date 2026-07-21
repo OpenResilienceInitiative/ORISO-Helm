@@ -6,6 +6,9 @@ DROP SEQUENCE IF EXISTS `sequence_chat`;
 CREATE SEQUENCE `sequence_chat` start with 0 minvalue 0 maxvalue 9223372036854775806 increment by 1 cache 100 nocycle ENGINE=InnoDB;
 DO SETVAL(`sequence_chat`, 900, 0);
 
+DROP SEQUENCE IF EXISTS `sequence_chat_occurrence_exception`;
+CREATE SEQUENCE `sequence_chat_occurrence_exception` start with 1 minvalue 1 maxvalue 9223372036854775806 increment by 1 nocycle ENGINE=InnoDB;
+
 DROP SEQUENCE IF EXISTS `sequence_chat_agency`;
 CREATE SEQUENCE `sequence_chat_agency` start with 0 minvalue 0 maxvalue 9223372036854775806 increment by 1 cache 100 nocycle ENGINE=InnoDB;
 DO SETVAL(`sequence_chat_agency`, 800, 0);
@@ -42,10 +45,16 @@ DROP SEQUENCE IF EXISTS `sequence_user_mobile_token`;
 CREATE SEQUENCE `sequence_user_mobile_token` start with 0 minvalue 0 maxvalue 9223372036854775806 increment by 1 cache 100 nocycle ENGINE=InnoDB;
 DO SETVAL(`sequence_user_mobile_token`, 0, 0);
 
+DROP TABLE IF EXISTS `invite_email_delivery`;
+DROP TABLE IF EXISTS `invite_email_template`;
+DROP TABLE IF EXISTS `account_invite`;
+DROP TABLE IF EXISTS `case_handover_reason_policy`;
+DROP TABLE IF EXISTS `case_handover_request`;
 DROP TABLE IF EXISTS `session_topic`;
 DROP TABLE IF EXISTS `session_supervisor`;
 DROP TABLE IF EXISTS `session_data`;
 DROP TABLE IF EXISTS `user_chat`;
+DROP TABLE IF EXISTS `chat_occurrence_exception`;
 DROP TABLE IF EXISTS `user_mobile_token`;
 DROP TABLE IF EXISTS `user_agency`;
 DROP TABLE IF EXISTS `language`;
@@ -191,7 +200,12 @@ CREATE TABLE `chat` (
   `start_date` datetime NOT NULL,
   `duration` smallint(6) NOT NULL,
   `is_repetitive` tinyint(1) unsigned NOT NULL DEFAULT 0,
+  `repeat_count` int(11) NOT NULL DEFAULT 1,
+  `current_occurrence_index` int(11) NOT NULL DEFAULT 0,
+  `timezone` varchar(100) NOT NULL DEFAULT 'UTC',
+  `modality` varchar(16) NOT NULL DEFAULT 'TEXT',
   `chat_interval` varchar(255) DEFAULT NULL,
+  `conversation_type` varchar(32) DEFAULT NULL,
   `is_active` tinyint(1) unsigned NOT NULL DEFAULT 0,
   `max_participants` tinyint(4) unsigned DEFAULT NULL,
   `consultant_id_owner` varchar(36) NOT NULL,
@@ -200,6 +214,9 @@ CREATE TABLE `chat` (
   `create_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `hint_message` varchar(300) DEFAULT NULL,
   `matrix_room_id` varchar(255) DEFAULT NULL,
+  `source_language` varchar(10) DEFAULT NULL,
+  `hint_message_translations` json DEFAULT NULL,
+  `group_chat_rules_translations` json DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `consultant_id_owner` (`consultant_id_owner`),
   CONSTRAINT `chat_consultant_ibfk_1` FOREIGN KEY (`consultant_id_owner`) REFERENCES `consultant` (`consultant_id`) ON UPDATE CASCADE
@@ -229,6 +246,7 @@ CREATE TABLE `session` (
   `counselling_relation` varchar(50) DEFAULT NULL,
   `referer` varchar(50) DEFAULT NULL,
   `matrix_room_id` varchar(255) DEFAULT NULL,
+  `conversation_type` varchar(32) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `index_consultant_id_status` (`consultant_id`,`status`),
   KEY `user_id` (`user_id`),
@@ -313,6 +331,53 @@ CREATE TABLE `consultant_agency` (
   CONSTRAINT `consultant_agency_ibfk_1` FOREIGN KEY (`consultant_id`) REFERENCES `consultant` (`consultant_id`) ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `case_handover_request` (
+  `id` bigint(21) unsigned NOT NULL AUTO_INCREMENT,
+  `session_id` bigint(21) unsigned NOT NULL,
+  `requester_consultant_id` varchar(36) NOT NULL,
+  `previous_consultant_id` varchar(36) DEFAULT NULL,
+  `reason_code` varchar(100) NOT NULL,
+  `reason_label` varchar(255) NOT NULL,
+  `explanation` text NOT NULL,
+  `status` varchar(40) NOT NULL,
+  `client_consent_required` tinyint(1) NOT NULL DEFAULT 0,
+  `policy_authority` varchar(255) NOT NULL,
+  `audit_outcome` varchar(100) NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `resolved_at` datetime DEFAULT NULL,
+  `tenant_id` bigint DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_case_handover_session_requester_created` (`session_id`,`requester_consultant_id`,`created_at`),
+  KEY `idx_case_handover_tenant_created` (`tenant_id`,`created_at`),
+  KEY `idx_case_handover_status` (`status`),
+  CONSTRAINT `case_handover_request_session_fk` FOREIGN KEY (`session_id`) REFERENCES `session` (`id`) ON UPDATE CASCADE,
+  CONSTRAINT `case_handover_request_requester_fk` FOREIGN KEY (`requester_consultant_id`) REFERENCES `consultant` (`consultant_id`) ON UPDATE CASCADE,
+  CONSTRAINT `case_handover_request_previous_fk` FOREIGN KEY (`previous_consultant_id`) REFERENCES `consultant` (`consultant_id`) ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `case_handover_reason_policy` (
+  `code` varchar(100) NOT NULL,
+  `label` varchar(255) NOT NULL,
+  `client_consent_required` tinyint(1) NOT NULL DEFAULT 0,
+  `access_allowed` tinyint(1) NOT NULL DEFAULT 1,
+  `enabled` tinyint(1) NOT NULL DEFAULT 1,
+  `display_order` int NOT NULL DEFAULT 100,
+  `policy_authority` varchar(255) NOT NULL,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`code`),
+  KEY `idx_case_handover_reason_enabled_order` (`enabled`,`display_order`,`code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_unicode_ci;
+
+INSERT INTO `case_handover_reason_policy`
+  (`code`, `label`, `client_consent_required`, `access_allowed`, `enabled`, `display_order`, `policy_authority`)
+VALUES
+  ('COUNSELLOR_ASKED_FOR_ADVICE', 'Counsellor asked for advice', 1, 1, 1, 10, 'platform-admin-default-case-handover-policy'),
+  ('COUNSELLOR_ON_HOLIDAY', 'Counsellor is on holiday', 0, 1, 1, 20, 'platform-admin-default-case-handover-policy'),
+  ('OTHER_EMERGENCY', 'Other emergency', 0, 1, 1, 30, 'platform-admin-default-case-handover-policy'),
+  ('COUNSELLOR_IS_ILL', 'Counsellor is ill', 0, 1, 1, 40, 'platform-admin-default-case-handover-policy'),
+  ('COUNSELLOR_LEFT', 'Counsellor does not work here anymore', 0, 1, 1, 50, 'platform-admin-default-case-handover-policy')
+ON DUPLICATE KEY UPDATE `code` = `code`;
+
 CREATE TABLE `consultant_mobile_token` (
   `id` bigint(21) unsigned NOT NULL,
   `consultant_id` varchar(36) NOT NULL,
@@ -375,10 +440,13 @@ CREATE TABLE `event_notification` (
   `read_date` datetime DEFAULT NULL,
   `create_date` datetime NOT NULL DEFAULT current_timestamp(),
   `tenant_id` bigint(20) DEFAULT NULL,
+  `params` text DEFAULT NULL,
+  `deduplication_key` varchar(191) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_event_notification_recipient_create` (`recipient_user_id`,`create_date`),
   KEY `idx_event_notification_recipient_read` (`recipient_user_id`,`read_date`),
-  KEY `idx_event_notification_tenant` (`tenant_id`)
+  KEY `idx_event_notification_tenant` (`tenant_id`),
+  UNIQUE KEY `uk_event_notification_recipient_deduplication` (`recipient_user_id`,`deduplication_key`)
 ) ENGINE=InnoDB AUTO_INCREMENT=332 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 CREATE TABLE `group_chat_participant` (
@@ -386,10 +454,28 @@ CREATE TABLE `group_chat_participant` (
   `chat_id` bigint(20) unsigned NOT NULL,
   `consultant_id` varchar(36) NOT NULL,
   `joined_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `series_id` bigint(21) unsigned DEFAULT NULL,
+  `participant_role` varchar(16) NOT NULL DEFAULT 'PARTICIPANT',
   PRIMARY KEY (`id`),
   UNIQUE KEY `unique_chat_consultant` (`chat_id`,`consultant_id`),
-  KEY `idx_consultant` (`consultant_id`)
+  KEY `idx_consultant` (`consultant_id`),
+  UNIQUE KEY `uk_group_chat_participant_series_consultant` (`series_id`,`consultant_id`),
+  CONSTRAINT `fk_group_chat_participant_series` FOREIGN KEY (`series_id`) REFERENCES `chat` (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=295 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `chat_occurrence_exception` (
+  `id` bigint(20) NOT NULL,
+  `series_id` bigint(21) unsigned NOT NULL,
+  `original_occurrence_start_utc` datetime(6) NOT NULL,
+  `exception_type` varchar(16) NOT NULL,
+  `override_start_utc` datetime(6) DEFAULT NULL,
+  `override_duration` int(11) DEFAULT NULL,
+  `override_capacity` int(11) DEFAULT NULL,
+  `override_modality` varchar(16) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_chat_occurrence_exception_series_start` (`series_id`,`original_occurrence_start_utc`),
+  CONSTRAINT `fk_chat_occurrence_exception_series` FOREIGN KEY (`series_id`) REFERENCES `chat` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_unicode_ci;
 
 CREATE TABLE `identity_tombstone` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -536,3 +622,73 @@ CREATE SEQUENCE `sequence_consultant_topic`
     CACHE 10
 NOCYCLE
 ENGINE=InnoDB;
+
+-- Account invite subsystem (UserService changeset 0055_account_invites).
+-- These three tables were missing from the pre-seed mirror, which crashlooped
+-- UserService on a fresh install (ddl-auto=validate + Liquibase off).
+-- account_invite must be created before invite_email_delivery (FK dependency).
+CREATE TABLE `account_invite` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `target_role` varchar(64) NOT NULL,
+  `tenant_id` bigint(20) DEFAULT NULL,
+  `recipient_email` varchar(255) NOT NULL,
+  `first_name` varchar(255) DEFAULT NULL,
+  `last_name` varchar(255) DEFAULT NULL,
+  `agency_id` bigint(20) DEFAULT NULL,
+  `department_id` bigint(20) DEFAULT NULL,
+  `token_hash` varchar(64) DEFAULT NULL,
+  `expires_at` datetime DEFAULT NULL,
+  `status` varchar(32) NOT NULL,
+  `email_verification_status` varchar(32) NOT NULL,
+  `two_factor_status` varchar(32) NOT NULL,
+  `accepted_at` datetime DEFAULT NULL,
+  `accepted_by_user_id` varchar(36) DEFAULT NULL,
+  `revoked_at` datetime DEFAULT NULL,
+  `revoked_by_user_id` varchar(36) DEFAULT NULL,
+  `superseded_at` datetime DEFAULT NULL,
+  `superseded_by_user_id` varchar(36) DEFAULT NULL,
+  `superseded_by_invite_id` bigint(20) DEFAULT NULL,
+  `two_factor_waived_by` varchar(36) DEFAULT NULL,
+  `two_factor_waived_at` datetime DEFAULT NULL,
+  `two_factor_waiver_reason` varchar(512) DEFAULT NULL,
+  `created_by_user_id` varchar(36) DEFAULT NULL,
+  `created_by_username` varchar(255) DEFAULT NULL,
+  `create_date` datetime NOT NULL,
+  `update_date` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_account_invite_token_hash` (`token_hash`),
+  KEY `idx_account_invite_tenant_status` (`tenant_id`,`status`),
+  KEY `idx_account_invite_target_role` (`target_role`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `invite_email_template` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `kind` varchar(32) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `language` varchar(16) DEFAULT NULL,
+  `subject` varchar(255) NOT NULL,
+  `body` longtext NOT NULL,
+  `active` bit(1) NOT NULL DEFAULT b'1',
+  `created_by_user_id` varchar(36) DEFAULT NULL,
+  `create_date` datetime NOT NULL,
+  `update_date` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_invite_email_template_kind` (`kind`,`active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `invite_email_delivery` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `account_invite_id` bigint(20) NOT NULL,
+  `template_id` bigint(20) DEFAULT NULL,
+  `template_kind` varchar(32) NOT NULL,
+  `subject_snapshot` varchar(255) NOT NULL,
+  `body_snapshot` longtext NOT NULL,
+  `recipient_snapshot` varchar(255) NOT NULL,
+  `status` varchar(32) NOT NULL,
+  `sent_at` datetime DEFAULT NULL,
+  `failure_reason` varchar(1024) DEFAULT NULL,
+  `create_date` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_invite_email_delivery_invite` (`account_invite_id`),
+  CONSTRAINT `fk_invite_email_delivery_account_invite` FOREIGN KEY (`account_invite_id`) REFERENCES `account_invite` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

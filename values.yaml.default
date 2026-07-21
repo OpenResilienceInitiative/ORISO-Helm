@@ -52,7 +52,9 @@ global:
   statisticsEnabled: "true"
   demographicsEnabled: "false"
 
-  initializeDummyData: true
+  # Prod-safe baseline: no dummy seeding. The dev overlay (values-dev.yaml)
+  # turns this on. See docs/infrastructure-report-2026-07.md §7.
+  initializeDummyData: false
 
   logstashHost: "http://logstash.default:8080"
 
@@ -93,7 +95,7 @@ matrix:
 
 admin:
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "latest"
+  imageVersion: "2.0.1"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -109,7 +111,7 @@ tokenService:
   replicas: 2
   image:
     repository: ghcr.io/openresilienceinitiative/livekit-token-service
-    tag: "latest"
+    tag: "2.0.1"
     pullPolicy: Always
   service:
     port: 3010
@@ -149,11 +151,11 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-agencyservice"
-  imageVersion: "latest"
+  imageVersion: "2.0.1"
 
   keycloakResource: "agency-service"
 
-  springProfilesActive: "dev"
+  springProfilesActive: "prod"
 
   topicEnrichmentEnabled: "false"
 
@@ -163,7 +165,7 @@ agencyService:
 # ConsultingType service
 consultingTypeService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "latest"
+  imageVersion: "2.0.1"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -174,8 +176,8 @@ consultingTypeService:
 # Tenant Service
 tenantService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "latest"  
-  springProfilesActive: "dev"
+  imageVersion: "2.0.1"  
+  springProfilesActive: "prod"
   springDatasourceURL: "jdbc:mariadb://mariadb:3306/tenantservice"
   springRabbitmqHost: "rabbitmq"
   springRabbitmqPort: "5672"
@@ -185,12 +187,22 @@ tenantService:
 # User service
 userService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-userservice"
-  imageVersion: "latest"
+  imageVersion: "2.0.1"
   serviceURL: "http://userservice:8080"
  
   keycloakResource: "user-service"
 
-  springProfilesActive: "dev"
+  springProfilesActive: "prod"
+
+  # 2FA / OTP login posture (NOT encryption — encryption is never toggled).
+  # Defaults keep OTP off; the dev overlay leaves it off for fast test-user
+  # creation, and prod's posture is a deliberate choice (see values-prod.yaml).
+  twoFactorAuthUserEnabled: "false"
+  twoFactorAuthConsultantEnabled: "false"
+  otpAllowedForUsers: "false"
+  otpAllowedForConsultants: "false"
+  otpAllowedForSingleTenantAdmins: "false"
+  otpAllowedForTenantSuperAdmins: "false"
 
   firebaseConfigurationCredentialsFilePath: "/firebase/firebase-credentials.json"
   firebaseConfigurationNotificationMessage: "Du hast eine neue Nachricht erhalten"
@@ -218,6 +230,13 @@ frontend:
   imageName: "ghcr.io/openresilienceinitiative/oriso-frontend"
   imageVersion: "2.0.1"
 
+# Element Call
+elementCall:
+  image:
+    repository: ghcr.io/openresilienceinitiative/element-call
+    tag: "2.0.1"
+    pullPolicy: Always
+
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
 
@@ -225,8 +244,8 @@ frontend:
 healthDashboard:
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: rebuild
-    pullPolicy: Never
+    tag: "2.0.1"
+    pullPolicy: Always
   replicas: 1
   namespace: ""
   resources: {}

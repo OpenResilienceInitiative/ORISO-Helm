@@ -76,15 +76,31 @@ spec:
                 secretKeyRef:
                   key: MONGO_CONSULTING_TYPES_PASSWORD
                   name: mongodb-secret
+            - name: MONGO_ROCKETCHAT_USER
+              valueFrom:
+                secretKeyRef:
+                  key: MONGO_ROCKETCHAT_USER
+                  name: mongodb-secret
+            - name: MONGO_ROCKETCHAT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: MONGO_ROCKETCHAT_PASSWORD
+                  name: mongodb-secret
           command:
             - /bin/bash
             - -c
-            - >
+            - |
               set -e;
-              echo "Creating user: nosqlclient";
-              mongosh "mongodb://$MONGODB_USERNAME:$MONGODB_PASSWORD@mongodb.{{ .Release.Namespace }}:27017/?replicaSet=rs0" --eval "db=db.getSiblingDB('nosqlclient'); db.createUser({ user: '$MONGO_NOSQLCLIENT_USER', pwd: '$MONGO_NOSQLCLIENT_PASSWORD', roles: [{ role: 'readWrite', db: 'nosqlclient' }]});" &&
-              echo "Creating user: statistics";
-              mongosh "mongodb://$MONGODB_USERNAME:$MONGODB_PASSWORD@mongodb.{{ .Release.Namespace }}:27017/?replicaSet=rs0" --eval "db=db.getSiblingDB('statistics'); db.createUser({ user: '$MONGO_STATISTICS_USER', pwd: '$MONGO_STATISTICS_PASSWORD', roles: [{ role: 'readWrite', db: 'statistics' }]});" &&
-              echo "Creating user: consulting_types";
-              mongosh "mongodb://$MONGODB_USERNAME:$MONGODB_PASSWORD@mongodb.{{ .Release.Namespace }}:27017/?replicaSet=rs0" --eval "db=db.getSiblingDB('consulting_types'); db.createUser({ user: '$MONGO_CONSULTING_TYPES_USER', pwd: '$MONGO_CONSULTING_TYPES_PASSWORD', roles: [{ role: 'readWrite', db: 'consulting_types' }]});"
+              mongo_host="mongodb.{{ .Release.Namespace }}:27017";
+              create_or_update_user() {
+                local db_name="$1";
+                local user_name="$2";
+                local password="$3";
+                echo "Ensuring Mongo user: ${user_name} on ${db_name}";
+                mongosh "$mongo_host" --username "$MONGODB_USERNAME" --password "$MONGODB_PASSWORD" --authenticationDatabase admin --eval "db=db.getSiblingDB('${db_name}'); if (db.getUser('${user_name}')) { db.updateUser('${user_name}', { pwd: '${password}', roles: [{ role: 'readWrite', db: '${db_name}' }]}); } else { db.createUser({ user: '${user_name}', pwd: '${password}', roles: [{ role: 'readWrite', db: '${db_name}' }]}); }"
+              }
+              create_or_update_user "nosqlclient" "$MONGO_NOSQLCLIENT_USER" "$MONGO_NOSQLCLIENT_PASSWORD";
+              create_or_update_user "statistics" "$MONGO_STATISTICS_USER" "$MONGO_STATISTICS_PASSWORD";
+              create_or_update_user "consulting_types" "$MONGO_CONSULTING_TYPES_USER" "$MONGO_CONSULTING_TYPES_PASSWORD";
+              create_or_update_user "rocketchat" "$MONGO_ROCKETCHAT_USER" "$MONGO_ROCKETCHAT_PASSWORD";
   backoffLimit: 1
