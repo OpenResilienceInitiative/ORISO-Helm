@@ -54,3 +54,17 @@ into `pre-dev`. Validate event arrival on Pre-Dev, promote reviewed immutable
 digests to Dev, then repeat the same queries there. Alert evaluation remains in
 burn-in until both environments produce the expected synthetic success and
 failure signals.
+
+## Management and refactoring quality view
+
+Use `dashboard-management-quality.json` for the cross-service scorecard and
+`service-state-map.yaml` for state ownership. `Deployment` means Kubernetes can
+replace a pod; it does not mean requests are replica-independent. A service
+may move from `stateless-target-replica-coupled` to `stateless-verified` only
+when its critical local-state count is zero, scheduled side effects are
+leader-safe or idempotent, and the multi-replica conformance gate is green.
+
+Compare a refactoring to `baseline-2026-07-22.yaml` only after PreDev and Dev
+run reviewed immutable revisions and both environments ingest the same signal
+set. Until then, show deployment drift and telemetry gaps as blockers rather
+than converting missing data into a green score.

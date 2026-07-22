@@ -40,6 +40,30 @@ FORBIDDEN_ATTRIBUTES = {
     "username",
     "matrix_access_token",
 }
+REQUIRED_SERVICE_IDS = {
+    "frontend",
+    "admin",
+    "user-service",
+    "agency-service",
+    "tenant-service",
+    "consulting-type-service",
+    "matrix-synapse",
+    "redis",
+    "mariadb",
+    "mongodb",
+    "keycloak",
+    "signoz-clickhouse",
+}
+REQUIRED_MANAGEMENT_PANELS = {
+    "live-chat-outcome",
+    "provisioning-integrity",
+    "e2ee-posture",
+    "service-slo",
+    "replica-safety",
+    "stateful-platform-health",
+    "deployment-drift",
+    "telemetry-pipeline-health",
+}
 
 
 def load_yaml(name: str):
@@ -88,3 +112,54 @@ def test_runbook_maps_every_required_cause_to_a_query():
     runbook = (OBSERVABILITY / "RUNBOOK.md").read_text(encoding="utf-8")
     for cause in REQUIRED_CAUSES:
         assert f"`{cause}`" in runbook
+
+
+def test_service_state_map_separates_workload_kind_from_verified_statelessness():
+    state_map = load_yaml("service-state-map.yaml")
+    services = {service["id"]: service for service in state_map["services"]}
+
+    assert REQUIRED_SERVICE_IDS <= services.keys()
+    assert services["user-service"]["stateClass"] == "stateless-target-replica-coupled"
+    for service in services.values():
+        assert service["workloadKind"] in {"Deployment", "StatefulSet"}
+        assert service["stateClass"] in {
+            "stateless-verified",
+            "stateless-target-replica-coupled",
+            "stateful-platform",
+        }
+        assert service["evidence"]
+        assert service["qualitySignals"]
+
+
+def test_management_dashboard_has_owned_before_after_quality_panels():
+    dashboard = json.loads(
+        (OBSERVABILITY / "dashboard-management-quality.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert dashboard["artifactType"] == "signoz-dashboard-build-specification"
+    panels = {panel["id"]: panel for panel in dashboard["panels"]}
+    assert REQUIRED_MANAGEMENT_PANELS <= panels.keys()
+    for panel in panels.values():
+        assert panel["managementQuestion"]
+        assert panel["owner"]
+        assert panel["beforeAfter"]["baseline"]
+        assert panel["beforeAfter"]["target"]
+        assert panel["signalStatus"] in {"live", "partial", "blocked-on-emitter"}
+
+
+def test_baseline_names_measurement_gaps_instead_of_claiming_success():
+    baseline = load_yaml("baseline-2026-07-22.yaml")
+    assert baseline["environmentEvidence"]["preDev"]["metricsIngesting"] is True
+    assert baseline["environmentEvidence"]["dev"]["metricsIngesting"] is False
+    assert "runtime identity signals are not emitted" in baseline["limitations"]
+    assert "live-chat diagnostic emitters are not emitted" in baseline["limitations"]
+
+
+def test_tracking_event_decisions_capture_reason_privacy_and_cardinality():
+    decision_log = (OBSERVABILITY / "TRACKING-EVENT-DECISIONS.md").read_text(
+        encoding="utf-8"
+    )
+    assert decision_log.count("## 2026-07-22") >= 4
+    for required in ("Decision:", "Why:", "Privacy:", "Cardinality:"):
+        assert required in decision_log
