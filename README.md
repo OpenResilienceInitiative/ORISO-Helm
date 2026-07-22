@@ -42,7 +42,7 @@ Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fi
 - `online-counseling-mariadb.dbRootPassword` — MariaDB root password
 - `livekit.api.key` / `livekit.api.secret` — LiveKit API credentials
 - `tenantService.springDatasourcePassword` / `springRabbitmqPassword`
-- `agencyService.serviceEncryptionAppkey` — AgencyService encryption key (Matrix service-account passwords)
+- `agencyService.serviceEncryptionAppkey` — AgencyService encryption key (Matrix service-account passwords). **Required** — the chart refuses to render if it is blank, because an empty key silently breaks agency creation. Rotating it invalidates already-stored credentials.
 - `userService.rocket*Password` / `keycloakTechnicalPassword` / `serviceEncryptionAppkey` / `identityTechnicalUser*`
 
 ### 3. Install / Upgrade
