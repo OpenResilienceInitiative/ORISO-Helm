@@ -234,9 +234,11 @@ userService:
 
   springProfilesActive: "prod"
 
-  # Rollout-safe server-side switch for encrypted Matrix room creation.
-  # Environment overlays opt in only after their stable homeserver identity is ready.
-  matrixEncryptionEnabled: "false"
+  # Encrypted Matrix room creation. Encryption is ON by default: the
+  # repository contract is that development and production must never run
+  # with encryption disabled, so the prod-safe baseline enables it rather
+  # than offering an encryption-off default that looks supported.
+  matrixEncryptionEnabled: "true"
 
   # Redis lease duration for consultant Live Chat availability. The Redis
   # password is wired from the chart's existing Secret; host/port default to

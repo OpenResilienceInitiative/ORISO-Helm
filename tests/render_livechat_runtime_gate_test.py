@@ -99,7 +99,7 @@ def main() -> None:
         baseline = by_kind_and_name(
             baseline_documents, "ConfigMap", "userservice-configmap-env"
         )
-        assert baseline["data"]["MATRIX_ENCRYPTION_ENABLED"] == "false"
+        assert baseline["data"]["MATRIX_ENCRYPTION_ENABLED"] == "true"
 
         print("PASS: Pre-Dev Live Chat runtime gate renders Redis and E2EE safely")
     finally:
