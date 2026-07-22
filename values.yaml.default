@@ -131,6 +131,34 @@ matrix:
 
 
 
+
+# WP-6 (epic ORISO-Admin#366): self-hosted, invisible ALTCHA (proof-of-work)
+# gate at anonymous live-chat entry + a server-side upload rate limit. No image
+# puzzles (privacy, a11y, U25). OFF by default — PoC. See docs/altcha-bot-protection.md.
+altcha:
+  enabled: false
+  # Pin a real, validated tag before promoting past the PoC.
+  image: "ghcr.io/altcha-org/altcha-server:latest"
+  # HMAC key the server signs challenges with. Provide out-of-band in real envs:
+  #   existingSecret: my-sealed-secret   (key: hmac-key)
+  existingSecret: ""
+  createSecret: false
+  hmacKey: ""
+  # Proof-of-work difficulty; higher = more client CPU, higher bot cost.
+  complexity: 100000
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "200m"
+      memory: "128Mi"
+  rateLimit:
+    enabled: false
+    # nginx limit_req on the anonymous-session / media-upload paths.
+    requestsPerSecond: 5
+    burst: 10
+
 # ---------- Infrastructure Services ----------------------------------------------------------------------------------
 
 admin:
