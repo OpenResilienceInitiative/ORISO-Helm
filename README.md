@@ -42,7 +42,8 @@ Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fi
 - `online-counseling-mariadb.dbRootPassword` — MariaDB root password
 - `livekit.api.key` / `livekit.api.secret` — LiveKit API credentials
 - `tenantService.springDatasourcePassword` / `springRabbitmqPassword`
-- `userService.rocket*Password` / `keycloakTechnicalPassword` / `serviceEncryptionAppkey`
+- `agencyService.serviceEncryptionAppkey` — AgencyService encryption key (Matrix service-account passwords). **Required** — the chart refuses to render if it is blank, because an empty key silently breaks agency creation. Rotating it invalidates already-stored credentials.
+- `userService.rocket*Password` / `keycloakTechnicalPassword` / `serviceEncryptionAppkey` / `identityTechnicalUser*`
 
 ### 3. Install / Upgrade
 
@@ -71,3 +72,14 @@ helm upgrade --install caritas ./ -n caritas --create-namespace \
 Overlays only change *test friction* and per-environment wiring. **Encryption is
 never toggled** — there is no dev "encryption off" mode by design (see
 `docs/infrastructure-report-2026-07.md` §7).
+
+### Prod telemetry (OTLP → SigNoz)
+
+Prod telemetry export is off by default (`global.observability.otlpEnabled:
+false` in `values-prod.yaml`) and stays off until a human explicitly decides
+otherwise. The KDG-safe pseudonymization pipeline that would make turning it
+on safe is built but also off by default
+(`global.observability.telemetryPseudonymizationEnabled`) — see
+`docs/observability-prod-pseudonymization.md` for exactly what is
+pseudonymized/dropped and the sign-off steps before either flag is flipped
+for prod.
