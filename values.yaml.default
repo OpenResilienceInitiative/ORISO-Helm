@@ -45,6 +45,9 @@ global:
     # telemetry (docs/observability-prod-pseudonymization.md, PR #65) — see
     # values-prod.yaml.
     webVitalsEnabled: true
+    # Browser OTLP batching interval. Applications enforce a 10s minimum and
+    # default to this conservative 60s cadence when the value is invalid.
+    webVitalsExportIntervalMillis: 60000
 
 
 
