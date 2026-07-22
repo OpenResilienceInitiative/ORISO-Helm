@@ -25,10 +25,17 @@ data:
 {{- else }}
   MULTITENANCY_ENABLED: {{ .Values.global.multitenancyEnabled | quote }}
 {{- end }}
+  # DPA_SIGN_FRONTEND_BASE_URL is the app frontend base URL embedded in the
+  # DPA-signing email. Same FQDN as APP_BASE_URL, so it derives from
+  # global.domainName rather than taking a separate value — otherwise the app's
+  # @Value default (https://app.oriso.org) applies and non-production
+  # environments link to production.
 {{- if .Values.global.enableTls }}
   APP_BASE_URL: "https://{{ .Values.global.domainName }}"
+  DPA_SIGN_FRONTEND_BASE_URL: "https://{{ .Values.global.domainName }}"
 {{- else }}
   APP_BASE_URL: "http://{{ .Values.global.domainName }}"
+  DPA_SIGN_FRONTEND_BASE_URL: "http://{{ .Values.global.domainName }}"
 {{- end }}
   # OBS-P2: OTLP traces/metrics to the SigNoz gateway collector. Property
   # names + full /v1/{traces,metrics} paths verified against Spring Boot
