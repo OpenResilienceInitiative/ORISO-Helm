@@ -41,9 +41,9 @@ data:
   # names + full /v1/{traces,metrics} paths verified against Spring Boot
   # 4.0.1 source directly (management.otlp.tracing.endpoint does NOT exist
   # in this version).
-  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}:4318/v1/traces"
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: "http://{{ .Values.global.observability.otlpCollectorHost | default (printf "%s-otel-collector.%s:4318" .Release.Name .Release.Namespace) }}/v1/traces"
   MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
-  MANAGEMENT_OTLP_METRICS_EXPORT_URL: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}:4318/v1/metrics"
+  MANAGEMENT_OTLP_METRICS_EXPORT_URL: "http://{{ .Values.global.observability.otlpCollectorHost | default (printf "%s-otel-collector.%s:4318" .Release.Name .Release.Namespace) }}/v1/metrics"
   MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
 
 

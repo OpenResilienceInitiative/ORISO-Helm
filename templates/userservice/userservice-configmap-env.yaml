@@ -109,12 +109,12 @@ data:
   FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED: {{ .Values.global.multitenancyWithSingleDomainEnabled | quote }}
   # Shared consultant availability lease store. The password remains in the
   # existing redis-secret and is referenced directly by the Deployment.
-  SPRING_DATA_REDIS_HOST: "redis"
-  SPRING_DATA_REDIS_PORT: "6379"
+  SPRING_DATA_REDIS_HOST: {{ .Values.userService.redisHost | default "redis" | quote }}
+  SPRING_DATA_REDIS_PORT: {{ .Values.userService.redisPort | default 6379 | quote }}
   CONSULTANT_AVAILABILITY_REDIS_TTL_SECONDS: {{ .Values.userService.consultantAvailabilityRedisTtlSeconds | default 120 | quote }}
   MATRIX_API_URL: {{ .Values.matrix.matrixApiUrl }}
   MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}
-  MATRIX_ENCRYPTION_ENABLED: {{ .Values.userService.matrixEncryptionEnabled | default "false" | quote }}
+  MATRIX_ENCRYPTION_ENABLED: {{ .Values.userService.matrixEncryptionEnabled | default "true" | quote }}
   MATRIX_MIGRATION_ENABLED: "true"
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: "{{ .Values.global.keycloak.authServerUrl }}/realms/{{ .Values.global.keycloak.realm }}"
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: "{{ .Values.global.keycloak.authServerUrl }}{{ .Values.global.keycloak.openidConnectUrl }}/certs"
@@ -128,7 +128,7 @@ data:
   # names + full /v1/{traces,metrics} paths verified against Spring Boot
   # 4.0.1 source directly (management.otlp.tracing.endpoint does NOT exist
   # in this version).
-  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}:4318/v1/traces"
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: "http://{{ .Values.global.observability.otlpCollectorHost | default (printf "%s-otel-collector.%s:4318" .Release.Name .Release.Namespace) }}/v1/traces"
   MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
-  MANAGEMENT_OTLP_METRICS_EXPORT_URL: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}:4318/v1/metrics"
+  MANAGEMENT_OTLP_METRICS_EXPORT_URL: "http://{{ .Values.global.observability.otlpCollectorHost | default (printf "%s-otel-collector.%s:4318" .Release.Name .Release.Namespace) }}/v1/metrics"
   MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
