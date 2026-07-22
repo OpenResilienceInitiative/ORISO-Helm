@@ -13,6 +13,34 @@
 
 global:
   initializeDummyData: false
+  # OBS-P2: OTLP traces/metrics export is dev/pre-dev-only for now. Prod
+  # stays off until a human explicitly decides to turn it on — see
+  # PLAN-observability-two-track-2026-07-11.md and
+  # docs/observability-prod-pseudonymization.md.
+  #
+  # OBS-P6 (this overlay's current state): the KDG-safe pseudonymization
+  # pipeline referenced above is now BUILT into the gateway collector config
+  # (templates/signoz/templates/otel-collector-configmap.yaml, gated by
+  # telemetryPseudonymizationEnabled below) but is left OFF here on purpose.
+  # Both flags must eventually flip together for prod telemetry to actually
+  # flow pseudonymized — otlpEnabled alone (with pseudonymization off) would
+  # export raw, unscrubbed identifiers and must never be turned on by itself.
+  # Turning either on is a decision for a human with legal/DPO sign-off, not
+  # something this chart does automatically.
+  observability:
+    otlpEnabled: false
+    # OBS-P6: built, verified by tests/render_obs_p6_test.py, still OFF.
+    # Do not flip this to true without reading
+    # docs/observability-prod-pseudonymization.md first — it documents
+    # exactly what is pseudonymized/dropped and the one open question
+    # (log-body handling) that still wants a second pair of eyes.
+    telemetryPseudonymizationEnabled: false
+    # OBS-P8: browser Web Vitals RUM stays off in prod for the same reason —
+    # it means capturing actual counsellor/client browser telemetry (page
+    # URLs, timing, IP-adjacent metadata via the request), which deserves
+    # the same KDG-conscious review OBS-P6 gave backend telemetry, not a
+    # silent default-on. Same off-by-default-in-prod pattern as PR #65.
+    webVitalsEnabled: false
 
 agencyService:
   springProfilesActive: "prod"
@@ -31,3 +59,11 @@ userService:
   otpAllowedForConsultants: "false"
   otpAllowedForSingleTenantAdmins: "false"
   otpAllowedForTenantSuperAdmins: "false"
+
+# SigNoz observability stack (OBS-P1): the stack itself may run in prod, but
+# the signoz.* UI subdomain is a dev-tooling exception (ADR-011) and is NOT
+# exposed in production. No global.domains.signoz is set here either — both
+# gates keep the ingress from rendering.
+signoz:
+  ingress:
+    enabled: false

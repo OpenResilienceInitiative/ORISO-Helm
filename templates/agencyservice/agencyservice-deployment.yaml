@@ -207,11 +207,36 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: MATRIX_REGISTRATION_SHARED_SECRET
-                  name: agencyservice-secret                
+                  name: agencyservice-secret
+            - name: SERVICE_ENCRYPTION_APPKEY
+              valueFrom:
+                secretKeyRef:
+                  key: SERVICE_ENCRYPTION_APPKEY
+                  name: agencyservice-secret
             - name: SPRING_DATA_MONGODB_URI
               valueFrom:
                 configMapKeyRef:
                   key: SPRING_DATA_MONGODB_URI
-                  name: agencyservice-configmap-env   
+                  name: agencyservice-configmap-env
+            - name: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+                  name: agencyservice-configmap-env
+            - name: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+                  name: agencyservice-configmap-env
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+                  name: agencyservice-configmap-env
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+                  name: agencyservice-configmap-env
           ports:
             - containerPort: 8080

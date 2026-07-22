@@ -37,6 +37,10 @@ jobs:
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
+        with:
+          # Pinned so a release renders with the same Helm as CI. Unpinned,
+          # setup-helm resolves to `latest`, which can change under us.
+          version: v4.2.2
 
       - name: Validate release input
         shell: bash
@@ -79,8 +83,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          helm lint . -f values.yaml.default
-          helm template oriso . -f values.yaml.default >/tmp/oriso-rendered.yaml
+          # The chart ships no committed `values.yaml`, and several templates and
+          # subcharts dereference secret values unconditionally (b64enc rejects nil).
+          # ci/placeholder-secrets.yaml supplies dummy values so the chart can be
+          # linted and rendered here — it holds no real credentials.
+          helm lint . -f values.yaml.default -f ci/placeholder-secrets.yaml
+          helm template oriso . -f values.yaml.default -f ci/placeholder-secrets.yaml >/tmp/oriso-rendered.yaml
 
       - name: Package Helm chart
         shell: bash

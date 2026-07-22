@@ -1,0 +1,441 @@
+{{- if .Values.signoz.enabled }}
+{{- $gGlobal := default dict .Values.global }}
+{{- $gObs := default dict $gGlobal.observability }}
+{{- $gDomains := default dict $gGlobal.domains }}
+{{/*
+OBS-P8 CORS origins: Frontend and Admin are separate subdomains on this
+deployment (per global.domains.app / global.domains.admin — verified
+against the live Pre-Dev release, which has NO global.domainName set at
+all; the "single shared ADR-011 domain" assumption this chart's docs/
+comments elsewhere describe does not hold for app/admin routing today,
+only for the signoz and matrix dev-tooling exceptions). Built as a list,
+not a single origin, so both apps' browser bundles can actually reach
+this receiver.
+*/}}
+{{- $webVitalsOrigins := list }}
+{{- if $gDomains.app }}{{ $webVitalsOrigins = append $webVitalsOrigins (printf "https://%s" $gDomains.app) }}{{- end }}
+{{- if $gDomains.admin }}{{ $webVitalsOrigins = append $webVitalsOrigins (printf "https://%s" $gDomains.admin) }}{{- end }}
+{{- $webVitalsCorsEnabled := and (default false $gObs.webVitalsEnabled) (gt (len $webVitalsOrigins) 0) }}
+{{/*
+Gateway collector configuration for the SigNoz ingest layer.
+
+The signoz/signoz single binary does NOT ingest OTLP (verified on Pre-Dev:
+it listens on 8080/4320/6060/9090 only). Ingest is SigNoz's own collector
+distribution signoz/signoz-otel-collector, which writes to ClickHouse
+directly via the clickhousetraces / signozclickhousemetrics /
+clickhouselogsexporter exporters and registers with the SigNoz backend over
+opamp (ws://signoz:4320).
+
+This config follows the upstream reference paired with SigNoz v0.132.2
+(charts tag signoz-0.132.2; the exporter/pipeline schema is unchanged since
+signoz-0.105.1), minus the jaeger/httplog receivers we do not use, plus the
+memory_limiter (K8-L02) and k8sattributes (traces/metrics only) processors.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "signoz.otelCollector.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
+  labels:
+    {{- include "signoz.labels" . | nindent 4 }}
+    app.kubernetes.io/component: otel-collector
+data:
+  otel-collector-config.yaml: |
+    connectors:
+      signozmeter:
+        metrics_flush_interval: 1h
+        dimensions:
+          - name: service.name
+          - name: deployment.environment
+          - name: host.name
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+            max_recv_msg_size_mib: 16
+          http:
+            endpoint: 0.0.0.0:4318
+            {{- if $webVitalsCorsEnabled }}
+            # OBS-P8: lets the Frontend/Admin browser bundles POST Web Vitals
+            # (LCP/CLS/INP/TTFB/FCP) OTLP metrics directly to this receiver
+            # via the signoz.oriso-dev.site/v1/metrics ingress path
+            # (templates/nginx/signoz-ingress.yaml), per SigNoz's own
+            # self-hosted RUM guidance
+            # (signoz.io/docs/frontend-monitoring/web-vitals-with-metrics).
+            # Scoped to global.domains.app / global.domains.admin — Frontend
+            # and Admin each live on their own subdomain, so both need to be
+            # allowed. CORS is a BROWSER-ONLY restriction: it does not stop a
+            # non-browser client from POSTing here directly — see the
+            # proxy-body-size/limit-rps abuse guards on the ingress itself.
+            # Gated off whenever global.observability.webVitalsEnabled is
+            # false (prod default, pending the same KDG review OBS-P6 got —
+            # docs/observability-prod-pseudonymization.md, PR #65) or when
+            # neither domain is set (e.g. a bare `helm template` with no
+            # -f/--set), so this block never renders with zero origins.
+            cors:
+              allowed_origins:
+                {{- range $webVitalsOrigins }}
+                - {{ . }}
+                {{- end }}
+              allowed_headers: ['*']
+            {{- end }}
+
+      {{- if or .Values.signoz.clickhouse.prometheus.enabled .Values.signoz.otelCollector.selfMetrics.enabled }}
+      # OBS-P4: scrapes Prometheus-format targets that have no native OTel
+      # receiver of their own. Two static jobs today:
+      #  - "clickhouse": the in-chart ClickHouse's own <prometheus> endpoint
+      #    (clickhouse-config-configmap.yaml) — feeds the already-imported
+      #    "ClickHouse Overview" dashboard, empty until now for lack of a
+      #    scraper.
+      #  - "otel-collector": this collector's OWN self-metrics (enabled
+      #    below under service.telemetry.metrics), scraped right back on
+      #    localhost — feeds the "OpenTelemetry Collector" self-monitoring
+      #    dashboard (auditability of the pipeline itself).
+      # The job_name becomes each series' service.name resource attribute,
+      # which is exactly what both dashboards filter/group by.
+      prometheus:
+        config:
+          scrape_configs:
+            {{- if .Values.signoz.clickhouse.prometheus.enabled }}
+            - job_name: "clickhouse"
+              scrape_interval: 30s
+              metrics_path: {{ .Values.signoz.clickhouse.prometheus.endpoint }}
+              static_configs:
+                - targets:
+                    - "{{ include "signoz.clickhouse.host" . }}:{{ .Values.signoz.clickhouse.prometheus.port }}"
+            {{- end }}
+            {{- if .Values.signoz.otelCollector.selfMetrics.enabled }}
+            - job_name: "otel-collector"
+              scrape_interval: 30s
+              static_configs:
+                - targets:
+                    - "localhost:8888"
+            {{- end }}
+      {{- end }}
+
+      {{- if .Values.signoz.mariadbMetrics.enabled }}
+      # OBS-P4: OTel Collector's built-in `mysql` receiver (MariaDB is
+      # MySQL-wire-compatible) — feeds the SigNoz "MySQL" community
+      # dashboard, whose panels query dotted `mysql.*` metric names with a
+      # `mysql.instance.endpoint` resource attribute (this receiver's own
+      # native naming — verified against
+      # https://github.com/SigNoz/dashboards/blob/main/mysql/mysql-otlp-v1.json,
+      # NOT the underscored Prometheus-exporter-style names in the
+      # receiver's own readme, which document a different ingestion path).
+      #
+      # Credentials: reused from the SAME Secret the AgencyService Deployment
+      # already consumes via secretKeyRef (LC-M03 precedent — no new
+      # plaintext credential). That credential is a schema-scoped app user
+      # (SELECT/INSERT/UPDATE/DELETE on agencyservice.* only), not a
+      # dedicated least-privilege monitoring account — see the values.yaml
+      # comment on mariadbMetrics.existingSecret. Flagged as an open
+      # question; this chart does not create DB users/grants.
+      mysql:
+        endpoint: "{{ if .Values.signoz.mariadbMetrics.host }}{{ .Values.signoz.mariadbMetrics.host }}{{ else }}mariadb.{{ .Release.Namespace }}{{ end }}:{{ .Values.signoz.mariadbMetrics.port }}"
+        username: ${env:MARIADB_METRICS_USERNAME}
+        password: ${env:MARIADB_METRICS_PASSWORD}
+        collection_interval: {{ .Values.signoz.mariadbMetrics.collectionInterval | quote }}
+      {{- end }}
+
+    processors:
+      # memory_limiter MUST run first in every pipeline (K8-L02).
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: {{ .Values.signoz.otelCollector.memoryLimiter.limitMib }}
+        spike_limit_mib: {{ .Values.signoz.otelCollector.memoryLimiter.spikeLimitMib }}
+      # Enrich traces/metrics with Kubernetes metadata, associated via the
+      # sending pod's connection IP (services export OTLP directly here).
+      # Deliberately NOT in the logs pipeline — see the pipeline comment.
+      k8sattributes:
+        passthrough: false
+        pod_association:
+          - sources:
+              - from: connection
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.deployment.name
+            - k8s.statefulset.name
+            - k8s.daemonset.name
+            - k8s.node.name
+      # APM RED metrics derived from spans (upstream signoz-0.132.2 config).
+      signozspanmetrics/delta:
+        metrics_exporter: signozclickhousemetrics
+        latency_histogram_buckets: [100us, 1ms, 2ms, 6ms, 10ms, 50ms, 100ms, 250ms, 500ms, 1000ms, 1400ms, 2000ms, 5s, 10s, 20s, 40s, 60s]
+        dimensions_cache_size: 100000
+        aggregation_temporality: AGGREGATION_TEMPORALITY_DELTA
+        dimensions:
+          - name: service.namespace
+            default: default
+          - name: deployment.environment
+            default: default
+          - name: signoz.collector.id
+      batch:
+        send_batch_size: 50000
+        timeout: 1s
+      batch/meter:
+        send_batch_max_size: 25000
+        send_batch_size: 20000
+        timeout: 1s
+      {{- if .Values.global.observability.telemetryPseudonymizationEnabled }}
+      # ---------------------------------------------------------------
+      # OBS-P6: KDG-safe prod telemetry pseudonymization.
+      #
+      # Full design rationale, what is/isn't covered, and sign-off status:
+      # docs/observability-prod-pseudonymization.md. Summary of the
+      # philosophy applied here — the SAME rigor as the app-layer statistics
+      # module's small-cell-suppression guard (UserService
+      # AdminDashboardStatisticsService.SMALL_CELL_MINIMUM_COUNSELORS, which
+      # forces suppression back on in the prod profile no matter what config
+      # says): the enforcement point is an explicit ALLOW-LIST
+      # (`keep_keys`), not an error path or a "known bad fields" denylist.
+      # Anything not named on an allow-list below is dropped unconditionally
+      # — including attributes nobody has invented yet. `error_mode:
+      # propagate` on every transform processor here means a processing
+      # error drops the affected telemetry rather than passing raw data
+      # through unmodified (the transform processor's `ignore` mode would do
+      # the opposite: keep the ORIGINAL, unpseudonymized record on error,
+      # which is the one thing this must never do).
+      #
+      # Verified against this codebase (grepped all 4 backend services'
+      # OBS-P2 telemetry code, 2026-07-13): none of them currently set a
+      # custom user/agency/tenant/session span attribute — the only
+      # correlation surface is `CorrelationIdFilter` (header
+      # `X-Correlation-ID`, MDC key `CID`), which today only reaches LOGS,
+      # not span attributes. The `*.id` hash statements below are therefore
+      # partly pre-emptive (guarding a future custom attribute a service
+      # might add) and partly current (Spring Boot's own auto-instrumentation
+      # attributes carry real risk today: raw URLs/targets can embed a
+      # numeric/UUID path segment, and IP addresses are attached by default).
+      transform/pseudonymize_traces:
+        error_mode: propagate
+        trace_statements:
+          - context: span
+            statements:
+              # Keyed hash ("HMAC-style"): SHA-256 of the raw value
+              # concatenated with a secret salt injected from a K8s Secret
+              # (global.secrets.telemetryPseudonymizationHmacKey, env
+              # PSEUDONYM_HMAC_KEY) — not a bare hash, so it cannot be
+              # dictionary/rainbow-table attacked back to the real ID by
+              # anyone without the salt. NOTE: the OTTL function library
+              # shipped in signoz-otel-collector v0.144.5 has no literal
+              # HMAC construction (no padded inner/outer key), so this is
+              # SHA-256(id || ":" || secret) rather than textbook
+              # HMAC-SHA256. It is still a *keyed* hash — see the doc for
+              # the full caveat — and should move to a real HMAC OTTL
+              # function if/when upstream ships one.
+              - set(attributes["user.id.hash"], SHA256(Concat([attributes["user.id"], "${env:PSEUDONYM_HMAC_KEY}"], ":"))) where attributes["user.id"] != nil
+              - set(attributes["enduser.id.hash"], SHA256(Concat([attributes["enduser.id"], "${env:PSEUDONYM_HMAC_KEY}"], ":"))) where attributes["enduser.id"] != nil
+              - set(attributes["agency.id.hash"], SHA256(Concat([attributes["agency.id"], "${env:PSEUDONYM_HMAC_KEY}"], ":"))) where attributes["agency.id"] != nil
+              - set(attributes["tenant.id.hash"], SHA256(Concat([attributes["tenant.id"], "${env:PSEUDONYM_HMAC_KEY}"], ":"))) where attributes["tenant.id"] != nil
+              - set(attributes["session.id.hash"], SHA256(Concat([attributes["session.id"], "${env:PSEUDONYM_HMAC_KEY}"], ":"))) where attributes["session.id"] != nil
+              - set(attributes["cid.hash"], SHA256(Concat([attributes["cid"], "${env:PSEUDONYM_HMAC_KEY}"], ":"))) where attributes["cid"] != nil
+              - delete_key(attributes, "user.id")
+              - delete_key(attributes, "enduser.id")
+              - delete_key(attributes, "agency.id")
+              - delete_key(attributes, "tenant.id")
+              - delete_key(attributes, "session.id")
+              - delete_key(attributes, "cid")
+              # No IP storage (plan doc constraint #2), regardless of
+              # semantic-convention name in use.
+              - delete_key(attributes, "net.peer.ip")
+              - delete_key(attributes, "net.sock.peer.addr")
+              - delete_key(attributes, "client.address")
+              - delete_key(attributes, "http.client_ip")
+              # Raw URL/target can embed a real ID in a path segment
+              # (e.g. /api/v1/users/12345); the templated http.route
+              # (/api/v1/users/{id}) carries no literal identifier and is
+              # kept via the allow-list below.
+              - delete_key(attributes, "http.url")
+              - delete_key(attributes, "http.target")
+              - delete_key(attributes, "url.full")
+              - delete_key(attributes, "url.path")
+              - delete_key(attributes, "url.query")
+              # SQL/messaging payloads can carry literal row data.
+              - delete_key(attributes, "db.statement")
+              # exception.message/stacktrace are free text and can carry
+              # names or message content; exception.type (the class name)
+              # is safe and stays on the allow-list.
+              - delete_key(attributes, "exception.message")
+              - delete_key(attributes, "exception.stacktrace")
+              # Fail-closed: collapse everything else to a small, named
+              # allow-list. Any attribute a future code change adds that
+              # isn't listed here — a new correlation field, a debug dump,
+              # anything — is dropped by construction, not "not yet handled".
+              - keep_keys(attributes, ["user.id.hash", "enduser.id.hash", "agency.id.hash", "tenant.id.hash", "session.id.hash", "cid.hash", "http.method", "http.request.method", "http.status_code", "http.response.status_code", "http.route", "http.scheme", "rpc.system", "rpc.method", "rpc.service", "db.system", "db.operation", "messaging.system", "messaging.operation", "messaging.destination.name", "otel.status_code", "otel.status_description"])
+          # Exception recordings are span EVENTS, not span attributes — same
+          # allow-list philosophy applied to them. OTTL's context identifier
+          # for this is "spanevent" (no underscore).
+          - context: spanevent
+            statements:
+              - delete_key(attributes, "exception.message")
+              - delete_key(attributes, "exception.stacktrace")
+              - keep_keys(attributes, ["exception.type", "exception.escaped"])
+      # Prod metrics must be counter/aggregate-only: no per-user or
+      # per-session labels. No custom high-cardinality metric exists in the
+      # 4 backends today (verified — none of them tag a Micrometer
+      # Observation or Brave span with an identifier), so this is primarily
+      # the fail-closed guard against one being added later without anyone
+      # updating this allow-list.
+      transform/pseudonymize_metrics:
+        error_mode: propagate
+        metric_statements:
+          - context: datapoint
+            statements:
+              - delete_key(attributes, "user.id")
+              - delete_key(attributes, "enduser.id")
+              - delete_key(attributes, "agency.id")
+              - delete_key(attributes, "tenant.id")
+              - delete_key(attributes, "session.id")
+              - delete_key(attributes, "cid")
+              - delete_key(attributes, "net.peer.ip")
+              - delete_key(attributes, "client.address")
+              - keep_keys(attributes, ["http.method", "http.request.method", "http.status_code", "http.response.status_code", "http.route", "service.name", "service.namespace", "deployment.environment", "jvm.memory.type", "jvm.memory.pool.name", "jvm.gc.name", "jvm.gc.action", "k8s.namespace.name", "k8s.pod.name", "k8s.deployment.name", "k8s.node.name", "signoz.collector.id"])
+      # Logs are the hardest case: the filelog receiver's `container`
+      # operator (otel-agent-configmap.yaml) does not parse the
+      # application's own JSON — the whole logstash-encoder JSON line
+      # (including the free-text `log.message` field) arrives as one opaque
+      # string in the LogRecord body. Two options were on the table: (a)
+      # parse it, promote a strict allow-list of structured fields, and
+      # unconditionally replace the body — or (b) turn prod log export off
+      # entirely because free-text scrubbing can't be proven reliable.
+      # We implement (a), but built so it degrades to (b)'s safety even on
+      # failure: the `set(body, ...)` and `keep_keys` statements below run
+      # UNCONDITIONALLY, independent of whether the ParseJSON extraction
+      # matches this service's actual JSON shape. Worst case (extraction
+      # mismatch) you lose the correlation-id/level/logger breadcrumbs —
+      # you never get a worse-case raw-body leak. The exact JSON key shape
+      # (flat "request.correlationId" vs a nested {"request":{"correlationId"
+      # :...}} object) has NOT been confirmed against a live prod log sample
+      # — verify it before ever enabling this flag; see the doc.
+      transform/pseudonymize_logs:
+        error_mode: propagate
+        log_statements:
+          - context: log
+            statements:
+              - set(cache, ParseJSON(body)) where IsMatch(body, "^\\s*\\{")
+              - set(attributes["request.correlationId.hash"], SHA256(Concat([cache["request.correlationId"], "${env:PSEUDONYM_HMAC_KEY}"], ":"))) where cache["request.correlationId"] != nil
+              - set(attributes["trace.traceId"], cache["trace.traceId"]) where cache["trace.traceId"] != nil
+              - set(attributes["trace.spanId"], cache["trace.spanId"]) where cache["trace.spanId"] != nil
+              - set(attributes["log.level"], cache["log.level"]) where cache["log.level"] != nil
+              - set(attributes["log.logger"], cache["log.logger"]) where cache["log.logger"] != nil
+              - set(attributes["serviceName"], cache["serviceName"]) where cache["serviceName"] != nil
+              # Unconditional: the raw free-text message NEVER leaves the
+              # pod for prod, regardless of whether the parse above matched.
+              - set(body, "[log body suppressed for prod — KDG policy OBS-P6, free-text message content is not exported]")
+              - keep_keys(attributes, ["request.correlationId.hash", "trace.traceId", "trace.spanId", "log.level", "log.logger", "serviceName"])
+      {{- end }}
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+      pprof:
+        endpoint: localhost:1777
+
+    exporters:
+      clickhousetraces:
+        datasource: tcp://${env:CLICKHOUSE_USER}:${env:CLICKHOUSE_PASSWORD}@${env:CLICKHOUSE_HOST}:${env:CLICKHOUSE_PORT}/${env:CLICKHOUSE_TRACE_DATABASE}
+        low_cardinal_exception_grouping: ${env:LOW_CARDINAL_EXCEPTION_GROUPING}
+        use_new_schema: true
+      signozclickhousemetrics:
+        dsn: tcp://${env:CLICKHOUSE_USER}:${env:CLICKHOUSE_PASSWORD}@${env:CLICKHOUSE_HOST}:${env:CLICKHOUSE_PORT}/${env:CLICKHOUSE_DATABASE}
+        timeout: 45s
+      clickhouselogsexporter:
+        dsn: tcp://${env:CLICKHOUSE_USER}:${env:CLICKHOUSE_PASSWORD}@${env:CLICKHOUSE_HOST}:${env:CLICKHOUSE_PORT}/${env:CLICKHOUSE_LOG_DATABASE}
+        timeout: 10s
+        use_new_schema: true
+      signozclickhousemeter:
+        dsn: tcp://${env:CLICKHOUSE_USER}:${env:CLICKHOUSE_PASSWORD}@${env:CLICKHOUSE_HOST}:${env:CLICKHOUSE_PORT}/${env:CLICKHOUSE_METER_DATABASE}
+        timeout: 45s
+        sending_queue:
+          enabled: false
+
+    service:
+      telemetry:
+        logs:
+          encoding: json
+        {{- if .Values.signoz.otelCollector.selfMetrics.enabled }}
+        # OBS-P4: emit the collector's own self-metrics on :8888 (the
+        # container/Service port was already reserved for this). The
+        # "readers" schema is required — service.telemetry.metrics.address
+        # was removed upstream (see the otel-agent config's note); this is
+        # its replacement, scraped straight back by the "otel-collector" job
+        # in the prometheus receiver above.
+        metrics:
+          level: normal
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8888
+        {{- end }}
+      extensions: [health_check, pprof]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          # OBS-P6: when telemetryPseudonymizationEnabled, pseudonymize runs
+          # right after memory_limiter and BEFORE every other processor —
+          # k8sattributes/signozspanmetrics never see the raw identifiers.
+          processors:
+            - memory_limiter
+          {{- if .Values.global.observability.telemetryPseudonymizationEnabled }}
+            - transform/pseudonymize_traces
+          {{- end }}
+            - k8sattributes
+            - signozspanmetrics/delta
+            - batch
+          exporters: [clickhousetraces, signozmeter]
+        metrics:
+          receivers: [otlp]
+          processors:
+            - memory_limiter
+          {{- if .Values.global.observability.telemetryPseudonymizationEnabled }}
+            - transform/pseudonymize_metrics
+          {{- end }}
+            - k8sattributes
+            - batch
+          exporters: [signozclickhousemetrics, signozmeter]
+        logs:
+          # NO k8sattributes here: log records arrive from the agent with
+          # k8s attributes already set from the file path, and the gateway's
+          # connection-IP association stamps the AGENT's workload identity
+          # (k8s.daemonset.name=<agent>) onto every record — confirmed live
+          # on Pre-Dev.
+          receivers: [otlp]
+          processors:
+            - memory_limiter
+          {{- if .Values.global.observability.telemetryPseudonymizationEnabled }}
+            - transform/pseudonymize_logs
+          {{- end }}
+            - batch
+          exporters: [clickhouselogsexporter, signozmeter]
+        metrics/meter:
+          receivers: [signozmeter]
+          processors: [batch/meter]
+          exporters: [signozclickhousemeter]
+        {{- if or .Values.signoz.clickhouse.prometheus.enabled .Values.signoz.otelCollector.selfMetrics.enabled .Values.signoz.mariadbMetrics.enabled }}
+        # OBS-P4: infra/self-monitoring metrics (ClickHouse, MariaDB, this
+        # collector's own self-metrics). Kept OUT of the main `metrics`
+        # pipeline deliberately: k8sattributes' pod_association is
+        # `from: connection`, which only makes sense for inbound OTLP from a
+        # workload — these three sources are either scraped locally
+        # (prometheus) or dialed outbound (mysql), so there is no meaningful
+        # connection-IP to enrich. Same write path as the main metrics
+        # pipeline (signozclickhousemetrics/signozmeter) — no duplicated
+        # ClickHouse ingest.
+        metrics/infra:
+          receivers:
+            [
+              {{- if or .Values.signoz.clickhouse.prometheus.enabled .Values.signoz.otelCollector.selfMetrics.enabled }}prometheus,{{- end }}
+              {{- if .Values.signoz.mariadbMetrics.enabled }}mysql,{{- end }}
+            ]
+          processors: [memory_limiter, batch]
+          exporters: [signozclickhousemetrics, signozmeter]
+        {{- end }}
+  otel-collector-opamp-config.yaml: |
+    server_endpoint: "ws://{{ include "signoz.fullname" . }}.{{ default .Release.Namespace .Values.signoz.namespace }}.svc.cluster.local:{{ .Values.signoz.service.opampPort }}/v1/opamp"
+{{- end }}
