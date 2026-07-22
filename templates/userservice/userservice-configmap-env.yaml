@@ -6,10 +6,17 @@ metadata:
   name: userservice-configmap-env
 data:
   # General
+  # DPA_SIGN_FRONTEND_BASE_URL is the app frontend base URL embedded in the
+  # DPA-signing email (DpaForwardEmailService). It is the same FQDN as
+  # APP_BASE_URL, so it derives from global.domainName rather than taking a
+  # separate value — otherwise the app's @Value default (https://app.oriso.org)
+  # applies and non-production environments link to production.
   {{- if .Values.global.enableTls }}
   APP_BASE_URL: "https://{{ .Values.global.domainName }}"
+  DPA_SIGN_FRONTEND_BASE_URL: "https://{{ .Values.global.domainName }}"
   {{- else }}
   APP_BASE_URL: "http://{{ .Values.global.domainName }}"
+  DPA_SIGN_FRONTEND_BASE_URL: "http://{{ .Values.global.domainName }}"
   {{- end }}
   STATISTICS_ENABLED: {{ .Values.global.statisticsEnabled | quote }}
   SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}
