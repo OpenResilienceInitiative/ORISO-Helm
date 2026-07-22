@@ -1,0 +1,29 @@
+version: 1
+alerts:
+  - id: provisioning_rollback_failure
+    severity: critical
+    query: sum(rate(oriso.admin.provisioning.operations{rollback.outcome="failure"}[5m])) > 0
+    for: 2m
+    groupBy: [deployment.environment, service.version]
+    runbookCause: relation_failure
+
+  - id: redis_availability_store_failure
+    severity: critical
+    query: sum(rate(oriso.live_chat.availability.store.operations{outcome="failure"}[5m])) > 0
+    for: 3m
+    groupBy: [deployment.environment, operation, service.version]
+    runbookCause: expired_availability
+
+  - id: matrix_notification_exception_rate
+    severity: warning
+    query: sum(rate(oriso.matrix.side_effect.operations{side_effect="notification",outcome="failure"}[10m])) / clamp_min(sum(rate(oriso.matrix.side_effect.operations{side_effect="notification"}[10m])), 1) > 0.05
+    for: 10m
+    groupBy: [deployment.environment, exception.type, service.version]
+    runbookCause: matrix_processing_failure
+
+  - id: unencrypted_room_created
+    severity: critical
+    query: sum(increase(oriso.matrix.room.creation{outcome="success",encryption.enabled="false"}[5m])) > 0
+    for: 1m
+    groupBy: [deployment.environment, service.version]
+    runbookCause: unencrypted_room_creation
