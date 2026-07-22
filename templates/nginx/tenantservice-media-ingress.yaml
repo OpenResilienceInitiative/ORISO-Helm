@@ -1,0 +1,27 @@
+# WP-3a wiring (epic ORISO-Admin#366): public route for tenant editor media.
+# The TenantService serves GET /media/{id} unauthenticated so anonymous visitors
+# can load images embedded in legal texts (imprint/privacy render without login).
+# Without this rule the /media/{id} URLs stored in editor HTML 404 at the edge.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /media/$1
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+    nginx.ingress.kubernetes.io/use-regex: 'true'
+  name: tenantservice-media-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: '{{ .Values.global.domainName }}'
+    http:
+      paths:
+      - backend:
+          service:
+            name: tenantservice
+            port:
+              number: 8081
+        path: /media/(.+)
+        pathType: ImplementationSpecific
