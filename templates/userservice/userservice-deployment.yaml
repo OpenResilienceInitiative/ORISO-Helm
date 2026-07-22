@@ -91,6 +91,11 @@ spec:
                 configMapKeyRef:
                   key: APP_BASE_URL
                   name: userservice-configmap-env
+            - name: DPA_SIGN_FRONTEND_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: DPA_SIGN_FRONTEND_BASE_URL
+                  name: userservice-configmap-env
             - name: ASKER_IMPORT_FILENAME
               valueFrom:
                 configMapKeyRef:
