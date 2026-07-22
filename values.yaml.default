@@ -238,15 +238,19 @@ userService:
   # Environment overlays opt in only after their stable homeserver identity is ready.
   matrixEncryptionEnabled: "false"
 
-  # Redis lease duration for consultant Live Chat availability. The Redis host
-  # and password are wired from the chart's existing Service and Secret.
+  # Redis lease duration for consultant Live Chat availability. The Redis
+  # password is wired from the chart's existing Secret; host/port default to
+  # the in-chart Redis Service and can be overridden to point at an external
+  # instance (templates must not hardcode hosts).
+  redisHost: "redis"
+  redisPort: 6379
   consultantAvailabilityRedisTtlSeconds: 120
 
   # 2FA / OTP login posture (independent from Matrix room encryption).
   # Defaults keep OTP off; the dev overlay leaves it off for fast test-user
   # creation, and prod's posture is a deliberate choice (see values-prod.yaml).
   otpAllowedForUsers: "false"
-  otpAllowedForConsultants: "true"
+  otpAllowedForConsultants: "false"
   otpAllowedForSingleTenantAdmins: "false"
   otpAllowedForTenantSuperAdmins: "false"
 
