@@ -29,6 +29,7 @@ global:
   # something this chart does automatically.
   observability:
     otlpEnabled: false
+    deploymentEnvironment: "production"
     # OBS-P6: built, verified by tests/render_obs_p6_test.py, still OFF.
     # Do not flip this to true without reading
     # docs/observability-prod-pseudonymization.md first — it documents

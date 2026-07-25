@@ -27,3 +27,24 @@ alerts:
     for: 1m
     groupBy: [deployment.environment, service.version]
     runbookCause: unencrypted_room_creation
+
+  - id: deployment_identity_mismatch
+    severity: critical
+    query: sum(increase(oriso.deployment.identity.mismatch[5m])) > 0
+    for: 1m
+    groupBy: [deployment.environment, service.name, expected.digest, running.digest]
+    runbookCause: deployment_drift
+
+  - id: clickhouse_capacity_warning
+    severity: warning
+    query: ClickHouseAsyncMetrics_DiskUsed_default / ClickHouseAsyncMetrics_DiskTotal_default > 0.75
+    for: 10m
+    groupBy: [deployment.environment, service.name]
+    runbookCause: clickhouse_capacity
+
+  - id: web_vitals_stale
+    severity: warning
+    query: absent_over_time(lcp{service.name=~"frontend|admin"}[30m]) > 0
+    for: 5m
+    groupBy: [deployment.environment, service.name]
+    runbookCause: browser_telemetry_stale
