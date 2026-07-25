@@ -10,7 +10,9 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RELEASE = "oriso"
 
 
-def render(enabled: bool) -> list[dict]:
+def helm_template(
+    enabled: bool, signoz_enabled: bool
+) -> subprocess.CompletedProcess[str]:
     command = [
         "helm",
         "template",
@@ -23,9 +25,15 @@ def render(enabled: bool) -> list[dict]:
         "--set",
         f"serviceHealthExporter.enabled={str(enabled).lower()}",
         "--set",
+        f"signoz.enabled={str(signoz_enabled).lower()}",
+        "--set",
         "global.observability.environment=pre-dev",
     ]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    return subprocess.run(command, capture_output=True, text=True, check=False)
+
+
+def render(enabled: bool, signoz_enabled: bool = False) -> list[dict]:
+    result = helm_template(enabled, signoz_enabled)
     assert result.returncode == 0, result.stderr
     return [document for document in yaml.safe_load_all(result.stdout) if isinstance(document, dict)]
 
@@ -41,7 +49,7 @@ def resource(documents: list[dict], kind: str, name: str) -> dict:
 
 
 def test_renders_dependency_free_body_validating_health_collector() -> None:
-    documents = render(enabled=True)
+    documents = render(enabled=True, signoz_enabled=True)
     configmap = resource(documents, "ConfigMap", f"{RELEASE}-service-health-exporter")
     deployment = resource(documents, "Deployment", f"{RELEASE}-service-health-exporter")
 
@@ -58,6 +66,8 @@ def test_renders_dependency_free_body_validating_health_collector() -> None:
     config = yaml.safe_load(configmap["data"]["otel-collector-config.yaml"])
     receiver = config["receivers"]["http_check"]
     assert receiver["collection_interval"] == "10s"
+    assert receiver["metrics"]["httpcheck.status"]["enabled"] is True
+    assert receiver["metrics"]["httpcheck.error"]["enabled"] is True
     assert receiver["metrics"]["httpcheck.validation.passed"]["enabled"] is True
     assert receiver["metrics"]["httpcheck.validation.failed"]["enabled"] is True
 
@@ -89,6 +99,29 @@ def test_renders_dependency_free_body_validating_health_collector() -> None:
         "processors": ["memory_limiter", "resource/identity", "batch"],
         "exporters": ["otlp"],
     }
+
+    contract = yaml.safe_load(configmap["data"]["service-health-contract.yaml"])
+    assert contract["groupBy"] == ["http.url", "deployment.environment"]
+    assert contract["up"]["requiresFresh"] == [
+        "httpcheck.status == 1",
+        "httpcheck.validation.passed >= 1",
+    ]
+    assert contract["down"]["anyFresh"] == [
+        "httpcheck.status != 1",
+        "httpcheck.error > 0",
+        "httpcheck.validation.failed > 0",
+    ]
+    assert contract["down"]["missingOrStale"] == [
+        "httpcheck.status",
+        "httpcheck.validation.passed",
+    ]
+
+
+def test_rejects_exporter_without_its_signoz_destination() -> None:
+    result = helm_template(enabled=True, signoz_enabled=False)
+
+    assert result.returncode != 0
+    assert "serviceHealthExporter.enabled requires signoz.enabled=true" in result.stderr
 
 
 def test_does_not_render_when_disabled() -> None:

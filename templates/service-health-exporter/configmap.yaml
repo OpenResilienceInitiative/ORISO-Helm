@@ -1,3 +1,6 @@
+{{- if and .Values.serviceHealthExporter.enabled (not .Values.signoz.enabled) }}
+{{- fail "serviceHealthExporter.enabled requires signoz.enabled=true because its OTLP destination is the in-chart SigNoz collector" }}
+{{- end }}
 {{- if .Values.serviceHealthExporter.enabled }}
 {{- $environment := default "pre-dev" (default .Values.serviceHealthExporter.environment (.Values.global.observability | default dict).environment) }}
 apiVersion: v1
@@ -10,6 +13,31 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 data:
+  # SigNoz query/recording-rule contract. A 2xx response alone is not UP:
+  # the actuator body must validate, while connection/timeout and validation
+  # failures are DOWN. Query at twice the collection interval and group by
+  # endpoint plus environment. Missing/stale required samples are DOWN.
+  service-health-contract.yaml: |
+    version: 1
+    queryWindow: "2x collection_interval"
+    groupBy:
+      - http.url
+      - deployment.environment
+    up:
+      requiresFresh:
+        - "httpcheck.status == 1"
+        - "httpcheck.validation.passed >= 1"
+      requiresAbsent:
+        - "httpcheck.error > 0"
+        - "httpcheck.validation.failed > 0"
+    down:
+      anyFresh:
+        - "httpcheck.status != 1"
+        - "httpcheck.error > 0"
+        - "httpcheck.validation.failed > 0"
+      missingOrStale:
+        - httpcheck.status
+        - httpcheck.validation.passed
   otel-collector-config.yaml: |
     extensions:
       health_check:
@@ -23,6 +51,10 @@ data:
         collection_interval: {{ .Values.serviceHealthExporter.collectionInterval | quote }}
         initial_delay: {{ .Values.serviceHealthExporter.initialDelay | quote }}
         metrics:
+          httpcheck.status:
+            enabled: true
+          httpcheck.error:
+            enabled: true
           httpcheck.validation.passed:
             enabled: true
           httpcheck.validation.failed:

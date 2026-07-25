@@ -1,3 +1,6 @@
+{{- if and .Values.serviceHealthExporter.enabled (not .Values.signoz.enabled) }}
+{{- fail "serviceHealthExporter.enabled requires signoz.enabled=true because its OTLP destination is the in-chart SigNoz collector" }}
+{{- end }}
 {{- if .Values.serviceHealthExporter.enabled }}
 {{- $image := printf "%s:%s" .Values.serviceHealthExporter.image.repository .Values.serviceHealthExporter.image.tag }}
 {{- if .Values.serviceHealthExporter.image.digest }}
