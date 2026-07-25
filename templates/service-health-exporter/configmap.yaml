@@ -1,0 +1,73 @@
+{{- if .Values.serviceHealthExporter.enabled }}
+{{- $environment := default "pre-dev" (default .Values.serviceHealthExporter.environment (.Values.global.observability | default dict).environment) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-service-health-exporter
+  namespace: {{ default .Release.Namespace .Values.serviceHealthExporter.namespace }}
+  labels:
+    app.kubernetes.io/name: service-health-exporter
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  otel-collector-config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      # Collector Contrib's HTTP Check receiver emits current non-monotonic
+      # status and duration metrics. Response validation prevents a generic
+      # HTTP 200 error page from being classified as a healthy actuator.
+      http_check:
+        collection_interval: {{ .Values.serviceHealthExporter.collectionInterval | quote }}
+        initial_delay: {{ .Values.serviceHealthExporter.initialDelay | quote }}
+        metrics:
+          httpcheck.validation.passed:
+            enabled: true
+          httpcheck.validation.failed:
+            enabled: true
+          httpcheck.response.size:
+            enabled: true
+        targets:
+          {{- range $name, $service := .Values.serviceHealthExporter.services }}
+          - endpoint: "http://{{ $.Release.Name }}-{{ $name }}:{{ $service.port }}{{ $service.path }}"
+            method: GET
+            timeout: {{ $.Values.serviceHealthExporter.timeout | quote }}
+            validations:
+              - json_path: "$.status"
+                equals: "UP"
+          {{- end }}
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 192
+        spike_limit_mib: 32
+      resource/identity:
+        attributes:
+          - key: service.name
+            value: service-health-exporter
+            action: upsert
+          - key: deployment.environment
+            value: {{ $environment | quote }}
+            action: upsert
+      batch:
+        timeout: 5s
+
+    exporters:
+      otlp:
+        endpoint: "{{ .Release.Name }}-otel-collector:4317"
+        tls:
+          insecure: true
+        retry_on_failure:
+          enabled: true
+
+    service:
+      extensions: [health_check]
+      pipelines:
+        metrics:
+          receivers: [http_check]
+          processors: [memory_limiter, resource/identity, batch]
+          exporters: [otlp]
+{{- end }}

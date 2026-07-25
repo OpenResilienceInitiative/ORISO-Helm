@@ -1,0 +1,77 @@
+{{- if .Values.serviceHealthExporter.enabled }}
+{{- $image := printf "%s:%s" .Values.serviceHealthExporter.image.repository .Values.serviceHealthExporter.image.tag }}
+{{- if .Values.serviceHealthExporter.image.digest }}
+{{- $image = printf "%s@%s" .Values.serviceHealthExporter.image.repository .Values.serviceHealthExporter.image.digest }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-service-health-exporter
+  namespace: {{ default .Release.Namespace .Values.serviceHealthExporter.namespace }}
+  labels:
+    app.kubernetes.io/name: service-health-exporter
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.serviceHealthExporter.replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: service-health-exporter
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: service-health-exporter
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/service-health-exporter/configmap.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: service-health-exporter
+          image: {{ $image | quote }}
+          imagePullPolicy: {{ .Values.serviceHealthExporter.image.pullPolicy }}
+          command: ["/otelcol-contrib"]
+          args: ["--config=/conf/otel-collector-config.yaml"]
+          ports:
+            - name: health
+              containerPort: 13133
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.serviceHealthExporter.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /conf/otel-collector-config.yaml
+              subPath: otel-collector-config.yaml
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-service-health-exporter
+      terminationGracePeriodSeconds: 30
+{{- end }}

@@ -308,6 +308,44 @@ healthDashboard:
   env:
     PORT: "9100"
 
+# Synthetic backend health checks. This replaces the legacy Python pod from
+# the archived ORISO-Kubernetes chart, which installed unpinned packages at
+# startup and crash-looped after an OpenTelemetry import moved.
+serviceHealthExporter:
+  enabled: false
+  replicas: 1
+  namespace: ""
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    tag: "0.156.0"
+    # Immutable digest of the 0.156.0 image already proven on PreDev.
+    digest: "sha256:125bdbeb7590cc1952c5b3430ecf14063568980c2c93d5b38676cc0446ed8108"
+    pullPolicy: IfNotPresent
+  collectionInterval: "10s"
+  initialDelay: "1s"
+  timeout: "5s"
+  environment: ""
+  services:
+    tenantservice:
+      port: 8080
+      path: /actuator/health
+    userservice:
+      port: 8080
+      path: /actuator/health
+    consultingtypeservice:
+      port: 8080
+      path: /actuator/health
+    agencyservice:
+      port: 8080
+      path: /actuator/health
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
 # SigNoz observability stack (OBS-P1): SigNoz backend/UI + in-chart
 # ClickHouse + OTel gateway collector + per-node log-collection agent.
 #
