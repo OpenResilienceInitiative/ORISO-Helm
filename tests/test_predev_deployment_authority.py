@@ -62,6 +62,7 @@ def test_plan_workflow_enforces_predev_render_on_pull_requests() -> None:
     assert "pre-dev" in text
     assert "scripts/predev/render-release.sh" in text
     assert "helm lint" in text
+    assert "pytest==" in text
     assert "continue-on-error" not in text
 
 
