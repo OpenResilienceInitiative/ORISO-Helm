@@ -35,7 +35,7 @@ spec:
       # shared network/PID namespace.
       containers:
       - name: otel-agent
-        image: "{{ .Values.signoz.otelAgent.image.repository }}:{{ .Values.signoz.otelAgent.image.tag }}"
+        image: {{ include "oriso.imageRef" (dict "repository" .Values.signoz.otelAgent.image.repository "tag" .Values.signoz.otelAgent.image.tag "digest" .Values.signoz.otelAgent.image.digest) | quote }}
         imagePullPolicy: {{ .Values.signoz.otelAgent.image.pullPolicy }}
         command:
         - /otelcol-contrib

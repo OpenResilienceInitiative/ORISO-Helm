@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: redis
-          image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
+          image: {{ include "oriso.imageRef" (dict "repository" .Values.imageName "tag" .Values.imageVersion "digest" .Values.imageDigest) }}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 6379
@@ -58,7 +58,7 @@ spec:
               name: redis-data
 
         - name: redis-exporter
-          image: oliver006/redis_exporter:latest
+          image: {{ include "oriso.imageRef" (dict "repository" .Values.exporter.imageName "tag" .Values.exporter.imageVersion "digest" .Values.exporter.imageDigest) }}
           ports:
             - containerPort: 9121
               name: metrics

@@ -48,7 +48,7 @@ spec:
           echo "ClickHouse is ready!"
       containers:
       - name: signoz
-        image: "{{ .Values.signoz.image.repository }}:{{ .Values.signoz.image.tag }}"
+        image: {{ include "oriso.imageRef" (dict "repository" .Values.signoz.image.repository "tag" .Values.signoz.image.tag "digest" .Values.signoz.image.digest) | quote }}
         imagePullPolicy: {{ .Values.signoz.image.pullPolicy }}
         env:
         - name: CLICKHOUSE_HOST

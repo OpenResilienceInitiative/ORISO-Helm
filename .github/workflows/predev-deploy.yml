@@ -1,0 +1,148 @@
+name: PreDev plan or deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact 40-character commit SHA currently at ORISO-Helm pre-dev
+        required: true
+        type: string
+      mode:
+        description: Produce a read-only plan or apply the approved release
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - deploy
+
+permissions:
+  contents: read
+
+jobs:
+  predev:
+    name: ${{ inputs.mode }} ORISO PreDev
+    runs-on: ubuntu-latest
+    environment: predev
+    concurrency:
+      group: predev-deployment
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout authoritative pre-dev branch
+        uses: actions/checkout@v4
+        with:
+          ref: pre-dev
+          fetch-depth: 0
+
+      - name: Bind the run to the approved commit
+        shell: bash
+        env:
+          APPROVED_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/pre-dev" ]]; then
+            echo "Dispatch this workflow from refs/heads/pre-dev." >&2
+            exit 1
+          fi
+          if [[ ! "$APPROVED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source_sha must be a full 40-character lowercase commit SHA." >&2
+            exit 1
+          fi
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          if [[ "$APPROVED_SHA" != "$ACTUAL_SHA" || "$APPROVED_SHA" != "$GITHUB_SHA" ]]; then
+            echo "Approved, checked-out, and dispatched commits must be identical." >&2
+            exit 1
+          fi
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install deterministic tooling
+        run: python -m pip install --disable-pip-version-check PyYAML==6.0.3
+
+      - name: Materialize protected inputs
+        shell: bash
+        env:
+          KUBECONFIG_B64: ${{ secrets.PREDEV_KUBECONFIG_B64 }}
+          VALUES_B64: ${{ secrets.PREDEV_VALUES_B64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/oriso-predev"
+          printf '%s' "$KUBECONFIG_B64" | base64 --decode >"$RUNNER_TEMP/oriso-predev/kubeconfig"
+          printf '%s' "$VALUES_B64" | base64 --decode >"$RUNNER_TEMP/oriso-predev/secrets.yaml"
+          echo "KUBECONFIG=$RUNNER_TEMP/oriso-predev/kubeconfig" >>"$GITHUB_ENV"
+          echo "PREDEV_SECRETS_FILE=$RUNNER_TEMP/oriso-predev/secrets.yaml" >>"$GITHUB_ENV"
+
+      - name: Render exact release
+        run: scripts/predev/render-release.sh "$RUNNER_TEMP/render"
+
+      - name: Collect read-only pre-deploy drift
+        id: drift_before
+        shell: bash
+        run: |
+          set +e
+          scripts/predev/drift-report.sh "$RUNNER_TEMP/render" "$RUNNER_TEMP/drift-before"
+          DRIFT_EXIT="$?"
+          set -e
+          if [[ "$DRIFT_EXIT" -gt 1 ]]; then
+            exit "$DRIFT_EXIT"
+          fi
+          echo "detected=$([[ "$DRIFT_EXIT" -eq 1 ]] && echo true || echo false)" >>"$GITHUB_OUTPUT"
+
+      - name: Apply approved release
+        if: ${{ inputs.mode == 'deploy' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm upgrade --install oriso-platform . \
+            --namespace caritas \
+            --create-namespace \
+            --atomic \
+            --wait \
+            --wait-for-jobs \
+            --timeout 20m \
+            -f values.yaml.default \
+            -f values-pre-dev.yaml \
+            -f deploy/predev/images.lock.yaml \
+            -f "$PREDEV_SECRETS_FILE"
+
+      - name: Enforce zero post-deploy drift
+        if: ${{ inputs.mode == 'deploy' }}
+        run: scripts/predev/drift-report.sh "$RUNNER_TEMP/render" "$RUNNER_TEMP/drift-after"
+
+      - name: Record proof summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          {
+            echo "### ORISO PreDev ${{ inputs.mode }}"
+            echo ""
+            echo "- Source: \`OpenResilienceInitiative/ORISO-Helm@${{ inputs.source_sha }}\`"
+            echo "- Authority branch: \`pre-dev\`"
+            echo "- Release / namespace: \`oriso-platform\` / \`caritas\`"
+            echo "- Pre-deploy drift detected: \`${{ steps.drift_before.outputs.detected || 'unknown' }}\`"
+            echo "- Secret values are not included in uploaded evidence."
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload non-secret deployment evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: predev-${{ inputs.mode }}-${{ inputs.source_sha }}
+          path: |
+            ${{ runner.temp }}/render/manifest.redacted.yaml
+            ${{ runner.temp }}/render/provenance.json
+            ${{ runner.temp }}/drift-before/drift.json
+            ${{ runner.temp }}/drift-after/drift.json
+          if-no-files-found: warn
+          retention-days: 30

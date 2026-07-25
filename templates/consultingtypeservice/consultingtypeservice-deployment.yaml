@@ -25,7 +25,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
         - name: consultingtypeservice
-          image:  {{ .Values.consultingTypeService.imageName }}:{{ .Values.consultingTypeService.imageVersion }}          
+          image: {{ include "oriso.imageRef" (dict "repository" .Values.consultingTypeService.imageName "tag" .Values.consultingTypeService.imageVersion "digest" .Values.consultingTypeService.imageDigest) }}
           imagePullPolicy: Always
           env:
             - name: SPRING_DATASOURCE_PASSWORD

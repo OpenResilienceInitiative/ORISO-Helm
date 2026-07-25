@@ -26,7 +26,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
       - name: livekit-token-service
-        image: "{{ .Values.tokenService.image.repository }}:{{ .Values.tokenService.image.tag }}"
+        image: {{ include "oriso.imageRef" (dict "repository" .Values.tokenService.image.repository "tag" .Values.tokenService.image.tag "digest" .Values.tokenService.image.digest) | quote }}
         imagePullPolicy: {{ .Values.tokenService.image.pullPolicy }}
         envFrom:
         - configMapRef:

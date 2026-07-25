@@ -1,0 +1,64 @@
+# Versioned, non-secret PreDev environment deltas.
+#
+# This file is always layered after values.yaml.default and before
+# deploy/predev/images.lock.yaml and the protected secret overlay. The sole
+# deployment authority is ORISO-Helm@pre-dev; see
+# runbooks/predev-deployment-authority.md.
+
+global:
+  domainName: "oriso-dev.site"
+  acmedomainName: "acme.oriso-dev.site"
+  observability:
+    otlpEnabled: true
+  keycloakAuthServerUrl: "http://keycloak:8080"
+  springSecurityOAuth2ResourceserverJWTIssuerURI: "https://auth.oriso-dev.site/realms/online-beratung"
+  springSecurityOAuth2ResourceserverJWTJWKSETURI: "http://keycloak:8080/realms/online-beratung/protocol/openid-connect/certs"
+  internal:
+    keycloakURL: "http://keycloak:8080"
+  external:
+    keycloakURL: "https://auth.oriso-dev.site"
+  domains:
+    app: "oriso-dev.site"
+    admin: "oriso-dev.site"
+    matrix: "matrix.oriso-dev.site"
+    auth: "auth.oriso-dev.site"
+    signoz: "signoz.oriso-dev.site"
+  matrix:
+    matrixServerName: "matrix.oriso-dev.site"
+  keycloak:
+    realm: "online-beratung"
+    authServerUrl: "https://auth.oriso-dev.site"
+    otpUrl: "/realms/online-beratung/otp-config"
+    openidConnectUrl: "/realms/online-beratung/protocol/openid-connect"
+
+online-counseling-keycloak:
+  imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
+  imageVersion: "26.6.3-otp"
+
+matrix:
+  synapseServerName: "matrix.oriso-dev.site"
+  matrixServerName: "matrix.oriso-dev.site"
+  matrixApiUrl: "https://matrix.oriso-dev.site"
+  serverPublicIp: "46.224.170.69"
+
+userService:
+  matrixEncryptionEnabled: "true"
+  otpAllowedForConsultants: "true"
+  otpAllowedForSingleTenantAdmins: "true"
+  otpAllowedForTenantSuperAdmins: "true"
+  magicLinkFrontendBaseUrl: "https://oriso-dev.site"
+  passwordResetFrontendBaseUrl: "https://oriso-dev.site"
+  passwordResetAdminFrontendBaseUrl: "https://oriso-dev.site/admin"
+
+healthDashboard:
+  image:
+    pullPolicy: IfNotPresent
+
+signoz:
+  enabled: true
+  ingress:
+    enabled: true
+    tlsSecretName: "signoz-oriso-site-tls"
+  otelAgent:
+    enabled: true
+    logsNamespace: "caritas"

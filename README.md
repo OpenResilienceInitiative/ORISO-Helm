@@ -73,6 +73,19 @@ Overlays only change *test friction* and per-environment wiring. **Encryption is
 never toggled** — there is no dev "encryption off" mode by design (see
 `docs/infrastructure-report-2026-07.md` §7).
 
+### PreDev has one deployment authority
+
+PreDev is not deployed with the generic local commands above. Its only
+authority is this repository's `pre-dev` branch and the manual,
+environment-protected `.github/workflows/predev-deploy.yml` workflow. The
+workflow binds a run to one full commit SHA, renders the versioned PreDev
+overlay and image lock, reports live drift, and enforces zero drift after an
+approved deployment.
+
+See [runbooks/predev-deployment-authority.md](runbooks/predev-deployment-authority.md)
+for the exact values order, Hassan review gate, GitHub environment handoff,
+and the archived status of the former `ORISO-Kubernetes` path.
+
 ### Prod telemetry (OTLP → SigNoz)
 
 Prod telemetry export is off by default (`global.observability.otlpEnabled:

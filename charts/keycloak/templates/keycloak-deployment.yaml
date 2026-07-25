@@ -31,7 +31,7 @@ spec:
           command: ['sh', '-c', 'until nc -z {{ .Values.dbServer }}.{{ .Release.Namespace }} 3306; do echo waiting for mariadb; sleep 2; done']
       containers:
         - name: keycloak
-          image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
+          image: {{ include "oriso.imageRef" (dict "repository" .Values.imageName "tag" .Values.imageVersion "digest" .Values.imageDigest) }}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080

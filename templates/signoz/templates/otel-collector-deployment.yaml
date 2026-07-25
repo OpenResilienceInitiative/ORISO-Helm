@@ -40,7 +40,7 @@ spec:
       # until the schema-migrator Job has run — no extra RBAC needed.
       {{- if .Values.signoz.schemaMigrator.enabled }}
       - name: check
-        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
+        image: {{ include "oriso.imageRef" (dict "repository" .Values.signoz.otelCollector.image.repository "tag" .Values.signoz.otelCollector.image.tag "digest" .Values.signoz.otelCollector.image.digest) | quote }}
         imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
         command: ["/signoz-otel-collector"]
         args: ["migrate", "sync", "check"]
@@ -49,7 +49,7 @@ spec:
       {{- end }}
       containers:
       - name: otel-collector
-        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
+        image: {{ include "oriso.imageRef" (dict "repository" .Values.signoz.otelCollector.image.repository "tag" .Values.signoz.otelCollector.image.tag "digest" .Values.signoz.otelCollector.image.digest) | quote }}
         imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
         command: ["/signoz-otel-collector"]
         # NOTE: no --feature-gates=-pkg.translator.prometheus.NormalizeName

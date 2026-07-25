@@ -15,7 +15,7 @@ spec:
     spec:
       initContainers:
         - name: add-keyfile
-          image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
+          image: {{ include "oriso.imageRef" (dict "repository" .Values.imageName "tag" .Values.imageVersion "digest" .Values.imageDigest) }}
           command: ["bash", "-c"]
           args:
             - >
@@ -30,7 +30,7 @@ spec:
               name: mongodb-data
       containers:
         - name: mongodb
-          image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
+          image: {{ include "oriso.imageRef" (dict "repository" .Values.imageName "tag" .Values.imageVersion "digest" .Values.imageDigest) }}
           args:
           - --bind_ip_all
           - --oplogSize

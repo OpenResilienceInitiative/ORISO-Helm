@@ -128,6 +128,15 @@ matrix:
   # Server's own public IP, exempted from Synapse rate limiting. Supplied by the
   # per-environment overlay — never hardcode an IP in the chart (ADR-005 / DB-M04).
   serverPublicIp: ""
+  image:
+    repository: "matrixdotorg/synapse"
+    tag: "v1.155.0"
+    digest: ""
+    pullPolicy: IfNotPresent
+  permissionsImage:
+    repository: "busybox"
+    tag: "1.36"
+    digest: ""
 
 
 
@@ -139,22 +148,26 @@ matrix:
 admin:
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
   imageVersion: "latest"
+  imageDigest: ""
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
   imageVersion: "5.0"
+  imageDigest: ""
 
 
 # MariaDB
 online-counseling-mariadb:
   imageName: "mariadb"
   imageVersion: "11.0.6"
+  imageDigest: ""
   maxconnections: "1000"
 tokenService:
   replicas: 2
   image:
     repository: ghcr.io/openresilienceinitiative/livekit-token-service
     tag: "latest"
+    digest: ""
     pullPolicy: Always
   service:
     port: 3010
@@ -166,18 +179,25 @@ tokenService:
 online-counseling-rabbitmq:
   imageName: "rabbitmq"
   imageVersion: "3-management"
+  imageDigest: ""
 
 # Redis
 online-counseling-redis:
   imageName: "redis"
   imageVersion: "7-alpine"
+  imageDigest: ""
   serviceURL: "redis://redis:6379"
+  exporter:
+    imageName: "oliver006/redis_exporter"
+    imageVersion: "v1.80.1"
+    imageDigest: ""
 
 
 # Keycloak
 online-counseling-keycloak:
   imageName: "quay.io/keycloak/keycloak"
   imageVersion: "26.6.3"
+  imageDigest: ""
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
@@ -195,6 +215,7 @@ online-counseling-keycloak:
 agencyService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-agencyservice"
   imageVersion: "latest"
+  imageDigest: ""
 
   keycloakResource: "agency-service"
 
@@ -209,6 +230,7 @@ agencyService:
 consultingTypeService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
   imageVersion: "latest"
+  imageDigest: ""
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -220,6 +242,7 @@ consultingTypeService:
 tenantService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
   imageVersion: "latest"  
+  imageDigest: ""
   springProfilesActive: "prod"
   springDatasourceURL: "jdbc:mariadb://mariadb:3306/tenantservice"
   springRabbitmqHost: "rabbitmq"
@@ -231,6 +254,7 @@ tenantService:
 userService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-userservice"
   imageVersion: "latest"
+  imageDigest: ""
   serviceURL: "http://userservice:8080"
  
   keycloakResource: "user-service"
@@ -288,6 +312,21 @@ userService:
 frontend:
   imageName: "ghcr.io/openresilienceinitiative/oriso-frontend"
   imageVersion: "2.0.1"
+  imageDigest: ""
+
+elementCall:
+  image:
+    repository: ghcr.io/openresilienceinitiative/element-call
+    tag: "0.11.0"
+    digest: ""
+    pullPolicy: IfNotPresent
+
+livekit:
+  image:
+    repository: livekit/livekit-server
+    tag: "v1.9.7"
+    digest: ""
+    pullPolicy: IfNotPresent
 
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
@@ -297,6 +336,7 @@ healthDashboard:
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
     tag: rebuild
+    digest: ""
     pullPolicy: Never
   replicas: 1
   namespace: ""
@@ -325,6 +365,7 @@ signoz:
   image:
     repository: signoz/signoz
     tag: "v0.132.2"
+    digest: ""
     pullPolicy: IfNotPresent
   replicas: 1
   namespace: ""
@@ -366,6 +407,7 @@ signoz:
       # settings that exist only in 25.12.5 (see the SigNoz 0.131 upgrade
       # guide). Older versions become incompatible with future SigNoz.
       tag: "25.12.5"
+      digest: ""
       pullPolicy: IfNotPresent
     resources:
       requests:
@@ -432,6 +474,7 @@ signoz:
     image:
       repository: signoz/signoz-otel-collector
       tag: "v0.144.5"
+      digest: ""
       pullPolicy: IfNotPresent
     replicas: 1
     memoryLimiter:
@@ -476,6 +519,7 @@ signoz:
     image:
       repository: otel/opentelemetry-collector-contrib
       tag: "0.156.0"
+      digest: ""
       pullPolicy: IfNotPresent
     # Namespace whose pod logs are collected; empty = release namespace.
     logsNamespace: ""

@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: mariadb
-          image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
+          image: {{ include "oriso.imageRef" (dict "repository" .Values.imageName "tag" .Values.imageVersion "digest" .Values.imageDigest) }}
           env:
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:

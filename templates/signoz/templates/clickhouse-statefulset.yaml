@@ -33,7 +33,7 @@ spec:
     spec:
       containers:
       - name: clickhouse
-        image: "{{ .Values.signoz.clickhouse.image.repository }}:{{ .Values.signoz.clickhouse.image.tag }}"
+        image: {{ include "oriso.imageRef" (dict "repository" .Values.signoz.clickhouse.image.repository "tag" .Values.signoz.clickhouse.image.tag "digest" .Values.signoz.clickhouse.image.digest) | quote }}
         imagePullPolicy: {{ .Values.signoz.clickhouse.image.pullPolicy }}
         env:
         - name: CLICKHOUSE_DB

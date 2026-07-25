@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
       - name: health-dashboard
-        image: "{{ .Values.healthDashboard.image.repository }}:{{ .Values.healthDashboard.image.tag }}"
+        image: {{ include "oriso.imageRef" (dict "repository" .Values.healthDashboard.image.repository "tag" .Values.healthDashboard.image.tag "digest" .Values.healthDashboard.image.digest) | quote }}
         imagePullPolicy: {{ .Values.healthDashboard.image.pullPolicy }}
         ports:
         - name: http

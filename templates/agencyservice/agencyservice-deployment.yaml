@@ -25,7 +25,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
         - name: agencyservice
-          image: {{ .Values.agencyService.imageName }}:{{ .Values.agencyService.imageVersion }}          
+          image: {{ include "oriso.imageRef" (dict "repository" .Values.agencyService.imageName "tag" .Values.agencyService.imageVersion "digest" .Values.agencyService.imageDigest) }}
           imagePullPolicy: Always
           env:
             - name: CSRF_COOKIE_PROPERTY

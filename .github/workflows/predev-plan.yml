@@ -1,0 +1,58 @@
+name: PreDev release plan
+
+on:
+  pull_request:
+    branches:
+      - pre-dev
+  push:
+    branches:
+      - pre-dev
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    name: Reproducible PreDev render
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install deterministic tooling
+        run: python -m pip install --disable-pip-version-check PyYAML==6.0.3
+
+      - name: Lint the exact PreDev values stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm lint . \
+            -f values.yaml.default \
+            -f values-pre-dev.yaml \
+            -f deploy/predev/images.lock.yaml \
+            -f secrets.yaml.default
+
+      - name: Render and record provenance
+        run: scripts/predev/render-release.sh artifacts/predev
+
+      - name: Test deployment authority and drift tooling
+        run: python -m pytest -q tests/test_predev_deployment_authority.py
+
+      - name: Upload non-secret plan evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: predev-plan-${{ github.sha }}
+          path: |
+            artifacts/predev/manifest.redacted.yaml
+            artifacts/predev/provenance.json
+          if-no-files-found: error
+          retention-days: 30

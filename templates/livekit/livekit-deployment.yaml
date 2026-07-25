@@ -26,8 +26,8 @@ spec:
       restartPolicy: Always
       containers:
         - name: livekit
-          image: livekit/livekit-server:latest
-          imagePullPolicy: IfNotPresent
+          image: {{ include "oriso.imageRef" (dict "repository" .Values.livekit.image.repository "tag" .Values.livekit.image.tag "digest" .Values.livekit.image.digest) }}
+          imagePullPolicy: {{ .Values.livekit.image.pullPolicy }}
           args:
             - --config
             - /etc/livekit/config.yaml

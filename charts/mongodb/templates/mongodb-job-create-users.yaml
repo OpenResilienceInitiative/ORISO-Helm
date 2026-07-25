@@ -34,7 +34,7 @@ spec:
               done
       containers:
         - name: create-mongo-users
-          image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
+          image: {{ include "oriso.imageRef" (dict "repository" .Values.imageName "tag" .Values.imageVersion "digest" .Values.imageDigest) }}
           env:
             - name: MONGODB_USERNAME
               valueFrom:

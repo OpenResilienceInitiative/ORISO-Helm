@@ -28,7 +28,7 @@ spec:
       restartPolicy: Always
       containers:
         - name: userservice
-          image: "{{ .Values.userService.imageName }}:{{ .Values.userService.imageVersion }}"
+          image: {{ include "oriso.imageRef" (dict "repository" .Values.userService.imageName "tag" .Values.userService.imageVersion "digest" .Values.userService.imageDigest) | quote }}
           imagePullPolicy: Always
           env:
             - name: IDENTITY_OPENID_CONNECT_URL

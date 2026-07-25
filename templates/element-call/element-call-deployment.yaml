@@ -22,8 +22,8 @@ spec:
     spec:
       containers:
       - name: element-call
-        image: ghcr.io/openresilienceinitiative/element-call:latest
-        imagePullPolicy: Always
+        image: {{ include "oriso.imageRef" (dict "repository" .Values.elementCall.image.repository "tag" .Values.elementCall.image.tag "digest" .Values.elementCall.image.digest) }}
+        imagePullPolicy: {{ .Values.elementCall.image.pullPolicy }}
         ports:
           - containerPort: 80
             name: http

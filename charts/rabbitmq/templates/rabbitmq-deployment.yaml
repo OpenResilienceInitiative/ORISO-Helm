@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: rabbitmq
-          image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
+          image: {{ include "oriso.imageRef" (dict "repository" .Values.imageName "tag" .Values.imageVersion "digest" .Values.imageDigest) }}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5672

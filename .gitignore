@@ -2,6 +2,8 @@ secrets.yaml
 .idea/
 values.yaml
 .claude/
+__pycache__/
+*.pyc
 
 # helm dependency update artifacts (subcharts are vendored unpacked)
 charts/*.tgz

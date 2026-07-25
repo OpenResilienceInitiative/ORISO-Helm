@@ -28,7 +28,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
       - name: admin
-        image: {{ .Values.admin.imageName }}:{{ .Values.admin.imageVersion }}     
+        image: {{ include "oriso.imageRef" (dict "repository" .Values.admin.imageName "tag" .Values.admin.imageVersion "digest" .Values.admin.imageDigest) }}
         imagePullPolicy: Always
         envFrom:
           - configMapRef:
@@ -54,4 +54,4 @@ spec:
             path: /admin
             port: 80
           initialDelaySeconds: 10
-          periodSeconds: 5 
+          periodSeconds: 5

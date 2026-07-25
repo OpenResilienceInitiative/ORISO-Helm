@@ -1,0 +1,77 @@
+# PreDev workload image lock.
+#
+# ORISO-owned images use the exact digests observed in the read-only live-state
+# inventory on 2026-07-25. Infrastructure images use explicit version tags
+# where the chart does not yet expose a digest field. No floating tag is
+# permitted by the PreDev render gate.
+
+admin:
+  imageDigest: "sha256:edfed5efd4a3d1a205a724daadd4756ef8e8559de04aea4a0f7f044e7e210d87"
+
+agencyService:
+  imageDigest: "sha256:07b578d9d092f0588d94231cbbce9cb7d7be240dfb86580f18b4425a682b1aa4"
+
+consultingTypeService:
+  imageDigest: "sha256:4dd7bfe2899bdbd0941217119e45799124b9ecde262ac0a50a405848c2d86607"
+
+tenantService:
+  imageDigest: "sha256:d1914c540fba46af8e609d964fe6922a26133bae1452cec8cdca6053069f31fc"
+
+userService:
+  imageDigest: "sha256:d39a331cc6450501ce9c720e6972ed50c82309c047b90259c379c9eb09f3957c"
+
+frontend:
+  imageDigest: "sha256:dc8ee6eef705b1e2ef170f78ad961797d523c52de6fa61438ab040a2f725c43d"
+
+healthDashboard:
+  image:
+    digest: "sha256:4804cc0ef38fa945ea5aee33be26b1819e4ec85347d348f9c7135e4b1549ceda"
+
+tokenService:
+  image:
+    digest: "sha256:ae969546edfdf2f562bfe2c104868573c8b75612654545377c72d9148e258d41"
+
+elementCall:
+  image:
+    digest: "sha256:51f652318840b5c38e4442e4bd7d49072462f696ecce664e0f1d423887faea3e"
+
+livekit:
+  image:
+    digest: "sha256:189f7c81b704a36642bc5c7e2d3e1ae83744627c11978a23a251bf19fbec64e0"
+
+matrix:
+  image:
+    digest: "sha256:a87d002fba8efba807af19a876f488f4a9d298d6b62f5bab66d14e311a355e99"
+
+online-counseling-redis:
+  imageDigest: "sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99"
+  exporter:
+    imageName: "oliver006/redis_exporter"
+    imageVersion: "v1.80.1"
+    imageDigest: "sha256:9ca6f929a8abc518d78158757922444f1cf807661a2238f44b28c3cd08a1b652"
+
+online-counseling-keycloak:
+  imageDigest: "sha256:5bb38b0f7b09fe8c6e964540fc774c710ed1b9c7a303a8e48ed79888d9eda9a0"
+
+online-counseling-mongodb:
+  imageDigest: "sha256:41108d183e972dcbf98d09ed83f6cfc89a471a3f15d06f9d64a95e45d9db8dd2"
+
+online-counseling-mariadb:
+  imageVersion: "10.11"
+  imageDigest: "sha256:be981e4113326ada8d6004174dd09eeaefc03094037f811182a52d4f2e737350"
+
+online-counseling-rabbitmq:
+  imageDigest: "sha256:e582c0bc7766f3342496d8485efb5a1df782b5ce3886ad017e2eaae442311f69"
+
+signoz:
+  image:
+    digest: "sha256:ced0eaaa9fc04e5b6319737eafe2c8c715b55bc18a3d4f04483be7eaf71a389a"
+  clickhouse:
+    image:
+      digest: "sha256:cacf32d6884291dc2ff5e0156a97f46fc53ff7c929a7906d114e268a929dfd3a"
+  otelCollector:
+    image:
+      digest: "sha256:f9bf94d566055d06581f3befbf361cc26d670f31ad00cb31fda2ec380210c5ec"
+  otelAgent:
+    image:
+      digest: "sha256:125bdbeb7590cc1952c5b3430ecf14063568980c2c93d5b38676cc0446ed8108"

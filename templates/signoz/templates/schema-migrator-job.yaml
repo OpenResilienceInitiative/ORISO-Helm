@@ -36,21 +36,21 @@ spec:
       restartPolicy: OnFailure
       initContainers:
       - name: ready
-        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
+        image: {{ include "oriso.imageRef" (dict "repository" .Values.signoz.otelCollector.image.repository "tag" .Values.signoz.otelCollector.image.tag "digest" .Values.signoz.otelCollector.image.digest) | quote }}
         imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
         command: ["/signoz-otel-collector"]
         args: ["migrate", "ready"]
         env:
           {{- include "signoz.migratorEnv" . | nindent 10 }}
       - name: bootstrap
-        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
+        image: {{ include "oriso.imageRef" (dict "repository" .Values.signoz.otelCollector.image.repository "tag" .Values.signoz.otelCollector.image.tag "digest" .Values.signoz.otelCollector.image.digest) | quote }}
         imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
         command: ["/signoz-otel-collector"]
         args: ["migrate", "bootstrap"]
         env:
           {{- include "signoz.migratorEnv" . | nindent 10 }}
       - name: sync
-        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
+        image: {{ include "oriso.imageRef" (dict "repository" .Values.signoz.otelCollector.image.repository "tag" .Values.signoz.otelCollector.image.tag "digest" .Values.signoz.otelCollector.image.digest) | quote }}
         imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
         command: ["/signoz-otel-collector"]
         args: ["migrate", "sync", "up"]
@@ -58,7 +58,7 @@ spec:
           {{- include "signoz.migratorEnv" . | nindent 10 }}
       containers:
       - name: async
-        image: "{{ .Values.signoz.otelCollector.image.repository }}:{{ .Values.signoz.otelCollector.image.tag }}"
+        image: {{ include "oriso.imageRef" (dict "repository" .Values.signoz.otelCollector.image.repository "tag" .Values.signoz.otelCollector.image.tag "digest" .Values.signoz.otelCollector.image.digest) | quote }}
         imagePullPolicy: {{ .Values.signoz.otelCollector.image.pullPolicy }}
         command: ["/signoz-otel-collector"]
         args: ["migrate", "async", "up"]
