@@ -22,5 +22,5 @@ spec:
             name: userservice
             port:
               number: 8080
-        path: /service/(users|conversations|liveproxy|useradmin|appointments|matrix)(/|$)(.*)
+        path: /service/(users|conversations|liveproxy|useradmin|appointments|matrix|error-reports)(/|$)(.*)
         pathType: ImplementationSpecific

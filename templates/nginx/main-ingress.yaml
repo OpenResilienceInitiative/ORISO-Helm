@@ -123,6 +123,13 @@ spec:
         pathType: Prefix
       - backend:
           service:
+            name: userservice
+            port:
+              number: 8080
+        path: /service/error-reports
+        pathType: Prefix
+      - backend:
+          service:
             name: keycloak
             port:
               number: 8080
