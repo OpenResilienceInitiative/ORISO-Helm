@@ -8,6 +8,10 @@ global:
   domains:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
+    health: ""
+    # Optional alias for the canonical HealthDashboard. ORISO-Status is
+    # archived and must not be deployed as a second health implementation.
+    status: ""
 
   # OBS-P2: OTLP traces/metrics export from the 4 backend services to the
   # in-cluster SigNoz gateway collector (OBS-P1). Verified against Spring
@@ -307,6 +311,14 @@ healthDashboard:
     targetPort: 9100
   env:
     PORT: "9100"
+  ingress:
+    enabled: false
+    className: nginx
+    clusterIssuer: letsencrypt-prod
+    healthTlsSecretName: ""
+    statusAlias:
+      enabled: false
+      tlsSecretName: ""
 
 # SigNoz observability stack (OBS-P1): SigNoz backend/UI + in-chart
 # ClickHouse + OTel gateway collector + per-node log-collection agent.

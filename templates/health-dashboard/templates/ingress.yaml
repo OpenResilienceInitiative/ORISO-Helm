@@ -1,0 +1,67 @@
+{{- $domains := default dict (.Values.global | default dict).domains }}
+{{- if and .Values.healthDashboard.ingress.enabled $domains.health }}
+{{- $serviceName := include "health-dashboard.fullname" . }}
+{{- $healthTlsSecret := default (printf "%s-tls" (replace "." "-" $domains.health)) .Values.healthDashboard.ingress.healthTlsSecretName }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  # Keep the live resource name so Helm adopts it without a second ingress.
+  name: health-dashboard-ingress
+  namespace: {{ default .Release.Namespace .Values.healthDashboard.namespace }}
+  labels:
+    {{- include "health-dashboard.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.healthDashboard.ingress.clusterIssuer | quote }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: {{ .Values.healthDashboard.ingress.className }}
+  rules:
+    - host: {{ $domains.health | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $serviceName }}
+                port:
+                  number: {{ .Values.healthDashboard.service.port }}
+  tls:
+    - hosts:
+        - {{ $domains.health | quote }}
+      secretName: {{ $healthTlsSecret }}
+{{- if and .Values.healthDashboard.ingress.statusAlias.enabled $domains.status }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  # Adopts the live legacy ingress and points it at the canonical dashboard.
+  # The archived status-page Deployment and Service intentionally do not
+  # render, so Helm removes them during the reviewed upgrade.
+  name: status-page-ingress
+  namespace: {{ default .Release.Namespace .Values.healthDashboard.namespace }}
+  labels:
+    {{- include "health-dashboard.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.healthDashboard.ingress.clusterIssuer | quote }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    oriso.org/status-owner: "health-dashboard"
+spec:
+  ingressClassName: {{ .Values.healthDashboard.ingress.className }}
+  rules:
+    - host: {{ $domains.status | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $serviceName }}
+                port:
+                  number: {{ .Values.healthDashboard.service.port }}
+  tls:
+    - hosts:
+        - {{ $domains.status | quote }}
+      secretName: {{ default (printf "%s-tls" (replace "." "-" $domains.status)) .Values.healthDashboard.ingress.statusAlias.tlsSecretName }}
+{{- end }}
+{{- end }}
