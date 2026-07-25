@@ -231,6 +231,10 @@ tenantService:
 userService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-userservice"
   imageVersion: "latest"
+  # Safety boundary, not a sizing default. Matrix sync and scheduled side
+  # effects are not yet proven cluster-safe. The template rejects every value
+  # except 1 until UserService#543, #379, and #216 have green two-replica proof.
+  replicas: 1
   serviceURL: "http://userservice:8080"
  
   keycloakResource: "user-service"
