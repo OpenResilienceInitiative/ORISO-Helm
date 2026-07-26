@@ -325,18 +325,21 @@ serviceHealthExporter:
   initialDelay: "1s"
   timeout: "5s"
   environment: ""
+  # Each backend publishes actuator on its own Service port; there is no shared
+  # 8080. Read back from inside PreDev (ns caritas) on 2026-07-26: 8081/8082/
+  # 8083/8084 return {"status":"UP"}, while 8080 times out on all four.
   services:
     tenantservice:
-      port: 8080
+      port: 8081
       path: /actuator/health
     userservice:
-      port: 8080
+      port: 8082
       path: /actuator/health
     consultingtypeservice:
-      port: 8080
+      port: 8083
       path: /actuator/health
     agencyservice:
-      port: 8080
+      port: 8084
       path: /actuator/health
   resources:
     requests:

@@ -2,7 +2,9 @@
 {{- fail "serviceHealthExporter.enabled requires signoz.enabled=true because its OTLP destination is the in-chart SigNoz collector" }}
 {{- end }}
 {{- if .Values.serviceHealthExporter.enabled }}
-{{- $environment := default "pre-dev" (default .Values.serviceHealthExporter.environment (.Values.global.observability | default dict).environment) }}
+{{- /* Most specific setting wins: component override, then the global
+       observability default, then the PreDev fallback. */ -}}
+{{- $environment := default (default "pre-dev" (.Values.global.observability | default dict).environment) .Values.serviceHealthExporter.environment }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
