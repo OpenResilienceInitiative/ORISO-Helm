@@ -10,6 +10,10 @@ global:
   acmedomainName: "acme.oriso-dev.site"
   observability:
     otlpEnabled: true
+    # PreDev is where the E2E suite runs, so every request needs a trace.
+    # Spring Boot's default of 0.1 discards nine out of ten, which makes
+    # per-test-run correlation useless (ORISO-Helm#165).
+    tracingSamplingProbability: "1.0"
   keycloakAuthServerUrl: "http://keycloak:8080"
   springSecurityOAuth2ResourceserverJWTIssuerURI: "https://auth.oriso-dev.site/realms/online-beratung"
   springSecurityOAuth2ResourceserverJWTJWKSETURI: "http://keycloak:8080/realms/online-beratung/protocol/openid-connect/certs"
