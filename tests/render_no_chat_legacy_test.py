@@ -12,6 +12,8 @@ FORBIDDEN = (
     "rocket_chat",
     "rocket-chat",
     "rocketchat",
+    "rc_user_id",
+    "rc_group_id",
     "jitsi",
     "jicofo",
     "prosody",
@@ -20,8 +22,16 @@ FORBIDDEN = (
 
 def main() -> None:
     checked_files = [
+        os.path.join(CHART_DIR, "README.md"),
         os.path.join(CHART_DIR, "values.yaml.default"),
         os.path.join(CHART_DIR, "secrets.yaml.default"),
+        os.path.join(
+            CHART_DIR,
+            "charts",
+            "mariadb",
+            "sql-schemas",
+            "userservice-schema.sql",
+        ),
     ]
     for root, _, files in os.walk(os.path.join(CHART_DIR, "templates")):
         checked_files.extend(
