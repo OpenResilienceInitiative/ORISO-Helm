@@ -1,0 +1,80 @@
+version: 1
+privacyBaseline:
+  forbidden:
+    - message bodies or previews
+    - access, Matrix, mobile-push, invite, or password-reset tokens
+    - email addresses and raw usernames
+  identity: HMAC-pseudonymize tenant, agency, topic, session, and room identifiers before export
+
+signals:
+  - boundary: admin.provisioning
+    type: span-and-counter
+    name: oriso.admin.provisioning.operations
+    success: outcome=success after relation readback
+    failure: outcome=failure with bounded stage and rollback outcome
+    cardinality: bounded
+    attributes: [operation, stage, outcome, rollback.outcome, agency.count, topic.count, runtime.version, deployment.environment]
+    privacyDecision: Counts and a generated operation correlation id only; form values and identities are excluded.
+
+  - boundary: live_chat.availability.store
+    type: counter
+    name: oriso.live_chat.availability.store.operations
+    success: outcome=success for enable, disable, refresh, and read
+    failure: outcome=failure; refresh of an absent lease is outcome=missing
+    cardinality: low
+    attributes: [operation, outcome, runtime.version, deployment.environment]
+    privacyDecision: Never export consultant identity; the aggregate operation and outcome are sufficient.
+
+  - boundary: live_chat.routing
+    type: span-and-counter
+    name: oriso.live_chat.routing.decisions
+    success: outcome=routed with bounded candidate counts
+    failure: outcome=not_routed with reason
+    cardinality: bounded
+    attributes: [outcome, reason, candidate.count, active.count, relation.count, tenant.pseudonym, topic.pseudonym, runtime.version]
+    privacyDecision: Tenant and topic are HMAC-pseudonymized; consultant ids and invitation links are excluded.
+
+  - boundary: live_chat.queue
+    type: histogram-and-counter
+    name: oriso.live_chat.queue.visibility
+    success: visible.count recorded after authoritative routing read
+    failure: outcome=request_failed or outcome=readback_mismatch
+    cardinality: bounded
+    attributes: [outcome, visible.count, tenant.pseudonym, topic.pseudonym, deployment.environment]
+    privacyDecision: Aggregate counts only; do not emit one event per enquiry or browser poll.
+
+  - boundary: matrix.room.creation
+    type: span-and-counter
+    name: oriso.matrix.room.creation
+    success: outcome=success and encryption.enabled=true
+    failure: outcome=failure or a successful room with encryption.enabled=false
+    cardinality: bounded
+    attributes: [outcome, encryption.enabled, room.pseudonym, session.pseudonym, runtime.version, deployment.environment]
+    privacyDecision: Room and session ids are HMAC-pseudonymized; no room name, member identity, key, or event content.
+
+  - boundary: matrix.event.processing
+    type: span-and-counter
+    name: oriso.matrix.event.processing
+    success: outcome=success with encrypted event type and processing duration
+    failure: outcome=failure with bounded exception class and stage
+    cardinality: bounded
+    attributes: [event.type, event.encrypted, stage, outcome, exception.type, room.pseudonym, processing.duration_ms, runtime.version]
+    privacyDecision: Event content, sender MXID, event id, and encryption material are excluded.
+
+  - boundary: matrix.notification.side_effect
+    type: span-and-counter
+    name: oriso.matrix.side_effect.operations
+    success: each durable or best-effort side effect records outcome=success
+    failure: the failing side effect records outcome=failure without suppressing sibling outcomes
+    cardinality: low
+    attributes: [side_effect, outcome, exception.type, recipient.count, device.count, event.encrypted, runtime.version]
+    privacyDecision: Counts only; device tokens, recipients, and notification text are excluded.
+
+  - boundary: runtime.identity
+    type: resource-attributes
+    name: service.runtime.identity
+    success: every signal identifies environment, full commit, and immutable image digest
+    failure: runtime evidence gate rejects missing or mutable identity
+    cardinality: bounded
+    attributes: [service.name, service.version, vcs.commit.sha, container.image.digest, deployment.environment, config.matrix_encryption, config.redis_ttl_seconds]
+    privacyDecision: Non-secret deployment identity and selected safety configuration only; Secret values are excluded.

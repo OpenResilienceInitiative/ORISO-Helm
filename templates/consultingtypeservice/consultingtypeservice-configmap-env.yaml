@@ -45,3 +45,5 @@ data:
   MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
   MANAGEMENT_OTLP_METRICS_EXPORT_URL: "http://{{ .Values.global.observability.otlpCollectorHost | default (printf "%s-otel-collector.%s:4318" .Release.Name .Release.Namespace) }}/v1/metrics"
   MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: "always"
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS: "always"

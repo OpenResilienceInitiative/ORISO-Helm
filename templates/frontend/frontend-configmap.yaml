@@ -1,3 +1,7 @@
+{{- $observability := default dict .Values.global.observability -}}
+{{- $domains := default dict .Values.global.domains -}}
+{{- $signozHost := default "" $domains.signoz -}}
+{{- $rumEnabled := and (default false $observability.webVitalsEnabled) (ne $signozHost "") -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -13,3 +17,6 @@ data:
   REACT_APP_KEYCLOAK_URL: "{{ .Values.global.external.keycloakURL }}"
   REACT_APP_MATRIX_HOMESERVER_URL:  "https://{{ .Values.global.domainName }}"
   REACT_APP_KEYCLOAK_REALM: "{{ .Values.global.keycloak.realm }}"
+  REACT_APP_OBSERVABILITY_ENABLED: {{ ternary "true" "false" $rumEnabled | quote }}
+  REACT_APP_OTEL_METRICS_URL: {{ ternary (printf "https://%s/v1/metrics" $signozHost) "" $rumEnabled | quote }}
+  REACT_APP_OTEL_EXPORT_INTERVAL_MS: {{ default 60000 $observability.webVitalsExportIntervalMillis | quote }}

@@ -52,6 +52,8 @@ COLLECTOR_CONFIGMAP_NAME = f"{RELEASE}-otel-collector"
 COLLECTOR_SERVICE_NAME = f"{RELEASE}-otel-collector"
 WEBVITALS_INGRESS_NAME = "signoz-webvitals-ingress"
 UI_INGRESS_NAME = "signoz-ingress"
+FRONTEND_CONFIGMAP_NAME = "frontend-configmap"
+ADMIN_CONFIGMAP_NAME = "admin-configmap"
 TEST_SIGNOZ_DOMAIN = "signoz.example.test"
 SIGNOZ_TEST_SET = [
     "signoz.enabled=true",
@@ -98,6 +100,37 @@ def gateway_config(documents: list[dict]) -> tuple[dict, str]:
     cm = resource(documents, "ConfigMap", COLLECTOR_CONFIGMAP_NAME)
     raw = cm["data"]["otel-collector-config.yaml"]
     return yaml.safe_load(raw), raw
+
+
+def check_browser_runtime_config(
+    documents: list[dict], enabled: bool, endpoint: str, label: str
+) -> None:
+    expected_enabled = "true" if enabled else "false"
+    frontend = resource(documents, "ConfigMap", FRONTEND_CONFIGMAP_NAME)["data"]
+    admin = resource(documents, "ConfigMap", ADMIN_CONFIGMAP_NAME)["data"]
+
+    expected = {
+        "enabled": expected_enabled,
+        "endpoint": endpoint,
+        "interval": "60000",
+    }
+    actual_frontend = {
+        "enabled": frontend.get("REACT_APP_OBSERVABILITY_ENABLED"),
+        "endpoint": frontend.get("REACT_APP_OTEL_METRICS_URL"),
+        "interval": frontend.get("REACT_APP_OTEL_EXPORT_INTERVAL_MS"),
+    }
+    actual_admin = {
+        "enabled": admin.get("VITE_OBSERVABILITY_ENABLED"),
+        "endpoint": admin.get("VITE_OTEL_METRICS_URL"),
+        "interval": admin.get("VITE_OTEL_EXPORT_INTERVAL_MS"),
+    }
+
+    if actual_frontend != expected:
+        fail(f"{label}: Frontend browser telemetry runtime config is {actual_frontend}, "
+             f"expected {expected}")
+    if actual_admin != expected:
+        fail(f"{label}: Admin browser telemetry runtime config is {actual_admin}, "
+             f"expected {expected}")
 
 
 def check_enabled(documents: list[dict], expected_origins: list[str], label: str) -> None:
@@ -192,6 +225,12 @@ def main() -> None:
         ["https://app.oriso-dev.site", "https://admin.oriso-dev.site"],
         "explicit environment domains",
     )
+    check_browser_runtime_config(
+        env_docs,
+        True,
+        f"https://{TEST_SIGNOZ_DOMAIN}/v1/metrics",
+        "explicit environment domains",
+    )
 
     # --- (2) Dev with SigNoz explicitly enabled: webVitalsEnabled defaults
     # true, but neither global.domains.app nor .admin nor .signoz is set
@@ -206,6 +245,7 @@ def main() -> None:
     if dev_cors is not None:
         fail(f"dev (values.yaml.default): cors block rendered without "
              f"global.domains.app/admin being set: {dev_cors}")
+    check_browser_runtime_config(dev_docs, False, "", "dev without SigNoz domain")
 
     # --- (3) Prod overlay exactly as committed: off by default. ------------
     prod_docs = render(
@@ -214,6 +254,7 @@ def main() -> None:
         extra_set=SIGNOZ_TEST_SET,
     )
     check_disabled(prod_docs, "prod (values-prod.yaml, as committed)")
+    check_browser_runtime_config(prod_docs, False, "", "prod overlay")
 
     # --- (4) webVitalsEnabled explicitly false: both the ingress
     # and CORS must disappear even though app/admin/signoz domains ARE set —
@@ -228,6 +269,9 @@ def main() -> None:
         ],
     )
     check_disabled(env_off_docs, "explicit environment domains with webVitalsEnabled=false")
+    check_browser_runtime_config(
+        env_off_docs, False, "", "explicit webVitalsEnabled=false"
+    )
 
     # --- (5) Only ONE of app/admin set: CORS must render with
     # just that one origin (not fail, not add a placeholder for the missing
