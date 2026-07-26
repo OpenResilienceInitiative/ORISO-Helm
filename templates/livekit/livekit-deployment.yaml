@@ -6,7 +6,7 @@ metadata:
   labels:
     app: livekit
 spec:
-  replicas: 1
+  replicas: {{ .Values.livekit.replicas }}
   selector:
     matchLabels:
       app: livekit

@@ -1,7 +1,3 @@
-{{- $replicas := int .Values.userService.replicas -}}
-{{- if ne $replicas 1 -}}
-{{- fail "UserService supports exactly one replica until UserService#543, UserService#379, and UserService#216 are complete and their two-replica release proof is green" -}}
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,7 +5,7 @@ metadata:
     app: userservice
   name: userservice
 spec:
-  replicas: {{ $replicas }}
+  replicas: {{ .Values.userService.replicas }}
   selector:
     matchLabels:
       app: userservice

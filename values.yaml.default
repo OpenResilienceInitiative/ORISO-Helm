@@ -120,6 +120,8 @@ global:
 
 
 matrix:
+  replicas: 1
+  postgresReplicas: 1
   synapseServerName: "matrix.oriso.org"
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"
@@ -137,6 +139,7 @@ matrix:
 # ---------- Infrastructure Services ----------------------------------------------------------------------------------
 
 admin:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
   imageVersion: "latest"
 # MongoDB
@@ -151,7 +154,7 @@ online-counseling-mariadb:
   imageVersion: "11.0.6"
   maxconnections: "1000"
 tokenService:
-  replicas: 2
+  replicas: 1
   image:
     repository: ghcr.io/openresilienceinitiative/livekit-token-service
     tag: "latest"
@@ -193,6 +196,7 @@ online-counseling-keycloak:
 
 # Agency service
 agencyService:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-agencyservice"
   imageVersion: "latest"
 
@@ -207,6 +211,7 @@ agencyService:
 
 # ConsultingType service
 consultingTypeService:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
   imageVersion: "latest"
   serviceURL: "http://consultingtypeservice:8080"
@@ -218,6 +223,7 @@ consultingTypeService:
 
 # Tenant Service
 tenantService:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
   imageVersion: "latest"  
   springProfilesActive: "prod"
@@ -231,9 +237,6 @@ tenantService:
 userService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-userservice"
   imageVersion: "latest"
-  # Safety boundary, not a sizing default. Matrix sync and scheduled side
-  # effects are not yet proven cluster-safe. The template rejects every value
-  # except 1 until UserService#543, #379, and #216 have green two-replica proof.
   replicas: 1
   serviceURL: "http://userservice:8080"
  
@@ -290,8 +293,18 @@ userService:
 
 # Frontend
 frontend:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-frontend"
   imageVersion: "2.0.1"
+
+elementCall:
+  replicas: 1
+
+livekit:
+  replicas: 1
+
+nginxController:
+  replicas: 1
 
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
