@@ -26,7 +26,7 @@ spec:
                   app: frontend
               topologyKey: kubernetes.io/hostname
       containers:
-        - image:  {{ .Values.frontend.imageName }}:{{ .Values.frontend.imageVersion }}
+        - image: {{ include "oriso.immutableImage" (list "frontend.image" .Values.frontend.image) | quote }}
           name: frontend          
           imagePullPolicy: Always
           envFrom:

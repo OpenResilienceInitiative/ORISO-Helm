@@ -22,7 +22,7 @@ spec:
     spec:       
       initContainers:
         - name: fix-permissions
-          image: {{ required "matrix.initImage must be an immutable image digest" .Values.matrix.initImage | quote }}
+          image: {{ include "oriso.immutableImage" (list "matrix.initImage" .Values.matrix.initImage) | quote }}
           command:
           - sh
           - -c
@@ -36,7 +36,7 @@ spec:
             mountPath: /data
       containers:
       - name: synapse
-        image: {{ required "matrix.image must be an immutable image digest" .Values.matrix.image | quote }}
+        image: {{ include "oriso.immutableImage" (list "matrix.image" .Values.matrix.image) | quote }}
         imagePullPolicy: IfNotPresent
         env:
           - name: SYNAPSE_SERVER_NAME

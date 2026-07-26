@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: gateway
-          image: {{ required "matrixrtcAuth.gateway.image must be an immutable image digest" .Values.matrixrtcAuth.gateway.image | quote }}
+          image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.gateway.image" .Values.matrixrtcAuth.gateway.image) | quote }}
           imagePullPolicy: {{ .Values.matrixrtcAuth.gateway.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -76,7 +76,7 @@ spec:
     spec:
       containers:
         - name: authorization-service
-          image: {{ required "matrixrtcAuth.upstream.image must be an immutable image digest" .Values.matrixrtcAuth.upstream.image | quote }}
+          image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.upstream.image" .Values.matrixrtcAuth.upstream.image) | quote }}
           imagePullPolicy: {{ .Values.matrixrtcAuth.upstream.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false

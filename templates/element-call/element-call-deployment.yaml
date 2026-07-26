@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
       - name: element-call
-        image: {{ required "elementCall.image must be an immutable image digest" .Values.elementCall.image | quote }}
+        image: {{ include "oriso.immutableImage" (list "elementCall.image" .Values.elementCall.image) | quote }}
         imagePullPolicy: IfNotPresent
         ports:
           - containerPort: 80

@@ -198,8 +198,7 @@ online-counseling-keycloak:
 
 # Agency service
 agencyService:
-  imageName: "ghcr.io/openresilienceinitiative/oriso-agencyservice"
-  imageVersion: "latest"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
   keycloakResource: "agency-service"
 
@@ -234,8 +233,7 @@ tenantService:
 
 # User service
 userService:
-  imageName: "ghcr.io/openresilienceinitiative/oriso-userservice"
-  imageVersion: "latest"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice@sha256:0000000000000000000000000000000000000000000000000000000000000000"
   serviceURL: "http://userservice:8080"
  
   keycloakResource: "user-service"
@@ -287,8 +285,7 @@ userService:
 
 # Frontend
 frontend:
-  imageName: "ghcr.io/openresilienceinitiative/oriso-frontend"
-  imageVersion: "2.0.1"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------

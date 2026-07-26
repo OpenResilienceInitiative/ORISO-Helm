@@ -26,7 +26,7 @@ spec:
       restartPolicy: Always
       containers:
         - name: livekit
-          image: {{ required "livekit.image must be an immutable image digest" .Values.livekit.image | quote }}
+          image: {{ include "oriso.immutableImage" (list "livekit.image" .Values.livekit.image) | quote }}
           imagePullPolicy: IfNotPresent
           args:
             - --config

@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 
 import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TEST_DIGEST = "1" * 64
 
 
 def render() -> list[dict]:
@@ -31,6 +33,12 @@ def render() -> list[dict]:
             "livekit.matrixAdminToken=test-matrix-admin-token",
             "--set-string",
             "global.secrets.redisdefaultPass=test-redis-password",
+            "--set-string",
+            f"frontend.image=ghcr.io/openresilienceinitiative/oriso-frontend@sha256:{TEST_DIGEST}",
+            "--set-string",
+            f"userService.image=ghcr.io/openresilienceinitiative/oriso-userservice@sha256:{TEST_DIGEST}",
+            "--set-string",
+            f"agencyService.image=ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{TEST_DIGEST}",
         ],
         capture_output=True,
         text=True,
@@ -54,16 +62,29 @@ def main() -> None:
     documents = render()
     synapse = find(documents, "Deployment", "matrix-synapse")
     element_call = find(documents, "Deployment", "element-call")
+    frontend = find(documents, "Deployment", "frontend")
+    userservice = find(documents, "Deployment", "userservice")
+    agencyservice = find(documents, "Deployment", "agencyservice")
 
     synapse_spec = synapse["spec"]["template"]["spec"]
     images = [
         synapse_spec["initContainers"][0]["image"],
         synapse_spec["containers"][0]["image"],
         element_call["spec"]["template"]["spec"]["containers"][0]["image"],
+        frontend["spec"]["template"]["spec"]["containers"][0]["image"],
+        userservice["spec"]["template"]["spec"]["containers"][0]["image"],
+        agencyservice["spec"]["template"]["spec"]["containers"][0]["image"],
     ]
     for image in images:
-        assert "@sha256:" in image
+        assert re.fullmatch(r"[^@\s]+@sha256:[a-f0-9]{64}", image)
         assert not image.endswith(":latest")
+
+    expected_cutover_images = {
+        f"ghcr.io/openresilienceinitiative/oriso-frontend@sha256:{TEST_DIGEST}",
+        f"ghcr.io/openresilienceinitiative/oriso-userservice@sha256:{TEST_DIGEST}",
+        f"ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{TEST_DIGEST}",
+    }
+    assert expected_cutover_images.issubset(set(images))
 
     rendered = yaml.safe_dump_all(documents)
     assert "matrix-backup-cronjob-github" not in rendered
@@ -71,7 +92,7 @@ def main() -> None:
     assert "YOUR_GITHUB_TOKEN" not in rendered
     assert "caritas-matrix-backups" not in rendered
 
-    print("PASS: Matrix and Element Call images are immutable; no unsafe backup job renders")
+    print("PASS: all chat cutover images are immutable; no unsafe backup job renders")
 
 
 if __name__ == "__main__":
