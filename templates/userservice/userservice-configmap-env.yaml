@@ -122,12 +122,6 @@ data:
   MATRIX_MIGRATION_ENABLED: "true"
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: "{{ .Values.global.keycloak.authServerUrl }}/realms/{{ .Values.global.keycloak.realm }}"
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: "{{ .Values.global.keycloak.authServerUrl }}{{ .Values.global.keycloak.openidConnectUrl }}/certs"
-
-
-  ROCKET_CHAT_MONGO_URL: "mongodb://localhost:27017/rocketchat?retryWrites=false"
-  ROCKET_CHAT_API_URL: "http://rocketchat.{{ .Release.Namespace }}:3000/api/v1"
-  ROCKET_SYSTEMUSER_ID: {{ .Values.userService.rocketSystemuserId }}
-  ROCKET_CREDENTIALSCHEDULER_CRON: {{ .Values.userService.rocketCredentialschedulerCron }}
   # OBS-P2: OTLP traces/metrics to the SigNoz gateway collector. Property
   # names + full /v1/{traces,metrics} paths verified against Spring Boot
   # 4.0.1 source directly (management.otlp.tracing.endpoint does NOT exist

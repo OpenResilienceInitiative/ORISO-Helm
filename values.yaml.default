@@ -283,10 +283,6 @@ userService:
   sessionInactiveDeleteWorkflowCron: "0 0 * * * ?"
   sessionInactiveDeleteWorkflowCheckDays: "30"
 
-  # Rocketchat
-  rocketCredentialschedulerCron: "0 0 0/1 * * ?"
-
-
 # ---------- Frontend Services ----------------------------------------------------------------------------------------
 
 # Frontend
