@@ -29,6 +29,7 @@ Invariants asserted (task requirements 1-6):
     6. Single source of truth: every propagated ``MATRIX_SERVER_NAME`` (user/agency/
        tenant service config-maps) and the Element Call ``server_name`` equal
        ``matrix.matrixServerName``.
+    7. MSC4140 delayed events are enabled for MatrixRTC crash-safe leave events.
 
 Usage:  python3 tests/render_adr005_test.py     (requires ``helm`` on PATH + pyyaml)
 """
@@ -253,6 +254,13 @@ def main() -> None:
                 value == SENTINEL,
                 f"{label} == single source of truth ({SENTINEL!r}); got {value!r}",
             )
+
+        # --- Requirement 7: MatrixRTC delayed leave events ----------------------
+        delay = hs_a.get("max_event_delay_duration") if hs_a else None
+        check(
+            delay == "24h",
+            f"max_event_delay_duration enables MSC4140 with a 24h ceiling; got {delay!r}",
+        )
 
         finalize()
     finally:
