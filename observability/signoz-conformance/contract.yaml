@@ -1,0 +1,95 @@
+version: 1
+deploymentEnvironment: pre-dev
+
+signals:
+  maxAgeMinutes: 15
+  requiredServices:
+    - user-service
+    - agency-service
+    - consulting-type-service
+    - tenant-service
+  requiredResourceAttributes:
+    - service.name
+    - deployment.environment
+
+correlation:
+  requireLogToTrace: true
+  lookbackMinutes: 60
+  minimumCorrelatedLogsPerService: 1
+
+webVitals:
+  services:
+    - frontend
+    - admin
+  metrics:
+    - lcp
+    - cls
+    - inp
+    - ttfb
+    - fcp
+  maxAgeMinutes: 30
+
+dashboards:
+  - id: service-signal-quality
+    requiredDimensions:
+      - service.name
+      - deployment.environment
+    liveQuery: >-
+      SELECT count() FROM signoz_traces.signoz_index_v3
+      WHERE timestamp > now() - INTERVAL 15 MINUTE
+      AND resources_string['deployment.environment'] = 'pre-dev'
+  - id: browser-web-vitals
+    requiredDimensions:
+      - service.name
+      - deployment.environment
+    liveQuery: >-
+      SELECT count() FROM signoz_metrics.time_series_v4
+      WHERE metric_name IN ('lcp','cls','inp','ttfb','fcp')
+      AND resource_attrs['deployment.environment'] = 'pre-dev'
+  - id: clickhouse-capacity
+    requiredDimensions:
+      - service.name
+      - deployment.environment
+    liveQuery: >-
+      SELECT count() FROM signoz_metrics.time_series_v4
+      WHERE metric_name = 'ClickHouseAsyncMetrics_DiskUsed_default'
+      AND resource_attrs['deployment.environment'] = 'pre-dev'
+  - id: collector-pipeline-health
+    requiredDimensions:
+      - service.name
+      - deployment.environment
+    liveQuery: >-
+      SELECT count() FROM signoz_metrics.time_series_v4
+      WHERE metric_name LIKE 'otelcol_%'
+      AND resource_attrs['deployment.environment'] = 'pre-dev'
+
+alerts:
+  required:
+    - matrix_notification_exception_rate
+    - redis_availability_store_failure
+    - provisioning_rollback_failure
+    - deployment_identity_mismatch
+    - clickhouse_capacity_warning
+  enabledRequired: true
+  routeTestRequired: true
+  routeTestMaxAgeHours: 24
+
+clickhouse:
+  internalLogRetentionDays: 3
+  internalLogTables:
+    - query_log
+    - text_log
+    - trace_log
+    - metric_log
+    - asynchronous_metric_log
+
+capacity:
+  maxDiskUsedPercent: 75
+  maxInternalLogsGiB: 10
+
+backup:
+  required: true
+  maxAgeHours: 24
+  acceptedStatuses:
+    - BACKUP_CREATED
+    - RESTORED

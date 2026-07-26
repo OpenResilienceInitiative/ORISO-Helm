@@ -79,8 +79,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          helm lint . -f values.yaml.default
-          helm template oriso . -f values.yaml.default >/tmp/oriso-rendered.yaml
+          helm lint . -f values.yaml.default -f secrets.yaml.default
+          helm template oriso . -f values.yaml.default -f secrets.yaml.default >/tmp/oriso-rendered.yaml
 
       - name: Package Helm chart
         shell: bash

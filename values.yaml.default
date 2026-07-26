@@ -17,6 +17,9 @@ global:
   # endpoint alone does NOT reliably no-op (see PLAN-observability doc).
   observability:
     otlpEnabled: false
+    # Canonical environment identity applied by both collector tiers to every
+    # signal. The default chart targets PreDev; production overrides this.
+    deploymentEnvironment: "pre-dev"
     otlpCollectorHost: "" # empty = derive from the in-chart signoz gateway service
     # OBS-P6: KDG-safe pseudonymization pipeline for the gateway collector
     # (otel-collector-configmap.yaml) — HMAC-style keyed-hash of identifiers,
@@ -392,6 +395,11 @@ signoz:
       enabled: true
       port: 9363
       endpoint: "/metrics"
+    internalLogs:
+      # ClickHouse's own profiler/text/query tables reached more than 20 GiB
+      # on the 50 GiB PreDev volume without TTL. The chart config and
+      # post-upgrade reconciliation Job enforce this bound.
+      retentionDays: 3
   # OBS-P4: OTel Collector `mysql` receiver against ORISO's MariaDB, feeding
   # the SigNoz "MySQL" community dashboard (MySQL-wire-compatible, verified
   # metric names are dotted `mysql.*`, not the underscored Prometheus-style
