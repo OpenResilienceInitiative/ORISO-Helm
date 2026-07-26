@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: health-dashboard
+  namespace: {{ default .Release.Namespace .Values.healthDashboard.namespace }}
+  labels:
+    {{- include "health-dashboard.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "health-dashboard.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.healthDashboard.namespace }}
+  labels:
+    {{- include "health-dashboard.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets", "daemonsets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "health-dashboard.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.healthDashboard.namespace }}
+  labels:
+    {{- include "health-dashboard.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: health-dashboard
+  namespace: {{ default .Release.Namespace .Values.healthDashboard.namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "health-dashboard.fullname" . }}
+  apiGroup: rbac.authorization.k8s.io

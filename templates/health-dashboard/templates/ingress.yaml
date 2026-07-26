@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "health-dashboard.fullname" . }}-ingress
+  namespace: {{ default .Release.Namespace .Values.healthDashboard.namespace }}
+  labels:
+    {{- include "health-dashboard.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - '{{ .Values.global.domainName }}'
+    secretName: {{ .Values.global.domainName | replace "." "-" }}-tls
+  rules:
+  - host: '{{ .Values.global.domainName }}'
+    http:
+      paths:
+      - path: /health(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: {{ include "health-dashboard.fullname" . }}
+            port:
+              number: {{ .Values.healthDashboard.service.port }}
