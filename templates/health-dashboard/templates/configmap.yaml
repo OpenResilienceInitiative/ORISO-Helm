@@ -8,20 +8,28 @@ metadata:
 data:
   config.json: |
     {
-      "TenantService": {
-        "name": "TenantService",
-        "url": "http://tenantservice.{{ .Release.Namespace }}.svc.cluster.local:8081/actuator/health"
+      "services": {
+        "TenantService": {
+          "name": "TenantService",
+          "url": "http://tenantservice.{{ .Release.Namespace }}.svc.cluster.local:8081/actuator/health"
+        },
+        "UserService": {
+          "name": "UserService",
+          "url": "http://userservice.{{ .Release.Namespace }}.svc.cluster.local:8080/actuator/health"
+        },
+        "ConsultingTypeService": {
+          "name": "ConsultingTypeService",
+          "url": "http://consultingtypeservice.{{ .Release.Namespace }}.svc.cluster.local:8080/actuator/health"
+        },
+        "AgencyService": {
+          "name": "AgencyService",
+          "url": "http://agencyservice.{{ .Release.Namespace }}.svc.cluster.local:8080/actuator/health"
+        }
       },
-      "UserService": {
-        "name": "UserService",
-        "url": "http://userservice.{{ .Release.Namespace }}.svc.cluster.local:8080/actuator/health"
-      },
-      "ConsultingTypeService": {
-        "name": "ConsultingTypeService",
-        "url": "http://consultingtypeservice.{{ .Release.Namespace }}.svc.cluster.local:8080/actuator/health"
-      },
-      "AgencyService": {
-        "name": "AgencyService",
-        "url": "http://agencyservice.{{ .Release.Namespace }}.svc.cluster.local:8080/actuator/health"
-      }
+      "quickLinks": [
+        { "label": "Frontend", "url": "https://{{ .Values.global.domainName }}" },
+        { "label": "Admin Panel", "url": "https://{{ .Values.global.domainName }}/admin" },
+        { "label": "Keycloak", "url": "https://{{ .Values.global.domainName }}/auth" },
+        { "label": "Signoz", "url": "https://signoz.{{ .Values.global.domainName }}" }
+      ]
     }
