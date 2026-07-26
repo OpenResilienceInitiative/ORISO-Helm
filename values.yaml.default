@@ -150,16 +150,21 @@ online-counseling-mariadb:
   imageName: "mariadb"
   imageVersion: "11.0.6"
   maxconnections: "1000"
-tokenService:
+matrixrtcAuth:
   replicas: 2
-  image:
-    repository: ghcr.io/openresilienceinitiative/livekit-token-service
-    tag: "latest"
+  gateway:
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway@sha256:0000000000000000000000000000000000000000000000000000000000000000"
     pullPolicy: Always
+  upstream:
+    image: "ghcr.io/element-hq/lk-jwt-service@sha256:2e41fa6144b36cf34ef73c46ca8c19c55a26de53cbd24d138311a61f470cc45d"
+    pullPolicy: IfNotPresent
   service:
     port: 3010
     targetPort: 3010
     type: ClusterIP
+
+livekit:
+  image: "docker.io/livekit/livekit-server@sha256:2c6869d2d5ff6c9c0166f47be1c92dad6928bfecfa5e4060a6ece48db8accfa3"
 
 
 # RabbitMQ

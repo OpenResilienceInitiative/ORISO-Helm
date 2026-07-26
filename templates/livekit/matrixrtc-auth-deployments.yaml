@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matrixrtc-auth-policy-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: matrixrtc-auth-policy-gateway
+spec:
+  replicas: {{ .Values.matrixrtcAuth.replicas }}
+  selector:
+    matchLabels:
+      app: matrixrtc-auth-policy-gateway
+  template:
+    metadata:
+      labels:
+        app: matrixrtc-auth-policy-gateway
+    spec:
+      containers:
+        - name: gateway
+          image: {{ required "matrixrtcAuth.gateway.image must be an immutable image digest" .Values.matrixrtcAuth.gateway.image | quote }}
+          imagePullPolicy: {{ .Values.matrixrtcAuth.gateway.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: MATRIXRTC_ALLOWED_ORIGINS
+              value: "https://{{ .Values.global.domainName }},https://call.{{ .Values.global.domainName }}"
+            - name: MATRIX_SERVER_NAME
+              value: {{ .Values.matrix.matrixServerName | quote }}
+            - name: MATRIX_FEDERATION_BASE_URL
+              value: "http://matrix-synapse:8008"
+            - name: MATRIX_ADMIN_BASE_URL
+              value: "http://matrix-synapse:8008"
+            - name: MATRIX_ADMIN_TOKEN_FILE
+              value: /run/secrets/matrix-admin-token
+            - name: MATRIXRTC_UPSTREAM_URL
+              value: "http://matrixrtc-authorization-service:8080"
+          ports:
+            - name: http
+              containerPort: 3010
+          volumeMounts:
+            - name: auth-secrets
+              mountPath: /run/secrets
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+      volumes:
+        - name: auth-secrets
+          secret:
+            secretName: matrixrtc-auth-secrets
+            items:
+              - key: matrix-admin-token
+                path: matrix-admin-token
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matrixrtc-authorization-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: matrixrtc-authorization-service
+spec:
+  replicas: {{ .Values.matrixrtcAuth.replicas }}
+  selector:
+    matchLabels:
+      app: matrixrtc-authorization-service
+  template:
+    metadata:
+      labels:
+        app: matrixrtc-authorization-service
+    spec:
+      containers:
+        - name: authorization-service
+          image: {{ required "matrixrtcAuth.upstream.image must be an immutable image digest" .Values.matrixrtcAuth.upstream.image | quote }}
+          imagePullPolicy: {{ .Values.matrixrtcAuth.upstream.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: LIVEKIT_URL
+              value: "wss://{{ .Values.global.domainName }}/livekit/sfu"
+            - name: LIVEKIT_KEY_FROM_FILE
+              value: /run/secrets/livekit-api-key
+            - name: LIVEKIT_SECRET_FROM_FILE
+              value: /run/secrets/livekit-api-secret
+            - name: LIVEKIT_FULL_ACCESS_HOMESERVERS
+              value: {{ .Values.matrix.matrixServerName | quote }}
+            - name: LIVEKIT_JWT_BIND
+              value: ":8080"
+            - name: LIVEKIT_LOG_LEVEL
+              value: error
+            - name: LIVEKIT_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: matrixrtc-auth-secrets
+                  key: redis-url
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: auth-secrets
+              mountPath: /run/secrets
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+      volumes:
+        - name: auth-secrets
+          secret:
+            secretName: matrixrtc-auth-secrets
+            items:
+              - key: livekit-api-key
+                path: livekit-api-key
+              - key: livekit-api-secret
+                path: livekit-api-secret

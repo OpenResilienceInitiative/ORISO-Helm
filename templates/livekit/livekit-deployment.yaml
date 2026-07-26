@@ -26,7 +26,7 @@ spec:
       restartPolicy: Always
       containers:
         - name: livekit
-          image: livekit/livekit-server:latest
+          image: {{ required "livekit.image must be an immutable image digest" .Values.livekit.image | quote }}
           imagePullPolicy: IfNotPresent
           args:
             - --config
@@ -40,5 +40,5 @@ spec:
               mountPath: /etc/livekit
       volumes:
         - name: livekit-config
-          configMap:
-            name: livekit-config
+          secret:
+            secretName: livekit-config
