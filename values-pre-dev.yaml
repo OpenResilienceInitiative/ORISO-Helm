@@ -23,6 +23,11 @@ global:
     matrix: "matrix.oriso-dev.site"
     auth: "auth.oriso-dev.site"
     signoz: "signoz.oriso-dev.site"
+    # Both hosts already exist on PreDev and keep their live TLS secrets:
+    # health-dashboard-ingress -> health.oriso-dev.site (health-oriso-site-tls)
+    # status-page-ingress      -> status.oriso-dev.site (status-oriso-site-tls)
+    health: "health.oriso-dev.site"
+    status: "status.oriso-dev.site"
   matrix:
     matrixServerName: "matrix.oriso-dev.site"
   keycloak:
@@ -53,6 +58,24 @@ userService:
 healthDashboard:
   image:
     pullPolicy: IfNotPresent
+  # Adopts the live health-dashboard-ingress and repoints the live
+  # status-page-ingress at the canonical dashboard (ORISO-Helm#153). The
+  # archived ORISO-Status Deployment/Service are not rendered, so the reviewed
+  # upgrade removes them. TLS secret names match the live resources, so no
+  # certificate is re-issued.
+  ingress:
+    enabled: true
+    healthTlsSecretName: "health-oriso-site-tls"
+    statusAlias:
+      enabled: true
+      tlsSecretName: "status-oriso-site-tls"
+
+# Replaces the crash-looping oriso-platform-service-health-exporter
+# (0/1 ready on PreDev) with the pinned Collector Contrib build
+# (ORISO-Helm#152). Requires signoz.enabled, which is set below.
+serviceHealthExporter:
+  enabled: true
+  environment: "pre-dev"
 
 signoz:
   enabled: true

@@ -31,6 +31,29 @@ def test_predev_render_is_reproducible_and_contains_no_latest_images(tmp_path: P
     assert all(":latest" not in image for image in provenance["images"])
 
 
+def test_predev_values_activate_the_truthful_health_surfaces() -> None:
+    # ORISO-Helm#152 and #153 add the exporter and the ingress templates, but
+    # both default to disabled. Without an explicit opt-in here, the deployment
+    # authority ships a chart where neither renders and the crash-looping
+    # legacy exporter and the archived status page stay in place.
+    values = yaml.safe_load((ROOT / "values-pre-dev.yaml").read_text())
+
+    assert values["serviceHealthExporter"]["enabled"] is True
+
+    ingress = values["healthDashboard"]["ingress"]
+    assert ingress["enabled"] is True
+    assert ingress["statusAlias"]["enabled"] is True
+
+    domains = values["global"]["domains"]
+    assert domains["health"] == "health.oriso-dev.site"
+    assert domains["status"] == "status.oriso-dev.site"
+
+    # The live Ingress resources already hold these secrets; reusing the names
+    # keeps the reviewed upgrade from triggering a certificate re-issue.
+    assert ingress["healthTlsSecretName"] == "health-oriso-site-tls"
+    assert ingress["statusAlias"]["tlsSecretName"] == "status-oriso-site-tls"
+
+
 def test_predev_image_lock_contains_no_floating_latest_values() -> None:
     lock = (ROOT / "deploy/predev/images.lock.yaml").read_text()
     assert "latest" not in lock.lower()
