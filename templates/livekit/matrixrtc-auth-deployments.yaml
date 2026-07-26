@@ -96,7 +96,7 @@ spec:
             - name: LIVEKIT_JWT_BIND
               value: ":8080"
             - name: LIVEKIT_LOG_LEVEL
-              value: error
+              value: "off"
             - name: LIVEKIT_REDIS_URL
               valueFrom:
                 secretKeyRef:

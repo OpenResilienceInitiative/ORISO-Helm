@@ -156,7 +156,7 @@ matrixrtcAuth:
     image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway@sha256:0000000000000000000000000000000000000000000000000000000000000000"
     pullPolicy: Always
   upstream:
-    image: "ghcr.io/element-hq/lk-jwt-service@sha256:2e41fa6144b36cf34ef73c46ca8c19c55a26de53cbd24d138311a61f470cc45d"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service@sha256:0000000000000000000000000000000000000000000000000000000000000000"
     pullPolicy: IfNotPresent
   service:
     port: 3010

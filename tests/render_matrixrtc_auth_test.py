@@ -78,6 +78,15 @@ def main() -> None:
 
     assert gateway_container["securityContext"]["runAsNonRoot"] is True
     assert upstream_container["securityContext"]["runAsNonRoot"] is True
+    assert (
+        upstream_container["image"].split("@", maxsplit=1)[0]
+        == "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service"
+    )
+    upstream_env = {
+        entry["name"]: entry
+        for entry in upstream_container["env"]
+    }
+    assert upstream_env["LIVEKIT_LOG_LEVEL"]["value"] == "off"
     assert livekit["spec"]["template"]["spec"]["volumes"][0]["secret"]["secretName"] == (
         "livekit-config"
     )
