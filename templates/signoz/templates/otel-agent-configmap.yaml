@@ -37,6 +37,34 @@ data:
           enabled: true
         operators:
           - type: container
+          # ORISO's Java services write JSON into the CRI body. Parse only
+          # JSON lines, promote the W3C trace context into the OTel log
+          # record, keep the raw body unchanged, and avoid exporting the
+          # parsed request/message object again as high-cardinality attrs.
+          - type: json_parser
+            id: oriso-json
+            parse_from: body
+            if: 'body matches "\"serviceName\"\\s*:"'
+            on_error: send
+          - type: trace_parser
+            id: oriso-trace-context
+            trace_id:
+              parse_from: attributes.traceId
+            span_id:
+              parse_from: attributes.spanId
+            if: 'attributes.traceId != nil and attributes.spanId != nil'
+            on_error: send
+          - type: retain
+            id: oriso-safe-parsed-attributes
+            fields:
+              - attributes.CID
+              - attributes.serviceName
+            if: 'attributes.serviceName != nil'
+          - type: move
+            id: oriso-service-name
+            from: attributes.serviceName
+            to: resource["service.name"]
+            if: 'attributes.serviceName != nil'
 
       # Per-node host metrics (OBS-P4a): cpu/disk/load/filesystem/memory/
       # network/paging, matching the upstream SigNoz k8s-infra chart's
@@ -131,6 +159,29 @@ data:
         check_interval: 1s
         limit_mib: {{ .Values.signoz.otelAgent.memoryLimiter.limitMib }}
         spike_limit_mib: {{ .Values.signoz.otelAgent.memoryLimiter.spikeLimitMib }}
+      resource/environment:
+        attributes:
+          - key: deployment.environment
+            value: {{ required "global.observability.deploymentEnvironment is required" .Values.global.observability.deploymentEnvironment | quote }}
+            action: upsert
+      resource/infrastructure:
+        attributes:
+          - key: service.name
+            value: kubernetes-infrastructure
+            action: upsert
+      # Application loggers use short historical names while traces use the
+      # canonical OpenTelemetry service names. Normalize after file parsing
+      # so a log can be followed directly to a trace under one service.
+      transform/log_identity:
+        error_mode: ignore
+        log_statements:
+          - context: resource
+            statements:
+              - set(attributes["service.name"], attributes["k8s.container.name"]) where attributes["service.name"] == nil and attributes["k8s.container.name"] != nil
+              - set(attributes["service.name"], "user-service") where attributes["service.name"] == "users"
+              - set(attributes["service.name"], "agency-service") where attributes["service.name"] == "agencies"
+              - set(attributes["service.name"], "tenant-service") where attributes["service.name"] == "tenants"
+              - set(attributes["service.name"], "consulting-type-service") where attributes["service.name"] == "consultingtypes"
       batch:
         timeout: 10s
         send_batch_size: 1024
@@ -177,7 +228,7 @@ data:
       pipelines:
         logs:
           receivers: [filelog]
-          processors: [memory_limiter, batch]
+          processors: [memory_limiter, resource/environment, transform/log_identity, batch]
           exporters: [otlp]
         metrics:
           receivers:
@@ -186,6 +237,6 @@ data:
               kubeletstats,
               {{- if .Values.signoz.otelAgent.selfMetrics.enabled }}prometheus,{{- end }}
             ]
-          processors: [memory_limiter, batch/metrics]
+          processors: [memory_limiter, resource/environment, resource/infrastructure, batch/metrics]
           exporters: [otlp]
 {{- end }}

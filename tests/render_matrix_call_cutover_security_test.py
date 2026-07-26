@@ -65,6 +65,7 @@ def main() -> None:
     frontend = find(documents, "Deployment", "frontend")
     userservice = find(documents, "Deployment", "userservice")
     agencyservice = find(documents, "Deployment", "agencyservice")
+    livekit = find(documents, "Deployment", "livekit")
 
     synapse_spec = synapse["spec"]["template"]["spec"]
     images = [
@@ -85,6 +86,7 @@ def main() -> None:
         f"ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{TEST_DIGEST}",
     }
     assert expected_cutover_images.issubset(set(images))
+    assert livekit["spec"]["strategy"] == {"type": "Recreate"}
 
     rendered = yaml.safe_dump_all(documents)
     assert "matrix-backup-cronjob-github" not in rendered
@@ -93,6 +95,10 @@ def main() -> None:
     assert "caritas-matrix-backups" not in rendered
 
     print("PASS: all chat cutover images are immutable; no unsafe backup job renders")
+
+
+def test_matrix_call_cutover_security() -> None:
+    main()
 
 
 if __name__ == "__main__":

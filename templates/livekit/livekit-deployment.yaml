@@ -6,15 +6,14 @@ metadata:
   labels:
     app: livekit
 spec:
-  replicas: 1
+  replicas: {{ .Values.livekit.replicas }}
   selector:
     matchLabels:
       app: livekit
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 25%
-      maxUnavailable: 25%
+    # LiveKit uses host networking, so a surge pod cannot bind the same
+    # single-node ports while the current replica is still running.
+    type: Recreate
   template:
     metadata:
       labels:

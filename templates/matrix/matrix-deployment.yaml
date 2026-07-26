@@ -6,7 +6,7 @@ metadata:
   labels:
     app: matrix-synapse
 spec:
-  replicas: 1
+  replicas: {{ .Values.matrix.replicas }}
   selector:
     matchLabels:
       app: matrix-synapse

@@ -20,6 +20,30 @@ metadata:
     {{- include "signoz.labels" . | nindent 4 }}
     app.kubernetes.io/component: clickhouse
 data:
+  internal-logs.xml: |
+    <clickhouse>
+      <!--
+      Bound ClickHouse's own diagnostic tables. On 2026-07-25 these tables
+      occupied more than 20 GiB of the 50 GiB PreDev volume, led by trace_log
+      at 12.46 GiB. The reconciliation Job applies the same TTL to tables that
+      already exist; this config keeps replacements/new tables bounded.
+      -->
+      <query_log>
+        <ttl>event_date + INTERVAL {{ .Values.signoz.clickhouse.internalLogs.retentionDays }} DAY DELETE</ttl>
+      </query_log>
+      <text_log>
+        <ttl>event_date + INTERVAL {{ .Values.signoz.clickhouse.internalLogs.retentionDays }} DAY DELETE</ttl>
+      </text_log>
+      <trace_log>
+        <ttl>event_date + INTERVAL {{ .Values.signoz.clickhouse.internalLogs.retentionDays }} DAY DELETE</ttl>
+      </trace_log>
+      <metric_log>
+        <ttl>event_date + INTERVAL {{ .Values.signoz.clickhouse.internalLogs.retentionDays }} DAY DELETE</ttl>
+      </metric_log>
+      <asynchronous_metric_log>
+        <ttl>event_date + INTERVAL {{ .Values.signoz.clickhouse.internalLogs.retentionDays }} DAY DELETE</ttl>
+      </asynchronous_metric_log>
+    </clickhouse>
   cluster.xml: |
     <clickhouse>
       <keeper_server>

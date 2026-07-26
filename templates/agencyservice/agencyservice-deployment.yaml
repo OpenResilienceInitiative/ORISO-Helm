@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: agencyservice
 spec:
-  replicas: 2
+  replicas: {{ .Values.agencyService.replicas }}
   selector:
     matchLabels:
       app: agencyservice
