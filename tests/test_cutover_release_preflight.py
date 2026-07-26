@@ -49,7 +49,7 @@ def ready_manifest() -> dict:
         },
         "policy": {
             "rocketChatFallbackAllowed": False,
-            "jitsiFallbackAllowed": False,
+            "legacyEmbeddedJitsiFallbackAllowed": False,
             "matrixWidgetHostOwnsCrypto": True,
             "disposablePreDevAccounts": True,
             "appointmentCallInCutoverScope": False,
@@ -139,6 +139,10 @@ class CutoverReleasePreflightTest(unittest.TestCase):
                 },
             },
         )
+
+    def test_future_provider_name_is_not_blanket_forbidden(self) -> None:
+        self.assertNotIn("jitsi", self.preflight.FORBIDDEN_RENDERED_LEGACY)
+        self.assertIn("jitsi-meet", self.preflight.FORBIDDEN_RENDERED_LEGACY)
 
     def test_stop_ship_or_local_evidence_cannot_become_helm_input(self) -> None:
         manifest = ready_manifest()

@@ -71,7 +71,9 @@ FORBIDDEN_RENDERED_LEGACY = (
     "rocketchat",
     "rc_user_id",
     "rc_group_id",
-    "jitsi",
+    "jitsi-meet",
+    "jitsi-jvb",
+    "jitsi-prosody",
     "jicofo",
     "prosody",
 )
@@ -106,8 +108,10 @@ def validate_source_bundle(manifest: Mapping) -> None:
     policy = require_mapping(manifest.get("policy"), "policy")
     if policy.get("rocketChatFallbackAllowed") is not False:
         raise ValueError("policy.rocketChatFallbackAllowed must be false")
-    if policy.get("jitsiFallbackAllowed") is not False:
-        raise ValueError("policy.jitsiFallbackAllowed must be false")
+    if policy.get("legacyEmbeddedJitsiFallbackAllowed") is not False:
+        raise ValueError(
+            "policy.legacyEmbeddedJitsiFallbackAllowed must be false"
+        )
     if policy.get("matrixWidgetHostOwnsCrypto") is not True:
         raise ValueError("policy.matrixWidgetHostOwnsCrypto must be true")
     if policy.get("disposablePreDevAccounts") is not True:

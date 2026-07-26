@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prevent Rocket.Chat and Jitsi deployment contracts from returning."""
+"""Prevent Rocket.Chat and the retired embedded-Jitsi stack from returning."""
 
 from __future__ import annotations
 
@@ -14,7 +14,9 @@ FORBIDDEN = (
     "rocketchat",
     "rc_user_id",
     "rc_group_id",
-    "jitsi",
+    "jitsi-meet",
+    "jitsi-jvb",
+    "jitsi-prosody",
     "jicofo",
     "prosody",
 )
@@ -66,7 +68,10 @@ def main() -> None:
     matches = [term for term in FORBIDDEN if term in rendered]
     assert not matches, f"rendered chart contains {matches}"
 
-    print("PASS: Helm source and rendered resources contain no Rocket.Chat or Jitsi contracts")
+    print(
+        "PASS: Helm source and rendered resources contain no Rocket.Chat "
+        "or retired embedded-Jitsi contracts"
+    )
 
 
 if __name__ == "__main__":
