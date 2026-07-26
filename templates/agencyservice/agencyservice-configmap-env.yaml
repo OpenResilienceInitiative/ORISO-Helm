@@ -45,5 +45,6 @@ data:
   MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
   MANAGEMENT_OTLP_METRICS_EXPORT_URL: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}:4318/v1/metrics"
   MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
-
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: "always"
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS: "always"
 
