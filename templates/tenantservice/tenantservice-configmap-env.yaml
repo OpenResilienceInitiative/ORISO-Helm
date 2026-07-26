@@ -26,6 +26,13 @@ data:
   # in this version).
   MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}:4318/v1/traces"
   MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
+  # Sampling is otherwise unset, so Spring Boot's default of 0.1 applies and
+  # 90% of traces are discarded. That makes per-test-run tracing useless: nine
+  # out of ten test requests would have no trace to open. The propagator is
+  # named explicitly so an incoming W3C traceparent is honoured and a test can
+  # be correlated with the backend spans it caused.
+  MANAGEMENT_TRACING_SAMPLING_PROBABILITY: {{ .Values.global.observability.tracingSamplingProbability | quote }}
+  MANAGEMENT_TRACING_PROPAGATION_TYPE: {{ .Values.global.observability.tracingPropagationType | quote }}
   MANAGEMENT_OTLP_METRICS_EXPORT_URL: "http://{{ .Release.Name }}-otel-collector.{{ .Release.Namespace }}:4318/v1/metrics"
   MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
 

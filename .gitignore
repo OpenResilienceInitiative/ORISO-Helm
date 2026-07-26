@@ -12,3 +12,7 @@ test-data/test-users.json
 # age private keys, wherever they land
 *.age
 keys.txt
+
+# Python bytecode from local pytest runs — never belongs in the tree.
+__pycache__/
+*.py[cod]

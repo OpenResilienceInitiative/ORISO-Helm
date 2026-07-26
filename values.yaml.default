@@ -18,6 +18,15 @@ global:
   observability:
     otlpEnabled: false
     otlpCollectorHost: "" # empty = derive from the in-chart signoz gateway service
+    # Spring Boot's own default is 0.1, i.e. nine out of ten traces are thrown
+    # away. That default is kept here so production behaviour is unchanged;
+    # environments that need per-request traceability (PreDev, where E2E runs)
+    # raise it in their own values file.
+    tracingSamplingProbability: "0.1"
+    # Named explicitly so an incoming W3C traceparent from a test run is
+    # adopted and the resulting backend spans join that test's trace instead of
+    # starting a new one.
+    tracingPropagationType: "W3C"
     # OBS-P6: KDG-safe pseudonymization pipeline for the gateway collector
     # (otel-collector-configmap.yaml) — HMAC-style keyed-hash of identifiers,
     # attribute allow-listing (fail-closed: anything not on the allow-list is

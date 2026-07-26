@@ -115,6 +115,16 @@ spec:
               configMapKeyRef:
                 key: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
                 name: tenantservice-configmap-env
+          - name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+                name: tenantservice-configmap-env
+          - name: MANAGEMENT_TRACING_PROPAGATION_TYPE
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_TRACING_PROPAGATION_TYPE
+                name: tenantservice-configmap-env
           - name: MANAGEMENT_OTLP_METRICS_EXPORT_URL
             valueFrom:
               configMapKeyRef:
