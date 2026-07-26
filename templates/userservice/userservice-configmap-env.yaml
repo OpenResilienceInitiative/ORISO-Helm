@@ -109,9 +109,13 @@ data:
   FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED: {{ .Values.global.multitenancyWithSingleDomainEnabled | quote }}
   # Shared consultant availability lease store. The password remains in the
   # existing redis-secret and is referenced directly by the Deployment.
+  SPRING_REDIS_HOST: "redis"
+  SPRING_REDIS_PORT: "6379"
   SPRING_DATA_REDIS_HOST: "redis"
   SPRING_DATA_REDIS_PORT: "6379"
   CONSULTANT_AVAILABILITY_REDIS_TTL_SECONDS: {{ .Values.userService.consultantAvailabilityRedisTtlSeconds | default 120 | quote }}
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: "always"
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS: "always"
   MATRIX_API_URL: {{ .Values.matrix.matrixApiUrl }}
   MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}
   MATRIX_ENCRYPTION_ENABLED: {{ .Values.userService.matrixEncryptionEnabled | default "false" | quote }}
