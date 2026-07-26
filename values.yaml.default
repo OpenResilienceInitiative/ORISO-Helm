@@ -120,6 +120,8 @@ global:
 
 
 matrix:
+  image: "matrixdotorg/synapse@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  initImage: "busybox@sha256:0000000000000000000000000000000000000000000000000000000000000000"
   synapseServerName: "matrix.oriso.org"
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"
@@ -129,10 +131,8 @@ matrix:
   # per-environment overlay — never hardcode an IP in the chart (ADR-005 / DB-M04).
   serverPublicIp: ""
 
-
-
-
-
+elementCall:
+  image: "ghcr.io/openresilienceinitiative/element-call@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
 # ---------- Infrastructure Services ----------------------------------------------------------------------------------
 

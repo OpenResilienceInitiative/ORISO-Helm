@@ -22,8 +22,8 @@ spec:
     spec:
       containers:
       - name: element-call
-        image: ghcr.io/openresilienceinitiative/element-call:latest
-        imagePullPolicy: Always
+        image: {{ required "elementCall.image must be an immutable image digest" .Values.elementCall.image | quote }}
+        imagePullPolicy: IfNotPresent
         ports:
           - containerPort: 80
             name: http
