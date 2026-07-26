@@ -296,8 +296,8 @@ frontend:
 healthDashboard:
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: rebuild
-    pullPolicy: Never
+    tag: pre-dev
+    pullPolicy: IfNotPresent
   replicas: 1
   namespace: ""
   resources: {}
@@ -307,6 +307,7 @@ healthDashboard:
     targetPort: 9100
   env:
     PORT: "9100"
+    HEALTH_CHECK_TIMEOUT_MS: "5000"
 
 # SigNoz observability stack (OBS-P1): SigNoz backend/UI + in-chart
 # ClickHouse + OTel gateway collector + per-node log-collection agent.
