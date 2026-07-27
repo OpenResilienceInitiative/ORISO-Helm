@@ -13,20 +13,28 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 25%
-      maxUnavailable: 25%
+      maxUnavailable: 1
+      maxSurge: 0
   template:
     metadata:
       labels:
         app: livekit
     spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: livekit
+              topologyKey: kubernetes.io/hostname
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       enableServiceLinks: false
       restartPolicy: Always
+      terminationGracePeriodSeconds: 18000
       containers:
         - name: livekit
-          image: livekit/livekit-server:latest
+          image: {{ include "oriso.immutableImage" (list "livekit.image" .Values.livekit.image) | quote }}
           imagePullPolicy: IfNotPresent
           args:
             - --config
@@ -40,5 +48,8 @@ spec:
               mountPath: /etc/livekit
       volumes:
         - name: livekit-config
-          configMap:
-            name: livekit-config
+          secret:
+            secretName: {{ .Values.livekit.existingConfigSecret.name | quote }}
+            items:
+              - key: {{ .Values.livekit.existingConfigSecret.key | quote }}
+                path: config.yaml

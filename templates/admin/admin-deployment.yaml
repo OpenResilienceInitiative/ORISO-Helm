@@ -54,4 +54,4 @@ spec:
             path: /admin
             port: 80
           initialDelaySeconds: 10
-          periodSeconds: 5 
+          periodSeconds: 5
