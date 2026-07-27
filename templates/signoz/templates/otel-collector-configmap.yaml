@@ -145,6 +145,14 @@ data:
         check_interval: 1s
         limit_mib: {{ .Values.signoz.otelCollector.memoryLimiter.limitMib }}
         spike_limit_mib: {{ .Values.signoz.otelCollector.memoryLimiter.spikeLimitMib }}
+      # The environment is a collector-owned deployment fact, not an
+      # application guess. Upsert it uniformly so logs, metrics, traces, span
+      # metrics, and infrastructure metrics can use the same dimension.
+      resource/environment:
+        attributes:
+          - key: deployment.environment
+            value: {{ required "global.observability.deploymentEnvironment is required" .Values.global.observability.deploymentEnvironment | quote }}
+            action: upsert
       # Enrich traces/metrics with Kubernetes metadata, associated via the
       # sending pod's connection IP (services export OTLP directly here).
       # Deliberately NOT in the logs pipeline — see the pipeline comment.
@@ -382,6 +390,7 @@ data:
           # k8sattributes/signozspanmetrics never see the raw identifiers.
           processors:
             - memory_limiter
+            - resource/environment
           {{- if .Values.global.observability.telemetryPseudonymizationEnabled }}
             - transform/pseudonymize_traces
           {{- end }}
@@ -393,6 +402,7 @@ data:
           receivers: [otlp]
           processors:
             - memory_limiter
+            - resource/environment
           {{- if .Values.global.observability.telemetryPseudonymizationEnabled }}
             - transform/pseudonymize_metrics
           {{- end }}
@@ -408,6 +418,7 @@ data:
           receivers: [otlp]
           processors:
             - memory_limiter
+            - resource/environment
           {{- if .Values.global.observability.telemetryPseudonymizationEnabled }}
             - transform/pseudonymize_logs
           {{- end }}
@@ -415,7 +426,7 @@ data:
           exporters: [clickhouselogsexporter, signozmeter]
         metrics/meter:
           receivers: [signozmeter]
-          processors: [batch/meter]
+          processors: [resource/environment, batch/meter]
           exporters: [signozclickhousemeter]
         {{- if or .Values.signoz.clickhouse.prometheus.enabled .Values.signoz.otelCollector.selfMetrics.enabled .Values.signoz.mariadbMetrics.enabled }}
         # OBS-P4: infra/self-monitoring metrics (ClickHouse, MariaDB, this
@@ -433,7 +444,7 @@ data:
               {{- if or .Values.signoz.clickhouse.prometheus.enabled .Values.signoz.otelCollector.selfMetrics.enabled }}prometheus,{{- end }}
               {{- if .Values.signoz.mariadbMetrics.enabled }}mysql,{{- end }}
             ]
-          processors: [memory_limiter, batch]
+          processors: [memory_limiter, resource/environment, batch]
           exporters: [signozclickhousemetrics, signozmeter]
         {{- end }}
   otel-collector-opamp-config.yaml: |

@@ -94,6 +94,10 @@ spec:
           mountPath: /etc/clickhouse-server/config.d/cluster.xml
           subPath: cluster.xml
           readOnly: true
+        - name: clickhouse-cluster-config
+          mountPath: /etc/clickhouse-server/config.d/internal-logs.xml
+          subPath: internal-logs.xml
+          readOnly: true
         {{- if .Values.signoz.clickhouse.prometheus.enabled }}
         # OBS-P4: <prometheus> metrics endpoint drop-in (same ConfigMap,
         # second key, mounted as its own single-file subPath).

@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: consultingtypeservice
 spec:
-  replicas: 2
+  replicas: {{ .Values.consultingTypeService.replicas }}
   selector:
     matchLabels:
       app: consultingtypeservice

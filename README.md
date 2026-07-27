@@ -43,9 +43,38 @@ Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fi
 - `livekit.api.key` / `livekit.api.secret` — LiveKit API credentials
 - `tenantService.springDatasourcePassword` / `springRabbitmqPassword`
 - `agencyService.serviceEncryptionAppkey` — AgencyService encryption key (Matrix service-account passwords). **Required** — the chart refuses to render if it is blank, because an empty key silently breaks agency creation. Rotating it invalidates already-stored credentials.
-- `userService.rocket*Password` / `keycloakTechnicalPassword` / `serviceEncryptionAppkey` / `identityTechnicalUser*`
+- `userService.keycloakTechnicalPassword` / `serviceEncryptionAppkey` / `identityTechnicalUser*`
 
 ### 3. Install / Upgrade
+
+For the coordinated Matrix-only/Matryoshka cutover, never edit image tags into
+`values.yaml`. Frontend, Element Call, UserService, AgencyService, Synapse and
+both MatrixRTC authorization images accept only complete
+`repository@sha256:<digest>` references.
+
+After the cross-repository release manifest contains reviewed registry
+digests, attached security evidence, rotated secrets and the status
+`ready-for-predev`, generate and verify the exact Helm overlay:
+
+```bash
+./scripts/cutover-release-preflight.py \
+  /path/to/ORISO-Matryoshka-Release-Manifest.yaml \
+  --output-values /path/to/new-cutover-digests.yaml
+```
+
+The command fails closed on `STOP_SHIP` placeholders, zero/wrong digests,
+missing PR or security evidence, forbidden legacy render artifacts, or any
+rendered image that differs from the manifest. It refuses to overwrite an
+existing output file.
+
+Use the verified overlay after the environment values and before secrets:
+
+```bash
+helm upgrade --install caritas ./ --namespace caritas --create-namespace \
+  --wait-for-jobs --timeout 15m \
+  -f values.yaml -f values-dev.yaml \
+  -f /path/to/new-cutover-digests.yaml -f secrets.yaml
+```
 
 ```bash
 helm upgrade --install caritas ./ --namespace caritas --create-namespace --wait-for-jobs --timeout 15m -f secrets.yaml

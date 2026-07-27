@@ -5,7 +5,7 @@ metadata:
     app: userservice
   name: userservice
 spec:
-  replicas: 2
+  replicas: {{ .Values.userService.replicas }}
   selector:
     matchLabels:
       app: userservice
@@ -28,7 +28,7 @@ spec:
       restartPolicy: Always
       containers:
         - name: userservice
-          image: "{{ .Values.userService.imageName }}:{{ .Values.userService.imageVersion }}"
+          image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
           imagePullPolicy: Always
           env:
             - name: IDENTITY_OPENID_CONNECT_URL
@@ -45,11 +45,6 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   key: AGENCY_SERVICE_API_URL
-                  name: userservice-configmap-env
-            - name: ROCKET_CHAT_MONGO_URL
-              valueFrom:
-                configMapKeyRef:
-                  key: ROCKET_CHAT_MONGO_URL
                   name: userservice-configmap-env
             - name: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
               valueFrom:
@@ -81,16 +76,6 @@ spec:
                 configMapKeyRef:
                   key: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
                   name: userservice-configmap-env
-            - name: ROCKET_CHAT_BASE_URL
-              value: "http://rocketchat.caritas:3000"
-            - name: ROCKET_TECHNICAL_USERNAME
-              value: "rocket-chat-technical-user"
-            - name: ROCKET_TECHNICAL_PASSWORD
-              value: "W5wIhzuRTxatsHxeT9ECbfY0M1bIoMn4769bWfkl"
-            - name: ROCKET_CHAT_MONGO_USERNAME
-              value: "your_username_here"
-            - name: ROCKET_CHAT_MONGO_PASSWORD
-              value: "your_password_here"
             - name: AGENCY_ADMIN_SERVICE_API_URL
               valueFrom:
                 configMapKeyRef:

@@ -10,6 +10,8 @@ data:
   PORT: "8080"
   REACT_APP_API_URL: "https://{{ .Values.global.domainName }}"
   REACT_APP_ELEMENT_CALL_URL: "https://{{ .Values.global.domainName }}"
+  REACT_APP_ELEMENT_CALL_BASE_URL: "https://{{ .Values.global.domainName }}"
+  REACT_APP_MATRIXRTC_MEMBERSHIP_READER_USER_ID: {{ .Values.matrixrtcAuth.membershipReaderUserId | quote }}
   REACT_APP_LIVEKIT_URL: "wss://{{ .Values.global.domainName }}/livekit/sfu"
   REACT_APP_LIVEKIT_WS_URL: "wss://{{ .Values.global.domainName }}/livekit/sfu"
   VITE_API_URL: "https://{{ .Values.global.domainName }}"

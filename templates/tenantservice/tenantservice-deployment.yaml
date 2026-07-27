@@ -4,7 +4,7 @@ kind: Deployment
 metadata:
   name: tenantservice
 spec:
-  replicas: 2
+  replicas: {{ .Values.tenantService.replicas }}
   selector:
     matchLabels:
       app: tenantservice
@@ -154,4 +154,3 @@ spec:
             port: 8081
           initialDelaySeconds: 60
           periodSeconds: 10
- 

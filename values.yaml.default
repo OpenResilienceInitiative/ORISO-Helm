@@ -17,6 +17,9 @@ global:
   # endpoint alone does NOT reliably no-op (see PLAN-observability doc).
   observability:
     otlpEnabled: false
+    # Canonical environment identity applied by both collector tiers to every
+    # signal. The default chart targets PreDev; production overrides this.
+    deploymentEnvironment: "pre-dev"
     otlpCollectorHost: "" # empty = derive from the in-chart signoz gateway service
     # Spring Boot's own default is 0.1, i.e. nine out of ten traces are thrown
     # away. That default is kept here so production behaviour is unchanged;
@@ -129,6 +132,10 @@ global:
 
 
 matrix:
+  image: "matrixdotorg/synapse@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  initImage: "busybox@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  replicas: 1
+  postgresReplicas: 1
   synapseServerName: "matrix.oriso.org"
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"
@@ -138,14 +145,15 @@ matrix:
   # per-environment overlay — never hardcode an IP in the chart (ADR-005 / DB-M04).
   serverPublicIp: ""
 
-
-
-
-
+elementCall:
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/element-call@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # ---------- Infrastructure Services ----------------------------------------------------------------------------------
 
 admin:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
   imageVersion: "latest"
 # MongoDB
@@ -159,16 +167,32 @@ online-counseling-mariadb:
   imageName: "mariadb"
   imageVersion: "11.0.6"
   maxconnections: "1000"
-tokenService:
+matrixrtcAuth:
   replicas: 2
-  image:
-    repository: ghcr.io/openresilienceinitiative/livekit-token-service
-    tag: "latest"
+  membershipReaderUserId: "@matrixrtc-auth:matrix.oriso.org"
+  existingSecret:
+    name: "matrixrtc-auth-secrets"
+    membershipTokenKey: "matrix-membership-token"
+    livekitApiKeyKey: "livekit-api-key"
+    livekitApiSecretKey: "livekit-api-secret"
+    redisUrlKey: "redis-url"
+  gateway:
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway@sha256:0000000000000000000000000000000000000000000000000000000000000000"
     pullPolicy: Always
+  upstream:
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    pullPolicy: IfNotPresent
   service:
     port: 3010
     targetPort: 3010
     type: ClusterIP
+
+livekit:
+  replicas: 2
+  image: "docker.io/livekit/livekit-server@sha256:2c6869d2d5ff6c9c0166f47be1c92dad6928bfecfa5e4060a6ece48db8accfa3"
+  existingConfigSecret:
+    name: "livekit-config"
+    key: "config.yaml"
 
 
 # RabbitMQ
@@ -202,8 +226,8 @@ online-counseling-keycloak:
 
 # Agency service
 agencyService:
-  imageName: "ghcr.io/openresilienceinitiative/oriso-agencyservice"
-  imageVersion: "latest"
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
   keycloakResource: "agency-service"
 
@@ -216,6 +240,7 @@ agencyService:
 
 # ConsultingType service
 consultingTypeService:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
   imageVersion: "latest"
   serviceURL: "http://consultingtypeservice:8080"
@@ -227,6 +252,7 @@ consultingTypeService:
 
 # Tenant Service
 tenantService:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
   imageVersion: "latest"  
   springProfilesActive: "prod"
@@ -238,27 +264,33 @@ tenantService:
 
 # User service
 userService:
-  imageName: "ghcr.io/openresilienceinitiative/oriso-userservice"
-  imageVersion: "latest"
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice@sha256:0000000000000000000000000000000000000000000000000000000000000000"
   serviceURL: "http://userservice:8080"
  
   keycloakResource: "user-service"
 
   springProfilesActive: "prod"
 
-  # Rollout-safe server-side switch for encrypted Matrix room creation.
-  # Environment overlays opt in only after their stable homeserver identity is ready.
-  matrixEncryptionEnabled: "false"
+  # Encrypted Matrix room creation. Encryption is ON by default: the
+  # repository contract is that development and production must never run
+  # with encryption disabled, so the prod-safe baseline enables it rather
+  # than offering an encryption-off default that looks supported.
+  matrixEncryptionEnabled: "true"
 
-  # Redis lease duration for consultant Live Chat availability. The Redis host
-  # and password are wired from the chart's existing Service and Secret.
+  # Redis lease duration for consultant Live Chat availability. The Redis
+  # password is wired from the chart's existing Secret; host/port default to
+  # the in-chart Redis Service and can be overridden to point at an external
+  # instance (templates must not hardcode hosts).
+  redisHost: "redis"
+  redisPort: 6379
   consultantAvailabilityRedisTtlSeconds: 120
 
   # 2FA / OTP login posture (independent from Matrix room encryption).
   # Defaults keep OTP off; the dev overlay leaves it off for fast test-user
   # creation, and prod's posture is a deliberate choice (see values-prod.yaml).
   otpAllowedForUsers: "false"
-  otpAllowedForConsultants: "true"
+  otpAllowedForConsultants: "false"
   otpAllowedForSingleTenantAdmins: "false"
   otpAllowedForTenantSuperAdmins: "false"
 
@@ -287,16 +319,15 @@ userService:
   sessionInactiveDeleteWorkflowCron: "0 0 * * * ?"
   sessionInactiveDeleteWorkflowCheckDays: "30"
 
-  # Rocketchat
-  rocketCredentialschedulerCron: "0 0 0/1 * * ?"
-
-
 # ---------- Frontend Services ----------------------------------------------------------------------------------------
 
 # Frontend
 frontend:
-  imageName: "ghcr.io/openresilienceinitiative/oriso-frontend"
-  imageVersion: "2.0.1"
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+nginxController:
+  replicas: 1
 
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
@@ -401,6 +432,11 @@ signoz:
       enabled: true
       port: 9363
       endpoint: "/metrics"
+    internalLogs:
+      # ClickHouse's own profiler/text/query tables reached more than 20 GiB
+      # on the 50 GiB PreDev volume without TTL. The chart config and
+      # post-upgrade reconciliation Job enforce this bound.
+      retentionDays: 3
   # OBS-P4: OTel Collector `mysql` receiver against ORISO's MariaDB, feeding
   # the SigNoz "MySQL" community dashboard (MySQL-wire-compatible, verified
   # metric names are dotted `mysql.*`, not the underscored Prometheus-style

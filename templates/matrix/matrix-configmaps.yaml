@@ -219,6 +219,9 @@ data:
       {{- end }}
 
     # Enable Sliding Sync (Matrix 2.0) for INSTANT real-time synchronization
+    # MSC4140 delayed events let Element Call schedule a crash-safe leave event.
+    max_event_delay_duration: 24h
+
     experimental_features:
       msc3575_enabled: true
       msc3575_for_workers: true

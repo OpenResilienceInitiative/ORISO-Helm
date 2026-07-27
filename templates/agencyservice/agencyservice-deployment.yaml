@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: agencyservice
 spec:
-  replicas: 2
+  replicas: {{ .Values.agencyService.replicas }}
   selector:
     matchLabels:
       app: agencyservice
@@ -25,7 +25,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
         - name: agencyservice
-          image: {{ .Values.agencyService.imageName }}:{{ .Values.agencyService.imageVersion }}          
+          image: {{ include "oriso.immutableImage" (list "agencyService.image" .Values.agencyService.image) | quote }}
           imagePullPolicy: Always
           env:
             - name: CSRF_COOKIE_PROPERTY
