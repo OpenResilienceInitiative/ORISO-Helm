@@ -26,12 +26,6 @@ def render() -> list[dict]:
             "-f",
             os.path.join(CHART_DIR, "secrets.yaml.default"),
             "--set-string",
-            "livekit.api.key=test-livekit-key",
-            "--set-string",
-            "livekit.api.secret=test-livekit-secret",
-            "--set-string",
-            "livekit.matrixAdminToken=test-matrix-admin-token",
-            "--set-string",
             "global.secrets.redisdefaultPass=test-redis-password",
             "--set-string",
             f"frontend.image=ghcr.io/openresilienceinitiative/oriso-frontend@sha256:{TEST_DIGEST}",
@@ -86,7 +80,12 @@ def main() -> None:
         f"ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{TEST_DIGEST}",
     }
     assert expected_cutover_images.issubset(set(images))
-    assert livekit["spec"]["strategy"] == {"type": "Recreate"}
+    assert livekit["spec"]["replicas"] == 2
+    assert livekit["spec"]["strategy"] == {
+        "type": "RollingUpdate",
+        "rollingUpdate": {"maxUnavailable": 1, "maxSurge": 0},
+    }
+    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 18000
 
     rendered = yaml.safe_dump_all(documents)
     assert "matrix-backup-cronjob-github" not in rendered

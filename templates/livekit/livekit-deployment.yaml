@@ -11,18 +11,27 @@ spec:
     matchLabels:
       app: livekit
   strategy:
-    # LiveKit uses host networking, so a surge pod cannot bind the same
-    # single-node ports while the current replica is still running.
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
   template:
     metadata:
       labels:
         app: livekit
     spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: livekit
+              topologyKey: kubernetes.io/hostname
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       enableServiceLinks: false
       restartPolicy: Always
+      terminationGracePeriodSeconds: 18000
       containers:
         - name: livekit
           image: {{ include "oriso.immutableImage" (list "livekit.image" .Values.livekit.image) | quote }}
@@ -40,4 +49,7 @@ spec:
       volumes:
         - name: livekit-config
           secret:
-            secretName: livekit-config
+            secretName: {{ .Values.livekit.existingConfigSecret.name | quote }}
+            items:
+              - key: {{ .Values.livekit.existingConfigSecret.key | quote }}
+                path: config.yaml

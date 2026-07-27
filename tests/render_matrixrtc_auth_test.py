@@ -24,12 +24,6 @@ def render() -> list[dict]:
             "-f",
             os.path.join(CHART_DIR, "secrets.yaml.default"),
             "--set-string",
-            "livekit.api.key=test-livekit-key",
-            "--set-string",
-            "livekit.api.secret=test-livekit-secret",
-            "--set-string",
-            "livekit.matrixAdminToken=test-matrix-admin-token",
-            "--set-string",
             "global.secrets.redisdefaultPass=test-redis-password",
         ],
         capture_output=True,
@@ -65,8 +59,8 @@ def main() -> None:
     upstream = find(documents, "Deployment", "matrixrtc-authorization-service")
     livekit = find(documents, "Deployment", "livekit")
     ingress = find(documents, "Ingress", "livekit-jwt-ingress")
-    livekit_secret = find(documents, "Secret", "livekit-config")
-    auth_secret = find(documents, "Secret", "matrixrtc-auth-secrets")
+    assert ("Secret", "livekit-config") not in names
+    assert ("Secret", "matrixrtc-auth-secrets") not in names
 
     gateway_container = gateway["spec"]["template"]["spec"]["containers"][0]
     upstream_container = upstream["spec"]["template"]["spec"]["containers"][0]
@@ -87,28 +81,32 @@ def main() -> None:
         for entry in upstream_container["env"]
     }
     assert upstream_env["LIVEKIT_LOG_LEVEL"]["value"] == "off"
+    assert livekit["spec"]["replicas"] == 2
+    assert livekit["spec"]["strategy"]["type"] == "RollingUpdate"
+    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 18000
     assert livekit["spec"]["template"]["spec"]["volumes"][0]["secret"]["secretName"] == (
         "livekit-config"
     )
-
-    livekit_config = livekit_secret["stringData"]["config.yaml"]
-    assert "auto_create: false" in livekit_config
-    assert "matrixrtc-authorization-service:8080/sfu_webhook" in livekit_config
-    assert "changeme" not in yaml.safe_dump(livekit_secret)
-    assert "changeme" not in yaml.safe_dump(auth_secret)
 
     ingress_backend = ingress["spec"]["rules"][0]["http"]["paths"][0]["backend"]
     assert ingress_backend["service"]["name"] == "matrixrtc-auth-policy-gateway"
     assert ingress["metadata"]["annotations"][
         "nginx.ingress.kubernetes.io/limit-rps"
     ] == "10"
+    assert ingress["metadata"]["annotations"][
+        "nginx.ingress.kubernetes.io/cors-allow-origin"
+    ] == "https://your-domain.example.com"
 
     rendered = yaml.safe_dump_all(documents)
     assert "LIVEKIT_FULL_ACCESS_HOMESERVERS" in rendered
-    assert "MATRIX_ADMIN_TOKEN_FILE" in rendered
+    assert "MATRIX_MEMBERSHIP_TOKEN_FILE" in rendered
+    assert "MATRIX_ADMIN_TOKEN_FILE" not in rendered
+    assert "matrix-admin-token" not in rendered
     assert "LIVEKIT_API_SECRET" not in rendered
+    assert "kind: NetworkPolicy" in rendered
+    assert "kind: PodDisruptionBudget" in rendered
 
-    print("PASS: MatrixRTC auth renders one public policy gateway and secret-only credentials")
+    print("PASS: MatrixRTC auth renders one public policy gateway and external secret references")
 
 
 if __name__ == "__main__":

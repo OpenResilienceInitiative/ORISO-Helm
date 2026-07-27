@@ -7,6 +7,11 @@ metadata:
     app: matrixrtc-auth-policy-gateway
 spec:
   replicas: {{ .Values.matrixrtcAuth.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: matrixrtc-auth-policy-gateway
@@ -27,15 +32,15 @@ spec:
               drop: ["ALL"]
           env:
             - name: MATRIXRTC_ALLOWED_ORIGINS
-              value: "https://{{ .Values.global.domainName }},https://call.{{ .Values.global.domainName }}"
+              value: "https://{{ .Values.global.domainName }}"
             - name: MATRIX_SERVER_NAME
               value: {{ .Values.matrix.matrixServerName | quote }}
             - name: MATRIX_FEDERATION_BASE_URL
-              value: "http://matrix-synapse:8008"
-            - name: MATRIX_ADMIN_BASE_URL
-              value: "http://matrix-synapse:8008"
-            - name: MATRIX_ADMIN_TOKEN_FILE
-              value: /run/secrets/matrix-admin-token
+              value: "https://{{ .Values.global.domainName }}"
+            - name: MATRIX_CLIENT_BASE_URL
+              value: "https://{{ .Values.global.domainName }}"
+            - name: MATRIX_MEMBERSHIP_TOKEN_FILE
+              value: /run/secrets/matrix-membership-token
             - name: MATRIXRTC_UPSTREAM_URL
               value: "http://matrixrtc-authorization-service:8080"
           ports:
@@ -49,13 +54,17 @@ spec:
             httpGet:
               path: /health
               port: http
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
       volumes:
         - name: auth-secrets
           secret:
-            secretName: matrixrtc-auth-secrets
+            secretName: {{ .Values.matrixrtcAuth.existingSecret.name | quote }}
             items:
-              - key: matrix-admin-token
-                path: matrix-admin-token
+              - key: {{ .Values.matrixrtcAuth.existingSecret.membershipTokenKey | quote }}
+                path: matrix-membership-token
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -66,6 +75,11 @@ metadata:
     app: matrixrtc-authorization-service
 spec:
   replicas: {{ .Values.matrixrtcAuth.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: matrixrtc-authorization-service
@@ -100,8 +114,8 @@ spec:
             - name: LIVEKIT_REDIS_URL
               valueFrom:
                 secretKeyRef:
-                  name: matrixrtc-auth-secrets
-                  key: redis-url
+                  name: {{ .Values.matrixrtcAuth.existingSecret.name | quote }}
+                  key: {{ .Values.matrixrtcAuth.existingSecret.redisUrlKey | quote }}
           ports:
             - name: http
               containerPort: 8080
@@ -113,12 +127,16 @@ spec:
             httpGet:
               path: /healthz
               port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
       volumes:
         - name: auth-secrets
           secret:
-            secretName: matrixrtc-auth-secrets
+            secretName: {{ .Values.matrixrtcAuth.existingSecret.name | quote }}
             items:
-              - key: livekit-api-key
+              - key: {{ .Values.matrixrtcAuth.existingSecret.livekitApiKeyKey | quote }}
                 path: livekit-api-key
-              - key: livekit-api-secret
+              - key: {{ .Values.matrixrtcAuth.existingSecret.livekitApiSecretKey | quote }}
                 path: livekit-api-secret
