@@ -66,6 +66,17 @@ data:
   {{- if .Values.userService.passwordResetAdminFrontendBaseUrl }}
   PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL: {{ .Values.userService.passwordResetAdminFrontendBaseUrl | quote }}
   {{- end }}
+  # Account-invite accept links (TEN-INV-U6/U7). InviteAcceptUrlBuilder appends
+  # the route itself (/admin/tenant-onboarding/{token} for tenant-admin,
+  # /account-invite/{token} otherwise), so both values are bare origins — the
+  # admin one must NOT end in /admin. Omitted (not rendered empty) when unset
+  # so the app's fallback (system notification base URL) applies.
+  {{- if .Values.userService.accountInviteAppFrontendBaseUrl }}
+  ACCOUNT_INVITE_APP_FRONTEND_BASE_URL: {{ .Values.userService.accountInviteAppFrontendBaseUrl | quote }}
+  {{- end }}
+  {{- if .Values.userService.accountInviteAdminFrontendBaseUrl }}
+  ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL: {{ .Values.userService.accountInviteAdminFrontendBaseUrl | quote }}
+  {{- end }}
   # SMTP transport for the Magic Link and password-reset mails. UserService
   # sends these itself over SMTP; the credentials live in userservice-secret
   # because the platform-settings copy is only readable with a super-admin

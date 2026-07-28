@@ -66,6 +66,45 @@ spec:
                 secretKeyRef:
                   key: SMTP_PASSWORD
                   name: userservice-secret
+            # One-time-link base URLs. Guarded exactly like their ConfigMap
+            # keys: a configMapKeyRef to a key the ConfigMap omits prevents the
+            # pod from starting, and an unreferenced ConfigMap key silently
+            # does nothing (ORISO-Helm#128 drift class).
+            {{- if .Values.userService.magicLinkFrontendBaseUrl }}
+            - name: MAGIC_LINK_FRONTEND_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: MAGIC_LINK_FRONTEND_BASE_URL
+                  name: userservice-configmap-env
+            {{- end }}
+            {{- if .Values.userService.passwordResetFrontendBaseUrl }}
+            - name: PASSWORD_RESET_FRONTEND_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: PASSWORD_RESET_FRONTEND_BASE_URL
+                  name: userservice-configmap-env
+            {{- end }}
+            {{- if .Values.userService.passwordResetAdminFrontendBaseUrl }}
+            - name: PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL
+                  name: userservice-configmap-env
+            {{- end }}
+            {{- if .Values.userService.accountInviteAppFrontendBaseUrl }}
+            - name: ACCOUNT_INVITE_APP_FRONTEND_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: ACCOUNT_INVITE_APP_FRONTEND_BASE_URL
+                  name: userservice-configmap-env
+            {{- end }}
+            {{- if .Values.userService.accountInviteAdminFrontendBaseUrl }}
+            - name: ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL
+                  name: userservice-configmap-env
+            {{- end }}
             - name: IDENTITY_OTP_URL
               valueFrom:
                 configMapKeyRef:

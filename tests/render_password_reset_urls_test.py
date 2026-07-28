@@ -148,6 +148,14 @@ def main() -> None:
 
     assert_smtp_wiring_renders("values-dev.yaml", "ORISO Platform <monty.burns@oriso.org>")
 
+    assert_environment_configures_reset_urls(
+        "values-pre-dev.yaml",
+        "https://app.oriso-dev.site",
+        "https://admin.oriso-dev.site/admin",
+    )
+
+    assert_smtp_wiring_renders("values-pre-dev.yaml", "ORISO Platform <monty.burns@oriso.org>")
+
 
 if __name__ == "__main__":
     try:
