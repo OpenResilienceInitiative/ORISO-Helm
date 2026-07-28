@@ -38,3 +38,10 @@ userService:
   magicLinkFrontendBaseUrl: "https://dev.oriso.org"
   passwordResetFrontendBaseUrl: "https://dev.oriso.org"
   passwordResetAdminFrontendBaseUrl: "https://dev.oriso.org/admin"
+
+  # SMTP transport for Magic Link and password-reset mail. The credentials
+  # belong in the persistent secret values, never in this file.
+  smtpHost: "mail.dreambau.com"
+  smtpPort: 587
+  smtpSecure: false
+  smtpFrom: "ORISO Platform <monty.burns@oriso.org>"

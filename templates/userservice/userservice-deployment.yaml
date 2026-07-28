@@ -36,6 +36,36 @@ spec:
                 configMapKeyRef:
                   key: IDENTITY_OPENID_CONNECT_URL
                   name: userservice-configmap-env
+            - name: SMTP_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: SMTP_HOST
+            - name: SMTP_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: SMTP_PORT
+            - name: SMTP_SECURE
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: SMTP_SECURE
+            - name: SMTP_FROM
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: SMTP_FROM
+            - name: SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  key: SMTP_USER
+                  name: userservice-secret
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: SMTP_PASSWORD
+                  name: userservice-secret
             - name: IDENTITY_OTP_URL
               valueFrom:
                 configMapKeyRef:
