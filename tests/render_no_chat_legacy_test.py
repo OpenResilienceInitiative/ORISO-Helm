@@ -25,6 +25,8 @@ FORBIDDEN = (
 def main() -> None:
     checked_files = [
         os.path.join(CHART_DIR, "README.md"),
+        os.path.join(CHART_DIR, "Chart.yaml"),
+        os.path.join(CHART_DIR, "Chart.lock"),
         os.path.join(CHART_DIR, "values.yaml.default"),
         os.path.join(CHART_DIR, "secrets.yaml.default"),
         os.path.join(
