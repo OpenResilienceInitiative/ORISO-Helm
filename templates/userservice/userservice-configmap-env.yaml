@@ -66,6 +66,14 @@ data:
   {{- if .Values.userService.passwordResetAdminFrontendBaseUrl }}
   PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL: {{ .Values.userService.passwordResetAdminFrontendBaseUrl | quote }}
   {{- end }}
+  # SMTP transport for the Magic Link and password-reset mails. UserService
+  # sends these itself over SMTP; the credentials live in userservice-secret
+  # because the platform-settings copy is only readable with a super-admin
+  # token, which the unauthenticated reset flow never has.
+  SMTP_HOST: {{ .Values.userService.smtpHost | default "" | quote }}
+  SMTP_PORT: {{ .Values.userService.smtpPort | default 587 | quote }}
+  SMTP_SECURE: {{ .Values.userService.smtpSecure | default false | quote }}
+  SMTP_FROM: {{ .Values.userService.smtpFrom | default "" | quote }}
   # CSRF
   CSRF_HEADER_PROPERTY: {{ .Values.global.csrfHeaderProperty}}
   CSRF_WHITELIST_HEADER_PROPERTY: {{ .Values.global.csrfWhitelistHeaderProperty}}

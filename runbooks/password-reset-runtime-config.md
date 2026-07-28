@@ -29,6 +29,28 @@ The Pre-Dev Deployment must also reference both keys. A ConfigMap value that no
 `env` entry imports has no effect — the same drift class as the platform-admin
 OTP policy (ORISO-Helm#128).
 
+## SMTP transport
+
+UserService sends the reset mail itself over SMTP. Until now the maintained
+chart rendered no SMTP configuration at all, so a Helm-deployed environment
+could never send one. The chart now renders:
+
+| Key | Source | Value |
+|---|---|---|
+| `SMTP_HOST` | `userService.smtpHost` | `mail.dreambau.com` |
+| `SMTP_PORT` | `userService.smtpPort` | `587` |
+| `SMTP_SECURE` | `userService.smtpSecure` | `false` (STARTTLS) |
+| `SMTP_FROM` | `userService.smtpFrom` | `ORISO Platform <monty.burns@oriso.org>` |
+| `SMTP_USER` | `userService.smtpUser` (secret values) | the platform-admin mailbox |
+| `SMTP_PASSWORD` | `userService.smtpPassword` (secret values) | its password |
+
+`smtpUser` and `smtpPassword` belong in the persistent secret values, never in
+a values file in this repository.
+
+Pre-Dev is not rendered from this chart; its ConfigMap and
+`oriso-platform-userservice-secrets` were wired to the same identity by hand on
+2026-07-28.
+
 ## Global SMTP settings
 
 The reset mail is sent directly over SMTP, not through MailService. UserService
