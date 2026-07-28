@@ -39,6 +39,46 @@ def render(admin_url: str = ADMIN_URL) -> list[dict]:
     return [doc for doc in yaml.safe_load_all(proc.stdout) if isinstance(doc, dict)]
 
 
+def render_with_values_file(values_file: str) -> list[dict]:
+    proc = subprocess.run(
+        [
+            "helm",
+            "template",
+            "password-reset-env-test",
+            CHART_DIR,
+            "-f",
+            os.path.join(CHART_DIR, "values.yaml.default"),
+            "-f",
+            os.path.join(CHART_DIR, "secrets.yaml.default"),
+            "-f",
+            os.path.join(CHART_DIR, values_file),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise AssertionError(f"helm template failed for {values_file}:\n{proc.stderr}")
+    return [doc for doc in yaml.safe_load_all(proc.stdout) if isinstance(doc, dict)]
+
+
+def assert_environment_configures_reset_urls(values_file: str, app_url: str, admin_url: str) -> None:
+    """A deployed environment that leaves these unset sends no reset mail at all."""
+    configmaps = [doc for doc in render_with_values_file(values_file) if doc.get("kind") == "ConfigMap"]
+    user_service = next(
+        (doc for doc in configmaps if "IDENTITY_OTP_URL" in (doc.get("data") or {})),
+        None,
+    )
+    assert user_service is not None, f"UserService ConfigMap was not rendered for {values_file}"
+    data = user_service["data"]
+    assert data.get("PASSWORD_RESET_FRONTEND_BASE_URL") == app_url, (
+        f"{values_file} must configure the app password-reset base URL"
+    )
+    assert data.get("PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL") == admin_url, (
+        f"{values_file} must configure the admin password-reset base URL"
+    )
+    print(f"PASS: {values_file} configures both password-reset base URLs")
+
+
 def main() -> None:
     configmaps = [doc for doc in render() if doc.get("kind") == "ConfigMap"]
     user_service = next(
@@ -63,6 +103,10 @@ def main() -> None:
     )
     assert "PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL" not in user_service_without_admin["data"]
     print("PASS: admin password-reset URL is omitted when the environment leaves it unset")
+
+    assert_environment_configures_reset_urls(
+        "values-dev.yaml", "https://dev.oriso.org", "https://dev.oriso.org/admin"
+    )
 
 
 if __name__ == "__main__":
