@@ -76,16 +76,6 @@ spec:
                 secretKeyRef:
                   key: MONGO_CONSULTING_TYPES_PASSWORD
                   name: mongodb-secret
-            - name: MONGO_ROCKETCHAT_USER
-              valueFrom:
-                secretKeyRef:
-                  key: MONGO_ROCKETCHAT_USER
-                  name: mongodb-secret
-            - name: MONGO_ROCKETCHAT_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  key: MONGO_ROCKETCHAT_PASSWORD
-                  name: mongodb-secret
           command:
             - /bin/bash
             - -c
@@ -102,5 +92,4 @@ spec:
               create_or_update_user "nosqlclient" "$MONGO_NOSQLCLIENT_USER" "$MONGO_NOSQLCLIENT_PASSWORD";
               create_or_update_user "statistics" "$MONGO_STATISTICS_USER" "$MONGO_STATISTICS_PASSWORD";
               create_or_update_user "consulting_types" "$MONGO_CONSULTING_TYPES_USER" "$MONGO_CONSULTING_TYPES_PASSWORD";
-              create_or_update_user "rocketchat" "$MONGO_ROCKETCHAT_USER" "$MONGO_ROCKETCHAT_PASSWORD";
   backoffLimit: 1

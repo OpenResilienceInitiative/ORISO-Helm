@@ -35,12 +35,13 @@ def main() -> None:
             "userservice-schema.sql",
         ),
     ]
-    for root, _, files in os.walk(os.path.join(CHART_DIR, "templates")):
-        checked_files.extend(
-            os.path.join(root, filename)
-            for filename in files
-            if filename.endswith((".yaml", ".yml", ".tpl"))
-        )
+    for source_root in ("templates", "charts"):
+        for root, _, files in os.walk(os.path.join(CHART_DIR, source_root)):
+            checked_files.extend(
+                os.path.join(root, filename)
+                for filename in files
+                if filename.endswith((".yaml", ".yml", ".tpl"))
+            )
 
     for path in checked_files:
         with open(path, encoding="utf-8") as source:
