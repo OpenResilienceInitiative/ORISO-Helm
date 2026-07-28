@@ -1,6 +1,10 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
+{{- with include "oriso.runtimeAnnotations" . }}
+  annotations:
+{{ . | nindent 4 }}
+{{- end }}
   name: matrix-postgres
   namespace: {{ .Release.Namespace }}
 spec:

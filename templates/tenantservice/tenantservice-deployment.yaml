@@ -2,6 +2,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+{{- with include "oriso.runtimeAnnotations" . }}
+  annotations:
+{{ . | nindent 4 }}
+{{- end }}
   name: tenantservice
 spec:
   replicas: {{ .Values.tenantService.replicas }}

@@ -5,6 +5,12 @@ cert-manager:
 global:
 
   domainName: "your-domain.example.com"
+  # Runtime metadata shown by ORISO-HealthDashboard. Deployment automation
+  # should set these to the source branch/release currently being rolled out,
+  # for example --set global.sourceBranch=pre-dev
+  # --set global.platformRelease=v2.0.1.
+  sourceBranch: ""
+  platformRelease: ""
   domains:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"

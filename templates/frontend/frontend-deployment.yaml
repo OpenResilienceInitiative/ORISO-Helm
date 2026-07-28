@@ -1,6 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata: 
+{{- with include "oriso.runtimeAnnotations" . }}
+  annotations:
+{{ . | nindent 4 }}
+{{- end }}
   labels:
     app: frontend
   name: frontend

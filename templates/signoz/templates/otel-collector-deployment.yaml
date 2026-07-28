@@ -14,6 +14,10 @@ collector restarts until the SigNoz schema exists.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+{{- with include "oriso.runtimeAnnotations" . }}
+  annotations:
+{{ . | nindent 4 }}
+{{- end }}
   name: {{ include "signoz.otelCollector.fullname" . }}
   namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
   labels:

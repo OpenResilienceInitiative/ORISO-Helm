@@ -11,6 +11,10 @@ do not rename these fields.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
+{{- with include "oriso.runtimeAnnotations" . }}
+  annotations:
+{{ . | nindent 4 }}
+{{- end }}
   name: {{ include "signoz.clickhouse.fullname" . }}
   namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
   labels:

@@ -11,6 +11,10 @@ memory-overcommitted).
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
+{{- with include "oriso.runtimeAnnotations" . }}
+  annotations:
+{{ . | nindent 4 }}
+{{- end }}
   name: {{ include "signoz.otelAgent.fullname" . }}
   namespace: {{ default .Release.Namespace .Values.signoz.namespace }}
   labels:

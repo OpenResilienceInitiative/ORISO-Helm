@@ -12,3 +12,18 @@ release preflight rejects those placeholders before deployment.
 {{- end -}}
 {{- $image -}}
 {{- end -}}
+
+{{/*
+Runtime metadata consumed by HealthDashboard and rollout tooling.
+Use annotations because source branches can contain characters such as `/`.
+*/}}
+{{- define "oriso.runtimeAnnotations" -}}
+{{- with .Values.global.sourceBranch }}
+app.kubernetes.io/source-branch: {{ . | quote }}
+oriso.org/source-branch: {{ . | quote }}
+{{- end }}
+{{- with .Values.global.platformRelease }}
+app.kubernetes.io/platform-release: {{ . | quote }}
+oriso.org/platform-release: {{ . | quote }}
+{{- end }}
+{{- end -}}
