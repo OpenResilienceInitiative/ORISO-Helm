@@ -30,3 +30,8 @@ jobs:
 
       - name: Verify the Matrix-only chart boundary
         run: python3 tests/render_no_chat_legacy_test.py
+
+      - name: Package the chart
+        run: |
+          package_output_dir="$(mktemp -d)"
+          helm package . --destination "$package_output_dir"
