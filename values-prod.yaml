@@ -49,6 +49,12 @@ tenantService:
   springProfilesActive: "prod"
 userService:
   springProfilesActive: "prod"
+
+  # ADR-018 Global Support Access is off in production. Enabling it is a deliberate policy decision
+  # that presupposes real Global Support Admin accounts with enrolled second factors and an agreed
+  # operational alerting posture — it is not a rollout default.
+  supportAccess:
+    enabled: "false"
   # DECISION REQUIRED: production 2FA/OTP posture. This is a product/security
   # policy choice (enabling OTP forces users to enrol TOTP), so it is left at
   # the safe, behaviour-preserving default of "false" rather than guessed here.

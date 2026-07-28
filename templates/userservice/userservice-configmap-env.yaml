@@ -120,6 +120,13 @@ data:
   MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}
   MATRIX_ENCRYPTION_ENABLED: {{ .Values.userService.matrixEncryptionEnabled | default "true" | quote }}
   MATRIX_MIGRATION_ENABLED: "true"
+  # ADR-018 Global Support Access. The flag gates only NEW handshakes: the revocation worker, the
+  # four-hour expiry sweep and the audit retention job keep running when it is off, so switching the
+  # feature off can never strand a session that is still granting access.
+  SUPPORT_ACCESS_ENABLED: {{ .Values.userService.supportAccess.enabled | default "false" | quote }}
+  SUPPORT_ACCESS_HANDSHAKE_TTL_SECONDS: {{ .Values.userService.supportAccess.handshakeTtlSeconds | default 300 | quote }}
+  SUPPORT_ACCESS_SESSION_TTL_HOURS: {{ .Values.userService.supportAccess.sessionTtlHours | default 4 | quote }}
+  SUPPORT_ACCESS_AUDIT_RETENTION_MONTHS: {{ .Values.userService.supportAccess.auditRetentionMonths | default 12 | quote }}
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: "{{ .Values.global.keycloak.authServerUrl }}/realms/{{ .Values.global.keycloak.realm }}"
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: "{{ .Values.global.keycloak.authServerUrl }}{{ .Values.global.keycloak.openidConnectUrl }}/certs"
   # OBS-P2: OTLP traces/metrics to the SigNoz gateway collector. Property

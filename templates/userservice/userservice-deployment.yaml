@@ -475,6 +475,29 @@ spec:
                 configMapKeyRef:
                   key: MATRIX_MIGRATION_ENABLED
                   name: userservice-configmap-env
+            # ADR-018 Global Support Access. Only the policy-bearing settings are wired here; the
+            # worker tuning knobs stay on their code defaults so this list keeps stating decisions
+            # rather than implementation detail.
+            - name: SUPPORT_ACCESS_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: SUPPORT_ACCESS_ENABLED
+                  name: userservice-configmap-env
+            - name: SUPPORT_ACCESS_HANDSHAKE_TTL_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  key: SUPPORT_ACCESS_HANDSHAKE_TTL_SECONDS
+                  name: userservice-configmap-env
+            - name: SUPPORT_ACCESS_SESSION_TTL_HOURS
+              valueFrom:
+                configMapKeyRef:
+                  key: SUPPORT_ACCESS_SESSION_TTL_HOURS
+                  name: userservice-configmap-env
+            - name: SUPPORT_ACCESS_AUDIT_RETENTION_MONTHS
+              valueFrom:
+                configMapKeyRef:
+                  key: SUPPORT_ACCESS_AUDIT_RETENTION_MONTHS
+                  name: userservice-configmap-env
             - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
               valueFrom:
                 configMapKeyRef:

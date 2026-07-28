@@ -277,6 +277,27 @@ userService:
   redisPort: 6379
   consultantAvailabilityRedisTtlSeconds: 120
 
+  # ADR-018 Global Support Access: a Global Support Admin and a consultant confirm a live
+  # handshake, after which a fresh encrypted 1:1 Matrix room exists for at most four hours.
+  #
+  # Ships disabled everywhere. Enable it per environment only, and only after that environment's
+  # global-support-admin realm role exists in Keycloak — the role is imported from realm.json on
+  # first start only, so an already-running Keycloak needs it created once by hand.
+  #
+  # `enabled` gates only NEW handshakes. Revocation, the expiry sweep and audit retention keep
+  # running when it is off, so turning the feature off never strands a session that still grants
+  # access. Rollback is this flag plus disabling the test support admins; applied database
+  # migrations are deliberately not rolled back.
+  #
+  # The three durations are policy, not tuning: five minutes to answer the popup, a hard four-hour
+  # lease, and twelve months of audit retention. Worker intervals, retry backoff and attempt limits
+  # stay on their code defaults.
+  supportAccess:
+    enabled: "false"
+    handshakeTtlSeconds: 300
+    sessionTtlHours: 4
+    auditRetentionMonths: 12
+
   # 2FA / OTP login posture (independent from Matrix room encryption).
   # Defaults keep OTP off; the dev overlay leaves it off for fast test-user
   # creation, and prod's posture is a deliberate choice (see values-prod.yaml).
