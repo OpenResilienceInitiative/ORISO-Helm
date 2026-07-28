@@ -44,4 +44,4 @@ userService:
   smtpHost: "mail.dreambau.com"
   smtpPort: 587
   smtpSecure: false
-  smtpFrom: "ORISO Platform <monty.burns@oriso.org>"
+  smtpFrom: "ORISO Platform <herb.powell@oriso.org>"

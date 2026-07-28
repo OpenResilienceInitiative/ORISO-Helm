@@ -146,7 +146,7 @@ def main() -> None:
         "values-dev.yaml", "https://dev.oriso.org", "https://dev.oriso.org/admin"
     )
 
-    assert_smtp_wiring_renders("values-dev.yaml", "ORISO Platform <monty.burns@oriso.org>")
+    assert_smtp_wiring_renders("values-dev.yaml", "ORISO Platform <herb.powell@oriso.org>")
 
 
 if __name__ == "__main__":

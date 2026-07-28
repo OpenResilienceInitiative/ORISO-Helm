@@ -40,7 +40,7 @@ could never send one. The chart now renders:
 | `SMTP_HOST` | `userService.smtpHost` | `mail.dreambau.com` |
 | `SMTP_PORT` | `userService.smtpPort` | `587` |
 | `SMTP_SECURE` | `userService.smtpSecure` | `false` (STARTTLS) |
-| `SMTP_FROM` | `userService.smtpFrom` | `ORISO Platform <monty.burns@oriso.org>` |
+| `SMTP_FROM` | `userService.smtpFrom` | `ORISO Platform <herb.powell@oriso.org>` |
 | `SMTP_USER` | `userService.smtpUser` (secret values) | the platform-admin mailbox |
 | `SMTP_PASSWORD` | `userService.smtpPassword` (secret values) | its password |
 
@@ -53,18 +53,27 @@ Pre-Dev is not rendered from this chart; its ConfigMap and
 
 ## Global SMTP settings
 
-The reset mail is sent directly over SMTP, not through MailService. UserService
-reads host/port/secure/from from the **public** ConsultingTypeService
-`/settings` and the username/password from the **authenticated**
-`/settingsadmin` endpoint, because the public payload deliberately omits
-credentials since the CTS-C01 credential-leak fix
-(ORISO-ConsultingTypeService#7). All of the following must be set in the
-platform settings, otherwise no mail is sent:
+The reset mail is sent directly over SMTP, not through MailService.
+UserService reads the transport settings from the **public**
+ConsultingTypeService `/settings`, so these must be set in the platform
+settings or no mail is sent:
 
 - `globalFeatureSystemNotificationEmailsEnabled` = true
 - `globalSmtpEnabled` = true
 - `globalSmtpHost`, `globalSmtpPort`, `globalSmtpFrom`
-- `globalSmtpUsername`, `globalSmtpPassword`
+
+The username and password come from `SMTP_USER` / `SMTP_PASSWORD` above, not
+from the platform settings. The public payload has deliberately omitted them
+since the CTS-C01 credential-leak fix (ORISO-ConsultingTypeService#7), and the
+authenticated `/settingsadmin/smtp-credentials` endpoint requires a token with
+`tenantId = 0` — which an unauthenticated, asynchronously dispatched password
+reset never has. Keeping the credentials in the deployment secret is the only
+source that works for that flow.
+
+Per-tenant SMTP is separate: a Träger's own settings live in
+`tenantservice.tenant.settings.smtp` and are used for tenant-scoped
+notification mail. The public tenant endpoint strips `username` and `password`
+from that block, so configuring it does not expose the mailbox.
 
 ## Verification
 
