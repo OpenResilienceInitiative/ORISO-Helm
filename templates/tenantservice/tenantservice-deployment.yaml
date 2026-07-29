@@ -4,7 +4,7 @@ kind: Deployment
 metadata:
   name: tenantservice
 spec:
-  replicas: 2
+  replicas: {{ .Values.tenantService.replicas }}
   selector:
     matchLabels:
       app: tenantservice
@@ -105,6 +105,26 @@ spec:
               configMapKeyRef:
                 key: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI
                 name: tenantservice-configmap-env
+          - name: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+                name: tenantservice-configmap-env
+          - name: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+                name: tenantservice-configmap-env
+          - name: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+                name: tenantservice-configmap-env
+          - name: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+                name: tenantservice-configmap-env
         resources:
           requests:
             memory: "512Mi"
@@ -124,4 +144,3 @@ spec:
             port: 8081
           initialDelaySeconds: 60
           periodSeconds: 10
- 

@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Render guard for the single-issuer MatrixRTC authorization boundary."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+
+import yaml
+
+CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def render() -> list[dict]:
+    result = subprocess.run(
+        [
+            "helm",
+            "template",
+            "matrixrtc-auth",
+            CHART_DIR,
+            "-f",
+            os.path.join(CHART_DIR, "values.yaml.default"),
+            "-f",
+            os.path.join(CHART_DIR, "secrets.yaml.default"),
+            "--set-string",
+            "global.secrets.redisdefaultPass=test-redis-password",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        raise AssertionError(result.stderr)
+    return [document for document in yaml.safe_load_all(result.stdout) if document]
+
+
+def find(documents: list[dict], kind: str, name: str) -> dict:
+    return next(
+        document
+        for document in documents
+        if document.get("kind") == kind
+        and document.get("metadata", {}).get("name") == name
+    )
+
+
+def main() -> None:
+    documents = render()
+    names = {
+        (document.get("kind"), document.get("metadata", {}).get("name"))
+        for document in documents
+    }
+
+    assert ("ConfigMap", "livekit-token-service-script") not in names
+    assert ("ConfigMap", "livekit-token-service-configmap-env") not in names
+    assert ("Deployment", "livekit-token-service") not in names
+
+    gateway = find(documents, "Deployment", "matrixrtc-auth-policy-gateway")
+    upstream = find(documents, "Deployment", "matrixrtc-authorization-service")
+    livekit = find(documents, "Deployment", "livekit")
+    ingress = find(documents, "Ingress", "livekit-jwt-ingress")
+    assert ("Secret", "livekit-config") not in names
+    assert ("Secret", "matrixrtc-auth-secrets") not in names
+
+    gateway_container = gateway["spec"]["template"]["spec"]["containers"][0]
+    upstream_container = upstream["spec"]["template"]["spec"]["containers"][0]
+    livekit_container = livekit["spec"]["template"]["spec"]["containers"][0]
+
+    for container in (gateway_container, upstream_container, livekit_container):
+        assert "@sha256:" in container["image"]
+        assert not container["image"].endswith(":latest")
+
+    assert gateway_container["securityContext"]["runAsNonRoot"] is True
+    assert upstream_container["securityContext"]["runAsNonRoot"] is True
+    assert (
+        upstream_container["image"].split("@", maxsplit=1)[0]
+        == "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service"
+    )
+    upstream_env = {
+        entry["name"]: entry
+        for entry in upstream_container["env"]
+    }
+    assert upstream_env["LIVEKIT_LOG_LEVEL"]["value"] == "off"
+    assert livekit["spec"]["replicas"] == 2
+    assert livekit["spec"]["strategy"]["type"] == "RollingUpdate"
+    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 18000
+    assert livekit["spec"]["template"]["spec"]["volumes"][0]["secret"]["secretName"] == (
+        "livekit-config"
+    )
+
+    ingress_backend = ingress["spec"]["rules"][0]["http"]["paths"][0]["backend"]
+    assert ingress_backend["service"]["name"] == "matrixrtc-auth-policy-gateway"
+    assert ingress["metadata"]["annotations"][
+        "nginx.ingress.kubernetes.io/limit-rps"
+    ] == "10"
+    assert ingress["metadata"]["annotations"][
+        "nginx.ingress.kubernetes.io/cors-allow-origin"
+    ] == "https://your-domain.example.com"
+
+    rendered = yaml.safe_dump_all(documents)
+    assert "LIVEKIT_FULL_ACCESS_HOMESERVERS" in rendered
+    assert "MATRIX_MEMBERSHIP_TOKEN_FILE" in rendered
+    assert "MATRIX_ADMIN_TOKEN_FILE" not in rendered
+    assert "matrix-admin-token" not in rendered
+    assert "LIVEKIT_API_SECRET" not in rendered
+    assert "kind: NetworkPolicy" in rendered
+    assert "kind: PodDisruptionBudget" in rendered
+
+    print("PASS: MatrixRTC auth renders one public policy gateway and external secret references")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (AssertionError, KeyError, StopIteration) as error:
+        print(f"FAIL: {error}", file=sys.stderr)
+        sys.exit(1)

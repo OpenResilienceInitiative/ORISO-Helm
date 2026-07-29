@@ -56,6 +56,53 @@ class DemoBaselineTest(unittest.TestCase):
         self.assertIn("UNIQUE KEY `uq_agency_topic`", (ROOT / "charts/mariadb/sql-schemas/agencyservice-schema.sql").read_text())
         self.assertIn("duplicate agency_topic rows", self.check_sql)
 
+    def test_setval_calls_are_mariadb_safe(self):
+        # Regression guard for the demo-baseline SETVAL defects (mirrors
+        # AgencyService changeset 0025 / DemoBaselineLiquibaseSqlTest). The sync
+        # step runs on a real MariaDB via scripts/demo-baseline-gate.sh, not H2,
+        # so these MariaDB-only rules must hold:
+        setvals = re.findall(r"DO SETVAL\((.*?)\);", self.sync_sql)
+        self.assertTrue(setvals, "expected SETVAL calls in the sync SQL")
+        for call in setvals:
+            with self.subTest(setval=call):
+                # ERROR 1064: MariaDB rejects a user variable / subquery as the
+                # next_value argument; it must be an integer literal.
+                self.assertNotIn(
+                    "@", call, "SETVAL next_value must be an integer literal, not a variable"
+                )
+                # ERROR 1062: is_used must be 1 so the next NEXTVAL skips past the
+                # reserved baseline id instead of returning (and colliding with) it.
+                self.assertRegex(
+                    call.replace("`", "").replace(" ", ""),
+                    r",\d+,1$",
+                    "SETVAL must reserve the baseline id with is_used=1",
+                )
+        # The dead @demo_sequence_* helper variables must be gone entirely.
+        self.assertNotIn("@demo_sequence", self.sync_sql)
+        # The exact reserved literals the baseline pins.
+        self.assertIn("DO SETVAL(`sequence_topic`, 16, 1);", self.sync_sql)
+        self.assertIn(
+            "DO SETVAL(`sequence_agency_postcode_range`, 900000001, 1);", self.sync_sql
+        )
+        self.assertIn(
+            "DO SETVAL(`sequence_agency_topic`, 900000010, 1);", self.sync_sql
+        )
+
+    def test_postcode_comparison_is_collation_safe(self):
+        # ERROR 1267: postcode_from/postcode_to are utf8mb3_unicode_ci columns, but
+        # @demo_postcode carries the mariadb client's connection collation. Comparing
+        # the two IMPLICIT collations directly raises "Illegal mix of collations", so
+        # the variable must be normalised to the column's charset+collation.
+        self.assertNotRegex(
+            self.sync_sql,
+            r"postcode_(from|to)\s*[<>]=\s*@demo_postcode\b",
+            "raw @demo_postcode comparison raises ERROR 1267 on real MariaDB",
+        )
+        self.assertIn(
+            "CONVERT(@demo_postcode USING utf8mb3) COLLATE utf8mb3_unicode_ci",
+            self.sync_sql,
+        )
+
     def test_gate_exposes_one_command_all_mode(self):
         self.assertIn("all)", self.gate_script)
         self.assertIn("sync_baseline", self.gate_script)

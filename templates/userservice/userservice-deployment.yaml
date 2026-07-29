@@ -5,7 +5,7 @@ metadata:
     app: userservice
   name: userservice
 spec:
-  replicas: 2
+  replicas: {{ .Values.userService.replicas }}
   selector:
     matchLabels:
       app: userservice
@@ -28,7 +28,7 @@ spec:
       restartPolicy: Always
       containers:
         - name: userservice
-          image: "{{ .Values.userService.imageName }}:{{ .Values.userService.imageVersion }}"
+          image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
           imagePullPolicy: Always
           env:
             - name: IDENTITY_OPENID_CONNECT_URL
@@ -46,21 +46,26 @@ spec:
                 configMapKeyRef:
                   key: AGENCY_SERVICE_API_URL
                   name: userservice-configmap-env
-            - name: ROCKET_CHAT_MONGO_URL
+            - name: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
               valueFrom:
                 configMapKeyRef:
-                  key: ROCKET_CHAT_MONGO_URL
+                  key: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
                   name: userservice-configmap-env
-            - name: ROCKET_CHAT_BASE_URL
-              value: "http://rocketchat.caritas:3000"
-            - name: ROCKET_TECHNICAL_USERNAME
-              value: "rocket-chat-technical-user"
-            - name: ROCKET_TECHNICAL_PASSWORD
-              value: "W5wIhzuRTxatsHxeT9ECbfY0M1bIoMn4769bWfkl"
-            - name: ROCKET_CHAT_MONGO_USERNAME
-              value: "your_username_here"
-            - name: ROCKET_CHAT_MONGO_PASSWORD
-              value: "your_password_here"
+            - name: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+                  name: userservice-configmap-env
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+                  name: userservice-configmap-env
+            - name: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+                  name: userservice-configmap-env
             - name: AGENCY_ADMIN_SERVICE_API_URL
               valueFrom:
                 configMapKeyRef:
@@ -70,6 +75,11 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   key: APP_BASE_URL
+                  name: userservice-configmap-env
+            - name: DPA_SIGN_FRONTEND_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: DPA_SIGN_FRONTEND_BASE_URL
                   name: userservice-configmap-env
             - name: ASKER_IMPORT_FILENAME
               valueFrom:
@@ -230,6 +240,11 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: SERVICE_ENCRYPTION_APPKEY
+                  name: userservice-secret
+            - name: STATISTICS_MESSAGE_COUNT_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: STATISTICS_MESSAGE_COUNT_HMAC_SECRET
                   name: userservice-secret
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
@@ -395,6 +410,51 @@ spec:
                 configMapKeyRef:
                   key: SPRING_LIQUIBASE_ENABLED
                   name: userservice-configmap-env
+            - name: SPRING_REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_REDIS_HOST
+                  name: userservice-configmap-env
+            - name: SPRING_REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_REDIS_PORT
+                  name: userservice-configmap-env
+            - name: SPRING_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: REDIS_DEFAULT_PASS
+                  name: redis-secret
+            - name: SPRING_DATA_REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_DATA_REDIS_HOST
+                  name: userservice-configmap-env
+            - name: SPRING_DATA_REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_DATA_REDIS_PORT
+                  name: userservice-configmap-env
+            - name: SPRING_DATA_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: REDIS_DEFAULT_PASS
+                  name: redis-secret
+            - name: CONSULTANT_AVAILABILITY_REDIS_TTL_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  key: CONSULTANT_AVAILABILITY_REDIS_TTL_SECONDS
+                  name: userservice-configmap-env
+            - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+                  name: userservice-configmap-env
+            - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
+                  name: userservice-configmap-env
             - name: MATRIX_API_URL
               valueFrom:
                 configMapKeyRef:
@@ -405,10 +465,38 @@ spec:
                 configMapKeyRef:
                   key: MATRIX_SERVER_NAME
                   name: userservice-configmap-env
+            - name: MATRIX_ENCRYPTION_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: MATRIX_ENCRYPTION_ENABLED
+                  name: userservice-configmap-env
             - name: MATRIX_MIGRATION_ENABLED
               valueFrom:
                 configMapKeyRef:
                   key: MATRIX_MIGRATION_ENABLED
+                  name: userservice-configmap-env
+            # ADR-018 Global Support Access. Only the policy-bearing settings are wired here; the
+            # worker tuning knobs stay on their code defaults so this list keeps stating decisions
+            # rather than implementation detail.
+            - name: SUPPORT_ACCESS_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: SUPPORT_ACCESS_ENABLED
+                  name: userservice-configmap-env
+            - name: SUPPORT_ACCESS_HANDSHAKE_TTL_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  key: SUPPORT_ACCESS_HANDSHAKE_TTL_SECONDS
+                  name: userservice-configmap-env
+            - name: SUPPORT_ACCESS_SESSION_TTL_HOURS
+              valueFrom:
+                configMapKeyRef:
+                  key: SUPPORT_ACCESS_SESSION_TTL_HOURS
+                  name: userservice-configmap-env
+            - name: SUPPORT_ACCESS_AUDIT_RETENTION_MONTHS
+              valueFrom:
+                configMapKeyRef:
+                  key: SUPPORT_ACCESS_AUDIT_RETENTION_MONTHS
                   name: userservice-configmap-env
             - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
               valueFrom:

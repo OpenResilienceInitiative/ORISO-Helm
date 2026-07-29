@@ -5,7 +5,7 @@ metadata:
     app: frontend
   name: frontend
 spec:
-  replicas: 2
+  replicas: {{ .Values.frontend.replicas }}
   selector:
     matchLabels:
       app: frontend
@@ -26,7 +26,7 @@ spec:
                   app: frontend
               topologyKey: kubernetes.io/hostname
       containers:
-        - image:  {{ .Values.frontend.imageName }}:{{ .Values.frontend.imageVersion }}
+        - image: {{ include "oriso.immutableImage" (list "frontend.image" .Values.frontend.image) | quote }}
           name: frontend          
           imagePullPolicy: Always
           envFrom:

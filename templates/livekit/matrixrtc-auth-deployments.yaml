@@ -1,0 +1,142 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matrixrtc-auth-policy-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: matrixrtc-auth-policy-gateway
+spec:
+  replicas: {{ .Values.matrixrtcAuth.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: matrixrtc-auth-policy-gateway
+  template:
+    metadata:
+      labels:
+        app: matrixrtc-auth-policy-gateway
+    spec:
+      containers:
+        - name: gateway
+          image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.gateway.image" .Values.matrixrtcAuth.gateway.image) | quote }}
+          imagePullPolicy: {{ .Values.matrixrtcAuth.gateway.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: MATRIXRTC_ALLOWED_ORIGINS
+              value: "https://{{ .Values.global.domainName }}"
+            - name: MATRIX_SERVER_NAME
+              value: {{ .Values.matrix.matrixServerName | quote }}
+            - name: MATRIX_FEDERATION_BASE_URL
+              value: "https://{{ .Values.global.domainName }}"
+            - name: MATRIX_CLIENT_BASE_URL
+              value: "https://{{ .Values.global.domainName }}"
+            - name: MATRIX_MEMBERSHIP_TOKEN_FILE
+              value: /run/secrets/matrix-membership-token
+            - name: MATRIXRTC_UPSTREAM_URL
+              value: "http://matrixrtc-authorization-service:8080"
+          ports:
+            - name: http
+              containerPort: 3010
+          volumeMounts:
+            - name: auth-secrets
+              mountPath: /run/secrets
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+      volumes:
+        - name: auth-secrets
+          secret:
+            secretName: {{ .Values.matrixrtcAuth.existingSecret.name | quote }}
+            items:
+              - key: {{ .Values.matrixrtcAuth.existingSecret.membershipTokenKey | quote }}
+                path: matrix-membership-token
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matrixrtc-authorization-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: matrixrtc-authorization-service
+spec:
+  replicas: {{ .Values.matrixrtcAuth.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: matrixrtc-authorization-service
+  template:
+    metadata:
+      labels:
+        app: matrixrtc-authorization-service
+    spec:
+      containers:
+        - name: authorization-service
+          image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.upstream.image" .Values.matrixrtcAuth.upstream.image) | quote }}
+          imagePullPolicy: {{ .Values.matrixrtcAuth.upstream.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: LIVEKIT_URL
+              value: "wss://{{ .Values.global.domainName }}/livekit/sfu"
+            - name: LIVEKIT_KEY_FROM_FILE
+              value: /run/secrets/livekit-api-key
+            - name: LIVEKIT_SECRET_FROM_FILE
+              value: /run/secrets/livekit-api-secret
+            - name: LIVEKIT_FULL_ACCESS_HOMESERVERS
+              value: {{ .Values.matrix.matrixServerName | quote }}
+            - name: LIVEKIT_JWT_BIND
+              value: ":8080"
+            - name: LIVEKIT_LOG_LEVEL
+              value: "off"
+            - name: LIVEKIT_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.matrixrtcAuth.existingSecret.name | quote }}
+                  key: {{ .Values.matrixrtcAuth.existingSecret.redisUrlKey | quote }}
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: auth-secrets
+              mountPath: /run/secrets
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+      volumes:
+        - name: auth-secrets
+          secret:
+            secretName: {{ .Values.matrixrtcAuth.existingSecret.name | quote }}
+            items:
+              - key: {{ .Values.matrixrtcAuth.existingSecret.livekitApiKeyKey | quote }}
+                path: livekit-api-key
+              - key: {{ .Values.matrixrtcAuth.existingSecret.livekitApiSecretKey | quote }}
+                path: livekit-api-secret

@@ -6,3 +6,5 @@ data:
   REACT_APP_MATRIX_URL: "https://{{ .Values.global.domains.matrix }}"
   REACT_APP_KEYCLOAK_URL: "https://{{ .Values.global.domains.auth }}"
   VITE_API_URL: "https://{{ .Values.global.domainName }}"
+  REACT_APP_PLATFORM_VERSION: {{ printf "v%s" (trimPrefix "v" .Chart.AppVersion) | quote }}
+  VITE_PLATFORM_VERSION: {{ printf "v%s" (trimPrefix "v" .Chart.AppVersion) | quote }}

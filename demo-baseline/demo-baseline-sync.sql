@@ -77,8 +77,13 @@ ON DUPLICATE KEY UPDATE
   titles_dropdown = VALUES(titles_dropdown),
   slug = VALUES(slug);
 
-SET @demo_sequence_topic_value := (SELECT GREATEST(COALESCE(MAX(id), 0), 16) FROM topic);
-DO SETVAL(`sequence_topic`, @demo_sequence_topic_value, 0);
+-- MariaDB requires SETVAL's next_value argument to be an integer literal; a user
+-- variable or subquery raises ERROR 1064. We pass the reserved baseline id as the
+-- last-USED value (is_used = 1), so the next NEXTVAL returns id + increment and
+-- skips past the reserved topic ids -- otherwise the next sequence-driven topic
+-- INSERT would collide with the demo rows (ERROR 1062 Duplicate entry). SETVAL never
+-- lowers a sequence, so this is a no-op on environments that already advanced past it.
+DO SETVAL(`sequence_topic`, 16, 1);
 
 USE agencyservice;
 
@@ -116,9 +121,14 @@ WHERE EXISTS (
 AND NOT EXISTS (
   SELECT 1
   FROM agency_postcode_range
+  -- postcode_from/postcode_to are utf8mb3_unicode_ci columns, but @demo_postcode
+  -- carries the client's connection collation (utf8mb3_general_ci under the gate's
+  -- mariadb client). Two IMPLICIT collations of the same charset raise
+  -- ERROR 1267 (Illegal mix of collations), so normalise the variable to the
+  -- column's charset and collation. Postcodes are ASCII, so CONVERT is lossless.
   WHERE agency_id = @demo_agency_id
-    AND postcode_from <= @demo_postcode
-    AND postcode_to >= @demo_postcode
+    AND postcode_from <= CONVERT(@demo_postcode USING utf8mb3) COLLATE utf8mb3_unicode_ci
+    AND postcode_to >= CONVERT(@demo_postcode USING utf8mb3) COLLATE utf8mb3_unicode_ci
 );
 
 INSERT INTO agency_topic (
@@ -171,12 +181,11 @@ ON DUPLICATE KEY UPDATE
   topic_id = VALUES(topic_id),
   update_date = UTC_TIMESTAMP();
 
-SET @demo_sequence_postcode_value := (
-  SELECT GREATEST(COALESCE(MAX(id), 0), 900000001) FROM agency_postcode_range
-);
-DO SETVAL(`sequence_agency_postcode_range`, @demo_sequence_postcode_value, 0);
-
-SET @demo_sequence_agency_topic_value := (
-  SELECT GREATEST(COALESCE(MAX(id), 0), 900000010) FROM agency_topic
-);
-DO SETVAL(`sequence_agency_topic`, @demo_sequence_agency_topic_value, 0);
+-- MariaDB requires SETVAL's next_value argument to be an integer literal (a user
+-- variable or subquery raises ERROR 1064). We pass the reserved baseline row ids as
+-- the last-USED value (is_used = 1), so the next NEXTVAL returns id + increment and
+-- skips past the reserved ids -- otherwise the following app INSERT would collide with
+-- the demo rows (ERROR 1062 Duplicate entry). SETVAL never lowers a sequence, so this
+-- is a no-op on environments that already advanced beyond these ids.
+DO SETVAL(`sequence_agency_postcode_range`, 900000001, 1);
+DO SETVAL(`sequence_agency_topic`, 900000010, 1);

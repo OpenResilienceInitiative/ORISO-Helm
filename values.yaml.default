@@ -9,6 +9,13 @@ global:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
+  # OTLP telemetry export to SigNoz (deployed separately via ORISO-SignOZ).
+  # Off by default; enable per environment.
+  observability:
+    otlpEnabled: false
+    deploymentEnvironment: "pre-dev"   # environment tag on exported signals
+    otlpCollectorHost: "" # e.g. signoz-otel-collector.<namespace>:4318 (used when otlpEnabled=true)
+
 
 
   acmedomainName: "acme.your-domain.example.com"
@@ -80,20 +87,28 @@ global:
 
 
 matrix:
+  image: "matrixdotorg/synapse@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  initImage: "busybox@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  replicas: 1
+  postgresReplicas: 1
   synapseServerName: "your-server.local"
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"
   matrixApiUrl: "http://matrix-synapse:8008"
   matrixServerName: "your-server.local"
+  # Server's own public IP, exempted from Synapse rate limiting. Supplied by the
+  # per-environment overlay — never hardcode an IP in the chart (ADR-005 / DB-M04).
+  serverPublicIp: ""
 
-
-
-
-
+elementCall:
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/element-call@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # ---------- Infrastructure Services ----------------------------------------------------------------------------------
 
 admin:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
   imageVersion: "latest"
 # MongoDB
@@ -107,16 +122,32 @@ online-counseling-mariadb:
   imageName: "mariadb"
   imageVersion: "11.0.6"
   maxconnections: "1000"
-tokenService:
+matrixrtcAuth:
   replicas: 2
-  image:
-    repository: ghcr.io/openresilienceinitiative/livekit-token-service
-    tag: "latest"
+  membershipReaderUserId: "@matrixrtc-auth:your-server.local"
+  existingSecret:
+    name: "matrixrtc-auth-secrets"
+    membershipTokenKey: "matrix-membership-token"
+    livekitApiKeyKey: "livekit-api-key"
+    livekitApiSecretKey: "livekit-api-secret"
+    redisUrlKey: "redis-url"
+  gateway:
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway@sha256:0000000000000000000000000000000000000000000000000000000000000000"
     pullPolicy: Always
+  upstream:
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    pullPolicy: IfNotPresent
   service:
     port: 3010
     targetPort: 3010
     type: ClusterIP
+
+livekit:
+  replicas: 2
+  image: "docker.io/livekit/livekit-server@sha256:2c6869d2d5ff6c9c0166f47be1c92dad6928bfecfa5e4060a6ece48db8accfa3"
+  existingConfigSecret:
+    name: "livekit-config"
+    key: "config.yaml"
 
 
 # RabbitMQ
@@ -150,8 +181,8 @@ online-counseling-keycloak:
 
 # Agency service
 agencyService:
-  imageName: "ghcr.io/openresilienceinitiative/oriso-agencyservice"
-  imageVersion: "latest"
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
   keycloakResource: "agency-service"
 
@@ -164,6 +195,7 @@ agencyService:
 
 # ConsultingType service
 consultingTypeService:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
   imageVersion: "latest"
   serviceURL: "http://consultingtypeservice:8080"
@@ -175,6 +207,7 @@ consultingTypeService:
 
 # Tenant Service
 tenantService:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
   imageVersion: "latest"  
   springProfilesActive: "prod"
@@ -186,23 +219,54 @@ tenantService:
 
 # User service
 userService:
-  imageName: "ghcr.io/openresilienceinitiative/oriso-userservice"
-  imageVersion: "latest"
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice@sha256:0000000000000000000000000000000000000000000000000000000000000000"
   serviceURL: "http://userservice:8080"
  
   keycloakResource: "user-service"
 
   springProfilesActive: "prod"
 
-  # 2FA / OTP login posture (NOT encryption — encryption is never toggled).
+  # Encrypted Matrix room creation. Encryption is ON by default: the
+  # repository contract is that development and production must never run
+  # with encryption disabled, so the prod-safe baseline enables it rather
+  # than offering an encryption-off default that looks supported.
+  matrixEncryptionEnabled: "true"
+
+  # Redis lease duration for consultant Live Chat availability. The Redis
+  # password is wired from the chart's existing Secret; host/port default to
+  # the in-chart Redis Service and can be overridden to point at an external
+  # instance (templates must not hardcode hosts).
+  redisHost: "redis"
+  redisPort: 6379
+  consultantAvailabilityRedisTtlSeconds: 120
+
+  # ADR-018 Global Support Access: time-boxed (4h) encrypted 1:1 Matrix room after a
+  # support-admin/consultant handshake. Ships disabled; enable per-env only after the
+  # global-support-admin realm role exists in Keycloak. See runbooks/support-access-enablement.md.
+  supportAccess:
+    enabled: "false"
+    handshakeTtlSeconds: 300
+    sessionTtlHours: 4
+    auditRetentionMonths: 12
+
+  # 2FA / OTP login posture (independent from Matrix room encryption).
   # Defaults keep OTP off; the dev overlay leaves it off for fast test-user
   # creation, and prod's posture is a deliberate choice (see values-prod.yaml).
-  twoFactorAuthUserEnabled: "false"
-  twoFactorAuthConsultantEnabled: "false"
   otpAllowedForUsers: "false"
   otpAllowedForConsultants: "false"
   otpAllowedForSingleTenantAdmins: "false"
   otpAllowedForTenantSuperAdmins: "false"
+
+  # Base URL of the deployed frontend the one-time links in the Magic Link
+  # login email and the self-service password-reset email point back to.
+  # Must be overridden by the environment deployment values — the sample
+  # default (https://app.oriso.org) does not resolve. Password reset fails
+  # closed (no email sent) if left unset; Magic Link falls back to the
+  # broken app default, so both must be set together.
+  magicLinkFrontendBaseUrl: "https://your-domain.example.com"
+  passwordResetFrontendBaseUrl: "https://your-domain.example.com"
+  passwordResetAdminFrontendBaseUrl: "https://admin.your-domain.example.com/admin"
 
   firebaseConfigurationCredentialsFilePath: "/firebase/firebase-credentials.json"
   firebaseConfigurationNotificationMessage: "Du hast eine neue Nachricht erhalten"
@@ -219,16 +283,15 @@ userService:
   sessionInactiveDeleteWorkflowCron: "0 0 * * * ?"
   sessionInactiveDeleteWorkflowCheckDays: "30"
 
-  # Rocketchat
-  rocketCredentialschedulerCron: "0 0 0/1 * * ?"
-
-
 # ---------- Frontend Services ----------------------------------------------------------------------------------------
 
 # Frontend
 frontend:
-  imageName: "ghcr.io/openresilienceinitiative/oriso-frontend"
-  imageVersion: "2.0.1"
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+nginxController:
+  replicas: 1
 
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
@@ -237,8 +300,8 @@ frontend:
 healthDashboard:
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: rebuild
-    pullPolicy: Never
+    tag: pre-dev
+    pullPolicy: IfNotPresent
   replicas: 1
   namespace: ""
   resources: {}
@@ -248,75 +311,4 @@ healthDashboard:
     targetPort: 9100
   env:
     PORT: "9100"
-
-# SigNoz
-signoz:
-  image:
-    repository: signoz/signoz
-    tag: "v0.105.1"
-    pullPolicy: IfNotPresent
-  replicas: 1
-  namespace: ""
-  service:
-    type: ClusterIP
-    port: 8080
-    targetPort: 8080
-    internalPort: 8085
-    opampPort: 4320
-    otlpGrpcPort: 4317
-    otlpHttpPort: 4318
-  clickhouse:
-    host: ""
-    port: 9000
-    httpPort: 8123
-    cluster: "cluster"
-    user: "default"
-    password: ""
-    secret:
-      name: clickhouse-config
-      key: default-password
-  appConfig:
-    telemetryStore:
-      provider: "clickhouse"
-    prometheus:
-      activeQueryTracker:
-        enabled: false
-    emailing:
-      enabled: false
-    alertmanager:
-      provider: "signoz"
-      signozExternalUrl: ""
-    dotMetrics:
-      enabled: true
-  resources:
-    requests:
-      cpu: 1000m
-      memory: 4Gi
-    limits:
-      cpu: 4000m
-      memory: 16Gi
-  livenessProbe:
-    httpGet:
-      path: /api/v1/health
-      port: http
-      scheme: HTTP
-    failureThreshold: 6
-    initialDelaySeconds: 5
-    periodSeconds: 10
-    successThreshold: 1
-    timeoutSeconds: 5
-  readinessProbe:
-    httpGet:
-      path: /api/v1/health?live=1
-      port: http
-      scheme: HTTP
-    failureThreshold: 6
-    initialDelaySeconds: 5
-    periodSeconds: 10
-    successThreshold: 1
-    timeoutSeconds: 5
-  persistence:
-    enabled: true
-    storageClass: "local-path"
-    size: 20Gi
-    accessMode: ReadWriteOnce
+    HEALTH_CHECK_TIMEOUT_MS: "5000"
