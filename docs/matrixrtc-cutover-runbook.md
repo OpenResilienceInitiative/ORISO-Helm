@@ -91,6 +91,7 @@ Liquibase migration has already run, use its tested rollback together with the
 same complete application bundle; never restore only the old Frontend or only
 the old UserService.
 
-Future Jitsi, Google Meet or Microsoft Teams integrations are separate provider
-adapters. They must not receive the host Matrix session, alter the Element Call
-crypto boundary, or act as an automatic fallback for this service.
+The approved platform target is exclusively the ORISO frontend with Matrix,
+the ORISO-controlled MatrixRTC / Element Call fork, and LiveKit. Rocket.Chat
+and Jitsi are neither supported providers nor fallback paths, and no chart
+dependency, secret, route, or runtime configuration for them may remain.

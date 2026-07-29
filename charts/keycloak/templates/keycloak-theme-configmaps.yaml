@@ -26,7 +26,7 @@ data:
 {{- $files := $.Files.Glob $globPath }}
 {{- range $path, $file := $files }}
   {{ base $path }}: |-
-{{- if include "binaryFile" $path }}
+{{- if eq (include "binaryFile" $path) "true" }}
     # base64-encoded
 {{ $file | toString | b64enc | indent 4 }}
 {{- else }}
