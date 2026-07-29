@@ -11,6 +11,8 @@
 global:
   # Seed dummy tenants/users so the app is immediately explorable in dev.
   initializeDummyData: true
+  matrix:
+    matrixServerName: "matrix.oriso.org"
 
 # Spring "dev" profile for the backend services (verbose errors, dev wiring).
 agencyService:
@@ -41,3 +43,11 @@ userService:
   # magicLinkFrontendBaseUrl: "https://TODO-confirm-dev-frontend-domain"
   # passwordResetFrontendBaseUrl: "https://TODO-confirm-dev-frontend-domain"
   # passwordResetAdminFrontendBaseUrl: "https://TODO-confirm-dev-admin-domain/admin"
+
+# Matrix federation identity (ADR-005 canonical server_name). Fixed across
+# environments; values.yaml.default ships a placeholder ("your-server.local").
+matrix:
+  synapseServerName: "matrix.oriso.org"
+  matrixServerName: "matrix.oriso.org"
+matrixrtcAuth:
+  membershipReaderUserId: "@matrixrtc-auth:matrix.oriso.org"
