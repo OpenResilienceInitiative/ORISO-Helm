@@ -11,6 +11,8 @@
 global:
   # Seed dummy tenants/users so the app is immediately explorable in dev.
   initializeDummyData: true
+  matrix:
+    matrixServerName: "matrix.oriso.org"
 
 # Spring "dev" profile for the backend services (verbose errors, dev wiring).
 agencyService:
@@ -19,6 +21,11 @@ tenantService:
   springProfilesActive: "dev"
 userService:
   springProfilesActive: "dev"
+
+  # ADR-018 Global Support Access stays off here. Release 1 is exercised on Pre-Dev only; dev is
+  # the stable QA environment and must not gain a new privileged access path ahead of it.
+  supportAccess:
+    enabled: "false"
   # OTP stays off in dev so backend-seeded test users log in with just a
   # password (rapid testing). Flip any of these to "true" to exercise the 2FA
   # flows. This is login posture only — not encryption.
@@ -45,3 +52,12 @@ userService:
   smtpPort: 587
   smtpSecure: false
   smtpFrom: "ORISO Platform <monty.burns@oriso.org>"
+
+# Matrix federation identity (ADR-005 canonical server_name). Fixed across
+# environments; values.yaml.default ships a placeholder ("your-server.local").
+matrix:
+  synapseServerName: "matrix.oriso.org"
+  matrixServerName: "matrix.oriso.org"
+matrixrtcAuth:
+  membershipReaderUserId: "@matrixrtc-auth:matrix.oriso.org"
+
