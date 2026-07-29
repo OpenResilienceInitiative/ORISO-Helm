@@ -12,3 +12,7 @@ test-data/test-users.json
 # age private keys, wherever they land
 *.age
 keys.txt
+
+# Java/Maven build output (keycloak SPI source lives in ORISO-Keycloak, not here)
+**/target/
+keycloak-image/
