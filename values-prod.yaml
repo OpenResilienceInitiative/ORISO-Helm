@@ -13,6 +13,8 @@
 
 global:
   initializeDummyData: false
+  matrix:
+    matrixServerName: "matrix.oriso.org"
   observability:
     otlpEnabled: false
     deploymentEnvironment: "production"
@@ -49,3 +51,11 @@ userService:
   # magicLinkFrontendBaseUrl: "https://TODO-set-before-go-live"
   # passwordResetFrontendBaseUrl: "https://TODO-set-before-go-live"
   # passwordResetAdminFrontendBaseUrl: "https://TODO-set-before-go-live/admin"
+
+# Matrix federation identity (ADR-005 canonical server_name). Fixed across
+# environments; values.yaml.default ships a placeholder ("your-server.local").
+matrix:
+  synapseServerName: "matrix.oriso.org"
+  matrixServerName: "matrix.oriso.org"
+matrixrtcAuth:
+  membershipReaderUserId: "@matrixrtc-auth:matrix.oriso.org"
