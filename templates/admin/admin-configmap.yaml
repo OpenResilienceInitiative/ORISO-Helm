@@ -1,7 +1,3 @@
-{{- $observability := default dict .Values.global.observability -}}
-{{- $domains := default dict .Values.global.domains -}}
-{{- $signozHost := default "" $domains.signoz -}}
-{{- $rumEnabled := and (default false $observability.webVitalsEnabled) (ne $signozHost "") -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,6 +8,3 @@ data:
   VITE_API_URL: "https://{{ .Values.global.domainName }}"
   REACT_APP_PLATFORM_VERSION: {{ printf "v%s" (trimPrefix "v" .Chart.AppVersion) | quote }}
   VITE_PLATFORM_VERSION: {{ printf "v%s" (trimPrefix "v" .Chart.AppVersion) | quote }}
-  VITE_OBSERVABILITY_ENABLED: {{ ternary "true" "false" $rumEnabled | quote }}
-  VITE_OTEL_METRICS_URL: {{ ternary (printf "https://%s/v1/metrics" $signozHost) "" $rumEnabled | quote }}
-  VITE_OTEL_EXPORT_INTERVAL_MS: {{ default 60000 $observability.webVitalsExportIntervalMillis | quote }}
