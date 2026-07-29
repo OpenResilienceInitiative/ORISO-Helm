@@ -9,19 +9,12 @@ global:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
-  # OBS-P2: OTLP traces/metrics export from the 4 backend services to the
-  # in-cluster SigNoz gateway collector (OBS-P1). Verified against Spring
-  # Boot 4.0.1's actual source (not docs): the endpoint properties require
-  # the full signal-specific HTTP path (/v1/traces, /v1/metrics), and each
-  # exporter needs its own explicit `enabled` toggle — an unset/empty
-  # endpoint alone does NOT reliably no-op (see PLAN-observability doc).
+  # OTLP telemetry export to SigNoz (deployed separately via ORISO-SignOZ).
+  # Off by default; enable per environment.
   observability:
     otlpEnabled: false
-    # Canonical environment identity applied by both collector tiers to every
-    # signal. The default chart targets PreDev; production overrides this.
-    deploymentEnvironment: "pre-dev"
-    otlpCollectorHost: "" # SigNoz OTLP collector deployed by ORISO-SignOZ, e.g.
-    # "signoz-otel-collector.<namespace>:4318". Only used when otlpEnabled=true.
+    deploymentEnvironment: "pre-dev"   # environment tag on exported signals
+    otlpCollectorHost: "" # e.g. signoz-otel-collector.<namespace>:4318 (used when otlpEnabled=true)
 
 
 
@@ -248,21 +241,9 @@ userService:
   redisPort: 6379
   consultantAvailabilityRedisTtlSeconds: 120
 
-  # ADR-018 Global Support Access: a Global Support Admin and a consultant confirm a live
-  # handshake, after which a fresh encrypted 1:1 Matrix room exists for at most four hours.
-  #
-  # Ships disabled everywhere. Enable it per environment only, and only after that environment's
-  # global-support-admin realm role exists in Keycloak — the role is imported from realm.json on
-  # first start only, so an already-running Keycloak needs it created once by hand.
-  #
-  # `enabled` gates only NEW handshakes. Revocation, the expiry sweep and audit retention keep
-  # running when it is off, so turning the feature off never strands a session that still grants
-  # access. Rollback is this flag plus disabling the test support admins; applied database
-  # migrations are deliberately not rolled back.
-  #
-  # The three durations are policy, not tuning: five minutes to answer the popup, a hard four-hour
-  # lease, and twelve months of audit retention. Worker intervals, retry backoff and attempt limits
-  # stay on their code defaults.
+  # ADR-018 Global Support Access: time-boxed (4h) encrypted 1:1 Matrix room after a
+  # support-admin/consultant handshake. Ships disabled; enable per-env only after the
+  # global-support-admin realm role exists in Keycloak. See runbooks/support-access-enablement.md.
   supportAccess:
     enabled: "false"
     handshakeTtlSeconds: 300
