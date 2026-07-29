@@ -2310,13 +2310,16 @@
       "totp": false,
       "emailVerified": true,
       "email": "technical@example.com",
+      "attributes": {
+        "tenantId": ["0"],
+        "userName": ["technical"],
+        "userId": ["8294c392-e1e0-405b-ac2f-ba3043cbad3e"]
+      },
       "credentials": [
         {
-          "id": "tech-cred-1",
           "type": "password",
-          "createdDate": 1609459200000,
-          "secretData": "{\"value\":\"qPbdCHYDbC8uElO7dO43u7nbFhhow5xv0nFUHFlS\",\"salt\":\"\",\"additionalParameters\":{}}",
-          "credentialData": "{\"hashIterations\":27500,\"algorithm\":\"pbkdf2-sha256\",\"additionalParameters\":{}}"
+          "temporary": false,
+          "value": "{{ .Values.global.secrets.keycloakTechnicalPassword }}"
         }
       ],
       "disableableCredentialTypes": [],
@@ -2343,10 +2346,15 @@
       "emailVerified": false,
       "firstName": "Realm",
       "lastName": "Admin",
-      "disableableCredentialTypes": [],
-      "requiredActions": [
-        "UPDATE_PASSWORD"
+      "credentials": [
+        {
+          "type": "password",
+          "temporary": false,
+          "value": "{{ .Values.global.secrets.keycloakAdminPassword }}"
+        }
       ],
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
       "realmRoles": [
         "default-roles-online-beratung"
       ],
