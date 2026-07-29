@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       create_tag:
-        description: Create and push Git tag from master
+        description: Create and push Git tag from main
         required: true
         default: true
         type: boolean
@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout master
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -50,8 +50,8 @@ jobs:
             exit 1
           fi
 
-          if [[ "${GITHUB_REF_NAME}" != "master" ]]; then
-            echo "This workflow must run from master after the release PR is merged."
+          if [[ "${GITHUB_REF_NAME}" != "main" ]]; then
+            echo "This workflow must run from main after the release PR is merged."
             echo "Current ref is ${GITHUB_REF_NAME}"
             exit 1
           fi
@@ -79,8 +79,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          helm lint . -f values.yaml.default
-          helm template oriso . -f values.yaml.default >/tmp/oriso-rendered.yaml
+          helm lint . -f values.yaml.default -f secrets.yaml.default
+          helm template oriso . -f values.yaml.default -f secrets.yaml.default >/tmp/oriso-rendered.yaml
 
       - name: Package Helm chart
         shell: bash

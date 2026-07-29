@@ -1,0 +1,18 @@
+dependencies:
+- name: online-counseling-keycloak
+  repository: file://charts/keycloak
+  version: 0.0.1
+- name: online-counseling-mariadb
+  repository: file://charts/mariadb
+  version: 0.0.1
+- name: online-counseling-mongodb
+  repository: file://charts/mongodb
+  version: 0.0.1
+- name: online-counseling-rabbitmq
+  repository: file://charts/rabbitmq
+  version: 0.0.1
+- name: online-counseling-redis
+  repository: file://charts/redis
+  version: 0.0.1
+digest: sha256:e9f40394b390926549ff32e4d21dbe070cbe519edad3acb9de07b3910e329b82
+generated: "2026-07-05T09:40:39.344408+02:00"

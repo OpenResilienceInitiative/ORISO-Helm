@@ -129,7 +129,7 @@ data:
       enabled: true
       host: redis
       port: 6379
-      password: {{ .Values.global.secrets.redisdefaultPass }}
+      password: {{ .Values.global.secrets.redisdefaultPass | quote }}
       dbid: 0
 
     caches:

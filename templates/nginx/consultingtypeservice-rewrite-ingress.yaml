@@ -4,7 +4,7 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     kubernetes.io/ingress.class: nginx
-    nginx.ingress.kubernetes.io/rewrite-target: /$1/$3
+    nginx.ingress.kubernetes.io/rewrite-target: /$1$2$3
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
     nginx.ingress.kubernetes.io/use-regex: 'true'
   name: consultingtypeservice-rewrite-ingress
@@ -19,5 +19,5 @@ spec:
             name: consultingtypeservice
             port:
               number: 8080
-        path: /service/(consultingtypes|consultingtypeadmin|topic|settings)(/|$)(.*)
+        path: /service/(consultingtypes|consultingtypeadmin|topic-groups|topicadmin|topic|settingsadmin|settings)(/|$)(.*)
         pathType: ImplementationSpecific

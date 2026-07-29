@@ -128,7 +128,9 @@ spec:
     spec:
       accessModes:
       - {{ .Values.signoz.persistence.accessMode }}
-      storageClassName: {{ .Values.signoz.persistence.storageClass }}
+      {{- with .Values.signoz.persistence.storageClass }}
+      storageClassName: {{ . }}
+      {{- end }}
       resources:
         requests:
           storage: {{ .Values.signoz.persistence.size }}

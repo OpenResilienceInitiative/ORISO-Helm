@@ -73,13 +73,16 @@ data:
   FEATURE_TOPICS_ENABLED: {{ .Values.global.topicsEnabled | quote }}
   FEATURE_DEMOGRAPHICS_ENABLED: {{ .Values.global.demographicsEnabled | quote }}
   TENANT_SERVICE_API_URL: "http://tenantservice.{{ .Release.Namespace }}:8081"
-  # 2fa
-  TWOFACTORAUTH_USER_ENABLED: "false"
-  TWOFACTORAUTH_CONSULTANT_ENABLED: "false"
-  IDENTITY_OTP_ALLOWED_FOR_USERS: "false"
-  IDENTITY_OTP_ALLOWED_FOR_CONSULTANTS: "false"
-  IDENTITY_OTP_ALLOWED_FOR_SINGLE_TENANT_ADMINS: "false"
-  IDENTITY_OTP_ALLOWED_FOR_TENANT_SUPER_ADMINS: "false"
+  # 2fa — value-driven so the OTP posture can differ per environment (dev vs
+  # prod overlay). Defaults preserve the previous hardcoded "false" behaviour.
+  # NOTE: this is 2FA/OTP login posture only; it is NOT encryption. Encryption
+  # is never toggled here — see docs/infrastructure-report-2026-07.md §7.
+  TWOFACTORAUTH_USER_ENABLED: {{ .Values.userService.twoFactorAuthUserEnabled | default "false" | quote }}
+  TWOFACTORAUTH_CONSULTANT_ENABLED: {{ .Values.userService.twoFactorAuthConsultantEnabled | default "false" | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_USERS: {{ .Values.userService.otpAllowedForUsers | default "false" | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_CONSULTANTS: {{ .Values.userService.otpAllowedForConsultants | default "false" | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_SINGLE_TENANT_ADMINS: {{ .Values.userService.otpAllowedForSingleTenantAdmins | default "false" | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_TENANT_SUPER_ADMINS: {{ .Values.userService.otpAllowedForTenantSuperAdmins | default "false" | quote }}
   # logstash
   LOGSTASH_HOST: {{ .Values.global.logstashHost }}
   FEATURE_APPOINTMENT_ENABLED: "false"
