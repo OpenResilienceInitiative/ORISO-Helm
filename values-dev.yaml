@@ -34,15 +34,24 @@ userService:
   otpAllowedForSingleTenantAdmins: "false"
   otpAllowedForTenantSuperAdmins: "false"
 
-  # DECISION/VERIFICATION REQUIRED: this environment's actual live frontend
-  # URL was not confirmed while fixing the same gap for Pre-Dev. Set this once
-  # confirmed in the deployment values. Until then, Magic Link login and
-  # password-reset emails on this environment link to / require the base
-  # values default, which does not resolve (password reset fails closed —
-  # no email sent at all; Magic Link emails a broken link).
-  # magicLinkFrontendBaseUrl: "https://TODO-confirm-dev-frontend-domain"
-  # passwordResetFrontendBaseUrl: "https://TODO-confirm-dev-frontend-domain"
-  # passwordResetAdminFrontendBaseUrl: "https://TODO-confirm-dev-admin-domain/admin"
+  # Confirmed against the live dev ingress: this environment serves the App at
+  # the host root and the Admin panel under /admin on the same host
+  # (main-ingress: dev.oriso.org/ -> frontend, dev.oriso.org/admin -> admin).
+  # UserService appends "/password-reset/confirm?token=…" to each base URL, so
+  # these produce https://dev.oriso.org/password-reset/confirm and
+  # https://dev.oriso.org/admin/password-reset/confirm.
+  # Leaving any of them unset makes the feature fail closed: password reset
+  # sends no email at all, Magic Link emails a broken link.
+  magicLinkFrontendBaseUrl: "https://dev.oriso.org"
+  passwordResetFrontendBaseUrl: "https://dev.oriso.org"
+  passwordResetAdminFrontendBaseUrl: "https://dev.oriso.org/admin"
+
+  # SMTP transport for Magic Link and password-reset mail. The credentials
+  # belong in the persistent secret values, never in this file.
+  smtpHost: "mail.dreambau.com"
+  smtpPort: 587
+  smtpSecure: false
+  smtpFrom: "ORISO Platform <monty.burns@oriso.org>"
 
 # Matrix federation identity (ADR-005 canonical server_name). Fixed across
 # environments; values.yaml.default ships a placeholder ("your-server.local").
@@ -51,3 +60,4 @@ matrix:
   matrixServerName: "matrix.oriso.org"
 matrixrtcAuth:
   membershipReaderUserId: "@matrixrtc-auth:matrix.oriso.org"
+
