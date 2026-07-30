@@ -39,7 +39,17 @@ def render(admin_url: str = ADMIN_URL) -> list[dict]:
     return [doc for doc in yaml.safe_load_all(proc.stdout) if isinstance(doc, dict)]
 
 
-def render_environment(values_file: str, with_smtp_credentials: bool = True) -> subprocess.CompletedProcess:
+def render_environment(
+    values_file: str,
+    *,
+    smtp_user: str | None = "smtp-canary-user",
+    smtp_password: str | None = "smtp-canary-password",
+) -> subprocess.CompletedProcess:
+    """Render an environment overlay; pass ``None`` to omit an SMTP credential.
+
+    Real deploys carry both credentials in the persistent secret values; the
+    render gate rejects an SMTP transport that lacks either one.
+    """
     args = [
         "helm",
         "template",
@@ -52,15 +62,10 @@ def render_environment(values_file: str, with_smtp_credentials: bool = True) -> 
         "-f",
         os.path.join(CHART_DIR, values_file),
     ]
-    if with_smtp_credentials:
-        # Real deploys carry these in the persistent secret values; the render
-        # gate rejects an SMTP transport without them.
-        args += [
-            "--set-string",
-            "userService.smtpUser=smtp-canary-user",
-            "--set-string",
-            "userService.smtpPassword=smtp-canary-password",
-        ]
+    if smtp_user is not None:
+        args += ["--set-string", f"userService.smtpUser={smtp_user}"]
+    if smtp_password is not None:
+        args += ["--set-string", f"userService.smtpPassword={smtp_password}"]
     return subprocess.run(args, capture_output=True, text=True)
 
 
@@ -128,20 +133,29 @@ def assert_smtp_wiring_renders(values_file: str, expected_from: str) -> None:
 
 
 def assert_smtp_credentials_gate(values_file: str) -> None:
-    """An SMTP transport without credentials must fail the render, not deploy.
+    """An SMTP transport lacking either credential must fail the render.
 
     Deployed with empty credentials, UserService still answers 204 but can
     never authenticate to the relay: password reset silently sends no mail.
-    This is exactly what kept reset mails off on dev (ORISO-Helm#179).
+    This is exactly what kept reset mails off on dev (ORISO-Helm#179). Each
+    credential is omitted independently so a regression from ``or`` to ``and``
+    in the template condition cannot slip through.
     """
-    proc = render_environment(values_file, with_smtp_credentials=False)
-    assert proc.returncode != 0, (
-        f"{values_file} rendered without SMTP credentials — the gate must fail this render"
-    )
-    assert "smtpUser/smtpPassword" in proc.stderr, (
-        f"render failure for {values_file} did not mention the missing SMTP credentials:\n{proc.stderr}"
-    )
-    print(f"PASS: {values_file} without SMTP credentials fails the render gate")
+    cases = {
+        "without either SMTP credential": {"smtp_user": None, "smtp_password": None},
+        "with only smtpUser missing": {"smtp_user": None},
+        "with only smtpPassword missing": {"smtp_password": None},
+    }
+    for label, overrides in cases.items():
+        proc = render_environment(values_file, **overrides)
+        assert proc.returncode != 0, (
+            f"{values_file} rendered {label} — the gate must fail this render"
+        )
+        assert "smtpUser/smtpPassword" in proc.stderr, (
+            f"render failure for {values_file} {label} did not mention the "
+            f"missing SMTP credentials:\n{proc.stderr}"
+        )
+        print(f"PASS: {values_file} {label} fails the render gate")
 
 
 def main() -> None:
