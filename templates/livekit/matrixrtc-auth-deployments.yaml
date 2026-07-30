@@ -27,10 +27,12 @@ spec:
             - /bin/sh
             - -ec
             - |
-              for i in $(seq 1 300); do
+              i=0
+              while [ "$i" -lt 300 ]; do
                 token="$(cat /run/secrets/matrix-membership-token 2>/dev/null || true)"
                 case "$token" in
                   ""|"changeme"|"pending-bootstrap")
+                    i=$((i + 1))
                     sleep 2
                     ;;
                   *)
@@ -52,6 +54,8 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
             capabilities:
               drop: ["ALL"]
           env:
@@ -120,6 +124,8 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
             capabilities:
               drop: ["ALL"]
           env:
