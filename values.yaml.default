@@ -167,8 +167,8 @@ online-counseling-redis:
 
 # Keycloak
 online-counseling-keycloak:
-  imageName: "quay.io/keycloak/keycloak"
-  imageVersion: "26.6.3"
+  imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
+  imageVersion: "26.6.3-otp"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
