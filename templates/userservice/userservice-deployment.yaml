@@ -340,6 +340,11 @@ spec:
                 secretKeyRef:
                   key: SPRING_LIQUIBASE_USER
                   name: userservice-secret
+            - name: SPRING_LIQUIBASE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  key: SPRING_LIQUIBASE_USERNAME
+                  name: userservice-secret
             - name: SPRING_PROFILES_ACTIVE
               valueFrom:
                 configMapKeyRef:
