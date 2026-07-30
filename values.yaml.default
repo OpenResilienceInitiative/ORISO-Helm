@@ -190,7 +190,7 @@ agencyService:
   keycloakResource: "agency-service"
 
   springProfilesActive: "prod"
-  liquibaseChangeLog: "classpath:/db/changelog/agencyservice-master.xml"
+  liquibaseChangeLog: "classpath:db/changelog/agencyservice-master.xml"
   liquibaseContexts: "seed"
 
   topicEnrichmentEnabled: "false"
@@ -208,7 +208,7 @@ consultingTypeService:
   keycloakResource: "consultingtype-service"
 
   consultingTypesJsonPath : "consulting-type-settings"
-  liquibaseChangeLog: "classpath:/db/changelog/consultingtypeservice-master.xml"
+  liquibaseChangeLog: "classpath:db/changelog/consultingtypeservice-master.xml"
   liquibaseContexts: "seed"
 
 
@@ -218,7 +218,7 @@ tenantService:
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
   imageVersion: "latest"  
   springProfilesActive: "prod"
-  liquibaseChangeLog: "classpath:/db/changelog/tenantservice-master.xml"
+  liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
   springDatasourceURL: "jdbc:mariadb://mariadb:3306/tenantservice"
   springRabbitmqHost: "rabbitmq"
