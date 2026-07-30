@@ -1,0 +1,14 @@
+{{- $bootstrapTenants := default (dict) .Values.tenantService.bootstrapTenants -}}
+{{- $bootstrapEnabled := true -}}
+{{- if hasKey $bootstrapTenants "enabled" -}}
+{{- $bootstrapEnabled = $bootstrapTenants.enabled -}}
+{{- end -}}
+{{- if $bootstrapEnabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenant-bootstrap-sql
+data:
+  tenant-bootstrap.sql: |-
+{{ .Files.Get "files/tenant-bootstrap.sql" | indent 4 }}
+{{- end }}
