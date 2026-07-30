@@ -301,6 +301,7 @@ frontend:
   image: "ghcr.io/openresilienceinitiative/oriso-frontend@sha256:0000000000000000000000000000000000000000000000000000000000000000"
 
 nginxController:
+  enabled: true
   replicas: 1
 
 
