@@ -210,6 +210,8 @@ consultingTypeService:
   consultingTypesJsonPath : "consulting-type-settings"
   liquibaseChangeLog: "classpath:db/changelog/consultingtypeservice-master.xml"
   liquibaseContexts: "seed"
+  bootstrapTopics:
+    enabled: true
 
 
 # Tenant Service
@@ -220,6 +222,8 @@ tenantService:
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
+  bootstrapTenants:
+    enabled: true
   springDatasourceURL: "jdbc:mariadb://mariadb:3306/tenantservice"
   springRabbitmqHost: "rabbitmq"
   springRabbitmqPort: "5672"
