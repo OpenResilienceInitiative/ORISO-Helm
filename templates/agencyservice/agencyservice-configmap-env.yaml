@@ -6,6 +6,7 @@ data:
   CSRF_COOKIE_PROPERTY:  {{ .Values.global.csrfCookieProperty }}
   CSRF_HEADER_PROPERTY: {{ .Values.global.csrfHeaderProperty }}
   SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}
+  SPRING_LIQUIBASE_CHANGE_LOG: "classpath:/db/changelog/agencyservice-prod-master.xml"
   KEYCLOAK_CORS: "false"
   KEYCLOAK_AUTH_SERVER_URL: {{ .Values.global.keycloak.authServerUrl }}
   KEYCLOAK_PRINCIPAL_ATTRIBUTE: {{ .Values.global.keycloak.principalAttribute }}
@@ -47,4 +48,3 @@ data:
   MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
   MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: "always"
   MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS: "always"
-
