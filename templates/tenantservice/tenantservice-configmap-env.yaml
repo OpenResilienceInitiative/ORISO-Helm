@@ -7,8 +7,9 @@ metadata:
 data:
   # General 
   
-  SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}  
+  SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}
   SPRING_LIQUIBASE_CHANGE_LOG: "classpath:/db/changelog/tenantservice-prod-master.xml"
+  SPRING_LIQUIBASE_CHANGELOG: "classpath:/db/changelog/tenantservice-prod-master.xml"
   SPRING_PROFILES_ACTIVE: {{ .Values.tenantService.springProfilesActive }}  
   SPRING_DATASOURCE_URL: {{ .Values.tenantService.springDatasourceURL }}  
   KEYCLOAK_AUTH_SERVER_URL: {{ .Values.global.keycloakAuthServerUrl  }}  

@@ -7,6 +7,7 @@ data:
   CSRF_HEADER_PROPERTY: {{ .Values.global.csrfHeaderProperty }}
   SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}
   SPRING_LIQUIBASE_CHANGE_LOG: "classpath:/db/changelog/agencyservice-prod-master.xml"
+  SPRING_LIQUIBASE_CHANGELOG: "classpath:/db/changelog/agencyservice-prod-master.xml"
   KEYCLOAK_CORS: "false"
   KEYCLOAK_AUTH_SERVER_URL: {{ .Values.global.keycloak.authServerUrl }}
   KEYCLOAK_PRINCIPAL_ATTRIBUTE: {{ .Values.global.keycloak.principalAttribute }}
