@@ -83,6 +83,39 @@ global:
     principalAttribute: "preferred_username"
     serviceAppClientId: "app"
     serviceAdminClientId: "admin-cli"
+    bootstrapUsers:
+      enabled: true
+      realmAdmin:
+        attributes:
+          tenantId:
+            - "0"
+          userId:
+            - "realmadmin"
+        realmRoles:
+          - "default-roles-online-beratung"
+          - "single-tenant-admin"
+          - "user-admin"
+          - "agency-admin"
+          - "tenant-admin"
+          - "topic-admin"
+        removeRealmRoles:
+          - "consultant"
+        clientRoles:
+          realm-management:
+            - "realm-admin"
+      technical:
+        attributes:
+          userId:
+            - "technical"
+        realmRoles:
+          - "default-roles-online-beratung"
+          - "technical"
+          - "TECHNICAL_DEFAULT"
+        clientRoles:
+          realm-management:
+            - "manage-users"
+            - "view-users"
+            - "query-users"
 
 
 
