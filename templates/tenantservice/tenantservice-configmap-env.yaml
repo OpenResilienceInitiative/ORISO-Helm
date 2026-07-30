@@ -8,8 +8,9 @@ data:
   # General 
   
   SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}
-  SPRING_LIQUIBASE_CHANGE_LOG: "classpath:/db/changelog/tenantservice-prod-master.xml"
-  SPRING_LIQUIBASE_CHANGELOG: "classpath:/db/changelog/tenantservice-prod-master.xml"
+  SPRING_LIQUIBASE_CHANGE_LOG: {{ default "classpath:/db/changelog/tenantservice-master.xml" .Values.tenantService.liquibaseChangeLog | quote }}
+  SPRING_LIQUIBASE_CHANGELOG: {{ default "classpath:/db/changelog/tenantservice-master.xml" .Values.tenantService.liquibaseChangeLog | quote }}
+  SPRING_LIQUIBASE_CONTEXTS: {{ default "seed" .Values.tenantService.liquibaseContexts | quote }}
   SPRING_PROFILES_ACTIVE: {{ .Values.tenantService.springProfilesActive }}  
   SPRING_DATASOURCE_URL: {{ .Values.tenantService.springDatasourceURL }}  
   KEYCLOAK_AUTH_SERVER_URL: {{ .Values.global.keycloakAuthServerUrl  }}  

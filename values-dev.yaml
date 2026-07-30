@@ -17,8 +17,12 @@ global:
 # Spring "dev" profile for the backend services (verbose errors, dev wiring).
 agencyService:
   springProfilesActive: "dev"
+  liquibaseContexts: "seed"
 tenantService:
   springProfilesActive: "dev"
+  liquibaseContexts: "seed"
+consultingTypeService:
+  liquibaseContexts: "seed"
 userService:
   springProfilesActive: "dev"
 
@@ -60,4 +64,3 @@ matrix:
   matrixServerName: "matrix.oriso.org"
 matrixrtcAuth:
   membershipReaderUserId: "@matrixrtc-auth:matrix.oriso.org"
-

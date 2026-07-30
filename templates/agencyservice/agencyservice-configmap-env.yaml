@@ -6,8 +6,9 @@ data:
   CSRF_COOKIE_PROPERTY:  {{ .Values.global.csrfCookieProperty }}
   CSRF_HEADER_PROPERTY: {{ .Values.global.csrfHeaderProperty }}
   SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}
-  SPRING_LIQUIBASE_CHANGE_LOG: "classpath:/db/changelog/agencyservice-prod-master.xml"
-  SPRING_LIQUIBASE_CHANGELOG: "classpath:/db/changelog/agencyservice-prod-master.xml"
+  SPRING_LIQUIBASE_CHANGE_LOG: {{ default "classpath:/db/changelog/agencyservice-master.xml" .Values.agencyService.liquibaseChangeLog | quote }}
+  SPRING_LIQUIBASE_CHANGELOG: {{ default "classpath:/db/changelog/agencyservice-master.xml" .Values.agencyService.liquibaseChangeLog | quote }}
+  SPRING_LIQUIBASE_CONTEXTS: {{ default "seed" .Values.agencyService.liquibaseContexts | quote }}
   KEYCLOAK_CORS: "false"
   KEYCLOAK_AUTH_SERVER_URL: {{ .Values.global.keycloak.authServerUrl }}
   KEYCLOAK_PRINCIPAL_ATTRIBUTE: {{ .Values.global.keycloak.principalAttribute }}
