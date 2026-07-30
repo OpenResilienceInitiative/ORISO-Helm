@@ -82,6 +82,22 @@ helm upgrade --install caritas ./ --namespace caritas --create-namespace --wait-
 
 The first `caritas` is the Helm release name, the second is the Kubernetes namespace. Both can be changed to suit your environment.
 
+### MatrixRTC / LiveKit runtime Secrets
+
+LiveKit and MatrixRTC auth read their sensitive runtime material from
+Kubernetes Secrets rendered by Helm from the ignored environment
+`secrets.yaml`. Set these values before installing:
+
+- `matrixrtcAuth.membershipToken` — Matrix access token for
+  `matrixrtcAuth.membershipReaderUserId`
+- `livekit.api.key` / `livekit.api.secret` — shared LiveKit API credentials
+- `matrixrtcAuth.redisUrl` — optional external Redis URL; leave blank to use
+  the in-chart Redis service and `global.secrets.redisdefaultPass`
+
+During `helm upgrade --install`, the chart creates `matrixrtc-auth-secrets` and
+`livekit-config` so LiveKit, MatrixRTC auth, and Element Call can start without
+a second bootstrap step.
+
 ### Environment overlays (dev vs prod)
 
 `values.yaml.default` is a **prod-safe baseline** (`springProfilesActive: prod`,
