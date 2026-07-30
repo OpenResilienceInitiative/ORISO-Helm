@@ -33,7 +33,7 @@ global:
 
   # TLS
   enableTls: true
-  enableLiquibase: "true"
+  enableLiquibase: "false"
   # CORS
   enableCors: false
   corsAllowOrigin:
@@ -183,6 +183,7 @@ online-counseling-keycloak:
 agencyService:
   replicas: 1
   image: "ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  enableLiquibase: "false"
 
   keycloakResource: "agency-service"
 
@@ -198,6 +199,7 @@ consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
   imageVersion: "latest"
+  enableLiquibase: "false"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -210,6 +212,7 @@ tenantService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
   imageVersion: "latest"  
+  enableLiquibase: "false"
   springProfilesActive: "prod"
   springDatasourceURL: "jdbc:mariadb://mariadb:3306/tenantservice"
   springRabbitmqHost: "rabbitmq"
@@ -222,6 +225,7 @@ userService:
   replicas: 1
   image: "ghcr.io/openresilienceinitiative/oriso-userservice@sha256:0000000000000000000000000000000000000000000000000000000000000000"
   serviceURL: "http://userservice:8080"
+  enableLiquibase: "true"
  
   keycloakResource: "user-service"
 
