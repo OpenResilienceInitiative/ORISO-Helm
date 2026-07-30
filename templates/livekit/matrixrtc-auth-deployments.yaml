@@ -20,6 +20,7 @@ spec:
       labels:
         app: matrixrtc-auth-policy-gateway
     spec:
+      automountServiceAccountToken: false
       initContainers:
         - name: wait-for-matrixrtc-membership-token
           image: {{ include "oriso.immutableImage" (list "elementCall.healthcheckImage" .Values.elementCall.healthcheckImage) | quote }}
@@ -116,6 +117,7 @@ spec:
       labels:
         app: matrixrtc-authorization-service
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: authorization-service
           image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.upstream.image" .Values.matrixrtcAuth.upstream.image) | quote }}
