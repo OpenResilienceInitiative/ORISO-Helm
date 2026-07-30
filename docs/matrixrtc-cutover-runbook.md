@@ -6,15 +6,20 @@ second release workflow.
 
 ## One-time secret and identity preparation
 
-Create a dedicated, non-admin Matrix user such as
-`@matrixrtc-auth:matrix.oriso.org` and obtain a client access token for it. The
-Frontend invites this user to each new call room. The policy gateway can
-therefore accept that invite and call `joined_members`, but it cannot inspect
-any unrelated room or use Synapse administration APIs.
+Configure a dedicated, non-admin Matrix user such as
+`@matrixrtc-auth:matrix.oriso.org` in `matrixrtcAuth.membershipReaderUserId` and
+set `matrixrtcAuth.membershipReaderPassword` in the environment `secrets.yaml`.
+During Helm install, the chart registers or reuses that user through Synapse's
+shared registration secret, logs in, and patches the resulting client access
+token into `matrixrtc-auth-secrets`. The Frontend invites this user to each new
+call room. The policy gateway can therefore accept that invite and call
+`joined_members`, but it cannot inspect any unrelated room or use Synapse
+administration APIs.
 
-Populate `matrixrtcAuth.membershipToken` and `livekit.api.*` in the
-environment `secrets.yaml`. Helm renders `matrixrtc-auth-secrets` during
-install. It contains:
+Populate `matrixrtcAuth.membershipReaderPassword` and `livekit.api.*` in the
+environment `secrets.yaml`. `matrixrtcAuth.membershipToken` is only a manual
+override; leave it blank for automatic bootstrap. Helm renders
+`matrixrtc-auth-secrets` during install. It contains:
 
 - `matrix-membership-token`
 - `livekit-api-key`
