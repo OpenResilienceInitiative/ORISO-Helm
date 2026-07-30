@@ -170,6 +170,15 @@ def render_full_chart(*extra_values: str) -> list[dict]:
     ]
     for values_file in extra_values:
         cmd += ["-f", os.path.join(CHART_DIR, values_file)]
+    # The environment overlays configure an SMTP transport, whose render gate
+    # requires credentials; real deploys carry them in the persistent secret
+    # values.
+    cmd += [
+        "--set-string",
+        "userService.smtpUser=smtp-canary-user",
+        "--set-string",
+        "userService.smtpPassword=smtp-canary-password",
+    ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         die(f"full-chart render failed for {extra_values or ('defaults',)}:\n{proc.stderr}")
