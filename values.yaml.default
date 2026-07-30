@@ -83,8 +83,8 @@ global:
     principalAttribute: "preferred_username"
     serviceAppClientId: "app"
     serviceAdminClientId: "admin-cli"
-
-
+    bootstrapUsers:
+      enabled: true
 
 matrix:
   image: "matrixdotorg/synapse@sha256:0000000000000000000000000000000000000000000000000000000000000000"
