@@ -21,8 +21,12 @@ global:
 
 agencyService:
   springProfilesActive: "prod"
+  liquibaseContexts: "production"
 tenantService:
   springProfilesActive: "prod"
+  liquibaseContexts: "prod"
+consultingTypeService:
+  liquibaseContexts: "prod"
 userService:
   springProfilesActive: "prod"
 
