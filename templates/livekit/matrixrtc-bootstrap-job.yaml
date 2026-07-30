@@ -1,4 +1,9 @@
-{{- if .Values.matrixrtcAuth.bootstrap.enabled }}
+{{- $bootstrap := default (dict) .Values.matrixrtcAuth.bootstrap -}}
+{{- $bootstrapEnabled := true -}}
+{{- if hasKey $bootstrap "enabled" -}}
+{{- $bootstrapEnabled = $bootstrap.enabled -}}
+{{- end -}}
+{{- if $bootstrapEnabled }}
 {{- $manualMembershipToken := default "" .Values.matrixrtcAuth.membershipToken -}}
 {{- $usesManualToken := and $manualMembershipToken (ne $manualMembershipToken "changeme") (ne $manualMembershipToken "pending-bootstrap") -}}
 {{- $readerPassword := default "" .Values.matrixrtcAuth.membershipReaderPassword -}}
@@ -65,7 +70,7 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
     app.kubernetes.io/instance: {{ .Release.Name | quote }}
 spec:
-  backoffLimit: {{ .Values.matrixrtcAuth.bootstrap.backoffLimit }}
+  backoffLimit: {{ default 6 $bootstrap.backoffLimit }}
   template:
     metadata:
       labels:
