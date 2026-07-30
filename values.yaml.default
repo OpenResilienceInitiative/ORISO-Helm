@@ -123,7 +123,7 @@ online-counseling-mariadb:
   imageVersion: "11.0.6"
   maxconnections: "1000"
 matrixrtcAuth:
-  replicas: 2
+  replicas: 1
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
   bootstrap:
     enabled: true
@@ -146,7 +146,7 @@ matrixrtcAuth:
     type: ClusterIP
 
 livekit:
-  replicas: 2
+  replicas: 1
   image: "docker.io/livekit/livekit-server@sha256:2c6869d2d5ff6c9c0166f47be1c92dad6928bfecfa5e4060a6ece48db8accfa3"
   existingConfigSecret:
     name: "livekit-config"
