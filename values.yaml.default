@@ -33,7 +33,7 @@ global:
 
   # TLS
   enableTls: true
-  enableLiquibase: "false"
+  enableLiquibase: "true"
   # CORS
   enableCors: false
   corsAllowOrigin:
