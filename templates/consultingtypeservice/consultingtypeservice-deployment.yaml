@@ -53,6 +53,11 @@ spec:
                 secretKeyRef:
                   key: SPRING_LIQUIBASE_USER
                   name: consultingtypeservice-secret
+            - name: SPRING_LIQUIBASE_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_LIQUIBASE_ENABLED
+                  name: consultingtypeservice-configmap-env
             - name: CONSULTING_TYPES_JSON_PATH
               valueFrom:
                 configMapKeyRef:
