@@ -12,19 +12,20 @@ Frontend invites this user to each new call room. The policy gateway can
 therefore accept that invite and call `joined_members`, but it cannot inspect
 any unrelated room or use Synapse administration APIs.
 
-Create `matrixrtc-auth-secrets` outside Helm through the environment's secret
-manager. It must contain:
+Populate `matrixrtcAuth.membershipToken` and `livekit.api.*` in the
+environment `secrets.yaml`. Helm renders `matrixrtc-auth-secrets` during
+install. It contains:
 
 - `matrix-membership-token`
 - `livekit-api-key`
 - `livekit-api-secret`
 - `redis-url`
 
-Create `livekit-config` outside Helm with the `config.yaml` key. The LiveKit
-configuration must contain the same API key and secret, the authorization
-service webhook, and the shared Redis connection required for a multi-node
-LiveKit cluster. Neither Secret may be supplied through values files or stored
-in Git.
+Helm also renders `livekit-config` with the `config.yaml` key. The LiveKit
+configuration contains the same API key and secret, the authorization service
+webhook, and the shared Redis connection required for a multi-node LiveKit
+cluster. These values must stay in ignored environment secret files and must
+not be committed to Git.
 
 ## Release preflight
 
