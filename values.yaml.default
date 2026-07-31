@@ -246,6 +246,10 @@ userService:
   # than offering an encryption-off default that looks supported.
   matrixEncryptionEnabled: "true"
 
+  # RabbitMQ broker used by Spring AMQP health checks and listeners.
+  springRabbitmqHost: "rabbitmq"
+  springRabbitmqPort: "5672"
+
   # Redis lease duration for consultant Live Chat availability. The Redis
   # password is wired from the chart's existing Secret; host/port default to
   # the in-chart Redis Service and can be overridden to point at an external
