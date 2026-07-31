@@ -125,6 +125,13 @@ online-counseling-mariadb:
 matrixrtcAuth:
   replicas: 2
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
+  # lk-jwt-service log level for the authorization service. Keep "off" in any
+  # environment with real counselling data: these logs carry Matrix user and
+  # room identifiers. On a test environment raise it ("warn"/"debug") for a
+  # bounded investigation — a silent fail-closed authorizer makes every denial
+  # look identical, which cost hours in ORISO-ElementCall#35. Lower it again
+  # afterwards.
+  logLevel: "off"
   existingSecret:
     name: "matrixrtc-auth-secrets"
     membershipTokenKey: "matrix-membership-token"
