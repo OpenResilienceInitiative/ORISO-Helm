@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
+import unittest
 
 import yaml
 
@@ -90,14 +90,9 @@ def assert_production_is_unchanged() -> None:
     print("PASS: production platform-admin OTP policy remains unchanged")
 
 
-def main() -> None:
-    assert_dev_enables_platform_admin_2fa()
-    assert_production_is_unchanged()
+class DevPlatformAdminTwoFactorRenderTest(unittest.TestCase):
+    def test_dev_enables_platform_admin_2fa(self) -> None:
+        assert_dev_enables_platform_admin_2fa()
 
-
-if __name__ == "__main__":
-    try:
-        main()
-    except (AssertionError, KeyError) as exc:
-        print(f"FAIL: {exc}", file=sys.stderr)
-        sys.exit(1)
+    def test_production_is_unchanged(self) -> None:
+        assert_production_is_unchanged()
