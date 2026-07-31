@@ -33,7 +33,7 @@ global:
 
   # TLS
   enableTls: true
-  enableLiquibase: "false"
+  enableLiquibase: "true"
   # CORS
   enableCors: false
   corsAllowOrigin:
@@ -83,8 +83,8 @@ global:
     principalAttribute: "preferred_username"
     serviceAppClientId: "app"
     serviceAdminClientId: "admin-cli"
-
-
+    bootstrapUsers:
+      enabled: true
 
 matrix:
   image: "matrixdotorg/synapse@sha256:0000000000000000000000000000000000000000000000000000000000000000"
@@ -102,7 +102,7 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  image: "ghcr.io/openresilienceinitiative/element-call:dev"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # ---------- Infrastructure Services ----------------------------------------------------------------------------------
@@ -110,7 +110,7 @@ elementCall:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "latest"
+  imageVersion: "dev"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -123,8 +123,11 @@ online-counseling-mariadb:
   imageVersion: "11.0.6"
   maxconnections: "1000"
 matrixrtcAuth:
-  replicas: 2
+  replicas: 1
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
+  bootstrap:
+    enabled: true
+    backoffLimit: 6
   existingSecret:
     name: "matrixrtc-auth-secrets"
     membershipTokenKey: "matrix-membership-token"
@@ -132,10 +135,10 @@ matrixrtcAuth:
     livekitApiSecretKey: "livekit-api-secret"
     redisUrlKey: "redis-url"
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:dev"
     pullPolicy: Always
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:dev"
     pullPolicy: IfNotPresent
   service:
     port: 3010
@@ -143,7 +146,7 @@ matrixrtcAuth:
     type: ClusterIP
 
 livekit:
-  replicas: 2
+  replicas: 1
   image: "docker.io/livekit/livekit-server@sha256:2c6869d2d5ff6c9c0166f47be1c92dad6928bfecfa5e4060a6ece48db8accfa3"
   existingConfigSecret:
     name: "livekit-config"
@@ -164,8 +167,8 @@ online-counseling-redis:
 
 # Keycloak
 online-counseling-keycloak:
-  imageName: "quay.io/keycloak/keycloak"
-  imageVersion: "26.6.3"
+  imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
+  imageVersion: "26.6.3-otp"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
@@ -182,11 +185,13 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:dev"
 
   keycloakResource: "agency-service"
 
   springProfilesActive: "prod"
+  liquibaseChangeLog: "classpath:db/changelog/agencyservice-master.xml"
+  liquibaseContexts: "seed"
 
   topicEnrichmentEnabled: "false"
 
@@ -197,20 +202,28 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "latest"
+  imageVersion: "dev"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
 
   consultingTypesJsonPath : "consulting-type-settings"
+  liquibaseChangeLog: "classpath:db/changelog/consultingtypeservice-master.xml"
+  liquibaseContexts: "seed"
+  bootstrapTopics:
+    enabled: true
 
 
 # Tenant Service
 tenantService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "latest"  
+  imageVersion: "dev"  
   springProfilesActive: "prod"
+  liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
+  liquibaseContexts: "seed"
+  bootstrapTenants:
+    enabled: true
   springDatasourceURL: "jdbc:mariadb://mariadb:3306/tenantservice"
   springRabbitmqHost: "rabbitmq"
   springRabbitmqPort: "5672"
@@ -220,7 +233,7 @@ tenantService:
 # User service
 userService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:dev"
   serviceURL: "http://userservice:8080"
  
   keycloakResource: "user-service"
@@ -232,6 +245,10 @@ userService:
   # with encryption disabled, so the prod-safe baseline enables it rather
   # than offering an encryption-off default that looks supported.
   matrixEncryptionEnabled: "true"
+
+  # RabbitMQ broker used by Spring AMQP health checks and listeners.
+  springRabbitmqHost: "rabbitmq"
+  springRabbitmqPort: "5672"
 
   # Redis lease duration for consultant Live Chat availability. The Redis
   # password is wired from the chart's existing Secret; host/port default to
@@ -251,12 +268,12 @@ userService:
     auditRetentionMonths: 12
 
   # 2FA / OTP login posture (independent from Matrix room encryption).
-  # Defaults keep OTP off; the dev overlay leaves it off for fast test-user
-  # creation, and prod's posture is a deliberate choice (see values-prod.yaml).
-  otpAllowedForUsers: "false"
-  otpAllowedForConsultants: "false"
-  otpAllowedForSingleTenantAdmins: "false"
-  otpAllowedForTenantSuperAdmins: "false"
+  # Enabled by default so fresh installs require OTP enrollment for all user
+  # categories unless an environment overlay deliberately opts out.
+  otpAllowedForUsers: "true"
+  otpAllowedForConsultants: "true"
+  otpAllowedForSingleTenantAdmins: "true"
+  otpAllowedForTenantSuperAdmins: "true"
 
   # Base URL of the deployed frontend the one-time links in the Magic Link
   # login email and the self-service password-reset email point back to.
@@ -298,9 +315,10 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:dev"
 
 nginxController:
+  enabled: true
   replicas: 1
 
 
@@ -310,7 +328,7 @@ nginxController:
 healthDashboard:
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: pre-dev
+    tag: dev
     pullPolicy: IfNotPresent
   replicas: 1
   namespace: ""

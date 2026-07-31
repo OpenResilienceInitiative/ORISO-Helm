@@ -1,0 +1,147 @@
+{{- $bootstrapUsers := default (dict) .Values.global.keycloak.bootstrapUsers -}}
+{{- $bootstrapEnabled := true -}}
+{{- if hasKey $bootstrapUsers "enabled" -}}
+{{- $bootstrapEnabled = $bootstrapUsers.enabled -}}
+{{- end -}}
+{{- if $bootstrapEnabled }}
+{{- $kc := index .Values "online-counseling-keycloak" -}}
+{{- $realmAdmin := default (dict) $bootstrapUsers.realmAdmin -}}
+{{- $technical := default (dict) $bootstrapUsers.technical -}}
+{{- $realmAdminAttributes := default (dict "tenantId" (list "0") "userName" (list "realmadmin") "userId" (list "7c5df021-536b-4f42-bb3c-37b1e4d9864d")) $realmAdmin.attributes -}}
+{{- $realmAdminRealmRoles := default (list "default-roles-online-beratung" "offline_access" "user" "user-admin" "agency-admin" "topic-admin" "single-tenant-admin" "USER_ADMIN" "restricted-agency-admin" "technical" "uma_authorization" "TECHNICAL_DEFAULT" "tenant-admin") $realmAdmin.realmRoles -}}
+{{- $realmAdminRemoveRealmRoles := default (list "consultant") $realmAdmin.removeRealmRoles -}}
+{{- $realmAdminClientRoles := default (dict "realm-management" (list "manage-identity-providers" "realm-admin" "query-groups" "view-users" "view-events" "query-realms" "manage-authorization" "manage-events" "view-identity-providers" "manage-users" "view-realm" "impersonation" "query-users" "manage-clients" "manage-realm" "create-client" "view-authorization" "query-clients" "view-clients") "broker" (list "read-token") "account" (list "view-groups" "manage-account" "delete-account" "view-profile" "view-consent" "manage-account-links" "manage-consent" "view-applications")) $realmAdmin.clientRoles -}}
+{{- $technicalAttributes := default (dict "userId" (list "technical")) $technical.attributes -}}
+{{- $technicalRealmRoles := default (list "default-roles-online-beratung" "technical" "TECHNICAL_DEFAULT") $technical.realmRoles -}}
+{{- $technicalClientRoles := default (dict "realm-management" (list "manage-users" "view-users" "query-users")) $technical.clientRoles -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-bootstrap-users
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: keycloak-bootstrap-users
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap-users
+          image: "{{ $kc.imageName }}:{{ $kc.imageVersion }}"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KEYCLOAK_URL
+              value: "http://keycloak.{{ .Release.Namespace }}:8080/auth"
+            - name: KEYCLOAK_REALM
+              value: {{ .Values.global.keycloak.realm | quote }}
+            - name: KEYCLOAK_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN_PASSWORD
+            - name: REALM_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN
+            - name: REALM_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN_PASSWORD
+            - name: REALM_ADMIN_ATTRIBUTES
+              value: {{ $realmAdminAttributes | toJson | quote }}
+            - name: TECHNICAL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: userservice-secret
+                  key: KEYCLOAKSERVICE_TECHNICAL_USERNAME
+            - name: TECHNICAL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: userservice-secret
+                  key: KEYCLOAKSERVICE_TECHNICAL_PASSWORD
+            - name: TECHNICAL_ATTRIBUTES
+              value: {{ $technicalAttributes | toJson | quote }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              set -eu
+              KCADM=/opt/keycloak/bin/kcadm.sh
+
+              until "$KCADM" config credentials \
+                --server "$KEYCLOAK_URL" \
+                --realm master \
+                --user "$KEYCLOAK_ADMIN_USERNAME" \
+                --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null 2>&1; do
+                echo "waiting for Keycloak admin API"
+                sleep 5
+              done
+
+              user_id() {
+                "$KCADM" get users -r "$KEYCLOAK_REALM" -q exact=true -q username="$1" --fields id,username \
+                  | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+                  | head -n1
+              }
+
+              ensure_user() {
+                username="$1"
+                password="$2"
+                attributes_json="$3"
+
+                uid="$(user_id "$username" || true)"
+                cat >/tmp/keycloak-user.json <<EOF
+              {
+                "username": "${username}",
+                "enabled": true,
+                "emailVerified": true,
+                "attributes": ${attributes_json},
+                "requiredActions": []
+              }
+              EOF
+
+                if [ -z "$uid" ]; then
+                  "$KCADM" create users -r "$KEYCLOAK_REALM" -f /tmp/keycloak-user.json
+                  uid="$(user_id "$username")"
+                else
+                  "$KCADM" update "users/${uid}" -r "$KEYCLOAK_REALM" -f /tmp/keycloak-user.json
+                fi
+
+                "$KCADM" set-password -r "$KEYCLOAK_REALM" --username "$username" --new-password "$password" --temporary=false
+              }
+
+              ensure_user "$REALM_ADMIN_USERNAME" "$REALM_ADMIN_PASSWORD" "$REALM_ADMIN_ATTRIBUTES"
+{{- range $role := $realmAdminRemoveRealmRoles }}
+              "$KCADM" remove-roles -r "$KEYCLOAK_REALM" --uusername "$REALM_ADMIN_USERNAME" --rolename {{ $role | quote }} || true
+{{- end }}
+{{- range $role := $realmAdminRealmRoles }}
+              "$KCADM" add-roles -r "$KEYCLOAK_REALM" --uusername "$REALM_ADMIN_USERNAME" --rolename {{ $role | quote }} || true
+{{- end }}
+{{- range $client, $roles := $realmAdminClientRoles }}
+{{- range $role := $roles }}
+              "$KCADM" add-roles -r "$KEYCLOAK_REALM" --uusername "$REALM_ADMIN_USERNAME" --cclientid {{ $client | quote }} --rolename {{ $role | quote }} || true
+{{- end }}
+{{- end }}
+
+              ensure_user "$TECHNICAL_USERNAME" "$TECHNICAL_PASSWORD" "$TECHNICAL_ATTRIBUTES"
+{{- range $role := $technicalRealmRoles }}
+              "$KCADM" add-roles -r "$KEYCLOAK_REALM" --uusername "$TECHNICAL_USERNAME" --rolename {{ $role | quote }} || true
+{{- end }}
+{{- range $client, $roles := $technicalClientRoles }}
+{{- range $role := $roles }}
+              "$KCADM" add-roles -r "$KEYCLOAK_REALM" --uusername "$TECHNICAL_USERNAME" --cclientid {{ $client | quote }} --rolename {{ $role | quote }} || true
+{{- end }}
+{{- end }}
+{{- end }}
