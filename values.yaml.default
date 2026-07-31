@@ -102,7 +102,7 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  image: "ghcr.io/openresilienceinitiative/element-call:dev"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # ---------- Infrastructure Services ----------------------------------------------------------------------------------
@@ -135,10 +135,10 @@ matrixrtcAuth:
     livekitApiSecretKey: "livekit-api-secret"
     redisUrlKey: "redis-url"
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:dev"
     pullPolicy: Always
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:dev"
     pullPolicy: IfNotPresent
   service:
     port: 3010
@@ -185,7 +185,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:dev"
 
   keycloakResource: "agency-service"
 
@@ -233,7 +233,7 @@ tenantService:
 # User service
 userService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:dev"
   serviceURL: "http://userservice:8080"
  
   keycloakResource: "user-service"
@@ -315,7 +315,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:dev"
 
 nginxController:
   enabled: true
@@ -328,7 +328,7 @@ nginxController:
 healthDashboard:
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: pre-dev
+    tag: dev
     pullPolicy: IfNotPresent
   replicas: 1
   namespace: ""
