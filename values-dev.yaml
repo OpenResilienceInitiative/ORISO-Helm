@@ -30,13 +30,12 @@ userService:
   # the stable QA environment and must not gain a new privileged access path ahead of it.
   supportAccess:
     enabled: "false"
-  # OTP stays off in dev so backend-seeded test users log in with just a
-  # password (rapid testing). Flip any of these to "true" to exercise the 2FA
-  # flows. This is login posture only — not encryption.
-  otpAllowedForUsers: "false"
+  # OTP is enabled by default in dev to match the platform security posture.
+  # This is login posture only — not encryption.
+  otpAllowedForUsers: "true"
   otpAllowedForConsultants: "true"
-  otpAllowedForSingleTenantAdmins: "false"
-  otpAllowedForTenantSuperAdmins: "false"
+  otpAllowedForSingleTenantAdmins: "true"
+  otpAllowedForTenantSuperAdmins: "true"
 
   # Confirmed against the live dev ingress: this environment serves the App at
   # the host root and the Admin panel under /admin on the same host
