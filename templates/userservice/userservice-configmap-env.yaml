@@ -126,6 +126,8 @@ data:
   LOGSTASH_HOST: {{ .Values.global.logstashHost }}
   FEATURE_APPOINTMENT_ENABLED: "false"
   FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED: {{ .Values.global.multitenancyWithSingleDomainEnabled | quote }}
+  SPRING_RABBITMQ_HOST: "rabbitmq"
+  SPRING_RABBITMQ_PORT: "5672"
   # Shared consultant availability lease store. The password remains in the
   # existing redis-secret and is referenced directly by the Deployment.
   SPRING_REDIS_HOST: {{ .Values.userService.redisHost | default "redis" | quote }}
