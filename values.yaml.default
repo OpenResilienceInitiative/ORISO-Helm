@@ -110,7 +110,7 @@ elementCall:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "latest"
+  imageVersion: "dev"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -202,7 +202,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "latest"
+  imageVersion: "dev"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -218,7 +218,7 @@ consultingTypeService:
 tenantService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "latest"  
+  imageVersion: "dev"  
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
