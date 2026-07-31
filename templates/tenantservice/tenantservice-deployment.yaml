@@ -90,6 +90,21 @@ spec:
               configMapKeyRef:
                 key: SPRING_LIQUIBASE_ENABLED
                 name: tenantservice-configmap-env
+          - name: SPRING_LIQUIBASE_CHANGE_LOG
+            valueFrom:
+              configMapKeyRef:
+                key: SPRING_LIQUIBASE_CHANGE_LOG
+                name: tenantservice-configmap-env
+          - name: SPRING_LIQUIBASE_CHANGELOG
+            valueFrom:
+              configMapKeyRef:
+                key: SPRING_LIQUIBASE_CHANGELOG
+                name: tenantservice-configmap-env
+          - name: SPRING_LIQUIBASE_CONTEXTS
+            valueFrom:
+              configMapKeyRef:
+                key: SPRING_LIQUIBASE_CONTEXTS
+                name: tenantservice-configmap-env
           - name: SPRING_LIQUIBASE_USER
             valueFrom:
               secretKeyRef:
@@ -134,6 +149,16 @@ spec:
             valueFrom:
               configMapKeyRef:
                 key: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+                name: tenantservice-configmap-env
+          - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+                name: tenantservice-configmap-env
+          - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
                 name: tenantservice-configmap-env
         resources:
           requests:

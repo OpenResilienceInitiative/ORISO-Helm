@@ -103,6 +103,31 @@ spec:
                 configMapKeyRef:
                   key: SPRING_LIQUIBASE_ENABLED
                   name: agencyservice-configmap-env
+            - name: SPRING_LIQUIBASE_CHANGE_LOG
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_LIQUIBASE_CHANGE_LOG
+                  name: agencyservice-configmap-env
+            - name: SPRING_LIQUIBASE_CHANGELOG
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_LIQUIBASE_CHANGELOG
+                  name: agencyservice-configmap-env
+            - name: SPRING_LIQUIBASE_CONTEXTS
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_LIQUIBASE_CONTEXTS
+                  name: agencyservice-configmap-env
+            - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+                  name: agencyservice-configmap-env
+            - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
+                  name: agencyservice-configmap-env
             - name: SPRING_PROFILES_ACTIVE
               valueFrom:
                 configMapKeyRef:

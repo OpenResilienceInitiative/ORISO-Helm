@@ -20,6 +20,33 @@ spec:
       labels:
         app: matrixrtc-auth-policy-gateway
     spec:
+      automountServiceAccountToken: false
+      initContainers:
+        - name: wait-for-matrixrtc-membership-token
+          image: {{ include "oriso.immutableImage" (list "elementCall.healthcheckImage" .Values.elementCall.healthcheckImage) | quote }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              i=0
+              while [ "$i" -lt 300 ]; do
+                token="$(cat /run/secrets/matrix-membership-token 2>/dev/null || true)"
+                case "$token" in
+                  ""|"changeme"|"pending-bootstrap")
+                    i=$((i + 1))
+                    sleep 2
+                    ;;
+                  *)
+                    exit 0
+                    ;;
+                esac
+              done
+              echo "Timed out waiting for MatrixRTC membership token bootstrap" >&2
+              exit 1
+          volumeMounts:
+            - name: auth-secrets
+              mountPath: /run/secrets
+              readOnly: true
       containers:
         - name: gateway
           image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.gateway.image" .Values.matrixrtcAuth.gateway.image) | quote }}
@@ -28,6 +55,8 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
             capabilities:
               drop: ["ALL"]
           env:
@@ -88,6 +117,29 @@ spec:
       labels:
         app: matrixrtc-authorization-service
     spec:
+      automountServiceAccountToken: false
+      initContainers:
+        - name: wait-for-redis
+          image: {{ printf "%s:%s" (index .Values "online-counseling-redis").imageName (index .Values "online-counseling-redis").imageVersion | quote }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              i=0
+              until redis-cli -h redis -p 6379 -a "$REDIS_PASSWORD" ping | grep -q PONG; do
+                i=$((i + 1))
+                if [ "$i" -ge 150 ]; then
+                  echo "Timed out waiting for Redis on redis:6379" >&2
+                  exit 1
+                fi
+                sleep 2
+              done
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_DEFAULT_PASS
       containers:
         - name: authorization-service
           image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.upstream.image" .Values.matrixrtcAuth.upstream.image) | quote }}
@@ -96,6 +148,8 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
             capabilities:
               drop: ["ALL"]
           env:

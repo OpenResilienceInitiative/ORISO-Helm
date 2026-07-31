@@ -21,8 +21,12 @@ global:
 
 agencyService:
   springProfilesActive: "prod"
+  liquibaseContexts: "production"
 tenantService:
   springProfilesActive: "prod"
+  liquibaseContexts: "prod"
+consultingTypeService:
+  liquibaseContexts: "prod"
 userService:
   springProfilesActive: "prod"
 
@@ -31,15 +35,13 @@ userService:
   # operational alerting posture — it is not a rollout default.
   supportAccess:
     enabled: "false"
-  # DECISION REQUIRED: production 2FA/OTP posture. This is a product/security
-  # policy choice (enabling OTP forces users to enrol TOTP), so it is left at
-  # the safe, behaviour-preserving default of "false" rather than guessed here.
-  # Set the relevant flags to "true" once the policy is agreed. This is login
-  # posture only and is unrelated to message/data encryption (always on).
-  otpAllowedForUsers: "false"
-  otpAllowedForConsultants: "false"
-  otpAllowedForSingleTenantAdmins: "false"
-  otpAllowedForTenantSuperAdmins: "false"
+  # OTP is enabled by default in prod to match the platform security posture.
+  # This is login posture only and is unrelated to message/data encryption
+  # (always on).
+  otpAllowedForUsers: "true"
+  otpAllowedForConsultants: "true"
+  otpAllowedForSingleTenantAdmins: "true"
+  otpAllowedForTenantSuperAdmins: "true"
 
   # DECISION REQUIRED: production frontend domain for Magic Link login and
   # password-reset email links. Not guessed here — go-live is 2026-10-01 and

@@ -6,25 +6,31 @@ second release workflow.
 
 ## One-time secret and identity preparation
 
-Create a dedicated, non-admin Matrix user such as
-`@matrixrtc-auth:matrix.oriso.org` and obtain a client access token for it. The
-Frontend invites this user to each new call room. The policy gateway can
-therefore accept that invite and call `joined_members`, but it cannot inspect
-any unrelated room or use Synapse administration APIs.
+Configure a dedicated, non-admin Matrix user such as
+`@matrixrtc-auth:matrix.oriso.org` in `matrixrtcAuth.membershipReaderUserId` and
+set `matrixrtcAuth.membershipReaderPassword` in the environment `secrets.yaml`.
+During Helm install, the chart registers or reuses that user through Synapse's
+shared registration secret, logs in, and patches the resulting client access
+token into `matrixrtc-auth-secrets`. The Frontend invites this user to each new
+call room. The policy gateway can therefore accept that invite and call
+`joined_members`, but it cannot inspect any unrelated room or use Synapse
+administration APIs.
 
-Create `matrixrtc-auth-secrets` outside Helm through the environment's secret
-manager. It must contain:
+Populate `matrixrtcAuth.membershipReaderPassword` and `livekit.api.*` in the
+environment `secrets.yaml`. `matrixrtcAuth.membershipToken` is only a manual
+override; leave it blank for automatic bootstrap. Helm renders
+`matrixrtc-auth-secrets` during install. It contains:
 
 - `matrix-membership-token`
 - `livekit-api-key`
 - `livekit-api-secret`
 - `redis-url`
 
-Create `livekit-config` outside Helm with the `config.yaml` key. The LiveKit
-configuration must contain the same API key and secret, the authorization
-service webhook, and the shared Redis connection required for a multi-node
-LiveKit cluster. Neither Secret may be supplied through values files or stored
-in Git.
+Helm also renders `livekit-config` with the `config.yaml` key. The LiveKit
+configuration contains the same API key and secret, the authorization service
+webhook, and the shared Redis connection required for a multi-node LiveKit
+cluster. These values must stay in ignored environment secret files and must
+not be committed to Git.
 
 ## Release preflight
 

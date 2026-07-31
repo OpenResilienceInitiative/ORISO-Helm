@@ -53,6 +53,36 @@ spec:
                 secretKeyRef:
                   key: SPRING_LIQUIBASE_USER
                   name: consultingtypeservice-secret
+            - name: SPRING_LIQUIBASE_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_LIQUIBASE_ENABLED
+                  name: consultingtypeservice-configmap-env
+            - name: SPRING_LIQUIBASE_CHANGE_LOG
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_LIQUIBASE_CHANGE_LOG
+                  name: consultingtypeservice-configmap-env
+            - name: SPRING_LIQUIBASE_CHANGELOG
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_LIQUIBASE_CHANGELOG
+                  name: consultingtypeservice-configmap-env
+            - name: SPRING_LIQUIBASE_CONTEXTS
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_LIQUIBASE_CONTEXTS
+                  name: consultingtypeservice-configmap-env
+            - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+                  name: consultingtypeservice-configmap-env
+            - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
+                  name: consultingtypeservice-configmap-env
             - name: CONSULTING_TYPES_JSON_PATH
               valueFrom:
                 configMapKeyRef:

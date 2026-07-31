@@ -7,7 +7,10 @@ metadata:
 data:
   # General 
   
-  SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}  
+  SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}
+  SPRING_LIQUIBASE_CHANGE_LOG: {{ default "classpath:db/changelog/tenantservice-master.xml" .Values.tenantService.liquibaseChangeLog | replace "classpath:/db/changelog" "classpath:db/changelog" | quote }}
+  SPRING_LIQUIBASE_CHANGELOG: {{ default "classpath:db/changelog/tenantservice-master.xml" .Values.tenantService.liquibaseChangeLog | replace "classpath:/db/changelog" "classpath:db/changelog" | quote }}
+  SPRING_LIQUIBASE_CONTEXTS: {{ default "seed" .Values.tenantService.liquibaseContexts | quote }}
   SPRING_PROFILES_ACTIVE: {{ .Values.tenantService.springProfilesActive }}  
   SPRING_DATASOURCE_URL: {{ .Values.tenantService.springDatasourceURL }}  
   KEYCLOAK_AUTH_SERVER_URL: {{ .Values.global.keycloakAuthServerUrl  }}  
@@ -28,4 +31,5 @@ data:
   MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
   MANAGEMENT_OTLP_METRICS_EXPORT_URL: "http://{{ .Values.global.observability.otlpCollectorHost }}/v1/metrics"
   MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
-
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: "always"
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS: "always"

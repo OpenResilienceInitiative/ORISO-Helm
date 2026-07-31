@@ -1,0 +1,14 @@
+{{- $bootstrapTopics := default (dict) .Values.consultingTypeService.bootstrapTopics -}}
+{{- $bootstrapEnabled := true -}}
+{{- if hasKey $bootstrapTopics "enabled" -}}
+{{- $bootstrapEnabled = $bootstrapTopics.enabled -}}
+{{- end -}}
+{{- if $bootstrapEnabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: topic-bootstrap-sql
+data:
+  topic-bootstrap.sql: |-
+{{ .Files.Get "files/topic-bootstrap.sql" | indent 4 }}
+{{- end }}

@@ -40,6 +40,7 @@ Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fi
 - `global.matrix.matrixAdminUsername` / `matrixAdminPassword` — Matrix admin credentials (must live under `global:` so subcharts can read them)
 - `online-counseling-mongodb.*Password` / `*Pass` — MongoDB passwords
 - `online-counseling-mariadb.dbRootPassword` — MariaDB root password
+- `matrixrtcAuth.membershipReaderPassword` — password for the non-admin MatrixRTC membership reader user that Helm bootstraps in Synapse
 - `livekit.api.key` / `livekit.api.secret` — LiveKit API credentials
 - `tenantService.springDatasourcePassword` / `springRabbitmqPassword`
 - `agencyService.serviceEncryptionAppkey` — AgencyService encryption key (Matrix service-account passwords). **Required** — the chart refuses to render if it is blank, because an empty key silently breaks agency creation. Rotating it invalidates already-stored credentials.
@@ -81,6 +82,28 @@ helm upgrade --install caritas ./ --namespace caritas --create-namespace --wait-
 ```
 
 The first `caritas` is the Helm release name, the second is the Kubernetes namespace. Both can be changed to suit your environment.
+
+### MatrixRTC / LiveKit runtime Secrets
+
+LiveKit and MatrixRTC auth read their sensitive runtime material from
+Kubernetes Secrets rendered by Helm from the ignored environment
+`secrets.yaml`. Set these values before installing:
+
+- `matrixrtcAuth.membershipReaderPassword` — password for
+  `matrixrtcAuth.membershipReaderUserId`; Helm registers/logs in this Matrix
+  user and patches the generated access token into `matrixrtc-auth-secrets`
+- `livekit.api.key` / `livekit.api.secret` — shared LiveKit API credentials
+- `matrixrtcAuth.redisUrl` — optional external Redis URL; leave blank to use
+  the in-chart Redis service and `global.secrets.redisdefaultPass`
+- `matrixrtcAuth.membershipToken` — optional manual Matrix access token
+  override; leave blank to use the automatic bootstrap job
+
+During `helm upgrade --install`, the chart creates `matrixrtc-auth-secrets` and
+`livekit-config`, then a `matrixrtc-bootstrap-token` Job waits for Synapse,
+creates or reuses the membership reader user, logs in, and patches the real
+Matrix access token into `matrixrtc-auth-secrets`. MatrixRTC auth waits for
+that token before starting, so LiveKit, MatrixRTC auth, and Element Call can
+start without a second bootstrap step.
 
 ### Environment overlays (dev vs prod)
 
