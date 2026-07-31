@@ -73,6 +73,16 @@ spec:
                 configMapKeyRef:
                   key: SPRING_LIQUIBASE_CONTEXTS
                   name: consultingtypeservice-configmap-env
+            - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+                  name: consultingtypeservice-configmap-env
+            - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
+              valueFrom:
+                configMapKeyRef:
+                  key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
+                  name: consultingtypeservice-configmap-env
             - name: CONSULTING_TYPES_JSON_PATH
               valueFrom:
                 configMapKeyRef:

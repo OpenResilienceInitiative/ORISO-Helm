@@ -150,6 +150,16 @@ spec:
               configMapKeyRef:
                 key: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
                 name: tenantservice-configmap-env
+          - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+                name: tenantservice-configmap-env
+          - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
+                name: tenantservice-configmap-env
         resources:
           requests:
             memory: "512Mi"

@@ -439,6 +439,16 @@ spec:
                 secretKeyRef:
                   key: SPRING_RABBITMQ_USERNAME
                   name: userservice-secret
+            - name: SPRING_RABBITMQ_HOST
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_RABBITMQ_HOST
+                  name: userservice-configmap-env
+            - name: SPRING_RABBITMQ_PORT
+              valueFrom:
+                configMapKeyRef:
+                  key: SPRING_RABBITMQ_PORT
+                  name: userservice-configmap-env
             - name: MATRIX_REGISTRATION_SHARED_SECRET
               valueFrom:
                 secretKeyRef:
