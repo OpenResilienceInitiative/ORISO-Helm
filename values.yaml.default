@@ -139,11 +139,17 @@ matrixrtcAuth:
     livekitApiKeyKey: "livekit-api-key"
     livekitApiSecretKey: "livekit-api-secret"
     redisUrlKey: "redis-url"
+  # Pinned by digest, not by tag. These two images are the authorization
+  # boundary for every LiveKit grant, so "which build is running" has to be
+  # answerable from the manifest alone — a mutable tag makes the rollback set
+  # undefined and, with pullPolicy IfNotPresent below, lets a restarted pod
+  # keep serving an older build without any visible difference.
+  # To update: publish from pre-dev, then paste the new digest here.
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:dev"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway@sha256:2bc86a3a178d26fbc8ab09887c75bc2f1dd8e2b6e41cacf836bad060124fec06"
     pullPolicy: Always
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:dev"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service@sha256:d62ecfd22cfbc2081d3814e63fc7fe2d969aab9fbba54881cd51552d971fd714"
     pullPolicy: IfNotPresent
   service:
     port: 3010
