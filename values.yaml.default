@@ -132,6 +132,11 @@ matrixrtcAuth:
   # look identical, which cost hours in ORISO-ElementCall#35. Lower it again
   # afterwards.
   logLevel: "off"
+  # Namespace of the ingress controller allowed to reach the policy
+  # gateway. Its pods live outside this release's namespace, so the
+  # NetworkPolicy needs the namespace by name (matched on the built-in
+  # kubernetes.io/metadata.name label) in addition to the pod labels.
+  ingressControllerNamespace: "ingress-nginx"
   bootstrap:
     enabled: true
     backoffLimit: 6

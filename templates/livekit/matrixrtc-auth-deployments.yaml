@@ -126,7 +126,7 @@ spec:
             - -ec
             - |
               i=0
-              until redis-cli -h redis -p 6379 -a "$REDIS_PASSWORD" ping | grep -q PONG; do
+              until redis-cli -h redis -p 6379 ping | grep -q PONG; do
                 i=$((i + 1))
                 if [ "$i" -ge 150 ]; then
                   echo "Timed out waiting for Redis on redis:6379" >&2
@@ -135,7 +135,10 @@ spec:
                 sleep 2
               done
           env:
-            - name: REDIS_PASSWORD
+            # REDISCLI_AUTH instead of `-a`: the password would otherwise sit in
+            # the container's argv, where anything that can read /proc can see
+            # it, and redis-cli warns about exactly that on stderr.
+            - name: REDISCLI_AUTH
               valueFrom:
                 secretKeyRef:
                   name: redis-secret
