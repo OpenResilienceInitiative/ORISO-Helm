@@ -38,6 +38,27 @@ def render() -> list[dict]:
     return [doc for doc in yaml.safe_load_all(result.stdout) if doc]
 
 
+def extract_location_block(snippet: str, path: str) -> str:
+    """Return the body of the active `location = <path>` block, or "".
+
+    Lines commented out with `#` are ignored, so a disabled handler cannot
+    satisfy the assertions below.
+    """
+    lines = [line for line in snippet.splitlines() if not line.strip().startswith("#")]
+    opener = f"location = {path}"
+    for index, line in enumerate(lines):
+        if opener not in line:
+            continue
+        depth = 0
+        body: list[str] = []
+        for current in lines[index:]:
+            depth += current.count("{") - current.count("}")
+            body.append(current)
+            if depth == 0 and body:
+                return "\n".join(body)
+    return ""
+
+
 def main() -> None:
     documents = render()
     ingress = next(
@@ -49,11 +70,19 @@ def main() -> None:
     snippet = ingress["metadata"]["annotations"].get(
         "nginx.ingress.kubernetes.io/server-snippet", ""
     )
-    assert "/.well-known/matrix/server" in snippet
+
+    # Assert on the active handler itself, not on substrings of the whole
+    # snippet: a commented-out or differently-scoped block must not satisfy
+    # this guard.
+    block = extract_location_block(snippet, "/.well-known/matrix/server")
+    assert block, "no active `location = /.well-known/matrix/server` block"
+    assert "return 200" in block
+    assert "default_type application/json" in block
+    assert "Access-Control-Allow-Origin *" in block
     # The delegation must name port 443, never the unreachable federation
     # default 8448 that caused the outage.
-    assert f'"m.server": "{DOMAIN}:443"' in snippet
-    assert "8448" not in snippet
+    assert f'"m.server": "{DOMAIN}:443"' in block
+    assert "8448" not in block
     print("PASS: matrix server delegation is published on :443")
 
 
