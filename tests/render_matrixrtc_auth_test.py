@@ -104,6 +104,22 @@ def main() -> None:
         "app.kubernetes.io/name": "ingress-nginx",
         "app.kubernetes.io/component": "controller",
     }
+
+    # lk-jwt-service validates the OpenID token against the homeserver over
+    # HTTPS. Without egress 443 every request is a 401 that the gateway proxies
+    # through silently, which is indistinguishable from a rejected caller.
+    upstream_policy = next(
+        doc
+        for doc in documents
+        if doc.get("kind") == "NetworkPolicy"
+        and doc["metadata"]["name"] == "matrixrtc-authorization-service"
+    )
+    upstream_egress_ports = {
+        port.get("port")
+        for rule in upstream_policy["spec"]["egress"]
+        for port in rule.get("ports", [])
+    }
+    assert 443 in upstream_egress_ports
     assert livekit["spec"]["replicas"] == 2
     assert livekit["spec"]["strategy"]["type"] == "RollingUpdate"
     assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 18000
