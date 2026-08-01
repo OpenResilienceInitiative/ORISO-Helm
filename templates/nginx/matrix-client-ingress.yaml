@@ -5,6 +5,19 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+    # Matrix server delegation. Without it, anything doing federation
+    # discovery for this server name falls back to the default port 8448,
+    # which nothing listens on. lk-jwt-service validates the OpenID token
+    # over `matrix://`, so it dialled :8448, got "connection refused", and
+    # every /sfu/get answered 401 — the call died with "SFU Config fetch
+    # failed with status code 401" and no component logged a denial, because
+    # none of them had denied anything.
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location = /.well-known/matrix/server {
+        default_type application/json;
+        add_header Access-Control-Allow-Origin *;
+        return 200 '{"m.server": "{{ .Values.global.domainName }}:443"}';
+      }
   name: matrix-client-ingress
 spec:
   ingressClassName: nginx
