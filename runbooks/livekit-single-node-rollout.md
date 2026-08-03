@@ -23,8 +23,17 @@ kubectl -n caritas get pods -l app=livekit -o wide
 Do not force-delete the old Pod. Force deletion removes the Kubernetes object
 before the container runtime has necessarily stopped the process, which can
 leave the host ports occupied and make the replacement crash-loop. If the
-rollout exceeds five minutes, inspect the terminating Pod and the node's
-container runtime before taking further action.
+rollout exceeds five minutes, run these diagnostics:
+
+```sh
+kubectl -n caritas get pods -l app=livekit -o wide
+kubectl -n caritas describe pod <terminating-pod>
+kubectl -n caritas get events --sort-by=.lastTimestamp
+kubectl describe node <node>
+```
+
+Inspect the terminating Pod, recent events, affected node, and its container
+runtime before taking further action.
 
 For an active-call smoke test, prove all of the following:
 

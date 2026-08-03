@@ -1,12 +1,24 @@
 {{- $strategy := required "livekit.deploymentStrategy is required" .Values.livekit.deploymentStrategy -}}
-{{- $terminationGrace := required "livekit.terminationGracePeriodSeconds is required" .Values.livekit.terminationGracePeriodSeconds -}}
+{{- $replicasRaw := toString .Values.livekit.replicas -}}
+{{- $terminationGraceRaw := toString .Values.livekit.terminationGracePeriodSeconds -}}
+{{- if not (regexMatch "^[0-9]+$" $replicasRaw) -}}
+{{- fail "livekit.replicas must be an integer" -}}
+{{- end -}}
+{{- if or (eq $terminationGraceRaw "") (eq $terminationGraceRaw "<nil>") -}}
+{{- fail "livekit.terminationGracePeriodSeconds is required" -}}
+{{- end -}}
+{{- if not (regexMatch "^[0-9]+$" $terminationGraceRaw) -}}
+{{- fail "livekit.terminationGracePeriodSeconds must be an integer" -}}
+{{- end -}}
+{{- $replicas := int $replicasRaw -}}
+{{- $terminationGrace := int $terminationGraceRaw -}}
 {{- if not (has $strategy (list "Recreate" "RollingUpdate")) -}}
 {{- fail "livekit.deploymentStrategy must be Recreate or RollingUpdate" -}}
 {{- end -}}
-{{- if and (eq $strategy "RollingUpdate") (lt (int .Values.livekit.replicas) 2) -}}
+{{- if and (eq $strategy "RollingUpdate") (lt $replicas 2) -}}
 {{- fail "livekit.deploymentStrategy=RollingUpdate requires livekit.replicas >= 2 because hostNetwork ports cannot overlap on a single node" -}}
 {{- end -}}
-{{- if or (lt (int $terminationGrace) 1) (gt (int $terminationGrace) 300) -}}
+{{- if or (lt $terminationGrace 1) (gt $terminationGrace 300) -}}
 {{- fail "livekit.terminationGracePeriodSeconds must be between 1 and 300 seconds" -}}
 {{- end -}}
 apiVersion: apps/v1
@@ -17,7 +29,7 @@ metadata:
   labels:
     app: livekit
 spec:
-  replicas: {{ .Values.livekit.replicas }}
+  replicas: {{ $replicas }}
   selector:
     matchLabels:
       app: livekit

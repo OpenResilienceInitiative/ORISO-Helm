@@ -84,6 +84,31 @@ def main() -> None:
     assert unbounded.returncode != 0
     assert "must be between 1 and 300 seconds" in unbounded.stderr
 
+    invalid_strategy = run_helm(
+        "--set-string", "livekit.deploymentStrategy=Replace"
+    )
+    assert invalid_strategy.returncode != 0
+    assert "must be Recreate or RollingUpdate" in invalid_strategy.stderr
+
+    zero_grace = run_helm(
+        "--set", "livekit.terminationGracePeriodSeconds=0"
+    )
+    assert zero_grace.returncode != 0
+    assert "must be between 1 and 300 seconds" in zero_grace.stderr
+
+    decimal_replicas = run_helm("--set-string", "livekit.replicas=2.5")
+    assert decimal_replicas.returncode != 0
+    assert "livekit.replicas must be an integer" in decimal_replicas.stderr
+
+    decimal_grace = run_helm(
+        "--set-string", "livekit.terminationGracePeriodSeconds=60.5"
+    )
+    assert decimal_grace.returncode != 0
+    assert (
+        "livekit.terminationGracePeriodSeconds must be an integer"
+        in decimal_grace.stderr
+    )
+
     print("PASS: single-node LiveKit rollout is serialized and bounded")
 
 
