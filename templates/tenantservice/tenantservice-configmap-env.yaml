@@ -23,6 +23,7 @@ data:
   CONSULTING_TYPE_SERVICE_API_URL: {{ .Values.consultingTypeService.serviceURL }}  
   MATRIX_API_URL: {{ .Values.matrix.matrixApiUrl }}
   MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}
+  FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED: {{ .Values.global.multitenancyWithSingleDomainEnabled | quote }}
   # OBS-P2: OTLP traces/metrics to the SigNoz gateway collector. Property
   # names + full /v1/{traces,metrics} paths verified against Spring Boot
   # 4.0.1 source directly (management.otlp.tracing.endpoint does NOT exist

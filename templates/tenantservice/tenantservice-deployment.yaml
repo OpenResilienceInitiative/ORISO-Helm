@@ -125,6 +125,11 @@ spec:
               configMapKeyRef:
                 key: USER_SERVICE_API_URL
                 name: tenantservice-configmap-env
+          - name: FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                key: FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED
+                name: tenantservice-configmap-env
           - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI
             valueFrom:
               configMapKeyRef:
