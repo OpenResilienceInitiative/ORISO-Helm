@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Render guard for LiveKit hostNetwork rollout safety."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+
+import yaml
+
+CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def render(*extra_args: str) -> list[dict]:
+    result = run_helm(*extra_args)
+    if result.returncode:
+        raise AssertionError(result.stderr)
+    return [document for document in yaml.safe_load_all(result.stdout) if document]
+
+
+def run_helm(*extra_args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            "helm",
+            "template",
+            "livekit-rollout",
+            CHART_DIR,
+            "-f",
+            os.path.join(CHART_DIR, "values.yaml.default"),
+            "-f",
+            os.path.join(CHART_DIR, "secrets.yaml.default"),
+            "--set-string",
+            "global.secrets.redisdefaultPass=test-redis-password",
+            *extra_args,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def find_livekit(documents: list[dict]) -> dict:
+    return next(
+        document
+        for document in documents
+        if document.get("kind") == "Deployment"
+        and document.get("metadata", {}).get("name") == "livekit"
+    )
+
+
+def main() -> None:
+    livekit = find_livekit(render())
+
+    assert livekit["spec"]["replicas"] == 1
+    assert livekit["spec"]["strategy"] == {"type": "Recreate"}
+    assert (
+        livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"]
+        == 60
+    )
+
+    rolling = find_livekit(
+        render(
+            "--set",
+            "livekit.replicas=2",
+            "--set-string",
+            "livekit.deploymentStrategy=RollingUpdate",
+        )
+    )
+    assert rolling["spec"]["strategy"] == {
+        "type": "RollingUpdate",
+        "rollingUpdate": {"maxUnavailable": 1, "maxSurge": 0},
+    }
+
+    unsafe = run_helm(
+        "--set-string", "livekit.deploymentStrategy=RollingUpdate"
+    )
+    assert unsafe.returncode != 0
+    assert "requires livekit.replicas >= 2" in unsafe.stderr
+
+    unbounded = run_helm(
+        "--set", "livekit.terminationGracePeriodSeconds=18000"
+    )
+    assert unbounded.returncode != 0
+    assert "must be between 1 and 300 seconds" in unbounded.stderr
+
+    print("PASS: single-node LiveKit rollout is serialized and bounded")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (AssertionError, KeyError, StopIteration) as error:
+        print(f"FAIL: {error}", file=sys.stderr)
+        sys.exit(1)

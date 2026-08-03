@@ -1,3 +1,14 @@
+{{- $strategy := required "livekit.deploymentStrategy is required" .Values.livekit.deploymentStrategy -}}
+{{- $terminationGrace := required "livekit.terminationGracePeriodSeconds is required" .Values.livekit.terminationGracePeriodSeconds -}}
+{{- if not (has $strategy (list "Recreate" "RollingUpdate")) -}}
+{{- fail "livekit.deploymentStrategy must be Recreate or RollingUpdate" -}}
+{{- end -}}
+{{- if and (eq $strategy "RollingUpdate") (lt (int .Values.livekit.replicas) 2) -}}
+{{- fail "livekit.deploymentStrategy=RollingUpdate requires livekit.replicas >= 2 because hostNetwork ports cannot overlap on a single node" -}}
+{{- end -}}
+{{- if or (lt (int $terminationGrace) 1) (gt (int $terminationGrace) 300) -}}
+{{- fail "livekit.terminationGracePeriodSeconds must be between 1 and 300 seconds" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,10 +22,12 @@ spec:
     matchLabels:
       app: livekit
   strategy:
-    type: RollingUpdate
+    type: {{ $strategy }}
+    {{- if eq $strategy "RollingUpdate" }}
     rollingUpdate:
       maxUnavailable: 1
       maxSurge: 0
+    {{- end }}
   template:
     metadata:
       labels:
@@ -31,7 +44,7 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       enableServiceLinks: false
       restartPolicy: Always
-      terminationGracePeriodSeconds: 18000
+      terminationGracePeriodSeconds: {{ $terminationGrace }}
       containers:
         - name: livekit
           image: {{ include "oriso.immutableImage" (list "livekit.image" .Values.livekit.image) | quote }}

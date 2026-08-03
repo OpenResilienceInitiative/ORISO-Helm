@@ -120,9 +120,9 @@ def main() -> None:
         for port in rule.get("ports", [])
     }
     assert 443 in upstream_egress_ports
-    assert livekit["spec"]["replicas"] == 2
-    assert livekit["spec"]["strategy"]["type"] == "RollingUpdate"
-    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 18000
+    assert livekit["spec"]["replicas"] == 1
+    assert livekit["spec"]["strategy"] == {"type": "Recreate"}
+    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 60
     assert livekit["spec"]["template"]["spec"]["volumes"][0]["secret"]["secretName"] == (
         "livekit-config"
     )
