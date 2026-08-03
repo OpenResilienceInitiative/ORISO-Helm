@@ -97,6 +97,9 @@ Kubernetes Secrets rendered by Helm from the ignored environment
   the in-chart Redis service and `global.secrets.redisdefaultPass`
 - `matrixrtcAuth.membershipToken` — optional manual Matrix access token
   override; leave blank to use the automatic bootstrap job
+- `matrixrtcAuth.callPolicyToken` — dedicated high-entropy secret shared only
+  by the MatrixRTC policy gateway and UserService; this authenticates the
+  cluster-internal fresh tenant-policy lookup
 
 During `helm upgrade --install`, the chart creates `matrixrtc-auth-secrets` and
 `livekit-config`, then a `matrixrtc-bootstrap-token` Job waits for Synapse,
@@ -104,6 +107,11 @@ creates or reuses the membership reader user, logs in, and patches the real
 Matrix access token into `matrixrtc-auth-secrets`. MatrixRTC auth waits for
 that token before starting, so LiveKit, MatrixRTC auth, and Element Call can
 start without a second bootstrap step.
+
+The gateway resolves every new call/reconnect against UserService before a
+LiveKit grant is issued. A tenant permission change therefore affects already
+open browser tabs on their next call, reconnect, or rejoin. Policy lookup is
+fail-closed; UserService unavailability never falls back to a permissive grant.
 
 ### Environment overlays (dev vs prod)
 

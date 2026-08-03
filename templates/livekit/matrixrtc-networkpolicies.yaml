@@ -37,6 +37,15 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app: userservice
+      ports:
+        - protocol: TCP
+          # NetworkPolicy is evaluated after Service DNAT on PreDev, so this
+          # must be the UserService pod targetPort, not the Service port.
+          port: 8082
     - ports:
         - protocol: TCP
           port: 443
