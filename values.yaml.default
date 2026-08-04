@@ -136,6 +136,7 @@ matrixrtcAuth:
   existingSecret:
     name: "matrixrtc-auth-secrets"
     membershipTokenKey: "matrix-membership-token"
+    callPolicyTokenKey: "call-policy-token"
     livekitApiKeyKey: "livekit-api-key"
     livekitApiSecretKey: "livekit-api-secret"
     redisUrlKey: "redis-url"

@@ -72,6 +72,10 @@ spec:
               value: /run/secrets/matrix-membership-token
             - name: MATRIXRTC_UPSTREAM_URL
               value: "http://matrixrtc-authorization-service:8080"
+            - name: MATRIXRTC_CALL_POLICY_URL
+              value: "http://userservice:8080/internal/matrixrtc/call-policy"
+            - name: MATRIXRTC_CALL_POLICY_TOKEN_FILE
+              value: /run/secrets/call-policy-token
           ports:
             - name: http
               containerPort: 3010
@@ -94,6 +98,8 @@ spec:
             items:
               - key: {{ .Values.matrixrtcAuth.existingSecret.membershipTokenKey | quote }}
                 path: matrix-membership-token
+              - key: {{ .Values.matrixrtcAuth.existingSecret.callPolicyTokenKey | quote }}
+                path: call-policy-token
 ---
 apiVersion: apps/v1
 kind: Deployment
