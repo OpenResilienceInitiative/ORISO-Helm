@@ -296,6 +296,13 @@ userService:
   passwordResetFrontendBaseUrl: "https://your-domain.example.com"
   passwordResetAdminFrontendBaseUrl: "https://admin.your-domain.example.com/admin"
 
+  # Default SMTP transport. Credentials stay in persistent secret values
+  # (`userService.smtpUser` / `userService.smtpPassword`), not in this file.
+  smtpHost: "mail.dreambau.com"
+  smtpPort: 587
+  smtpSecure: false
+  smtpFrom: "ORISO Platform <monty.burns@oriso.org>"
+
   # Account-invite accept links (TEN-INV-U6/U7). UserService appends the full
   # route itself: /admin/tenant-onboarding/{token} for tenant-admin invites,
   # /account-invite/{token} for all other roles. Both values are therefore
