@@ -158,6 +158,11 @@ matrixrtcAuth:
 
 livekit:
   replicas: 1
+  # hostNetwork binds node-local RTC ports. A single replica must be fully
+  # terminated before its replacement is created or both processes compete
+  # for the same ports.
+  deploymentStrategy: Recreate
+  terminationGracePeriodSeconds: 60
   image: "docker.io/livekit/livekit-server@sha256:2c6869d2d5ff6c9c0166f47be1c92dad6928bfecfa5e4060a6ece48db8accfa3"
   existingConfigSecret:
     name: "livekit-config"
