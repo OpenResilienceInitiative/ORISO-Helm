@@ -80,10 +80,7 @@ jobs:
           set -euo pipefail
 
           helm lint . -f values.yaml.default -f secrets.yaml.default
-          helm template oriso . -f values.yaml.default -f secrets.yaml.default \
-            --set-string userService.smtpUser=smtp-validation-user \
-            --set-string userService.smtpPassword=smtp-validation-password \
-            >/tmp/oriso-rendered.yaml
+          helm template oriso . -f values.yaml.default -f secrets.yaml.default >/tmp/oriso-rendered.yaml
 
       - name: Package Helm chart
         shell: bash
