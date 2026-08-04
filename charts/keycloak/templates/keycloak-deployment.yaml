@@ -31,7 +31,7 @@ spec:
           command: ['sh', '-c', 'until nc -z {{ .Values.dbServer }}.{{ .Release.Namespace }} 3306; do echo waiting for mariadb; sleep 2; done']
       containers:
         - name: keycloak
-          image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
+          image: "{{ .Values.imageName }}:{{ .Values.imageVersion }}"
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -43,6 +43,9 @@ spec:
             - /opt/keycloak/bin/kc.sh
           args:
             - start
+            # Imports realm.json only when the realm is absent; existing realms are skipped.
+            # Keep this out of lifecycle hooks so pod restarts never re-import over live data.
+            - --import-realm
           env:
             - name: KC_DB
               valueFrom:
@@ -126,20 +129,6 @@ spec:
             periodSeconds: {{ .Values.keycloakProbes.readiness.periodSeconds | default 10 }}
             failureThreshold: {{ .Values.keycloakProbes.readiness.failureThreshold | default 3 }}
           {{- end }}
-          lifecycle:
-            postStart:
-              exec:
-                command:
-                  - /bin/sh
-                  - -c
-                  - |
-                    (
-                    sleep 300;
-                    if [ ! -f /tmp/keycloak-initialized.lock ]; then
-                      /opt/keycloak/bin/kc.sh import --file /data/import/realm.json && \
-                      touch /tmp/keycloak-initialized.lock;
-                    fi
-                    ) &
           volumeMounts:
             - mountPath: /opt/keycloak/themes/custom-theme/login
               name: keycloak-theme-templates
@@ -155,7 +144,7 @@ spec:
               name: keycloak-theme-email-html
             - mountPath: /opt/keycloak/themes/custom-theme/email/text
               name: keycloak-theme-email-text
-            - mountPath: /data/import
+            - mountPath: /opt/keycloak/data/import
               name: keycloak-full-dump
       volumes:
         - name: keycloak-theme-templates
