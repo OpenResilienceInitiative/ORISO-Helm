@@ -72,6 +72,10 @@ spec:
               value: /run/secrets/matrix-membership-token
             - name: MATRIXRTC_UPSTREAM_URL
               value: "http://matrixrtc-authorization-service:8080"
+            - name: MATRIXRTC_CALL_POLICY_URL
+              value: "http://userservice:8080/internal/matrixrtc/call-policy"
+            - name: MATRIXRTC_CALL_POLICY_TOKEN_FILE
+              value: /run/secrets/call-policy-token
           ports:
             - name: http
               containerPort: 3010
@@ -94,6 +98,8 @@ spec:
             items:
               - key: {{ .Values.matrixrtcAuth.existingSecret.membershipTokenKey | quote }}
                 path: matrix-membership-token
+              - key: {{ .Values.matrixrtcAuth.existingSecret.callPolicyTokenKey | quote }}
+                path: call-policy-token
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -163,8 +169,12 @@ spec:
               value: {{ .Values.matrix.matrixServerName | quote }}
             - name: LIVEKIT_JWT_BIND
               value: ":8080"
+            # Stays "off" by default: lk-jwt-service logs Matrix user and room
+            # identifiers, which are personal data on a counselling platform.
+            # Overridable so a bounded investigation on a test environment does
+            # not need a hand-applied kubectl patch (ORISO-ElementCall#35).
             - name: LIVEKIT_LOG_LEVEL
-              value: "off"
+              value: {{ .Values.matrixrtcAuth.logLevel | default "off" | quote }}
             - name: LIVEKIT_REDIS_URL
               valueFrom:
                 secretKeyRef:

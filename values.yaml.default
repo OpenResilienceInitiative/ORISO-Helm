@@ -5,16 +5,20 @@ cert-manager:
 global:
 
   domainName: "your-domain.example.com"
+  # Empty means PVCs use the cluster's default StorageClass. Set one value here
+  # only when the environment must force a specific class for all chart-owned PVCs.
+  storageClass: ""
   domains:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
-  # OTLP telemetry export to SigNoz (deployed separately via ORISO-SignOZ).
-  # Off by default; enable per environment.
+  # OTLP telemetry export to SigNoz. If signoz.enabled=true, ORISO points the
+  # services at the bundled SigNoz collector automatically.
   observability:
     otlpEnabled: false
+    autoEnableWithSignoz: true
     deploymentEnvironment: "pre-dev"   # environment tag on exported signals
-    otlpCollectorHost: "" # e.g. signoz-otel-collector.<namespace>:4318 (used when otlpEnabled=true)
+    otlpCollectorHost: "" # optional external collector host:port when signoz.enabled=false
 
 
 
@@ -125,20 +129,32 @@ online-counseling-mariadb:
 matrixrtcAuth:
   replicas: 1
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
+  # Namespace of the ingress controller allowed to reach the policy
+  # gateway. Its pods live outside this release's namespace, so the
+  # NetworkPolicy needs the namespace by name (matched on the built-in
+  # kubernetes.io/metadata.name label) in addition to the pod labels.
+  ingressControllerNamespace: "ingress-nginx"
   bootstrap:
     enabled: true
     backoffLimit: 6
   existingSecret:
     name: "matrixrtc-auth-secrets"
     membershipTokenKey: "matrix-membership-token"
+    callPolicyTokenKey: "call-policy-token"
     livekitApiKeyKey: "livekit-api-key"
     livekitApiSecretKey: "livekit-api-secret"
     redisUrlKey: "redis-url"
+  # Pinned by digest, not by tag. These two images are the authorization
+  # boundary for every LiveKit grant, so "which build is running" has to be
+  # answerable from the manifest alone — a mutable tag makes the rollback set
+  # undefined and, with pullPolicy IfNotPresent below, lets a restarted pod
+  # keep serving an older build without any visible difference.
+  # To update: publish from pre-dev, then paste the new digest here.
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:dev"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway@sha256:2bc86a3a178d26fbc8ab09887c75bc2f1dd8e2b6e41cacf836bad060124fec06"
     pullPolicy: Always
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:dev"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service@sha256:d62ecfd22cfbc2081d3814e63fc7fe2d969aab9fbba54881cd51552d971fd714"
     pullPolicy: IfNotPresent
   service:
     port: 3010
@@ -147,6 +163,11 @@ matrixrtcAuth:
 
 livekit:
   replicas: 1
+  # hostNetwork binds node-local RTC ports. A single replica must be fully
+  # terminated before its replacement is created or both processes compete
+  # for the same ports.
+  deploymentStrategy: Recreate
+  terminationGracePeriodSeconds: 60
   image: "docker.io/livekit/livekit-server@sha256:2c6869d2d5ff6c9c0166f47be1c92dad6928bfecfa5e4060a6ece48db8accfa3"
   existingConfigSecret:
     name: "livekit-config"
@@ -285,6 +306,13 @@ userService:
   passwordResetFrontendBaseUrl: "https://your-domain.example.com"
   passwordResetAdminFrontendBaseUrl: "https://admin.your-domain.example.com/admin"
 
+  # Default SMTP transport. Credentials stay in persistent secret values
+  # (`userService.smtpUser` / `userService.smtpPassword`), not in this file.
+  smtpHost: "mail.dreambau.com"
+  smtpPort: 587
+  smtpSecure: false
+  smtpFrom: "ORISO Platform <monty.burns@oriso.org>"
+
   # Account-invite accept links (TEN-INV-U6/U7). UserService appends the full
   # route itself: /admin/tenant-onboarding/{token} for tenant-admin invites,
   # /account-invite/{token} for all other roles. Both values are therefore
@@ -323,6 +351,15 @@ nginxController:
 
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
+
+# SigNoz observability stack. Disabled by default; set signoz.enabled=true to
+# deploy SigNoz in the same release and auto-enable OTLP export for the
+# backend services through global.observability.autoEnableWithSignoz.
+signoz:
+  enabled: false
+  clickhouse:
+    persistence:
+      size: 20Gi
 
 # Health Dashboard
 healthDashboard:

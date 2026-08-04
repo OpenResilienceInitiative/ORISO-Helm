@@ -26,3 +26,7 @@ dependencies:
   - name: online-counseling-redis
     version: 0.0.1
     repository: file://charts/redis
+  - name: signoz
+    version: 0.135.1
+    repository: https://charts.signoz.io
+    condition: signoz.enabled

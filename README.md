@@ -97,6 +97,9 @@ Kubernetes Secrets rendered by Helm from the ignored environment
   the in-chart Redis service and `global.secrets.redisdefaultPass`
 - `matrixrtcAuth.membershipToken` — optional manual Matrix access token
   override; leave blank to use the automatic bootstrap job
+- `matrixrtcAuth.callPolicyToken` — dedicated high-entropy secret shared only
+  by the MatrixRTC policy gateway and UserService; this authenticates the
+  cluster-internal fresh tenant-policy lookup
 
 During `helm upgrade --install`, the chart creates `matrixrtc-auth-secrets` and
 `livekit-config`, then a `matrixrtc-bootstrap-token` Job waits for Synapse,
@@ -104,6 +107,11 @@ creates or reuses the membership reader user, logs in, and patches the real
 Matrix access token into `matrixrtc-auth-secrets`. MatrixRTC auth waits for
 that token before starting, so LiveKit, MatrixRTC auth, and Element Call can
 start without a second bootstrap step.
+
+The gateway resolves every new call/reconnect against UserService before a
+LiveKit grant is issued. A tenant permission change therefore affects already
+open browser tabs on their next call, reconnect, or rejoin. Policy lookup is
+fail-closed; UserService unavailability never falls back to a permissive grant.
 
 ### Environment overlays (dev vs prod)
 
@@ -127,10 +135,28 @@ never toggled** — there is no dev "encryption off" mode by design (see
 
 ### Prod telemetry (OTLP → SigNoz)
 
-Prod telemetry export is off by default (`global.observability.otlpEnabled:
-false` in `values-prod.yaml`) and stays off until a human explicitly decides
-otherwise. The KDG-safe pseudonymization pipeline that would make turning it
-on safe is built but also off by default
+Prod telemetry export is off by default unless the bundled SigNoz dependency
+is enabled. Set `signoz.enabled=true` to deploy SigNoz with ORISO-Helm and
+automatically point the backend services at the in-cluster OTLP HTTP collector
+(`caritas-signoz-otel-collector.<namespace>:4318` for the default release
+name):
+
+```bash
+helm dependency build .
+helm upgrade --install caritas ./ -n caritas --create-namespace \
+  --wait-for-jobs --timeout 15m \
+  -f values.yaml -f secrets.yaml \
+  --set signoz.enabled=true
+```
+
+The SigNoz UI is exposed at `https://signoz.<global.domainName>` by the parent
+chart ingress. If SigNoz is deployed somewhere else, leave `signoz.enabled=false`
+and set both `global.observability.otlpEnabled=true` and
+`global.observability.otlpCollectorHost=<collector-host>:4318`. No
+`secrets.yaml` change is required for the bundled default SigNoz install.
+
+The KDG-safe pseudonymization pipeline that would make turning production
+telemetry on safe is built but also off by default
 (`global.observability.telemetryPseudonymizationEnabled`) — see
 `docs/observability-prod-pseudonymization.md` for exactly what is
 pseudonymized/dropped and the sign-off steps before either flag is flipped

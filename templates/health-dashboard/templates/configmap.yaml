@@ -30,6 +30,6 @@ data:
         { "label": "Frontend", "url": "https://{{ .Values.global.domainName }}" },
         { "label": "Admin Panel", "url": "https://{{ .Values.global.domainName }}/admin" },
         { "label": "Keycloak", "url": "https://{{ .Values.global.domainName }}/auth" },
-        { "label": "Signoz", "url": "https://signoz.{{ .Values.global.domainName }}" }
+        { "label": "Signoz", "url": "{{ include "oriso.signozExternalUrl" . }}" }
       ]
     }

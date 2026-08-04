@@ -25,6 +25,12 @@ def render() -> list[dict]:
             os.path.join(CHART_DIR, "secrets.yaml.default"),
             "--set-string",
             "global.secrets.redisdefaultPass=test-redis-password",
+            "--set-string",
+            "matrixrtcAuth.callPolicyToken=test-only-call-policy-token-with-at-least-48-characters",
+            "--set-string",
+            "userService.smtpUser=smtp-canary-user",
+            "--set-string",
+            "userService.smtpPassword=smtp-canary-password",
         ],
         capture_output=True,
         text=True,
@@ -57,13 +63,15 @@ def main() -> None:
 
     gateway = find(documents, "Deployment", "matrixrtc-auth-policy-gateway")
     upstream = find(documents, "Deployment", "matrixrtc-authorization-service")
+    userservice = find(documents, "Deployment", "userservice")
     livekit = find(documents, "Deployment", "livekit")
     ingress = find(documents, "Ingress", "livekit-jwt-ingress")
-    assert ("Secret", "livekit-config") not in names
-    assert ("Secret", "matrixrtc-auth-secrets") not in names
+    auth_secret = find(documents, "Secret", "matrixrtc-auth-secrets")
+    find(documents, "Secret", "livekit-config")
 
     gateway_container = gateway["spec"]["template"]["spec"]["containers"][0]
     upstream_container = upstream["spec"]["template"]["spec"]["containers"][0]
+    userservice_container = userservice["spec"]["template"]["spec"]["containers"][0]
     livekit_container = livekit["spec"]["template"]["spec"]["containers"][0]
 
     for container in (gateway_container, upstream_container, livekit_container):
@@ -81,9 +89,79 @@ def main() -> None:
         for entry in upstream_container["env"]
     }
     assert upstream_env["LIVEKIT_LOG_LEVEL"]["value"] == "off"
-    assert livekit["spec"]["replicas"] == 2
-    assert livekit["spec"]["strategy"]["type"] == "RollingUpdate"
-    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 18000
+    gateway_env = {entry["name"]: entry for entry in gateway_container["env"]}
+    assert gateway_env["MATRIXRTC_CALL_POLICY_URL"]["value"] == (
+        "http://userservice:8080/internal/matrixrtc/call-policy"
+    )
+    assert gateway_env["MATRIXRTC_CALL_POLICY_TOKEN_FILE"]["value"] == (
+        "/run/secrets/call-policy-token"
+    )
+    gateway_secret_items = gateway["spec"]["template"]["spec"]["volumes"][0][
+        "secret"
+    ]["items"]
+    assert {
+        "key": "call-policy-token",
+        "path": "call-policy-token",
+    } in gateway_secret_items
+
+    userservice_env = {
+        entry["name"]: entry for entry in userservice_container["env"]
+    }
+    assert userservice_env["MATRIXRTC_CALL_POLICY_TOKEN"]["valueFrom"] == {
+        "secretKeyRef": {
+            "name": "matrixrtc-auth-secrets",
+            "key": "call-policy-token",
+        }
+    }
+    call_policy_token = auth_secret["stringData"]["call-policy-token"]
+    assert len(call_policy_token) >= 48
+    assert call_policy_token not in {"", "changeme"}
+
+    # The ingress controller lives in its own namespace. A bare podSelector
+    # would silently deny it and every /livekit/jwt request would 502, so the
+    # namespace must be selected explicitly and ANDed with the pod labels in
+    # one rule (never a namespace-wide allow).
+    gateway_policy = next(
+        doc
+        for doc in documents
+        if doc.get("kind") == "NetworkPolicy"
+        and doc["metadata"]["name"] == "matrixrtc-auth-policy-gateway"
+    )
+    controller_rule = next(
+        entry
+        for entry in gateway_policy["spec"]["ingress"][0]["from"]
+        if "namespaceSelector" in entry
+    )
+    assert controller_rule["namespaceSelector"]["matchLabels"] == {
+        "kubernetes.io/metadata.name": "ingress-nginx"
+    }
+    assert controller_rule["podSelector"]["matchLabels"] == {
+        "app.kubernetes.io/name": "ingress-nginx",
+        "app.kubernetes.io/component": "controller",
+    }
+    assert {
+        "to": [{"podSelector": {"matchLabels": {"app": "userservice"}}}],
+        "ports": [{"protocol": "TCP", "port": 8082}],
+    } in gateway_policy["spec"]["egress"]
+
+    # lk-jwt-service validates the OpenID token against the homeserver over
+    # HTTPS. Without egress 443 every request is a 401 that the gateway proxies
+    # through silently, which is indistinguishable from a rejected caller.
+    upstream_policy = next(
+        doc
+        for doc in documents
+        if doc.get("kind") == "NetworkPolicy"
+        and doc["metadata"]["name"] == "matrixrtc-authorization-service"
+    )
+    upstream_egress_ports = {
+        port.get("port")
+        for rule in upstream_policy["spec"]["egress"]
+        for port in rule.get("ports", [])
+    }
+    assert 443 in upstream_egress_ports
+    assert livekit["spec"]["replicas"] == 1
+    assert livekit["spec"]["strategy"] == {"type": "Recreate"}
+    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 60
     assert livekit["spec"]["template"]["spec"]["volumes"][0]["secret"]["secretName"] == (
         "livekit-config"
     )
