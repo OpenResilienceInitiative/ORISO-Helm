@@ -11,7 +11,9 @@ spec:
   resources:
     requests:
       storage: 10Gi
-  storageClassName: block-storage
+  {{- if .Values.global.storageClass }}
+  storageClassName: {{ .Values.global.storageClass | quote }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -26,7 +28,9 @@ spec:
   resources:
     requests:
       storage: 20Gi
-  storageClassName: block-storage
+  {{- if .Values.global.storageClass }}
+  storageClassName: {{ .Values.global.storageClass | quote }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -41,5 +45,6 @@ spec:
   resources:
     requests:
       storage: 50Gi
-  storageClassName: block-storage
-
+  {{- if .Values.global.storageClass }}
+  storageClassName: {{ .Values.global.storageClass | quote }}
+  {{- end }}

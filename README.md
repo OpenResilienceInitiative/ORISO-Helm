@@ -135,10 +135,28 @@ never toggled** — there is no dev "encryption off" mode by design (see
 
 ### Prod telemetry (OTLP → SigNoz)
 
-Prod telemetry export is off by default (`global.observability.otlpEnabled:
-false` in `values-prod.yaml`) and stays off until a human explicitly decides
-otherwise. The KDG-safe pseudonymization pipeline that would make turning it
-on safe is built but also off by default
+Prod telemetry export is off by default unless the bundled SigNoz dependency
+is enabled. Set `signoz.enabled=true` to deploy SigNoz with ORISO-Helm and
+automatically point the backend services at the in-cluster OTLP HTTP collector
+(`caritas-signoz-otel-collector.<namespace>:4318` for the default release
+name):
+
+```bash
+helm dependency build .
+helm upgrade --install caritas ./ -n caritas --create-namespace \
+  --wait-for-jobs --timeout 15m \
+  -f values.yaml -f secrets.yaml \
+  --set signoz.enabled=true
+```
+
+The SigNoz UI is exposed at `https://signoz.<global.domainName>` by the parent
+chart ingress. If SigNoz is deployed somewhere else, leave `signoz.enabled=false`
+and set both `global.observability.otlpEnabled=true` and
+`global.observability.otlpCollectorHost=<collector-host>:4318`. No
+`secrets.yaml` change is required for the bundled default SigNoz install.
+
+The KDG-safe pseudonymization pipeline that would make turning production
+telemetry on safe is built but also off by default
 (`global.observability.telemetryPseudonymizationEnabled`) — see
 `docs/observability-prod-pseudonymization.md` for exactly what is
 pseudonymized/dropped and the sign-off steps before either flag is flipped

@@ -44,9 +44,9 @@ data:
   # names + full /v1/{traces,metrics} paths verified against Spring Boot
   # 4.0.1 source directly (management.otlp.tracing.endpoint does NOT exist
   # in this version).
-  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: "http://{{ .Values.global.observability.otlpCollectorHost }}/v1/traces"
-  MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
-  MANAGEMENT_OTLP_METRICS_EXPORT_URL: "http://{{ .Values.global.observability.otlpCollectorHost }}/v1/metrics"
-  MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: {{ .Values.global.observability.otlpEnabled | quote }}
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: "http://{{ include "oriso.otlpCollectorHost" . }}/v1/traces"
+  MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: {{ include "oriso.observabilityEnabled" . | quote }}
+  MANAGEMENT_OTLP_METRICS_EXPORT_URL: "http://{{ include "oriso.otlpCollectorHost" . }}/v1/metrics"
+  MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: {{ include "oriso.observabilityEnabled" . | quote }}
   MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: "always"
   MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS: "always"

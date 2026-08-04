@@ -5,16 +5,20 @@ cert-manager:
 global:
 
   domainName: "your-domain.example.com"
+  # Empty means PVCs use the cluster's default StorageClass. Set one value here
+  # only when the environment must force a specific class for all chart-owned PVCs.
+  storageClass: ""
   domains:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
-  # OTLP telemetry export to SigNoz (deployed separately via ORISO-SignOZ).
-  # Off by default; enable per environment.
+  # OTLP telemetry export to SigNoz. If signoz.enabled=true, ORISO points the
+  # services at the bundled SigNoz collector automatically.
   observability:
     otlpEnabled: false
+    autoEnableWithSignoz: true
     deploymentEnvironment: "pre-dev"   # environment tag on exported signals
-    otlpCollectorHost: "" # e.g. signoz-otel-collector.<namespace>:4318 (used when otlpEnabled=true)
+    otlpCollectorHost: "" # optional external collector host:port when signoz.enabled=false
 
 
 
@@ -347,6 +351,15 @@ nginxController:
 
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
+
+# SigNoz observability stack. Disabled by default; set signoz.enabled=true to
+# deploy SigNoz in the same release and auto-enable OTLP export for the
+# backend services through global.observability.autoEnableWithSignoz.
+signoz:
+  enabled: false
+  clickhouse:
+    persistence:
+      size: 20Gi
 
 # Health Dashboard
 healthDashboard:

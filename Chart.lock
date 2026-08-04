@@ -14,5 +14,8 @@ dependencies:
 - name: online-counseling-redis
   repository: file://charts/redis
   version: 0.0.1
-digest: sha256:e9f40394b390926549ff32e4d21dbe070cbe519edad3acb9de07b3910e329b82
-generated: "2026-07-05T09:40:39.344408+02:00"
+- name: signoz
+  repository: https://charts.signoz.io
+  version: 0.135.1
+digest: sha256:7af73c76aa5a6e8aca945f2dd302f2ab8301c4987008e944df0bea027dff7727
+generated: "2026-08-04T16:55:25.986502+05:00"

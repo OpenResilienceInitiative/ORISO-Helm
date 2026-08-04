@@ -1,0 +1,5 @@
+{{- $observabilityEnabled := eq (include "oriso.observabilityEnabled" .) "true" -}}
+{{- $collectorHost := include "oriso.otlpCollectorHost" . -}}
+{{- if and $observabilityEnabled (eq $collectorHost "") -}}
+{{- fail "global.observability.otlpCollectorHost is required when OTLP observability is enabled without signoz.enabled=true" -}}
+{{- end -}}
