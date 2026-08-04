@@ -65,17 +65,14 @@ def render(extra_values_files: list[str] | None = None) -> list[dict]:
     ]
     for values_file in extra_values_files or []:
         cmd += ["-f", os.path.join(CHART_DIR, values_file)]
-    if extra_values_files:
-        # The environment overlays configure an SMTP transport, whose render
-        # gate requires credentials; real deploys carry them in the persistent
-        # secret values. Default renders stay credential-free like the real
-        # default configuration.
-        cmd += [
-            "--set-string",
-            "userService.smtpUser=smtp-canary-user",
-            "--set-string",
-            "userService.smtpPassword=smtp-canary-password",
-        ]
+    # The default values configure an SMTP transport, whose render gate requires
+    # credentials; real deploys carry them in the persistent secret values.
+    cmd += [
+        "--set-string",
+        "userService.smtpUser=smtp-canary-user",
+        "--set-string",
+        "userService.smtpPassword=smtp-canary-password",
+    ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise AssertionError(f"helm template failed:\n{proc.stderr}")
