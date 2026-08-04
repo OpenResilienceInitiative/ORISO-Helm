@@ -1,0 +1,35 @@
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $orisoIngress := get $signoz "orisoIngress" | default dict -}}
+{{- $signozApp := get $signoz "signoz" | default dict -}}
+{{- $signozService := get $signozApp "service" | default dict -}}
+{{- if and (get $signoz "enabled" | default false) (get $orisoIngress "enabled" | default true) -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "oriso.signozServiceName" . }}-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: signoz
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ get $orisoIngress "clusterIssuer" | default "letsencrypt-prod" | quote }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: {{ get $orisoIngress "ingressClassName" | default "nginx" | quote }}
+  tls:
+    - hosts:
+        - {{ printf "signoz.%s" .Values.global.domainName | quote }}
+      secretName: {{ printf "signoz-%s-tls" (.Values.global.domainName | replace "." "-") }}
+  rules:
+    - host: {{ printf "signoz.%s" .Values.global.domainName | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "oriso.signozServiceName" . }}
+                port:
+                  number: {{ get $signozService "port" | default 8080 }}
+{{- end -}}
