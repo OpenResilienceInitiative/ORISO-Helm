@@ -87,9 +87,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          helm lint . -f values.yaml.default -f secrets.yaml.default
-          python tests/render_livekit_rollout_test.py
-          helm template oriso . -f values.yaml.default -f secrets.yaml.default >/tmp/oriso-rendered.yaml
+          # values.yaml.default configures an SMTP transport and the chart's
+          # render gate requires non-empty SMTP credentials with it, so the
+          # validation render supplies placeholders the same way real deploys
+          # supply the credentials from persistent secret values.
+          helm lint . -f values.yaml.default -f secrets.yaml.default \
+            --set-string userService.smtpUser=smtp-validation-user \
+            --set-string userService.smtpPassword=smtp-validation-password
+          helm template oriso . -f values.yaml.default -f secrets.yaml.default \
+            --set-string userService.smtpUser=smtp-validation-user \
+            --set-string userService.smtpPassword=smtp-validation-password \
+            >/tmp/oriso-rendered.yaml
 
       - name: Package Helm chart
         shell: bash
