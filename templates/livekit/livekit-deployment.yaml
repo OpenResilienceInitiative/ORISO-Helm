@@ -60,7 +60,7 @@ spec:
       containers:
         - name: livekit
           image: {{ include "oriso.immutableImage" (list "livekit.image" .Values.livekit.image) | quote }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           args:
             - --config
             - /etc/livekit/config.yaml

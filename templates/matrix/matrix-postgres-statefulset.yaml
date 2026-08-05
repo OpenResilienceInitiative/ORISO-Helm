@@ -22,7 +22,7 @@ spec:
       containers:
       - name: postgres
         image: postgres:15-alpine
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         env:
         - name: POSTGRES_USER
           valueFrom:

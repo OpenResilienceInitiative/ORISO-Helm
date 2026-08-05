@@ -24,6 +24,7 @@ spec:
       initContainers:
         - name: wait-for-matrixrtc-membership-token
           image: {{ include "oriso.immutableImage" (list "elementCall.healthcheckImage" .Values.elementCall.healthcheckImage) | quote }}
+          imagePullPolicy: Always
           command:
             - /bin/sh
             - -ec
@@ -127,6 +128,7 @@ spec:
       initContainers:
         - name: wait-for-redis
           image: {{ printf "%s:%s" (index .Values "online-counseling-redis").imageName (index .Values "online-counseling-redis").imageVersion | quote }}
+          imagePullPolicy: Always
           command:
             - /bin/sh
             - -ec
