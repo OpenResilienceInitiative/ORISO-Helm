@@ -100,6 +100,29 @@ def main() -> None:
     assert "block-storage" not in rendered
     assert "local-path" not in rendered
 
+    guarded_templates = {
+        "charts/mariadb/templates/mariadb-statefulset.yaml": [
+            "mariadb-data-mariadb-0"
+        ],
+        "charts/mongodb/templates/mongodb-statefulset.yaml": [
+            "mongodb-data-mongodb-0"
+        ],
+        "charts/redis/templates/redis-persistentvolumeclaim.yaml": ["redis-pvc"],
+        "templates/userservice/userservice-report-persistentvolumeclaim.yaml": [
+            "userservice-report"
+        ],
+        "templates/matrix/matrix-pvcs-clean.yaml": [
+            "matrix-synapse-data",
+            "matrix-postgres-pvc",
+            "matrix-postgres-backup-pvc",
+        ],
+    }
+    for template, pvc_names in guarded_templates.items():
+        template_body = open(os.path.join(CHART_DIR, template), encoding="utf-8").read()
+        assert "lookup \"v1\" \"PersistentVolumeClaim\"" in template_body
+        for pvc_name in pvc_names:
+            assert pvc_name in template_body
+
     print("PASS: default PVCs do not hardcode a StorageClass")
 
 
