@@ -18,13 +18,6 @@ spec:
       paths:
       - backend:
           service:
-            name: element-call
-            port:
-              number: 80
-        path: /room
-        pathType: Prefix
-      - backend:
-          service:
             name: agencyservice
             port:
               number: 8080

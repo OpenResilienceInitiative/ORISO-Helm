@@ -1,30 +1,24 @@
-﻿
+
 cert-manager:
   enabled: true
 
 global:
 
   domainName: "your-domain.example.com"
-  # Empty means PVCs use the cluster's default StorageClass. Set one value here
-  # only when the environment must force a specific class for all chart-owned PVCs.
+  # Empty = cluster default StorageClass.
   storageClass: ""
-  # Default image pull policy for chart-managed workloads. Dev-style mutable tags
-  # should use Always; override per environment only when deploying immutable tags
-  # or digests and you deliberately want node cache reuse.
+  # Override per environment only for immutable tags/digests.
   imagePullPolicy: "Always"
   domains:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
-  # OTLP telemetry export to SigNoz. If signoz.enabled=true, ORISO points the
-  # services at the bundled SigNoz collector automatically.
+  # OTLP export to SigNoz — auto-enabled when signoz.enabled=true.
   observability:
     otlpEnabled: false
     autoEnableWithSignoz: true
     deploymentEnvironment: "pre-dev"   # environment tag on exported signals
     otlpCollectorHost: "" # optional external collector host:port when signoz.enabled=false
-
-
 
   acmedomainName: "acme.your-domain.example.com"
  #adminDomainName: "admin.your-domain.example.com"
@@ -67,20 +61,16 @@ global:
   statisticsEnabled: "true"
   demographicsEnabled: "false"
 
-  # Prod-safe baseline: no dummy seeding. The dev overlay (values-dev.yaml)
-  # turns this on. See docs/infrastructure-report-2026-07.md §7.
+  # No dummy seeding here — the dev overlay (values-dev.yaml) turns this on.
   initializeDummyData: false
 
   logstashHost: "http://logstash.default:8080"
 
-  # Matrix values needed by subcharts (subcharts cannot see the top-level `matrix:` block).
-  # matrixAdminUsername / matrixAdminPassword must be set under global.matrix in secrets.yaml.
+  # Needed by subcharts; admin credentials go under global.matrix in secrets.yaml.
   matrix:
     matrixServerName: "your-server.local"
 
   # Keycloak connection
-
-
   keycloak:
     realm: "your-realm"
     authServerUrl: "https://your-domain.example.com/auth"
@@ -104,8 +94,7 @@ matrix:
   synapseEnableAuthenticatedMedia: "false"
   matrixApiUrl: "http://matrix-synapse:8008"
   matrixServerName: "your-server.local"
-  # Server's own public IP, exempted from Synapse rate limiting. Supplied by the
-  # per-environment overlay — never hardcode an IP in the chart (ADR-005 / DB-M04).
+  # Public IP exempt from Synapse rate limiting; set per environment (ADR-005).
   serverPublicIp: ""
 
 elementCall:
@@ -124,7 +113,6 @@ online-counseling-mongodb:
   imageName: "mongo"
   imageVersion: "5.0"
 
-
 # MariaDB
 online-counseling-mariadb:
   imageName: "mariadb"
@@ -133,10 +121,7 @@ online-counseling-mariadb:
 matrixrtcAuth:
   replicas: 1
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
-  # Namespace of the ingress controller allowed to reach the policy
-  # gateway. Its pods live outside this release's namespace, so the
-  # NetworkPolicy needs the namespace by name (matched on the built-in
-  # kubernetes.io/metadata.name label) in addition to the pod labels.
+  # Namespace of the ingress controller, needed by the NetworkPolicy.
   ingressControllerNamespace: "ingress-nginx"
   bootstrap:
     enabled: true
@@ -148,12 +133,7 @@ matrixrtcAuth:
     livekitApiKeyKey: "livekit-api-key"
     livekitApiSecretKey: "livekit-api-secret"
     redisUrlKey: "redis-url"
-  # Pinned by digest, not by tag. These two images are the authorization
-  # boundary for every LiveKit grant, so "which build is running" has to be
-  # answerable from the manifest alone — a mutable tag makes the rollback set
-  # undefined and, with pullPolicy IfNotPresent below, lets a restarted pod
-  # keep serving an older build without any visible difference.
-  # To update: publish from pre-dev, then paste the new digest here.
+  # Pinned by digest — these images are the LiveKit authorization boundary.
   gateway:
     image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway@sha256:2bc86a3a178d26fbc8ab09887c75bc2f1dd8e2b6e41cacf836bad060124fec06"
     pullPolicy: ""
@@ -167,16 +147,13 @@ matrixrtcAuth:
 
 livekit:
   replicas: 1
-  # hostNetwork binds node-local RTC ports. A single replica must be fully
-  # terminated before its replacement is created or both processes compete
-  # for the same ports.
+  # hostNetwork ports — the replica must fully terminate before its replacement starts.
   deploymentStrategy: Recreate
   terminationGracePeriodSeconds: 60
   image: "docker.io/livekit/livekit-server:v1.13.5"
   existingConfigSecret:
     name: "livekit-config"
     key: "config.yaml"
-
 
 # RabbitMQ
 online-counseling-rabbitmq:
@@ -189,7 +166,6 @@ online-counseling-redis:
   imageVersion: "7-alpine"
   serviceURL: "redis://redis:6379"
 
-
 # Keycloak
 online-counseling-keycloak:
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
@@ -197,9 +173,9 @@ online-counseling-keycloak:
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
-  dbDatabase: "keycloak" 
+  dbDatabase: "keycloak"
 
-  # Logging (supported log levels are ALL, DEBUG, ERROR, FATAL, INFO, OFF, TRACE and WARN)
+  # Log levels: ALL, DEBUG, ERROR, FATAL, INFO, OFF, TRACE, WARN
   keycloakLogLevel: "WARN"
   rootLogLevel: "WARN"
 
@@ -243,7 +219,7 @@ consultingTypeService:
 tenantService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "dev"  
+  imageVersion: "dev"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -254,76 +230,51 @@ tenantService:
   springRabbitmqPort: "5672"
 
 
-
 # User service
 userService:
   replicas: 1
   image: "ghcr.io/openresilienceinitiative/oriso-userservice:dev"
   serviceURL: "http://userservice:8080"
- 
+
   keycloakResource: "user-service"
 
   springProfilesActive: "prod"
 
-  # Encrypted Matrix room creation. Encryption is ON by default: the
-  # repository contract is that development and production must never run
-  # with encryption disabled, so the prod-safe baseline enables it rather
-  # than offering an encryption-off default that looks supported.
+  # Encryption must never be disabled in any environment.
   matrixEncryptionEnabled: "true"
 
-  # RabbitMQ broker used by Spring AMQP health checks and listeners.
   springRabbitmqHost: "rabbitmq"
   springRabbitmqPort: "5672"
 
-  # Redis lease duration for consultant Live Chat availability. The Redis
-  # password is wired from the chart's existing Secret; host/port default to
-  # the in-chart Redis Service and can be overridden to point at an external
-  # instance (templates must not hardcode hosts).
   redisHost: "redis"
   redisPort: 6379
   consultantAvailabilityRedisTtlSeconds: 120
 
-  # ADR-018 Global Support Access: time-boxed (4h) encrypted 1:1 Matrix room after a
-  # support-admin/consultant handshake. Ships disabled; enable per-env only after the
-  # global-support-admin realm role exists in Keycloak. See runbooks/support-access-enablement.md.
+  # ADR-018 Global Support Access — see runbooks/support-access-enablement.md.
   supportAccess:
     enabled: "false"
     handshakeTtlSeconds: 300
     sessionTtlHours: 4
     auditRetentionMonths: 12
 
-  # 2FA / OTP login posture (independent from Matrix room encryption).
-  # Enabled by default so fresh installs require OTP enrollment for all user
-  # categories unless an environment overlay deliberately opts out.
+  # 2FA / OTP login posture — enabled by default.
   otpAllowedForUsers: "true"
   otpAllowedForConsultants: "true"
   otpAllowedForSingleTenantAdmins: "true"
   otpAllowedForTenantSuperAdmins: "true"
 
-  # Base URL of the deployed frontend the one-time links in the Magic Link
-  # login email and the self-service password-reset email point back to.
-  # Must be overridden by the environment deployment values — the sample
-  # default (https://app.oriso.org) does not resolve. Password reset fails
-  # closed (no email sent) if left unset; Magic Link falls back to the
-  # broken app default, so both must be set together.
+  # Must be overridden per environment; password reset fails closed if unset.
   magicLinkFrontendBaseUrl: "https://your-domain.example.com"
   passwordResetFrontendBaseUrl: "https://your-domain.example.com"
   passwordResetAdminFrontendBaseUrl: "https://admin.your-domain.example.com/admin"
 
-  # Default SMTP transport. Credentials stay in persistent secret values
-  # (`userService.smtpUser` / `userService.smtpPassword`), not in this file.
+  # SMTP credentials live in secrets (userService.smtpUser / smtpPassword).
   smtpHost: "mail.dreambau.com"
   smtpPort: 587
   smtpSecure: false
   smtpFrom: "ORISO Platform <monty.burns@oriso.org>"
 
-  # Account-invite accept links (TEN-INV-U6/U7). UserService appends the full
-  # route itself: /admin/tenant-onboarding/{token} for tenant-admin invites,
-  # /account-invite/{token} for all other roles. Both values are therefore
-  # bare origins; the admin one must NOT end in /admin. Leave unset to fall
-  # back to the app's system-notification base URL — REQUIRED wherever the
-  # Admin panel lives on its own host (e.g. Pre-Dev), otherwise tenant-admin
-  # invite mails link to a host that does not serve the onboarding route.
+  # Bare origins for account-invite links (TEN-INV-U6/U7); unset = system-notification base URL.
   # accountInviteAppFrontendBaseUrl: "https://your-domain.example.com"
   # accountInviteAdminFrontendBaseUrl: "https://admin.your-domain.example.com"
 
@@ -356,11 +307,13 @@ nginxController:
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
 
-# SigNoz observability stack. Disabled by default; set signoz.enabled=true to
-# deploy SigNoz in the same release and auto-enable OTLP export for the
-# backend services through global.observability.autoEnableWithSignoz.
+# SigNoz — set signoz.enabled=true to deploy it and auto-enable OTLP export.
 signoz:
   enabled: false
+  # UI is served at https://<global.domainName>/signoz — keep in sync per environment.
+  signoz:
+    env:
+      signoz_global_external__url: "https://your-domain.example.com/signoz"
   telemetryStoreMigrator:
     upgradeHelmHooks: false
   clickhouse:

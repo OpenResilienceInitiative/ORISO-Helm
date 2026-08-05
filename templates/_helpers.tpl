@@ -58,5 +58,5 @@ the bundled SigNoz chart is enabled, use its in-cluster collector service.
 
 {{- define "oriso.signozExternalUrl" -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
-{{- default (printf "https://signoz.%s" .Values.global.domainName) (get $signoz "externalUrl" | default "") -}}
+{{- default (printf "https://%s/signoz" .Values.global.domainName) (get $signoz "externalUrl" | default "") -}}
 {{- end -}}
