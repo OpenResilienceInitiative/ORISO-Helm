@@ -361,6 +361,8 @@ nginxController:
 # backend services through global.observability.autoEnableWithSignoz.
 signoz:
   enabled: false
+  telemetryStoreMigrator:
+    upgradeHelmHooks: false
   clickhouse:
     persistence:
       size: 20Gi
