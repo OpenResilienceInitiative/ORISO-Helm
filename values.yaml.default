@@ -361,6 +361,10 @@ nginxController:
 # backend services through global.observability.autoEnableWithSignoz.
 signoz:
   enabled: false
+  # UI is served at https://<global.domainName>/signoz — keep in sync per environment.
+  signoz:
+    env:
+      signoz_global_external__url: "https://your-domain.example.com/signoz"
   telemetryStoreMigrator:
     upgradeHelmHooks: false
   clickhouse:
