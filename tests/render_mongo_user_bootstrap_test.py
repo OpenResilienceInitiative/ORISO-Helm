@@ -53,9 +53,7 @@ def main() -> None:
     secret = find(documents, "Secret", "mongodb-secret")
     job = find(documents, "Job", "create-mongo-users")
 
-    assert job["metadata"]["annotations"]["helm.sh/hook"] == (
-        "post-install,post-upgrade"
-    )
+    assert job["metadata"]["annotations"]["helm.sh/hook"] == "post-install"
     assert job["metadata"]["annotations"]["helm.sh/hook-delete-policy"] == (
         "before-hook-creation,hook-succeeded"
     )
@@ -87,7 +85,7 @@ def main() -> None:
     assert "$MONGO_CONSULTING_TYPES_USER" in script
     assert "$MONGO_CONSULTING_TYPES_PASSWORD" in script
 
-    print("PASS: Mongo user bootstrap includes ConsultingType user on install and upgrade")
+    print("PASS: Mongo user bootstrap includes ConsultingType user on install only")
 
 
 if __name__ == "__main__":
