@@ -17,7 +17,7 @@ spec:
       containers:
         - name: redis
           image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 6379
               protocol: TCP
@@ -59,6 +59,7 @@ spec:
 
         - name: redis-exporter
           image: oliver006/redis_exporter:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 9121
               name: metrics

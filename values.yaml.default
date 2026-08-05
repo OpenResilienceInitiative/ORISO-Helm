@@ -155,7 +155,7 @@ matrixrtcAuth:
     pullPolicy: Always
   upstream:
     image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service@sha256:d62ecfd22cfbc2081d3814e63fc7fe2d969aab9fbba54881cd51552d971fd714"
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   service:
     port: 3010
     targetPort: 3010
@@ -366,7 +366,7 @@ healthDashboard:
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
     tag: dev
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   replicas: 1
   namespace: ""
   resources: {}
