@@ -13,19 +13,23 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
   annotations:
-    cert-manager.io/cluster-issuer: {{ get $orisoIngress "clusterIssuer" | default "letsencrypt-prod" | quote }}
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
 spec:
   ingressClassName: {{ get $orisoIngress "ingressClassName" | default "nginx" | quote }}
+  # Served on the main domain under /signoz — reuses the main-ingress
+  # certificate, so no extra DNS record or cert-manager Certificate is needed.
   tls:
     - hosts:
-        - {{ printf "signoz.%s" .Values.global.domainName | quote }}
-      secretName: {{ printf "signoz-%s-tls" (.Values.global.domainName | replace "." "-") }}
+        - {{ .Values.global.domainName | quote }}
+      secretName: {{ printf "%s-tls" (.Values.global.domainName | replace "." "-") }}
   rules:
-    - host: {{ printf "signoz.%s" .Values.global.domainName | quote }}
+    - host: {{ .Values.global.domainName | quote }}
       http:
         paths:
-          - path: /
+          # SigNoz resolves assets/APIs against SIGNOZ_GLOBAL_EXTERNAL__URL
+          # (signoz.signoz.env), which requires the full /signoz path to be
+          # forwarded unmodified — do not add a rewrite annotation here.
+          - path: /signoz
             pathType: Prefix
             backend:
               service:
