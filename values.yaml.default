@@ -95,8 +95,8 @@ global:
       enabled: true
 
 matrix:
-  image: "matrixdotorg/synapse@sha256:0000000000000000000000000000000000000000000000000000000000000000"
-  initImage: "busybox@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  image: "matrixdotorg/synapse:v1.158.0"
+  initImage: "busybox:1.38.0"
   replicas: 1
   postgresReplicas: 1
   synapseServerName: "your-server.local"
@@ -172,7 +172,7 @@ livekit:
   # for the same ports.
   deploymentStrategy: Recreate
   terminationGracePeriodSeconds: 60
-  image: "docker.io/livekit/livekit-server@sha256:2c6869d2d5ff6c9c0166f47be1c92dad6928bfecfa5e4060a6ece48db8accfa3"
+  image: "docker.io/livekit/livekit-server:v1.13.5"
   existingConfigSecret:
     name: "livekit-config"
     key: "config.yaml"

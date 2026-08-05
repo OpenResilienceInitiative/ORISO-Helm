@@ -62,6 +62,13 @@ def assert_pull_policy(documents: list[dict], expected: str) -> None:
 
 
 def main() -> None:
+    with open(os.path.join(CHART_DIR, "values.yaml.default"), encoding="utf-8") as values_file:
+        default_values = yaml.safe_load(values_file)
+
+    assert default_values["matrix"]["image"] == "matrixdotorg/synapse:v1.158.0"
+    assert default_values["matrix"]["initImage"] == "busybox:1.38.0"
+    assert default_values["livekit"]["image"] == "docker.io/livekit/livekit-server:v1.13.5"
+
     assert_pull_policy(render(), "Always")
     assert_pull_policy(
         render("--set-string", "global.imagePullPolicy=IfNotPresent"),
