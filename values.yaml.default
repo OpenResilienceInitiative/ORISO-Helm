@@ -133,12 +133,11 @@ matrixrtcAuth:
     livekitApiKeyKey: "livekit-api-key"
     livekitApiSecretKey: "livekit-api-secret"
     redisUrlKey: "redis-url"
-  # Pinned by digest — these images are the LiveKit authorization boundary.
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway@sha256:457093d70f9839d6cdbb139bcefbb4139d2be8342e31c57fb3262dbb2cc6f995"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.2"
     pullPolicy: ""
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service@sha256:b01c5ec9d9425821d0e91ba218b0688aa58f73a80454f66ee9934bffd1f1f2e7"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.2"
     pullPolicy: ""
   service:
     port: 3010
