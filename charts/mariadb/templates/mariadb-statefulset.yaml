@@ -1,5 +1,10 @@
 apiVersion: apps/v1
 kind: StatefulSet
+{{ $existingDataPvc := lookup "v1" "PersistentVolumeClaim" .Release.Namespace "mariadb-data-mariadb-0" }}
+{{ $storageClass := .Values.global.storageClass }}
+{{ if $existingDataPvc }}
+{{ $storageClass = $existingDataPvc.spec.storageClassName | default "" }}
+{{ end }}
 metadata:
   name: mariadb
 spec:
@@ -49,6 +54,6 @@ spec:
         resources:
           requests:
             storage: 10Gi
-        {{- if .Values.global.storageClass }}
-        storageClassName: {{ .Values.global.storageClass | quote }}
+        {{- if $storageClass }}
+        storageClassName: {{ $storageClass | quote }}
         {{- end }}
