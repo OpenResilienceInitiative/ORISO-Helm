@@ -34,5 +34,4 @@ INSERT IGNORE INTO `topic` (
   (15,1,'{"de": "Leben im Alter", "en": "Life in Old Age"}','{"de": "Beratung zum Leben im Alter", "en": "Counselling on life in old age"}','ACTIVE','2026-06-01 11:27:16','2026-06-01 11:27:16','life-in-old-age',NULL,NULL,NULL,0,'{"de": "Leben im Alter", "en": "Life in Old Age"}','{"de": "Leben im Alter", "en": "Life in Old Age"}','Willkommen zur Beratung zum Leben im Alter','Leben im Alter','life-in-old-age'),
   (16,1,'{"de": "Kuren Mütter & Väter", "en": "Rehabilitation Cures for Mothers & Fathers"}','{"de": "Beratung zu Kuren für Mütter und Väter", "en": "Counselling on rehabilitation cures for mothers and fathers"}','ACTIVE','2026-06-01 11:27:16','2026-06-01 11:27:16','cures-parents',NULL,NULL,NULL,0,'{"de": "Kuren Mütter & Väter", "en": "Cures for Parents"}','{"de": "Kuren Mütter & Väter", "en": "Rehabilitation Cures for Mothers & Fathers"}','Willkommen zur Beratung zu Kuren für Mütter & Väter','Kuren Mütter & Väter','cures-mothers-fathers');
 
-SELECT COALESCE(MAX(`id`), 1) INTO @topic_sequence_value FROM `topic`;
-DO SETVAL(`sequence_topic`, @topic_sequence_value, 0);
+DO SETVAL(`sequence_topic`, 16, 1);
