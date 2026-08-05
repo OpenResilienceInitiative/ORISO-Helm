@@ -3,12 +3,14 @@ kind: Job
 metadata:
   name: create-mongo-users
   annotations:
-    "helm.sh/hook": post-install
+    "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "1"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
+  activeDeadlineSeconds: 600
   template:
     spec:
+      activeDeadlineSeconds: 600
       restartPolicy: Never
       initContainers:
         - name: wait-for-mongo-ready
@@ -28,10 +30,15 @@ spec:
             - sh
             - -c
             - |
-              until mongosh --username "$MONGODB_USERNAME" --password "$MONGODB_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping')" mongodb.{{ .Release.Namespace }}:27017; do
-                echo "waiting for mongodb auth to work";
+              for attempt in $(seq 1 150); do
+                if mongosh --username "$MONGODB_USERNAME" --password "$MONGODB_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping')" mongodb.{{ .Release.Namespace }}:27017; then
+                  exit 0;
+                fi
+                echo "waiting for mongodb auth to work (${attempt}/150)";
                 sleep 2;
               done
+              echo "timed out waiting for mongodb auth to work" >&2;
+              exit 1
       containers:
         - name: create-mongo-users
           image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
