@@ -25,7 +25,7 @@ spec:
       containers:
       - name: health-dashboard
         image: "{{ .Values.healthDashboard.image.repository }}:{{ .Values.healthDashboard.image.tag }}"
-        imagePullPolicy: {{ .Values.healthDashboard.image.pullPolicy }}
+        imagePullPolicy: {{ default (include "oriso.imagePullPolicy" .) .Values.healthDashboard.image.pullPolicy | quote }}
         ports:
         - name: http
           containerPort: {{ .Values.healthDashboard.service.targetPort }}

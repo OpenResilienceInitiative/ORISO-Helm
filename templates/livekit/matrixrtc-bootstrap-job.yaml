@@ -81,7 +81,7 @@ spec:
       containers:
         - name: bootstrap
           image: {{ include "oriso.immutableImage" (list "matrix.image" .Values.matrix.image) | quote }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: MATRIX_BASE_URL
               value: {{ .Values.matrix.matrixApiUrl | quote }}

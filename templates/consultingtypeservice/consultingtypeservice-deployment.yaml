@@ -26,7 +26,7 @@ spec:
       containers:
         - name: consultingtypeservice
           image:  {{ .Values.consultingTypeService.imageName }}:{{ .Values.consultingTypeService.imageVersion }}          
-          imagePullPolicy: Always
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:

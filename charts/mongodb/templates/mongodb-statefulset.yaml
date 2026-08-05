@@ -26,6 +26,7 @@ spec:
       initContainers:
         - name: add-keyfile
           image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           command: ["bash", "-c"]
           args:
             - >
@@ -41,6 +42,7 @@ spec:
       containers:
         - name: mongodb
           image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           args:
           - --bind_ip_all
           - --oplogSize

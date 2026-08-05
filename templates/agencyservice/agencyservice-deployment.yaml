@@ -26,7 +26,7 @@ spec:
       containers:
         - name: agencyservice
           image: {{ include "oriso.immutableImage" (list "agencyService.image" .Values.agencyService.image) | quote }}
-          imagePullPolicy: Always
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: CSRF_COOKIE_PROPERTY
               valueFrom:

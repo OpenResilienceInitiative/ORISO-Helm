@@ -9,6 +9,15 @@ not available.
 {{- end -}}
 
 {{/*
+Default image pull policy for chart-managed workloads. Keep this value
+environment-overridable from values.yaml/secrets.yaml instead of hardcoding it
+in templates.
+*/}}
+{{- define "oriso.imagePullPolicy" -}}
+{{- default "Always" .Values.global.imagePullPolicy -}}
+{{- end -}}
+
+{{/*
 Resolve whether ORISO services should export OTLP telemetry.
 Enabling the bundled SigNoz dependency turns this on automatically unless
 global.observability.autoEnableWithSignoz is explicitly false.

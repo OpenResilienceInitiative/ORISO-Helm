@@ -28,11 +28,12 @@ spec:
       initContainers:
         - name: wait-for-mariadb
           image: busybox:1.36
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           command: ['sh', '-c', 'until nc -z {{ .Values.dbServer }}.{{ .Release.Namespace }} 3306; do echo waiting for mariadb; sleep 2; done']
       containers:
         - name: keycloak
           image: "{{ .Values.imageName }}:{{ .Values.imageVersion }}"
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           ports:
             - containerPort: 8080
           {{- if .Values.keycloakResources }}
