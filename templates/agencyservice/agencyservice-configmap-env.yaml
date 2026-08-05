@@ -1,3 +1,7 @@
+{{- $liquibaseChangeLog := default "classpath:db/changelog/agencyservice-master.xml" .Values.agencyService.liquibaseChangeLog | replace "classpath:/db/changelog" "classpath:db/changelog" -}}
+{{- if eq $liquibaseChangeLog "classpath:db/changelog/db.changelog-master.xml" -}}
+{{- $liquibaseChangeLog = "classpath:db/changelog/agencyservice-master.xml" -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,8 +10,8 @@ data:
   CSRF_COOKIE_PROPERTY:  {{ .Values.global.csrfCookieProperty }}
   CSRF_HEADER_PROPERTY: {{ .Values.global.csrfHeaderProperty }}
   SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}
-  SPRING_LIQUIBASE_CHANGE_LOG: {{ default "classpath:db/changelog/agencyservice-master.xml" .Values.agencyService.liquibaseChangeLog | replace "classpath:/db/changelog" "classpath:db/changelog" | quote }}
-  SPRING_LIQUIBASE_CHANGELOG: {{ default "classpath:db/changelog/agencyservice-master.xml" .Values.agencyService.liquibaseChangeLog | replace "classpath:/db/changelog" "classpath:db/changelog" | quote }}
+  SPRING_LIQUIBASE_CHANGE_LOG: {{ $liquibaseChangeLog | quote }}
+  SPRING_LIQUIBASE_CHANGELOG: {{ $liquibaseChangeLog | quote }}
   SPRING_LIQUIBASE_CONTEXTS: {{ default "seed" .Values.agencyService.liquibaseContexts | quote }}
   KEYCLOAK_CORS: "false"
   KEYCLOAK_AUTH_SERVER_URL: {{ .Values.global.keycloak.authServerUrl }}
