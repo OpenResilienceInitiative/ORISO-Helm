@@ -1,9 +1,14 @@
 apiVersion: apps/v1
 kind: StatefulSet
-{{ $existingDataPvc := lookup "v1" "PersistentVolumeClaim" .Release.Namespace "mariadb-data-mariadb-0" }}
 {{ $storageClass := .Values.global.storageClass }}
-{{ if $existingDataPvc }}
-{{ $storageClass = $existingDataPvc.spec.storageClassName | default "" }}
+{{ $existingStatefulSet := lookup "apps/v1" "StatefulSet" .Release.Namespace "mariadb" }}
+{{ if and $existingStatefulSet $existingStatefulSet.spec.volumeClaimTemplates }}
+{{ $existingClaim := index $existingStatefulSet.spec.volumeClaimTemplates 0 }}
+{{ if hasKey $existingClaim.spec "storageClassName" }}
+{{ $storageClass = $existingClaim.spec.storageClassName | default "" }}
+{{ else }}
+{{ $storageClass = "" }}
+{{ end }}
 {{ end }}
 metadata:
   name: mariadb

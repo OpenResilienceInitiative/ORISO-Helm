@@ -100,13 +100,16 @@ def main() -> None:
     assert "block-storage" not in rendered
     assert "local-path" not in rendered
 
-    guarded_templates = {
-        "charts/mariadb/templates/mariadb-statefulset.yaml": [
-            "mariadb-data-mariadb-0"
-        ],
-        "charts/mongodb/templates/mongodb-statefulset.yaml": [
-            "mongodb-data-mongodb-0"
-        ],
+    statefulset_guarded_templates = {
+        "charts/mariadb/templates/mariadb-statefulset.yaml": "mariadb",
+        "charts/mongodb/templates/mongodb-statefulset.yaml": "mongodb",
+    }
+    for template, statefulset_name in statefulset_guarded_templates.items():
+        template_body = open(os.path.join(CHART_DIR, template), encoding="utf-8").read()
+        assert "lookup \"apps/v1\" \"StatefulSet\"" in template_body
+        assert statefulset_name in template_body
+
+    pvc_guarded_templates = {
         "charts/redis/templates/redis-persistentvolumeclaim.yaml": ["redis-pvc"],
         "templates/userservice/userservice-report-persistentvolumeclaim.yaml": [
             "userservice-report"
@@ -117,7 +120,7 @@ def main() -> None:
             "matrix-postgres-backup-pvc",
         ],
     }
-    for template, pvc_names in guarded_templates.items():
+    for template, pvc_names in pvc_guarded_templates.items():
         template_body = open(os.path.join(CHART_DIR, template), encoding="utf-8").read()
         assert "lookup \"v1\" \"PersistentVolumeClaim\"" in template_body
         for pvc_name in pvc_names:
