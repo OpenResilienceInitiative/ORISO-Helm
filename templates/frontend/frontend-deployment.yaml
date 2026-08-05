@@ -28,7 +28,7 @@ spec:
       containers:
         - image: {{ include "oriso.immutableImage" (list "frontend.image" .Values.frontend.image) | quote }}
           name: frontend          
-          imagePullPolicy: Always
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           envFrom:
             - configMapRef:
                 name: frontend-configmap

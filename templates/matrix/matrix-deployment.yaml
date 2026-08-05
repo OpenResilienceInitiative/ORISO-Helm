@@ -23,7 +23,7 @@ spec:
       initContainers:
         - name: fix-permissions
           image: {{ include "oriso.immutableImage" (list "matrix.initImage" .Values.matrix.initImage) | quote }}
-          imagePullPolicy: Always
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           command:
           - sh
           - -c
@@ -38,7 +38,7 @@ spec:
       containers:
       - name: synapse
         image: {{ include "oriso.immutableImage" (list "matrix.image" .Values.matrix.image) | quote }}
-        imagePullPolicy: Always
+        imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
         env:
           - name: SYNAPSE_SERVER_NAME
             valueFrom:

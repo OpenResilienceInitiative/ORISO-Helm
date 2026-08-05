@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render guard that every workload container always pulls images."""
+"""Render guard for value-driven image pull policy."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKLOAD_KINDS = {"Deployment", "StatefulSet", "DaemonSet", "Job"}
 
 
-def render() -> list[dict]:
+def render(*extra_args: str) -> list[dict]:
     result = subprocess.run(
         [
             "helm",
@@ -30,6 +30,7 @@ def render() -> list[dict]:
             "userService.smtpUser=smtp-canary-user",
             "--set-string",
             "userService.smtpPassword=smtp-canary-password",
+            *extra_args,
         ],
         capture_output=True,
         text=True,
@@ -40,9 +41,9 @@ def render() -> list[dict]:
     return [document for document in yaml.safe_load_all(result.stdout) if document]
 
 
-def main() -> None:
+def assert_pull_policy(documents: list[dict], expected: str) -> None:
     failures = []
-    for document in render():
+    for document in documents:
         kind = document.get("kind")
         if kind not in WORKLOAD_KINDS:
             continue
@@ -52,13 +53,21 @@ def main() -> None:
         for field in ("initContainers", "containers"):
             for container in pod_spec.get(field, []) or []:
                 pull_policy = container.get("imagePullPolicy")
-                if pull_policy != "Always":
+                if pull_policy != expected:
                     failures.append(
                         f"{kind}/{name} {field}/{container.get('name')} has {pull_policy!r}"
                     )
 
     assert not failures, "\n".join(failures)
-    print("PASS: all rendered workload containers use imagePullPolicy Always")
+
+
+def main() -> None:
+    assert_pull_policy(render(), "Always")
+    assert_pull_policy(
+        render("--set-string", "global.imagePullPolicy=IfNotPresent"),
+        "IfNotPresent",
+    )
+    print("PASS: all rendered workload containers use configured imagePullPolicy")
 
 
 if __name__ == "__main__":

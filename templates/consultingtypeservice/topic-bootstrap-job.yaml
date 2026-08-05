@@ -25,7 +25,7 @@ spec:
       containers:
         - name: topic-bootstrap
           image: "{{ $mariadb.imageName }}:{{ $mariadb.imageVersion }}"
-          imagePullPolicy: Always
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: MYSQL_HOST
               value: "mariadb.{{ .Release.Namespace }}"

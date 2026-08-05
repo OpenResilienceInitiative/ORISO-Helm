@@ -15,7 +15,7 @@ spec:
       initContainers:
         - name: wait-for-mongo-ready
           image: mongo:6.0
-          imagePullPolicy: Always
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: MONGODB_USERNAME
               valueFrom:
@@ -43,7 +43,7 @@ spec:
       containers:
         - name: create-mongo-users
           image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
-          imagePullPolicy: Always
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: MONGODB_USERNAME
               valueFrom:

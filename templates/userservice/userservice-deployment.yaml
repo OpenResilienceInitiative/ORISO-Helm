@@ -29,7 +29,7 @@ spec:
       containers:
         - name: userservice
           image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
-          imagePullPolicy: Always
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: MATRIXRTC_CALL_POLICY_TOKEN
               valueFrom:

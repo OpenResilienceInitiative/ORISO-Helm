@@ -8,6 +8,10 @@ global:
   # Empty means PVCs use the cluster's default StorageClass. Set one value here
   # only when the environment must force a specific class for all chart-owned PVCs.
   storageClass: ""
+  # Default image pull policy for chart-managed workloads. Dev-style mutable tags
+  # should use Always; override per environment only when deploying immutable tags
+  # or digests and you deliberately want node cache reuse.
+  imagePullPolicy: "Always"
   domains:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
@@ -152,10 +156,10 @@ matrixrtcAuth:
   # To update: publish from pre-dev, then paste the new digest here.
   gateway:
     image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway@sha256:2bc86a3a178d26fbc8ab09887c75bc2f1dd8e2b6e41cacf836bad060124fec06"
-    pullPolicy: Always
+    pullPolicy: ""
   upstream:
     image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service@sha256:d62ecfd22cfbc2081d3814e63fc7fe2d969aab9fbba54881cd51552d971fd714"
-    pullPolicy: Always
+    pullPolicy: ""
   service:
     port: 3010
     targetPort: 3010
@@ -366,7 +370,7 @@ healthDashboard:
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
     tag: dev
-    pullPolicy: Always
+    pullPolicy: ""
   replicas: 1
   namespace: ""
   resources: {}
