@@ -26,6 +26,7 @@ spec:
       containers:
         - name: mariadb
           image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:

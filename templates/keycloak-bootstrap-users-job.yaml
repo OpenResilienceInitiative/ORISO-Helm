@@ -34,7 +34,7 @@ spec:
       containers:
         - name: bootstrap-users
           image: "{{ $kc.imageName }}:{{ $kc.imageVersion }}"
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: KEYCLOAK_URL
               value: "http://keycloak.{{ .Release.Namespace }}:8080/auth"

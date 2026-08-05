@@ -29,7 +29,7 @@ spec:
       containers:
       - name: admin
         image: {{ .Values.admin.imageName }}:{{ .Values.admin.imageVersion }}     
-        imagePullPolicy: Always
+        imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
         envFrom:
           - configMapRef:
               name: admin-configmap

@@ -24,6 +24,7 @@ spec:
       initContainers:
         - name: wait-for-matrixrtc-membership-token
           image: {{ include "oriso.immutableImage" (list "elementCall.healthcheckImage" .Values.elementCall.healthcheckImage) | quote }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           command:
             - /bin/sh
             - -ec
@@ -50,7 +51,7 @@ spec:
       containers:
         - name: gateway
           image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.gateway.image" .Values.matrixrtcAuth.gateway.image) | quote }}
-          imagePullPolicy: {{ .Values.matrixrtcAuth.gateway.pullPolicy }}
+          imagePullPolicy: {{ default (include "oriso.imagePullPolicy" .) .Values.matrixrtcAuth.gateway.pullPolicy | quote }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -127,6 +128,7 @@ spec:
       initContainers:
         - name: wait-for-redis
           image: {{ printf "%s:%s" (index .Values "online-counseling-redis").imageName (index .Values "online-counseling-redis").imageVersion | quote }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           command:
             - /bin/sh
             - -ec
@@ -149,7 +151,7 @@ spec:
       containers:
         - name: authorization-service
           image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.upstream.image" .Values.matrixrtcAuth.upstream.image) | quote }}
-          imagePullPolicy: {{ .Values.matrixrtcAuth.upstream.pullPolicy }}
+          imagePullPolicy: {{ default (include "oriso.imagePullPolicy" .) .Values.matrixrtcAuth.upstream.pullPolicy | quote }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
