@@ -1,3 +1,7 @@
+{{- $liquibaseChangeLog := default "classpath:db/changelog/consultingtypeservice-master.xml" .Values.consultingTypeService.liquibaseChangeLog | replace "classpath:/db/changelog" "classpath:db/changelog" -}}
+{{- if eq $liquibaseChangeLog "classpath:db/changelog/db.changelog-master.xml" -}}
+{{- $liquibaseChangeLog = "classpath:db/changelog/consultingtypeservice-master.xml" -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,8 +11,8 @@ data:
   CSRF_COOKIE_PROPERTY:  {{ .Values.global.csrfCookieProperty }}
   CSRF_HEADER_PROPERTY: {{ .Values.global.csrfHeaderProperty }}
   SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}
-  SPRING_LIQUIBASE_CHANGE_LOG: {{ default "classpath:db/changelog/consultingtypeservice-master.xml" .Values.consultingTypeService.liquibaseChangeLog | replace "classpath:/db/changelog" "classpath:db/changelog" | quote }}
-  SPRING_LIQUIBASE_CHANGELOG: {{ default "classpath:db/changelog/consultingtypeservice-master.xml" .Values.consultingTypeService.liquibaseChangeLog | replace "classpath:/db/changelog" "classpath:db/changelog" | quote }}
+  SPRING_LIQUIBASE_CHANGE_LOG: {{ $liquibaseChangeLog | quote }}
+  SPRING_LIQUIBASE_CHANGELOG: {{ $liquibaseChangeLog | quote }}
   SPRING_LIQUIBASE_CONTEXTS: {{ default "seed" .Values.consultingTypeService.liquibaseContexts | quote }}
   TENANT_SERVICE_API_URL: "http://tenantservice.{{ .Release.Namespace }}:8081"
   JAVA_OPTS: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
