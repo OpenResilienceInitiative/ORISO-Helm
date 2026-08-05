@@ -3,3 +3,20 @@
 {{- if and $observabilityEnabled (eq $collectorHost "") -}}
 {{- fail "global.observability.otlpCollectorHost is required when OTLP observability is enabled without signoz.enabled=true" -}}
 {{- end -}}
+{{- /*
+The ORISO signoz ingress serves the UI at https://<domainName>/signoz without
+rewriting, so the SigNoz app must resolve assets/APIs against that external
+URL. Fail fast when the env var is missing or still points at another domain
+(e.g. the values.yaml.default placeholder).
+*/ -}}
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $orisoIngress := get $signoz "orisoIngress" | default dict -}}
+{{- if and (get $signoz "enabled" | default false) (get $orisoIngress "enabled" | default true) -}}
+{{- $signozApp := get $signoz "signoz" | default dict -}}
+{{- $signozEnv := get $signozApp "env" | default dict -}}
+{{- $externalUrl := get $signozEnv "signoz_global_external__url" | default "" -}}
+{{- $expectedUrl := printf "https://%s/signoz" .Values.global.domainName -}}
+{{- if ne $externalUrl $expectedUrl -}}
+{{- fail (printf "signoz.signoz.env.signoz_global_external__url must be %q when signoz.enabled=true and the ORISO signoz ingress is enabled (got %q). Set it in the environment values file, in sync with global.domainName." $expectedUrl $externalUrl) -}}
+{{- end -}}
+{{- end -}}
