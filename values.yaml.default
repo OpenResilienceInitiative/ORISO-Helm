@@ -56,7 +56,7 @@ global:
   multitenancyEnabled: true
   multitenancyWithSingleDomainEnabled: "true"
 
-  topicsEnabled: "false"
+  topicsEnabled: "true"
   featureTopicsEnabled: "true"
   statisticsEnabled: "true"
   demographicsEnabled: "false"
