@@ -49,3 +49,6 @@ spec:
         resources:
           requests:
             storage: 10Gi
+        {{- if .Values.global.storageClass }}
+        storageClassName: {{ .Values.global.storageClass | quote }}
+        {{- end }}
