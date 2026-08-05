@@ -1,5 +1,10 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
+{{ $existingPvc := lookup "v1" "PersistentVolumeClaim" .Release.Namespace "redis-pvc" }}
+{{ $storageClass := .Values.global.storageClass }}
+{{ if $existingPvc }}
+{{ $storageClass = $existingPvc.spec.storageClassName | default "" }}
+{{ end }}
 metadata:
   name: redis-pvc
   labels:
@@ -10,6 +15,6 @@ spec:
   resources:
     requests:
       storage: 5Gi
-  {{- if .Values.global.storageClass }}
-  storageClassName: {{ .Values.global.storageClass | quote }}
+  {{- if $storageClass }}
+  storageClassName: {{ $storageClass | quote }}
   {{- end }}
