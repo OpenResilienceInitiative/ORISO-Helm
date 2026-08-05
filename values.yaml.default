@@ -99,7 +99,7 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call:dev"
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.2"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # ---------- Infrastructure Services ----------------------------------------------------------------------------------
@@ -107,7 +107,7 @@ elementCall:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "dev"
+  imageVersion: "2.0.2"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -186,7 +186,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:dev"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.2"
 
   keycloakResource: "agency-service"
 
@@ -203,7 +203,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "dev"
+  imageVersion: "2.0.2"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -219,7 +219,7 @@ consultingTypeService:
 tenantService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "dev"
+  imageVersion: "2.0.2"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -233,7 +233,7 @@ tenantService:
 # User service
 userService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:dev"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.2"
   serviceURL: "http://userservice:8080"
 
   keycloakResource: "user-service"
@@ -298,7 +298,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:dev"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.2"
 
 nginxController:
   enabled: true
@@ -324,7 +324,7 @@ signoz:
 healthDashboard:
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: dev
+    tag: "2.0.2"
     pullPolicy: ""
   replicas: 1
   namespace: ""
