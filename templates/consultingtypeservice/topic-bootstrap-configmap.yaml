@@ -8,6 +8,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: topic-bootstrap-sql
+  namespace: {{ .Release.Namespace }}
 data:
   topic-bootstrap.sql: |-
 {{ .Files.Get "files/topic-bootstrap.sql" | indent 4 }}
