@@ -1,0 +1,6 @@
+# Render-gate input for the Pre-Dev Live Chat stabilization candidate.
+# This deliberately contains only the safety-critical delta; deployment values
+# remain operator-owned and must render identically before rollout.
+userService:
+  matrixEncryptionEnabled: "true"
+  consultantAvailabilityRedisTtlSeconds: 120

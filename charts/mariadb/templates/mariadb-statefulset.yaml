@@ -1,5 +1,15 @@
 apiVersion: apps/v1
 kind: StatefulSet
+{{ $storageClass := .Values.global.storageClass }}
+{{ $existingStatefulSet := lookup "apps/v1" "StatefulSet" .Release.Namespace "mariadb" }}
+{{ if and $existingStatefulSet $existingStatefulSet.spec.volumeClaimTemplates }}
+{{ $existingClaim := index $existingStatefulSet.spec.volumeClaimTemplates 0 }}
+{{ if hasKey $existingClaim.spec "storageClassName" }}
+{{ $storageClass = $existingClaim.spec.storageClassName | default "" }}
+{{ else }}
+{{ $storageClass = "" }}
+{{ end }}
+{{ end }}
 metadata:
   name: mariadb
 spec:
@@ -16,6 +26,7 @@ spec:
       containers:
         - name: mariadb
           image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: MYSQL_ROOT_PASSWORD
               valueFrom:
@@ -49,3 +60,6 @@ spec:
         resources:
           requests:
             storage: 10Gi
+        {{- if $storageClass }}
+        storageClassName: {{ $storageClass | quote }}
+        {{- end }}

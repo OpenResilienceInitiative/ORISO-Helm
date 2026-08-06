@@ -1,0 +1,79 @@
+{{- $bootstrapTopics := default (dict) .Values.consultingTypeService.bootstrapTopics -}}
+{{- $bootstrapEnabled := true -}}
+{{- if hasKey $bootstrapTopics "enabled" -}}
+{{- $bootstrapEnabled = $bootstrapTopics.enabled -}}
+{{- end -}}
+{{- if $bootstrapEnabled }}
+{{- $mariadb := index .Values "online-counseling-mariadb" -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: topic-bootstrap
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install
+    "helm.sh/hook-weight": "21"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: topic-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: topic-bootstrap
+          image: "{{ $mariadb.imageName }}:{{ $mariadb.imageVersion }}"
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          env:
+            - name: MYSQL_HOST
+              value: "mariadb.{{ .Release.Namespace }}"
+            - name: MYSQL_DATABASE
+              value: "consultingtypeservice"
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: consultingtypeservice-secret
+                  key: CONSULTINGTYPESERVICE_SPRING_DATASOURCE_USERNAME
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: consultingtypeservice-secret
+                  key: CONSULTINGTYPESERVICE_SPRING_DATASOURCE_PASSWORD
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              set -eu
+
+              mysql() {
+                mariadb -h "$MYSQL_HOST" -P 3306 -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" "$@"
+              }
+
+              until mysql -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '${MYSQL_DATABASE}' AND table_name = 'DATABASECHANGELOGLOCK';" | grep -qx 1; do
+                echo "waiting for ConsultingTypeService Liquibase lock table"
+                sleep 5
+              done
+
+              until mysql -N -e "SELECT COUNT(*) FROM DATABASECHANGELOGLOCK WHERE ID = 1 AND LOCKED = 0;" | grep -qx 1; do
+                echo "waiting for ConsultingTypeService Liquibase to release lock"
+                sleep 5
+              done
+
+              until mysql -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '${MYSQL_DATABASE}' AND table_name = 'topic';" | grep -qx 1; do
+                echo "waiting for ConsultingTypeService topic table"
+                sleep 5
+              done
+
+              mysql < /bootstrap/topic-bootstrap.sql
+              echo "topic bootstrap completed"
+          volumeMounts:
+            - name: topic-bootstrap-sql
+              mountPath: /bootstrap
+              readOnly: true
+      volumes:
+        - name: topic-bootstrap-sql
+          configMap:
+            name: topic-bootstrap-sql
+{{- end }}

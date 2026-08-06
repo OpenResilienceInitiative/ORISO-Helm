@@ -8,7 +8,7 @@ spec:
     whenDeleted: Retain
     whenScaled: Retain
   podManagementPolicy: OrderedReady
-  replicas: 1
+  replicas: {{ .Values.matrix.postgresReplicas }}
   revisionHistoryLimit: 10
   selector:
     matchLabels:
@@ -22,7 +22,7 @@ spec:
       containers:
       - name: postgres
         image: postgres:15-alpine
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
         env:
         - name: POSTGRES_USER
           valueFrom:

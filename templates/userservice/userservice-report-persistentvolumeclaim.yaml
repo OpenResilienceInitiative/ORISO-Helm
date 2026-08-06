@@ -1,5 +1,10 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
+{{ $existingPvc := lookup "v1" "PersistentVolumeClaim" .Release.Namespace "userservice-report" }}
+{{ $storageClass := .Values.global.storageClass }}
+{{ if $existingPvc }}
+{{ $storageClass = $existingPvc.spec.storageClassName | default "" }}
+{{ end }}
 metadata:
   labels:
     app: userservice-report
@@ -10,3 +15,6 @@ spec:
   resources:
     requests:
       storage: 1Gi
+  {{- if $storageClass }}
+  storageClassName: {{ $storageClass | quote }}
+  {{- end }}

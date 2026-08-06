@@ -7,7 +7,10 @@ metadata:
 data:
   # General 
   
-  SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}  
+  SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}
+  SPRING_LIQUIBASE_CHANGE_LOG: {{ default "classpath:db/changelog/tenantservice-master.xml" .Values.tenantService.liquibaseChangeLog | replace "classpath:/db/changelog" "classpath:db/changelog" | quote }}
+  SPRING_LIQUIBASE_CHANGELOG: {{ default "classpath:db/changelog/tenantservice-master.xml" .Values.tenantService.liquibaseChangeLog | replace "classpath:/db/changelog" "classpath:db/changelog" | quote }}
+  SPRING_LIQUIBASE_CONTEXTS: {{ default "seed" .Values.tenantService.liquibaseContexts | quote }}
   SPRING_PROFILES_ACTIVE: {{ .Values.tenantService.springProfilesActive }}  
   SPRING_DATASOURCE_URL: {{ .Values.tenantService.springDatasourceURL }}  
   KEYCLOAK_AUTH_SERVER_URL: {{ .Values.global.keycloakAuthServerUrl  }}  
@@ -18,6 +21,16 @@ data:
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: {{ .Values.global.springSecurityOAuth2ResourceserverJWTJWKSETURI }}   
   USER_SERVICE_API_URL: {{ .Values.userService.serviceURL }}  
   CONSULTING_TYPE_SERVICE_API_URL: {{ .Values.consultingTypeService.serviceURL }}  
-  MATRIX_API_URL: {{ .Values.matrix.matrixApiUrl }}  
-  MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}  
-
+  MATRIX_API_URL: {{ .Values.matrix.matrixApiUrl }}
+  MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}
+  FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED: {{ .Values.global.multitenancyWithSingleDomainEnabled | quote }}
+  # OBS-P2: OTLP traces/metrics to the SigNoz gateway collector. Property
+  # names + full /v1/{traces,metrics} paths verified against Spring Boot
+  # 4.0.1 source directly (management.otlp.tracing.endpoint does NOT exist
+  # in this version).
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: "http://{{ include "oriso.otlpCollectorHost" . }}/v1/traces"
+  MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: {{ include "oriso.observabilityEnabled" . | quote }}
+  MANAGEMENT_OTLP_METRICS_EXPORT_URL: "http://{{ include "oriso.otlpCollectorHost" . }}/v1/metrics"
+  MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: {{ include "oriso.observabilityEnabled" . | quote }}
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: "always"
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS: "always"

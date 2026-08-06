@@ -1,7 +1,7 @@
 name: online-counseling
 description: Helm chart for the online counseling plattform
-version: 2.0.1
-appVersion: "2.0.1"
+version: 2.0.2
+appVersion: "2.0.2"
 apiVersion: v2
 keywords:
   - online-counseling
@@ -26,3 +26,7 @@ dependencies:
   - name: online-counseling-redis
     version: 0.0.1
     repository: file://charts/redis
+  - name: signoz
+    version: 0.135.1
+    repository: https://charts.signoz.io
+    condition: signoz.enabled

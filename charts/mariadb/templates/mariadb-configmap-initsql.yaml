@@ -12,12 +12,12 @@ data:
 
     CREATE USER IF NOT EXISTS '{{ .Values.global.secrets.userServiceDbUsername }}'@'%' IDENTIFIED BY '{{ .Values.global.secrets.userServiceDbPassword }}';
     CREATE DATABASE IF NOT EXISTS userservice CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-    GRANT CREATE, SELECT, INSERT, UPDATE, DELETE, ALTER, TRIGGER, INDEX ON userservice.* TO '{{ .Values.global.secrets.userServiceDbUsername }}'@'%';
+    GRANT ALTER, CREATE, CREATE VIEW, DELETE, DROP, INDEX, INSERT, REFERENCES, SELECT, SHOW VIEW, TRIGGER, UPDATE, ALTER ROUTINE, EXECUTE ON userservice.* TO '{{ .Values.global.secrets.userServiceDbUsername }}'@'%';
     FLUSH PRIVILEGES;
 
     CREATE USER IF NOT EXISTS '{{ .Values.global.secrets.agencyServiceDbUsername }}'@'%' IDENTIFIED BY '{{ .Values.global.secrets.agencyServiceDbPassword }}';
     CREATE DATABASE IF NOT EXISTS agencyservice CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-    GRANT SELECT, INSERT, UPDATE, DELETE ON agencyservice.* TO '{{ .Values.global.secrets.agencyServiceDbUsername }}'@'%';
+    GRANT ALTER, CREATE, CREATE VIEW, DELETE, DROP, INDEX, INSERT, REFERENCES, SELECT, SHOW VIEW, TRIGGER, UPDATE, ALTER ROUTINE, EXECUTE ON agencyservice.* TO '{{ .Values.global.secrets.agencyServiceDbUsername }}'@'%';
     FLUSH PRIVILEGES;
 
     CREATE USER IF NOT EXISTS '{{ .Values.global.secrets.uploadServiceDbUsername }}'@'%' IDENTIFIED BY '{{ .Values.global.secrets.uploadServiceDbPassword }}';
@@ -27,12 +27,12 @@ data:
 
     CREATE USER IF NOT EXISTS '{{ .Values.global.secrets.tenantServiceDbUsername }}'@'%' IDENTIFIED BY '{{ .Values.global.secrets.tenantServiceDbPassword }}';
     CREATE DATABASE IF NOT EXISTS tenantservice CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-    GRANT SELECT, INSERT, UPDATE, DELETE ON tenantservice.* TO '{{ .Values.global.secrets.tenantServiceDbUsername }}'@'%';
+    GRANT ALTER, CREATE, CREATE VIEW, DELETE, DROP, INDEX, INSERT, REFERENCES, SELECT, SHOW VIEW, TRIGGER, UPDATE, ALTER ROUTINE, EXECUTE ON tenantservice.* TO '{{ .Values.global.secrets.tenantServiceDbUsername }}'@'%';
     FLUSH PRIVILEGES;
 
     CREATE USER IF NOT EXISTS '{{ .Values.global.secrets.consultingTypeServiceDbUsername }}'@'%' IDENTIFIED BY '{{ .Values.global.secrets.consultingTypeServiceDbPassword }}';
     CREATE DATABASE IF NOT EXISTS consultingtypeservice CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-    GRANT SELECT, INSERT, UPDATE, DELETE ON consultingtypeservice.* TO '{{ .Values.global.secrets.consultingTypeServiceDbUsername }}'@'%';
+    GRANT ALTER, CREATE, CREATE VIEW, DELETE, DROP, INDEX, INSERT, REFERENCES, SELECT, SHOW VIEW, TRIGGER, UPDATE, ALTER ROUTINE, EXECUTE ON consultingtypeservice.* TO '{{ .Values.global.secrets.consultingTypeServiceDbUsername }}'@'%';
     FLUSH PRIVILEGES;
 
     CREATE USER IF NOT EXISTS '{{ .Values.global.secrets.caritasDbUsername }}'@'%' IDENTIFIED BY '{{ .Values.global.secrets.caritasDbPassword }}';
@@ -49,37 +49,3 @@ data:
     GRANT ALTER, CREATE, CREATE VIEW, DELETE, DROP, INDEX, INSERT, REFERENCES, SELECT, SHOW VIEW, TRIGGER, UPDATE, ALTER ROUTINE, EXECUTE ON consultingtypeservice.* TO '{{ .Values.global.secrets.liquibaseUser }}'@'%';
     GRANT ALTER, CREATE, CREATE VIEW, DELETE, DROP, INDEX, INSERT, REFERENCES, SELECT, SHOW VIEW, TRIGGER, UPDATE, ALTER ROUTINE, EXECUTE ON appointmentservice.* TO '{{ .Values.global.secrets.liquibaseUser }}'@'%';
     FLUSH PRIVILEGES;
-
-  02tenantservice_schema.sql: | 
-    use tenantservice;
-{{ .Files.Get "sql-schemas/tenantservice-schema.sql" | indent 4 }}
-  03setinitialsettings.sql: |
-    update tenantservice.tenant set settings = '{ 
-      "featureMultitenancyEnabled" : {{ .Values.global.multitenancyEnabled }},
-      "featureStatisticsEnabled" : {{ .Values.global.statisticsEnabled }},
-      "featureTopicsEnabled" : {{ .Values.global.topicsEnabled }},
-      "enableTopicsInRegistration" : false,
-      "featureDemographicsEnabled" : {{ .Values.global.demographicsEnabled }}
-    }'
-    where settings is null;
-  04consultingtype_schema.sql: | 
-    use consultingtypeservice;
-{{ .Files.Get "sql-schemas/consultingtypeservice-schema.sql" | indent 4 }}
-
-  05uploadservice_schema.sql: | 
-    use uploadservice;
-{{ .Files.Get "sql-schemas/uploadservice-schema.sql" | indent 4 }}
-
-  06userservice_schema.sql: | 
-    use userservice;
-{{ .Files.Get "sql-schemas/userservice-schema.sql" | indent 4 }}  
-
-  07agencyservice.sql: |
-    use agencyservice;
-{{ .Files.Get "sql-schemas/agencyservice-schema.sql" | indent 4 }}
-  08agencyservice-matrix.sql: |
-    use agencyservice;
-    UPDATE agency
-    SET matrix_user_id='@{{ .Values.global.matrix.matrixAdminUsername }}:{{ .Values.global.matrix.matrixServerName }}',
-        matrix_password='{{ .Values.global.matrix.matrixAdminPassword }}'
-    WHERE id=1;

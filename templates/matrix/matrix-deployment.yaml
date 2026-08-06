@@ -6,7 +6,7 @@ metadata:
   labels:
     app: matrix-synapse
 spec:
-  replicas: 1
+  replicas: {{ .Values.matrix.replicas }}
   selector:
     matchLabels:
       app: matrix-synapse
@@ -22,7 +22,8 @@ spec:
     spec:       
       initContainers:
         - name: fix-permissions
-          image: busybox:latest
+          image: {{ include "oriso.immutableImage" (list "matrix.initImage" .Values.matrix.initImage) | quote }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           command:
           - sh
           - -c
@@ -36,8 +37,8 @@ spec:
             mountPath: /data
       containers:
       - name: synapse
-        image: matrixdotorg/synapse:latest
-        imagePullPolicy: Always
+        image: {{ include "oriso.immutableImage" (list "matrix.image" .Values.matrix.image) | quote }}
+        imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
         env:
           - name: SYNAPSE_SERVER_NAME
             valueFrom:

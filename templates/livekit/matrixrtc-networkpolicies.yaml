@@ -1,0 +1,104 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: matrixrtc-auth-policy-gateway
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: matrixrtc-auth-policy-gateway
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # A bare podSelector only ever matches pods in this namespace, but the
+    # ingress controller runs in its own. Without the namespaceSelector the
+    # controller is denied and every /livekit/jwt request ends as 502, i.e.
+    # no participant can obtain a LiveKit grant and calls cannot connect.
+    # namespaceSelector and podSelector in ONE list item are ANDed on purpose:
+    # only the controller pods of that namespace are allowed, not the namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.matrixrtcAuth.ingressControllerNamespace | default "ingress-nginx" | quote }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+              app.kubernetes.io/component: controller
+        - podSelector:
+            matchLabels:
+              app: element-call
+      ports:
+        - protocol: TCP
+          port: 3010
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: matrixrtc-authorization-service
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app: userservice
+      ports:
+        - protocol: TCP
+          # NetworkPolicy is evaluated after Service DNAT on PreDev, so this
+          # must be the UserService pod targetPort, not the Service port.
+          port: 8082
+    - ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: matrixrtc-authorization-service
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: matrixrtc-authorization-service
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: matrixrtc-auth-policy-gateway
+        - podSelector:
+            matchLabels:
+              app: livekit
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - ports:
+        - protocol: TCP
+          port: 6379
+    # lk-jwt-service validates the OpenID token itself against the homeserver's
+    # federation userinfo endpoint over HTTPS. Without this the validation
+    # cannot run, every request ends as 401, and the policy gateway proxies
+    # that 401 through without logging a denial of its own — the call dies with
+    # "SFU Config fetch failed with status code 401" and nothing says why.
+    # The gateway policy already carries the same rule.
+    - ports:
+        - protocol: TCP
+          port: 443
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

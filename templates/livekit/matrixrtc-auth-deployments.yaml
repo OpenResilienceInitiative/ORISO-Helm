@@ -1,0 +1,208 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matrixrtc-auth-policy-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: matrixrtc-auth-policy-gateway
+spec:
+  replicas: {{ .Values.matrixrtcAuth.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: matrixrtc-auth-policy-gateway
+  template:
+    metadata:
+      labels:
+        app: matrixrtc-auth-policy-gateway
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+        - name: wait-for-matrixrtc-membership-token
+          image: {{ include "oriso.immutableImage" (list "elementCall.healthcheckImage" .Values.elementCall.healthcheckImage) | quote }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              i=0
+              while [ "$i" -lt 300 ]; do
+                token="$(cat /run/secrets/matrix-membership-token 2>/dev/null || true)"
+                case "$token" in
+                  ""|"changeme"|"pending-bootstrap")
+                    i=$((i + 1))
+                    sleep 2
+                    ;;
+                  *)
+                    exit 0
+                    ;;
+                esac
+              done
+              echo "Timed out waiting for MatrixRTC membership token bootstrap" >&2
+              exit 1
+          volumeMounts:
+            - name: auth-secrets
+              mountPath: /run/secrets
+              readOnly: true
+      containers:
+        - name: gateway
+          image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.gateway.image" .Values.matrixrtcAuth.gateway.image) | quote }}
+          imagePullPolicy: {{ default (include "oriso.imagePullPolicy" .) .Values.matrixrtcAuth.gateway.pullPolicy | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: MATRIXRTC_ALLOWED_ORIGINS
+              value: "https://{{ .Values.global.domainName }}"
+            - name: MATRIX_SERVER_NAME
+              value: {{ .Values.matrix.matrixServerName | quote }}
+            - name: MATRIX_FEDERATION_BASE_URL
+              value: "https://{{ .Values.global.domainName }}"
+            - name: MATRIX_CLIENT_BASE_URL
+              value: "https://{{ .Values.global.domainName }}"
+            - name: MATRIX_MEMBERSHIP_TOKEN_FILE
+              value: /run/secrets/matrix-membership-token
+            - name: MATRIXRTC_UPSTREAM_URL
+              value: "http://matrixrtc-authorization-service:8080"
+            - name: MATRIXRTC_CALL_POLICY_URL
+              value: "http://userservice:8080/internal/matrixrtc/call-policy"
+            - name: MATRIXRTC_CALL_POLICY_TOKEN_FILE
+              value: /run/secrets/call-policy-token
+          ports:
+            - name: http
+              containerPort: 3010
+          volumeMounts:
+            - name: auth-secrets
+              mountPath: /run/secrets
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+      volumes:
+        - name: auth-secrets
+          secret:
+            secretName: {{ .Values.matrixrtcAuth.existingSecret.name | quote }}
+            items:
+              - key: {{ .Values.matrixrtcAuth.existingSecret.membershipTokenKey | quote }}
+                path: matrix-membership-token
+              - key: {{ .Values.matrixrtcAuth.existingSecret.callPolicyTokenKey | quote }}
+                path: call-policy-token
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: matrixrtc-authorization-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: matrixrtc-authorization-service
+spec:
+  replicas: {{ .Values.matrixrtcAuth.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: matrixrtc-authorization-service
+  template:
+    metadata:
+      labels:
+        app: matrixrtc-authorization-service
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+        - name: wait-for-redis
+          image: {{ printf "%s:%s" (index .Values "online-counseling-redis").imageName (index .Values "online-counseling-redis").imageVersion | quote }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              i=0
+              until redis-cli -h redis -p 6379 -a "$REDIS_PASSWORD" ping | grep -q PONG; do
+                i=$((i + 1))
+                if [ "$i" -ge 150 ]; then
+                  echo "Timed out waiting for Redis on redis:6379" >&2
+                  exit 1
+                fi
+                sleep 2
+              done
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: REDIS_DEFAULT_PASS
+      containers:
+        - name: authorization-service
+          image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.upstream.image" .Values.matrixrtcAuth.upstream.image) | quote }}
+          imagePullPolicy: {{ default (include "oriso.imagePullPolicy" .) .Values.matrixrtcAuth.upstream.pullPolicy | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: LIVEKIT_URL
+              value: "wss://{{ .Values.global.domainName }}/livekit/sfu"
+            - name: LIVEKIT_KEY_FROM_FILE
+              value: /run/secrets/livekit-api-key
+            - name: LIVEKIT_SECRET_FROM_FILE
+              value: /run/secrets/livekit-api-secret
+            - name: LIVEKIT_FULL_ACCESS_HOMESERVERS
+              value: {{ .Values.matrix.matrixServerName | quote }}
+            - name: LIVEKIT_JWT_BIND
+              value: ":8080"
+            # Stays "off" by default: lk-jwt-service logs Matrix user and room
+            # identifiers, which are personal data on a counselling platform.
+            # Overridable so a bounded investigation on a test environment does
+            # not need a hand-applied kubectl patch (ORISO-ElementCall#35).
+            - name: LIVEKIT_LOG_LEVEL
+              value: {{ .Values.matrixrtcAuth.logLevel | default "off" | quote }}
+            - name: LIVEKIT_REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.matrixrtcAuth.existingSecret.name | quote }}
+                  key: {{ .Values.matrixrtcAuth.existingSecret.redisUrlKey | quote }}
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: auth-secrets
+              mountPath: /run/secrets
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+      volumes:
+        - name: auth-secrets
+          secret:
+            secretName: {{ .Values.matrixrtcAuth.existingSecret.name | quote }}
+            items:
+              - key: {{ .Values.matrixrtcAuth.existingSecret.livekitApiKeyKey | quote }}
+                path: livekit-api-key
+              - key: {{ .Values.matrixrtcAuth.existingSecret.livekitApiSecretKey | quote }}
+                path: livekit-api-secret

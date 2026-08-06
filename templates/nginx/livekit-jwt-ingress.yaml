@@ -7,9 +7,10 @@ metadata:
     nginx.ingress.kubernetes.io/cors-allow-headers: Authorization, Content-Type, X-Requested-With,
       Accept, Origin
     nginx.ingress.kubernetes.io/cors-allow-methods: GET, POST, OPTIONS
-    nginx.ingress.kubernetes.io/cors-allow-origin: https://acme{{ .Values.global.domainName
-      }}, https://{{ .Values.global.domainName }}
+    nginx.ingress.kubernetes.io/cors-allow-origin: https://{{ .Values.global.domainName }}
     nginx.ingress.kubernetes.io/enable-cors: 'true'
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: '2'
+    nginx.ingress.kubernetes.io/limit-rps: '10'
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
   name: livekit-jwt-ingress
 spec:
@@ -20,7 +21,7 @@ spec:
       paths:
       - backend:
           service:
-            name: livekit-token-service
+            name: matrixrtc-auth-policy-gateway
             port:
               number: 3010
         path: /livekit/jwt

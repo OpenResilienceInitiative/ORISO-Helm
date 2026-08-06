@@ -1,5 +1,10 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
+{{ $existingSynapsePvc := lookup "v1" "PersistentVolumeClaim" .Release.Namespace "matrix-synapse-data" }}
+{{ $synapseStorageClass := .Values.global.storageClass }}
+{{ if $existingSynapsePvc }}
+{{ $synapseStorageClass = $existingSynapsePvc.spec.storageClassName | default "" }}
+{{ end }}
 metadata:
   name: matrix-synapse-data
   namespace: {{ .Release.Namespace }}
@@ -11,9 +16,17 @@ spec:
   resources:
     requests:
       storage: 10Gi
+  {{- if $synapseStorageClass }}
+  storageClassName: {{ $synapseStorageClass | quote }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
+{{ $existingPostgresPvc := lookup "v1" "PersistentVolumeClaim" .Release.Namespace "matrix-postgres-pvc" }}
+{{ $postgresStorageClass := .Values.global.storageClass }}
+{{ if $existingPostgresPvc }}
+{{ $postgresStorageClass = $existingPostgresPvc.spec.storageClassName | default "" }}
+{{ end }}
 metadata:
   name: matrix-postgres-pvc
   namespace: {{ .Release.Namespace }}
@@ -25,9 +38,17 @@ spec:
   resources:
     requests:
       storage: 20Gi
+  {{- if $postgresStorageClass }}
+  storageClassName: {{ $postgresStorageClass | quote }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
+{{ $existingPostgresBackupPvc := lookup "v1" "PersistentVolumeClaim" .Release.Namespace "matrix-postgres-backup-pvc" }}
+{{ $postgresBackupStorageClass := .Values.global.storageClass }}
+{{ if $existingPostgresBackupPvc }}
+{{ $postgresBackupStorageClass = $existingPostgresBackupPvc.spec.storageClassName | default "" }}
+{{ end }}
 metadata:
   name: matrix-postgres-backup-pvc
   namespace: {{ .Release.Namespace }}
@@ -39,3 +60,6 @@ spec:
   resources:
     requests:
       storage: 50Gi
+  {{- if $postgresBackupStorageClass }}
+  storageClassName: {{ $postgresBackupStorageClass | quote }}
+  {{- end }}

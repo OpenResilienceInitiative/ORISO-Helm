@@ -4,7 +4,7 @@ kind: Deployment
 metadata:
   name: tenantservice
 spec:
-  replicas: 2
+  replicas: {{ .Values.tenantService.replicas }}
   selector:
     matchLabels:
       app: tenantservice
@@ -26,7 +26,7 @@ spec:
       containers:
       - name: tenantservice
         image:  {{ .Values.tenantService.imageName }}:{{ .Values.tenantService.imageVersion }}
-        imagePullPolicy: Always
+        imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
         ports:
         - containerPort: 8081
         env:
@@ -90,6 +90,31 @@ spec:
               configMapKeyRef:
                 key: SPRING_LIQUIBASE_ENABLED
                 name: tenantservice-configmap-env
+          - name: SPRING_LIQUIBASE_CHANGE_LOG
+            valueFrom:
+              configMapKeyRef:
+                key: SPRING_LIQUIBASE_CHANGE_LOG
+                name: tenantservice-configmap-env
+          - name: SPRING_LIQUIBASE_CHANGELOG
+            valueFrom:
+              configMapKeyRef:
+                key: SPRING_LIQUIBASE_CHANGELOG
+                name: tenantservice-configmap-env
+          - name: SPRING_LIQUIBASE_CONTEXTS
+            valueFrom:
+              configMapKeyRef:
+                key: SPRING_LIQUIBASE_CONTEXTS
+                name: tenantservice-configmap-env
+          - name: SPRING_LIQUIBASE_USER
+            valueFrom:
+              secretKeyRef:
+                key: SPRING_LIQUIBASE_USER
+                name: tenantservice-secret
+          - name: SPRING_LIQUIBASE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                key: SPRING_LIQUIBASE_PASSWORD
+                name: tenantservice-secret
           - name: CONSULTING_TYPE_SERVICE_API_URL
             valueFrom:
               configMapKeyRef:
@@ -100,10 +125,45 @@ spec:
               configMapKeyRef:
                 key: USER_SERVICE_API_URL
                 name: tenantservice-configmap-env
+          - name: FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                key: FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED
+                name: tenantservice-configmap-env
           - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI
             valueFrom:
               configMapKeyRef:
                 key: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI
+                name: tenantservice-configmap-env
+          - name: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT
+                name: tenantservice-configmap-env
+          - name: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED
+                name: tenantservice-configmap-env
+          - name: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_OTLP_METRICS_EXPORT_URL
+                name: tenantservice-configmap-env
+          - name: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED
+                name: tenantservice-configmap-env
+          - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+                name: tenantservice-configmap-env
+          - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
+            valueFrom:
+              configMapKeyRef:
+                key: MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS
                 name: tenantservice-configmap-env
         resources:
           requests:
@@ -124,4 +184,3 @@ spec:
             port: 8081
           initialDelaySeconds: 60
           periodSeconds: 10
- 

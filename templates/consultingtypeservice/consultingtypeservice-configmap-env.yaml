@@ -1,3 +1,7 @@
+{{- $liquibaseChangeLog := default "classpath:db/changelog/consultingtypeservice-master.xml" .Values.consultingTypeService.liquibaseChangeLog | replace "classpath:/db/changelog" "classpath:db/changelog" -}}
+{{- if eq $liquibaseChangeLog "classpath:db/changelog/db.changelog-master.xml" -}}
+{{- $liquibaseChangeLog = "classpath:db/changelog/consultingtypeservice-master.xml" -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,6 +11,9 @@ data:
   CSRF_COOKIE_PROPERTY:  {{ .Values.global.csrfCookieProperty }}
   CSRF_HEADER_PROPERTY: {{ .Values.global.csrfHeaderProperty }}
   SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}
+  SPRING_LIQUIBASE_CHANGE_LOG: {{ $liquibaseChangeLog | quote }}
+  SPRING_LIQUIBASE_CHANGELOG: {{ $liquibaseChangeLog | quote }}
+  SPRING_LIQUIBASE_CONTEXTS: {{ default "seed" .Values.consultingTypeService.liquibaseContexts | quote }}
   TENANT_SERVICE_API_URL: "http://tenantservice.{{ .Release.Namespace }}:8081"
   JAVA_OPTS: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
   SPRING_DATASOURCE_URL: "jdbc:mariadb://mariadb.{{ .Release.Namespace }}:3306/consultingtypeservice"
@@ -25,8 +32,25 @@ data:
 {{- else }}
   MULTITENANCY_ENABLED: {{ .Values.global.multitenancyEnabled | quote }}
 {{- end }}
+  # DPA_SIGN_FRONTEND_BASE_URL is the app frontend base URL embedded in the
+  # DPA-signing email. Same FQDN as APP_BASE_URL, so it derives from
+  # global.domainName rather than taking a separate value — otherwise the app's
+  # @Value default (https://app.oriso.org) applies and non-production
+  # environments link to production.
 {{- if .Values.global.enableTls }}
   APP_BASE_URL: "https://{{ .Values.global.domainName }}"
+  DPA_SIGN_FRONTEND_BASE_URL: "https://{{ .Values.global.domainName }}"
 {{- else }}
   APP_BASE_URL: "http://{{ .Values.global.domainName }}"
+  DPA_SIGN_FRONTEND_BASE_URL: "http://{{ .Values.global.domainName }}"
 {{- end }}
+  # OBS-P2: OTLP traces/metrics to the SigNoz gateway collector. Property
+  # names + full /v1/{traces,metrics} paths verified against Spring Boot
+  # 4.0.1 source directly (management.otlp.tracing.endpoint does NOT exist
+  # in this version).
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: "http://{{ include "oriso.otlpCollectorHost" . }}/v1/traces"
+  MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED: {{ include "oriso.observabilityEnabled" . | quote }}
+  MANAGEMENT_OTLP_METRICS_EXPORT_URL: "http://{{ include "oriso.otlpCollectorHost" . }}/v1/metrics"
+  MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED: {{ include "oriso.observabilityEnabled" . | quote }}
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: "always"
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS: "always"

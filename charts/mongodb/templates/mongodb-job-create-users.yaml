@@ -7,12 +7,15 @@ metadata:
     "helm.sh/hook-weight": "1"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
+  activeDeadlineSeconds: 600
   template:
     spec:
+      activeDeadlineSeconds: 600
       restartPolicy: Never
       initContainers:
         - name: wait-for-mongo-ready
           image: mongo:6.0
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: MONGODB_USERNAME
               valueFrom:
@@ -28,13 +31,19 @@ spec:
             - sh
             - -c
             - |
-              until mongosh --username "$MONGODB_USERNAME" --password "$MONGODB_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping')" mongodb.{{ .Release.Namespace }}:27017; do
-                echo "waiting for mongodb auth to work";
+              for attempt in $(seq 1 150); do
+                if mongosh --username "$MONGODB_USERNAME" --password "$MONGODB_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping')" mongodb.{{ .Release.Namespace }}:27017; then
+                  exit 0;
+                fi
+                echo "waiting for mongodb auth to work (${attempt}/150)";
                 sleep 2;
               done
+              echo "timed out waiting for mongodb auth to work" >&2;
+              exit 1
       containers:
         - name: create-mongo-users
           image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: MONGODB_USERNAME
               valueFrom:
@@ -76,16 +85,6 @@ spec:
                 secretKeyRef:
                   key: MONGO_CONSULTING_TYPES_PASSWORD
                   name: mongodb-secret
-            - name: MONGO_ROCKETCHAT_USER
-              valueFrom:
-                secretKeyRef:
-                  key: MONGO_ROCKETCHAT_USER
-                  name: mongodb-secret
-            - name: MONGO_ROCKETCHAT_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  key: MONGO_ROCKETCHAT_PASSWORD
-                  name: mongodb-secret
           command:
             - /bin/bash
             - -c
@@ -102,5 +101,4 @@ spec:
               create_or_update_user "nosqlclient" "$MONGO_NOSQLCLIENT_USER" "$MONGO_NOSQLCLIENT_PASSWORD";
               create_or_update_user "statistics" "$MONGO_STATISTICS_USER" "$MONGO_STATISTICS_PASSWORD";
               create_or_update_user "consulting_types" "$MONGO_CONSULTING_TYPES_USER" "$MONGO_CONSULTING_TYPES_PASSWORD";
-              create_or_update_user "rocketchat" "$MONGO_ROCKETCHAT_USER" "$MONGO_ROCKETCHAT_PASSWORD";
   backoffLimit: 1

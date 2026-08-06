@@ -1,15 +1,24 @@
-﻿
+
 cert-manager:
   enabled: true
 
 global:
 
   domainName: "your-domain.example.com"
+  # Empty = cluster default StorageClass.
+  storageClass: ""
+  # Override per environment only for immutable tags/digests.
+  imagePullPolicy: "Always"
   domains:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
-
+  # OTLP export to SigNoz — auto-enabled when signoz.enabled=true.
+  observability:
+    otlpEnabled: false
+    autoEnableWithSignoz: true
+    deploymentEnvironment: "pre-dev"   # environment tag on exported signals
+    otlpCollectorHost: "" # optional external collector host:port when signoz.enabled=false
 
   acmedomainName: "acme.your-domain.example.com"
  #adminDomainName: "admin.your-domain.example.com"
@@ -26,7 +35,7 @@ global:
 
   # TLS
   enableTls: true
-  enableLiquibase: "false"
+  enableLiquibase: "true"
   # CORS
   enableCors: false
   corsAllowOrigin:
@@ -47,25 +56,21 @@ global:
   multitenancyEnabled: true
   multitenancyWithSingleDomainEnabled: "true"
 
-  topicsEnabled: "false"
+  topicsEnabled: "true"
   featureTopicsEnabled: "true"
   statisticsEnabled: "true"
   demographicsEnabled: "false"
 
-  # Prod-safe baseline: no dummy seeding. The dev overlay (values-dev.yaml)
-  # turns this on. See docs/infrastructure-report-2026-07.md §7.
+  # No dummy seeding here — the dev overlay (values-dev.yaml) turns this on.
   initializeDummyData: false
 
   logstashHost: "http://logstash.default:8080"
 
-  # Matrix values needed by subcharts (subcharts cannot see the top-level `matrix:` block).
-  # matrixAdminUsername / matrixAdminPassword must be set under global.matrix in secrets.yaml.
+  # Needed by subcharts; admin credentials go under global.matrix in secrets.yaml.
   matrix:
     matrixServerName: "your-server.local"
 
   # Keycloak connection
-
-
   keycloak:
     realm: "your-realm"
     authServerUrl: "https://your-domain.example.com/auth"
@@ -76,48 +81,78 @@ global:
     principalAttribute: "preferred_username"
     serviceAppClientId: "app"
     serviceAdminClientId: "admin-cli"
-
-
+    bootstrapUsers:
+      enabled: true
 
 matrix:
+  image: "matrixdotorg/synapse:v1.158.0"
+  initImage: "busybox:1.38.0"
+  replicas: 1
+  postgresReplicas: 1
   synapseServerName: "your-server.local"
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"
   matrixApiUrl: "http://matrix-synapse:8008"
   matrixServerName: "your-server.local"
+  # Public IP exempt from Synapse rate limiting; set per environment (ADR-005).
+  serverPublicIp: ""
 
-
-
-
-
+elementCall:
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.2"
+  healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # ---------- Infrastructure Services ----------------------------------------------------------------------------------
 
 admin:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.1"
+  imageVersion: "2.0.2"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
   imageVersion: "5.0"
-
 
 # MariaDB
 online-counseling-mariadb:
   imageName: "mariadb"
   imageVersion: "11.0.6"
   maxconnections: "1000"
-tokenService:
-  replicas: 2
-  image:
-    repository: ghcr.io/openresilienceinitiative/livekit-token-service
-    tag: "2.0.1"
-    pullPolicy: Always
+matrixrtcAuth:
+  replicas: 1
+  membershipReaderUserId: "@matrixrtc-auth:your-server.local"
+  # Namespace of the ingress controller, needed by the NetworkPolicy.
+  ingressControllerNamespace: "ingress-nginx"
+  bootstrap:
+    enabled: true
+    backoffLimit: 6
+  existingSecret:
+    name: "matrixrtc-auth-secrets"
+    membershipTokenKey: "matrix-membership-token"
+    callPolicyTokenKey: "call-policy-token"
+    livekitApiKeyKey: "livekit-api-key"
+    livekitApiSecretKey: "livekit-api-secret"
+    redisUrlKey: "redis-url"
+  gateway:
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.2"
+    pullPolicy: ""
+  upstream:
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.2"
+    pullPolicy: ""
   service:
     port: 3010
     targetPort: 3010
     type: ClusterIP
 
+livekit:
+  replicas: 1
+  # hostNetwork ports — the replica must fully terminate before its replacement starts.
+  deploymentStrategy: Recreate
+  terminationGracePeriodSeconds: 60
+  image: "docker.io/livekit/livekit-server:v1.13.5"
+  existingConfigSecret:
+    name: "livekit-config"
+    key: "config.yaml"
 
 # RabbitMQ
 online-counseling-rabbitmq:
@@ -130,17 +165,16 @@ online-counseling-redis:
   imageVersion: "7-alpine"
   serviceURL: "redis://redis:6379"
 
-
 # Keycloak
 online-counseling-keycloak:
-  imageName: "quay.io/keycloak/keycloak"
-  imageVersion: "26.6.3"
+  imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
+  imageVersion: "2.0.2"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
-  dbDatabase: "keycloak" 
+  dbDatabase: "keycloak"
 
-  # Logging (supported log levels are ALL, DEBUG, ERROR, FATAL, INFO, OFF, TRACE and WARN)
+  # Log levels: ALL, DEBUG, ERROR, FATAL, INFO, OFF, TRACE, WARN
   keycloakLogLevel: "WARN"
   rootLogLevel: "WARN"
 
@@ -150,12 +184,14 @@ online-counseling-keycloak:
 
 # Agency service
 agencyService:
-  imageName: "ghcr.io/openresilienceinitiative/oriso-agencyservice"
-  imageVersion: "2.0.1"
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.2"
 
   keycloakResource: "agency-service"
 
   springProfilesActive: "prod"
+  liquibaseChangeLog: "classpath:db/changelog/agencyservice-master.xml"
+  liquibaseContexts: "seed"
 
   topicEnrichmentEnabled: "false"
 
@@ -164,45 +200,82 @@ agencyService:
 
 # ConsultingType service
 consultingTypeService:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "2.0.1"
+  imageVersion: "2.0.2"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
 
   consultingTypesJsonPath : "consulting-type-settings"
+  liquibaseChangeLog: "classpath:db/changelog/consultingtypeservice-master.xml"
+  liquibaseContexts: "seed"
+  bootstrapTopics:
+    enabled: true
 
 
 # Tenant Service
 tenantService:
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.1"  
+  imageVersion: "2.0.2"
   springProfilesActive: "prod"
+  liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
+  liquibaseContexts: "seed"
+  bootstrapTenants:
+    enabled: true
   springDatasourceURL: "jdbc:mariadb://mariadb:3306/tenantservice"
   springRabbitmqHost: "rabbitmq"
   springRabbitmqPort: "5672"
 
 
-
 # User service
 userService:
-  imageName: "ghcr.io/openresilienceinitiative/oriso-userservice"
-  imageVersion: "2.0.1"
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.2"
   serviceURL: "http://userservice:8080"
- 
+
   keycloakResource: "user-service"
 
   springProfilesActive: "prod"
 
-  # 2FA / OTP login posture (NOT encryption — encryption is never toggled).
-  # Defaults keep OTP off; the dev overlay leaves it off for fast test-user
-  # creation, and prod's posture is a deliberate choice (see values-prod.yaml).
-  twoFactorAuthUserEnabled: "false"
-  twoFactorAuthConsultantEnabled: "false"
-  otpAllowedForUsers: "false"
-  otpAllowedForConsultants: "false"
-  otpAllowedForSingleTenantAdmins: "false"
-  otpAllowedForTenantSuperAdmins: "false"
+  # Encryption must never be disabled in any environment.
+  matrixEncryptionEnabled: "true"
+
+  springRabbitmqHost: "rabbitmq"
+  springRabbitmqPort: "5672"
+
+  redisHost: "redis"
+  redisPort: 6379
+  consultantAvailabilityRedisTtlSeconds: 120
+
+  # ADR-018 Global Support Access — see runbooks/support-access-enablement.md.
+  supportAccess:
+    enabled: "false"
+    handshakeTtlSeconds: 300
+    sessionTtlHours: 4
+    auditRetentionMonths: 12
+
+  # 2FA / OTP login posture — enabled by default.
+  otpAllowedForUsers: "true"
+  otpAllowedForConsultants: "true"
+  otpAllowedForSingleTenantAdmins: "true"
+  otpAllowedForTenantSuperAdmins: "true"
+
+  # Must be overridden per environment; password reset fails closed if unset.
+  magicLinkFrontendBaseUrl: "https://your-domain.example.com"
+  passwordResetFrontendBaseUrl: "https://your-domain.example.com"
+  passwordResetAdminFrontendBaseUrl: "https://admin.your-domain.example.com/admin"
+
+  # SMTP credentials live in secrets (userService.smtpUser / smtpPassword).
+  smtpHost: "mail.dreambau.com"
+  smtpPort: 587
+  smtpSecure: false
+  smtpFrom: "ORISO Platform <monty.burns@oriso.org>"
+
+  # Bare origins for account-invite links (TEN-INV-U6/U7); unset = system-notification base URL.
+  # accountInviteAppFrontendBaseUrl: "https://your-domain.example.com"
+  # accountInviteAdminFrontendBaseUrl: "https://admin.your-domain.example.com"
 
   firebaseConfigurationCredentialsFilePath: "/firebase/firebase-credentials.json"
   firebaseConfigurationNotificationMessage: "Du hast eine neue Nachricht erhalten"
@@ -219,33 +292,39 @@ userService:
   sessionInactiveDeleteWorkflowCron: "0 0 * * * ?"
   sessionInactiveDeleteWorkflowCheckDays: "30"
 
-  # Rocketchat
-  rocketCredentialschedulerCron: "0 0 0/1 * * ?"
-
-
 # ---------- Frontend Services ----------------------------------------------------------------------------------------
 
 # Frontend
 frontend:
-  imageName: "ghcr.io/openresilienceinitiative/oriso-frontend"
-  imageVersion: "2.0.1"
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.2"
 
-# Element Call
-elementCall:
-  image:
-    repository: ghcr.io/openresilienceinitiative/element-call
-    tag: "2.0.1"
-    pullPolicy: Always
+nginxController:
+  enabled: true
+  replicas: 1
 
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
+
+# SigNoz — set signoz.enabled=true to deploy it and auto-enable OTLP export.
+signoz:
+  enabled: false
+  # UI is served at https://<global.domainName>/signoz — keep in sync per environment.
+  signoz:
+    env:
+      signoz_global_external__url: "https://your-domain.example.com/signoz"
+  telemetryStoreMigrator:
+    upgradeHelmHooks: false
+  clickhouse:
+    persistence:
+      size: 20Gi
 
 # Health Dashboard
 healthDashboard:
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: "2.0.1"
-    pullPolicy: Always
+    tag: "2.0.2"
+    pullPolicy: ""
   replicas: 1
   namespace: ""
   resources: {}
@@ -255,94 +334,4 @@ healthDashboard:
     targetPort: 9100
   env:
     PORT: "9100"
-
-# SigNoz
-signoz:
-  image:
-    repository: signoz/signoz
-    tag: "v0.105.1"
-    pullPolicy: IfNotPresent
-  replicas: 1
-  namespace: ""
-  service:
-    type: ClusterIP
-    port: 8080
-    targetPort: 8080
-    internalPort: 8085
-    opampPort: 4320
-    otlpGrpcPort: 4317
-    otlpHttpPort: 4318
-  clickhouse:
-    deploy: true  # deploy a single-node ClickHouse in-cluster; set false to use an external one via host/port
-    host: "clickhouse"
-    port: 9000
-    httpPort: 8123
-    cluster: "cluster"
-    user: "default"
-    password: ""
-    secret:
-      name: clickhouse-config
-      key: default-password
-    image:
-      repository: clickhouse/clickhouse-server
-      tag: "25.5.6"
-      pullPolicy: IfNotPresent
-    persistence:
-      storageClass: ""  # empty = use the cluster's default StorageClass
-      size: 10Gi
-    resources:
-      requests:
-        cpu: 100m
-        memory: 512Mi
-      limits:
-        memory: 4Gi
-  schemaMigrator:
-    image:
-      repository: signoz/signoz-schema-migrator
-      tag: "v0.129.12"
-      pullPolicy: IfNotPresent
-  appConfig:
-    telemetryStore:
-      provider: "clickhouse"
-    prometheus:
-      activeQueryTracker:
-        enabled: false
-    emailing:
-      enabled: false
-    alertmanager:
-      provider: "signoz"
-      signozExternalUrl: ""
-    dotMetrics:
-      enabled: true
-  resources:
-    requests:
-      cpu: 1000m
-      memory: 4Gi
-    limits:
-      cpu: 4000m
-      memory: 16Gi
-  livenessProbe:
-    httpGet:
-      path: /api/v1/health
-      port: http
-      scheme: HTTP
-    failureThreshold: 6
-    initialDelaySeconds: 5
-    periodSeconds: 10
-    successThreshold: 1
-    timeoutSeconds: 5
-  readinessProbe:
-    httpGet:
-      path: /api/v1/health?live=1
-      port: http
-      scheme: HTTP
-    failureThreshold: 6
-    initialDelaySeconds: 5
-    periodSeconds: 10
-    successThreshold: 1
-    timeoutSeconds: 5
-  persistence:
-    enabled: true
-    storageClass: ""  # empty = use the cluster's default StorageClass
-    size: 20Gi
-    accessMode: ReadWriteOnce
+    HEALTH_CHECK_TIMEOUT_MS: "5000"
