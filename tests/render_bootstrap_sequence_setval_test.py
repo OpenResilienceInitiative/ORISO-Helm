@@ -20,7 +20,8 @@ def main() -> None:
     topic_sql = read_sql("files/topic-bootstrap.sql")
 
     assert "DO SETVAL(`sequence_tenant`, 1, 1);" in tenant_sql
-    assert "DO SETVAL(`sequence_topic`, 16, 1);" in topic_sql
+    assert "DO SETVAL(`sequence_topic`, 20, 1);" in topic_sql
+    assert "DO SETVAL(`sequence_topic_group`, 6, 1);" in topic_sql
 
     for path, sql in {
         "files/tenant-bootstrap.sql": tenant_sql,
