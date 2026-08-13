@@ -28,6 +28,8 @@ def render() -> list[dict]:
             "-f", os.path.join(CHART_DIR, "secrets.yaml.default"),
             "--set-string", "global.secrets.redisdefaultPass=test-redis-password",
             "--set", f"global.domainName={DOMAIN}",
+            "--set-string", "userService.smtpUser=smtp-canary-user",
+            "--set-string", "userService.smtpPassword=smtp-canary-password",
         ],
         capture_output=True,
         text=True,
