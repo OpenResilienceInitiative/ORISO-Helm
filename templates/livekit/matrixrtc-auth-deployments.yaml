@@ -169,6 +169,8 @@ spec:
               value: /run/secrets/livekit-api-secret
             - name: LIVEKIT_FULL_ACCESS_HOMESERVERS
               value: {{ .Values.matrix.matrixServerName | quote }}
+            - name: LIVEKIT_FEDERATION_URL_OVERRIDES
+              value: {{ printf "%s=https://%s" .Values.matrix.matrixServerName .Values.global.domainName | quote }}
             - name: LIVEKIT_JWT_BIND
               value: ":8080"
             # Stays "off" by default: lk-jwt-service logs Matrix user and room
