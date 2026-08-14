@@ -35,6 +35,17 @@ def image(repository: str) -> str:
     return f"{repository}@sha256:{DIGEST}"
 
 
+def add_init_images(name: str, pod_spec: dict) -> None:
+    repositories = {
+        "element-call": "docker.io/curlimages/curl",
+        "matrixrtc-auth-policy-gateway": "docker.io/curlimages/curl",
+        "matrixrtc-authorization-service": "docker.io/library/redis",
+        "matrix-synapse": "busybox",
+    }
+    if name in repositories:
+        pod_spec["initContainers"] = [{"image": image(repositories[name])}]
+
+
 class CaptureCutoverRollbackTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -44,8 +55,7 @@ class CaptureCutoverRollbackTest(unittest.TestCase):
         deployments = []
         for name, repository in self.capture.DEPLOYMENT_REPOSITORIES.items():
             pod_spec = {"containers": [{"image": image(repository)}]}
-            if name == "matrix-synapse":
-                pod_spec["initContainers"] = [{"image": image("busybox")}]
+            add_init_images(name, pod_spec)
             deployments.append(
                 {
                     "metadata": {"name": name},
@@ -72,7 +82,7 @@ class CaptureCutoverRollbackTest(unittest.TestCase):
 
         before = self.capture.collect_before_state("caritas", "caritas", run)
         self.assertEqual(before["helmRevision"], 7)
-        self.assertEqual(len(before["images"]), 9)
+        self.assertEqual(len(before["images"]), 11)
         self.assertTrue(before["helmManifestMatchesLive"])
 
         target = {
@@ -109,8 +119,7 @@ class CaptureCutoverRollbackTest(unittest.TestCase):
         deployments = []
         for name, repository in self.capture.DEPLOYMENT_REPOSITORIES.items():
             pod_spec = {"containers": [{"image": image(repository)}]}
-            if name == "matrix-synapse":
-                pod_spec["initContainers"] = [{"image": image("busybox")}]
+            add_init_images(name, pod_spec)
             deployments.append(
                 {
                     "metadata": {"name": name},

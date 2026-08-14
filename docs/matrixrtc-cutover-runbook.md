@@ -62,7 +62,8 @@ set to one reachable address and is the reason Pre-Dev calls connect at all.
 
 1. Record the reviewed source commit and published OCI digest for Frontend,
    Element Call, UserService, AgencyService, both MatrixRTC authorization
-   images, LiveKit, Synapse, and the shared BusyBox init/healthcheck image.
+   images, LiveKit, Synapse, the Synapse BusyBox init image, the shared curl
+   healthcheck image, and the MatrixRTC Redis-check image.
 2. Run `scripts/cutover-release-preflight.py` against the coordinated bundle.
    Zero digests, mutable tags, missing evidence, and a partial repository set
    are stop-ship conditions.

@@ -42,6 +42,8 @@ IMAGE_REPOSITORIES = {
     "livekit": DEPLOYMENT_REPOSITORIES["livekit"],
     "synapse": DEPLOYMENT_REPOSITORIES["matrix-synapse"],
     "synapseInit": "busybox",
+    "healthcheck": "docker.io/curlimages/curl",
+    "redisCheck": "docker.io/library/redis",
 }
 
 DEPLOYMENT_TO_IMAGE_KEY = {
@@ -53,6 +55,19 @@ DEPLOYMENT_TO_IMAGE_KEY = {
     "matrixrtc-authorization-service": "matrixrtcAuthorizationService",
     "livekit": "livekit",
     "matrix-synapse": "synapse",
+}
+
+INIT_IMAGES = {
+    "element-call": ("healthcheck", "docker.io/curlimages/curl"),
+    "matrixrtc-auth-policy-gateway": (
+        "healthcheck",
+        "docker.io/curlimages/curl",
+    ),
+    "matrixrtc-authorization-service": (
+        "redisCheck",
+        "docker.io/library/redis",
+    ),
+    "matrix-synapse": ("synapseInit", "busybox"),
 }
 
 IMMUTABLE_IMAGE = re.compile(r"^[^@\s]+@sha256:[a-f0-9]{64}$")
@@ -88,11 +103,17 @@ def extract_deployed_images(deployments: list[dict]) -> dict[str, str]:
         images[key] = require_image(
             name, container_image, DEPLOYMENT_REPOSITORIES[name]
         )
-        if name == "matrix-synapse":
+        if name in INIT_IMAGES:
             init_image = pod_spec.get("initContainers", [{}])[0].get("image")
-            images["synapseInit"] = require_image(
-                "matrix-synapse init container", init_image, "busybox"
+            init_key, init_repository = INIT_IMAGES[name]
+            verified_init = require_image(
+                f"{name} init container", init_image, init_repository
             )
+            if init_key in images and images[init_key] != verified_init:
+                raise ValueError(
+                    f"{name} init container differs from the shared {init_key} image"
+                )
+            images[init_key] = verified_init
 
     missing = set(DEPLOYMENT_REPOSITORIES) - names
     if missing:
@@ -207,6 +228,8 @@ def target_images_from_values(values: object) -> dict[str, str]:
             "livekit": values["livekit"]["image"],
             "synapse": values["matrix"]["image"],
             "synapseInit": values["matrix"]["initImage"],
+            "healthcheck": values["elementCall"]["healthcheckImage"],
+            "redisCheck": values["matrixrtcAuth"]["redisCheckImage"],
         }
     except (KeyError, TypeError) as error:
         raise ValueError(

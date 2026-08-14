@@ -38,7 +38,9 @@ def render() -> list[dict]:
             "--set-string",
             f"elementCall.image=ghcr.io/openresilienceinitiative/element-call@sha256:{TEST_DIGEST}",
             "--set-string",
-            f"elementCall.healthcheckImage=busybox@sha256:{TEST_DIGEST}",
+            f"elementCall.healthcheckImage=docker.io/curlimages/curl@sha256:{TEST_DIGEST}",
+            "--set-string",
+            f"matrixrtcAuth.redisCheckImage=docker.io/library/redis@sha256:{TEST_DIGEST}",
             "--set-string",
             f"userService.image=ghcr.io/openresilienceinitiative/oriso-userservice@sha256:{TEST_DIGEST}",
             "--set-string",
@@ -76,6 +78,8 @@ def main() -> None:
     userservice = find(documents, "Deployment", "userservice")
     agencyservice = find(documents, "Deployment", "agencyservice")
     livekit = find(documents, "Deployment", "livekit")
+    gateway = find(documents, "Deployment", "matrixrtc-auth-policy-gateway")
+    authorization = find(documents, "Deployment", "matrixrtc-authorization-service")
 
     synapse_spec = synapse["spec"]["template"]["spec"]
     images = [
@@ -86,6 +90,9 @@ def main() -> None:
         userservice["spec"]["template"]["spec"]["containers"][0]["image"],
         agencyservice["spec"]["template"]["spec"]["containers"][0]["image"],
         livekit["spec"]["template"]["spec"]["containers"][0]["image"],
+        element_call["spec"]["template"]["spec"]["initContainers"][0]["image"],
+        gateway["spec"]["template"]["spec"]["initContainers"][0]["image"],
+        authorization["spec"]["template"]["spec"]["initContainers"][0]["image"],
     ]
     for image in images:
         assert re.fullmatch(r"[^@\s]+@sha256:[a-f0-9]{64}", image)

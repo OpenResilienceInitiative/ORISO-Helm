@@ -14,7 +14,9 @@ DIGEST = "1" * 64
 
 
 def load_preflight():
-    spec = importlib.util.spec_from_file_location("cutover_release_preflight", SCRIPT_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "cutover_release_preflight", SCRIPT_PATH
+    )
     if spec is None or spec.loader is None:
         raise AssertionError(f"cannot load {SCRIPT_PATH}")
     module = importlib.util.module_from_spec(spec)
@@ -39,6 +41,8 @@ def ready_manifest() -> dict:
         "livekit": f"docker.io/livekit/livekit-server@sha256:{DIGEST}",
         "synapse": f"matrixdotorg/synapse@sha256:{DIGEST}",
         "synapseInit": f"busybox@sha256:{DIGEST}",
+        "healthcheck": f"docker.io/curlimages/curl@sha256:{DIGEST}",
+        "redisCheck": f"docker.io/library/redis@sha256:{DIGEST}",
     }
     return {
         "apiVersion": "oriso.org/v1alpha1",
@@ -116,19 +120,16 @@ class CutoverReleasePreflightTest(unittest.TestCase):
                 "frontend": {"image": manifest["registryRelease"]["frontend"]},
                 "elementCall": {
                     "image": manifest["registryRelease"]["elementCall"],
-                    "healthcheckImage": manifest["registryRelease"]["synapseInit"],
+                    "healthcheckImage": manifest["registryRelease"]["healthcheck"],
                 },
-                "userService": {
-                    "image": manifest["registryRelease"]["userService"]
-                },
+                "userService": {"image": manifest["registryRelease"]["userService"]},
                 "agencyService": {
                     "image": manifest["registryRelease"]["agencyService"]
                 },
                 "matrixrtcAuth": {
+                    "redisCheckImage": manifest["registryRelease"]["redisCheck"],
                     "gateway": {
-                        "image": manifest["registryRelease"][
-                            "matrixrtcPolicyGateway"
-                        ]
+                        "image": manifest["registryRelease"]["matrixrtcPolicyGateway"]
                     },
                     "upstream": {
                         "image": manifest["registryRelease"][
@@ -165,13 +166,15 @@ class CutoverReleasePreflightTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ready-for-predev"):
             self.preflight.validate_and_build_values(manifest)
 
-    def test_wrong_repository_zero_digest_and_missing_evidence_fail_closed(self) -> None:
+    def test_wrong_repository_zero_digest_and_missing_evidence_fail_closed(
+        self,
+    ) -> None:
         cases = []
 
         wrong_repository = ready_manifest()
-        wrong_repository["registryRelease"]["frontend"] = (
-            f"ghcr.io/example/not-oriso@sha256:{DIGEST}"
-        )
+        wrong_repository["registryRelease"][
+            "frontend"
+        ] = f"ghcr.io/example/not-oriso@sha256:{DIGEST}"
         cases.append((wrong_repository, "frontend"))
 
         zero_digest = ready_manifest()
@@ -210,26 +213,28 @@ class CutoverReleasePreflightTest(unittest.TestCase):
                 str(CHART_DIR / "values.yaml.default"),
                 "-f",
                 str(CHART_DIR / "secrets.yaml.default"),
-            "--set-string",
-            "frontend.image=ghcr.io/openresilienceinitiative/oriso-frontend:latest",
-            "--set-string",
-            f"elementCall.image=ghcr.io/openresilienceinitiative/element-call@sha256:{DIGEST}",
-            "--set-string",
-            f"elementCall.healthcheckImage=busybox@sha256:{DIGEST}",
-            "--set-string",
-            f"userService.image=ghcr.io/openresilienceinitiative/oriso-userservice@sha256:{DIGEST}",
-            "--set-string",
-            f"agencyService.image=ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{DIGEST}",
-            "--set-string",
-            f"matrix.image=matrixdotorg/synapse@sha256:{DIGEST}",
-            "--set-string",
-            f"matrix.initImage=busybox@sha256:{DIGEST}",
-            "--set",
-            "global.requireImmutableImages=true",
-            "--set-string",
-            "userService.smtpUser=smtp-canary-user",
-            "--set-string",
-            "userService.smtpPassword=smtp-canary-password",
+                "--set-string",
+                "frontend.image=ghcr.io/openresilienceinitiative/oriso-frontend:latest",
+                "--set-string",
+                f"elementCall.image=ghcr.io/openresilienceinitiative/element-call@sha256:{DIGEST}",
+                "--set-string",
+                f"elementCall.healthcheckImage=docker.io/curlimages/curl@sha256:{DIGEST}",
+                "--set-string",
+                f"matrixrtcAuth.redisCheckImage=docker.io/library/redis@sha256:{DIGEST}",
+                "--set-string",
+                f"userService.image=ghcr.io/openresilienceinitiative/oriso-userservice@sha256:{DIGEST}",
+                "--set-string",
+                f"agencyService.image=ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{DIGEST}",
+                "--set-string",
+                f"matrix.image=matrixdotorg/synapse@sha256:{DIGEST}",
+                "--set-string",
+                f"matrix.initImage=busybox@sha256:{DIGEST}",
+                "--set",
+                "global.requireImmutableImages=true",
+                "--set-string",
+                "userService.smtpUser=smtp-canary-user",
+                "--set-string",
+                "userService.smtpPassword=smtp-canary-password",
             ],
             capture_output=True,
             text=True,
@@ -238,6 +243,7 @@ class CutoverReleasePreflightTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("frontend.image must use repository@sha256", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
