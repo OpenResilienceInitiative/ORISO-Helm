@@ -11,7 +11,7 @@ Configure a dedicated, non-admin Matrix user such as
 Provision `matrixrtc-auth-runtime` outside Helm with:
 
 - `matrix-membership-token`
-- `call-policy-token`
+- `matrix-call-policy-token`
 - `livekit-api-key`
 - `livekit-api-secret`
 - `redis-url`

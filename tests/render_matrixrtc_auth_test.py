@@ -98,7 +98,7 @@ def main() -> None:
         "items"
     ]
     assert {
-        "key": "call-policy-token",
+        "key": "matrix-call-policy-token",
         "path": "call-policy-token",
     } in gateway_secret_items
 
@@ -106,7 +106,7 @@ def main() -> None:
     assert userservice_env["MATRIXRTC_CALL_POLICY_TOKEN"]["valueFrom"] == {
         "secretKeyRef": {
             "name": "matrixrtc-auth-runtime",
-            "key": "call-policy-token",
+            "key": "matrix-call-policy-token",
         }
     }
 

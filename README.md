@@ -113,7 +113,7 @@ Before installation, provision `matrixrtcAuth.existingSecret.name` (default
 `matrixrtc-auth-runtime`) with these keys:
 
 - `matrix-membership-token` (a real token for the dedicated non-admin reader)
-- `call-policy-token` (a dedicated high-entropy value shared with UserService)
+- `matrix-call-policy-token` (a dedicated high-entropy value shared with UserService)
 - `livekit-api-key` and `livekit-api-secret`
 - `redis-url` (the complete authenticated Redis URL)
 

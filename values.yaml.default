@@ -131,7 +131,7 @@ matrixrtcAuth:
     # rendered manifests or Helm release history.
     name: "matrixrtc-auth-runtime"
     membershipTokenKey: "matrix-membership-token"
-    callPolicyTokenKey: "call-policy-token"
+    callPolicyTokenKey: "matrix-call-policy-token"
     livekitApiKeyKey: "livekit-api-key"
     livekitApiSecretKey: "livekit-api-secret"
     redisUrlKey: "redis-url"
