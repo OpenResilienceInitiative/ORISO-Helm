@@ -56,7 +56,7 @@ class VerifySigNozRuntimeTest(unittest.TestCase):
                     "items": [
                         {
                             "metadata": {
-                                "name": "data-oriso-platform-clickhouse-0-0-0",
+                                "name": "data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0",
                                 "uid": "pvc-uid-1",
                             }
                         }
@@ -69,10 +69,12 @@ class VerifySigNozRuntimeTest(unittest.TestCase):
 
     def test_ready_stack_and_least_privilege_rbac_pass(self) -> None:
         result = self.verify.verify_runtime(
-            "oriso-platform",
+            "caritas",
             "caritas",
             "oriso-clickhouse-operator",
-            {"data-oriso-platform-clickhouse-0-0-0": "pvc-uid-1"},
+            {
+                "data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0": "pvc-uid-1"
+            },
             self.runner,
         )
         self.assertEqual(result["clickhouseStatus"], "Completed")
@@ -101,20 +103,24 @@ class VerifySigNozRuntimeTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             self.verify.verify_runtime(
-                "oriso-platform",
+                "caritas",
                 "caritas",
                 "oriso-clickhouse-operator",
-                {"data-oriso-platform-clickhouse-0-0-0": "pvc-uid-1"},
+                {
+                    "data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0": "pvc-uid-1"
+                },
                 unsafe_runner,
             )
 
     def test_changed_or_empty_pvc_snapshot_fails(self) -> None:
         with self.assertRaisesRegex(ValueError, "PVC continuity"):
             self.verify.verify_runtime(
-                "oriso-platform",
+                "caritas",
                 "caritas",
                 "oriso-clickhouse-operator",
-                {"data-oriso-platform-clickhouse-0-0-0": "different-uid"},
+                {
+                    "data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0": "different-uid"
+                },
                 self.runner,
             )
 

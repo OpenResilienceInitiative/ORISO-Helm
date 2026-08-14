@@ -18,8 +18,10 @@ def render() -> list[dict]:
         [
             "helm",
             "template",
-            "oriso-platform",
+            "caritas",
             str(CHART_DIR),
+            "--namespace",
+            "caritas",
             "-f",
             str(CHART_DIR / "values.yaml.default"),
             "-f",
@@ -46,8 +48,10 @@ def render_disabled() -> list[dict]:
         [
             "helm",
             "template",
-            "oriso-platform",
+            "caritas",
             str(CHART_DIR),
+            "--namespace",
+            "caritas",
             "-f",
             str(CHART_DIR / "values.yaml.default"),
             "-f",
@@ -87,10 +91,10 @@ def resources_for(role: dict, api_group: str) -> set[str]:
 
 def test_clickhouse_operator_has_read_only_cluster_discovery() -> None:
     documents = render()
-    role_name = "oriso-platform-clickhouse-operator-cluster-read"
+    role_name = "caritas-clickhouse-operator-cluster-read"
     cluster_role = find(documents, "ClusterRole", role_name)
     binding = find(documents, "ClusterRoleBinding", role_name)
-    namespace_role = find(documents, "Role", "oriso-platform-clickhouse-operator")
+    namespace_role = find(documents, "Role", "caritas-clickhouse-operator")
 
     assert resources_for(cluster_role, "apiextensions.k8s.io") == {
         "customresourcedefinitions"
@@ -116,7 +120,7 @@ def test_clickhouse_operator_has_read_only_cluster_discovery() -> None:
         {
             "kind": "ServiceAccount",
             "name": "oriso-clickhouse-operator",
-            "namespace": "default",
+            "namespace": "caritas",
         }
     ]
 
@@ -132,6 +136,6 @@ def test_clickhouse_operator_has_read_only_cluster_discovery() -> None:
 def test_clickhouse_cluster_permissions_do_not_render_when_signoz_is_disabled() -> None:
     assert not any(
         document.get("metadata", {}).get("name")
-        == "oriso-platform-clickhouse-operator-cluster-read"
+        == "caritas-clickhouse-operator-cluster-read"
         for document in render_disabled()
     )

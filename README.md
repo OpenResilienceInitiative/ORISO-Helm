@@ -159,7 +159,7 @@ Before the upgrade, capture the retained ClickHouse PVC identities:
 
 ```bash
 kubectl --namespace caritas get pvc \
-  --selector clickhouse.altinity.com/chi=oriso-platform-clickhouse \
+  --selector clickhouse.altinity.com/chi=caritas-clickhouse \
   -o json > signoz-pvcs-before.json
 ```
 
@@ -172,7 +172,7 @@ no-op, or export-failure loop:
 
 ```bash
 ./scripts/verify-signoz-runtime.py \
-  --release oriso-platform \
+  --release caritas \
   --namespace caritas \
   --pvc-snapshot signoz-pvcs-before.json \
   --output signoz-runtime-evidence.json
@@ -185,7 +185,7 @@ three through SigNoz's authenticated v5 API, and writes a secret-free artifact:
 
 ```bash
 ./scripts/verify-signoz-ingestion.py \
-  --release oriso-platform \
+  --release caritas \
   --namespace caritas \
   --environment predev \
   --output signoz-ingestion-evidence.json

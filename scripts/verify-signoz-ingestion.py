@@ -365,7 +365,7 @@ def verify_ingestion(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--release", default="oriso-platform")
+    parser.add_argument("--release", default="caritas")
     parser.add_argument("--namespace", default="caritas")
     parser.add_argument("--environment", default="predev")
     parser.add_argument("--service-name", default="oriso-cutover-canary")
