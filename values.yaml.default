@@ -458,6 +458,10 @@ k8s-infra:
             - 'set(log.body, "[ORISO log body suppressed by privacy policy]")'
             - 'keep_keys(log.attributes, ["trace.id", "span.id", "log.level", "log.logger", "service.name"])'
       service:
+        telemetry:
+          resource:
+            service.name: oriso-k8s-infra-agent
+            deployment.environment: '${env:DEPLOYMENT_ENVIRONMENT}'
         pipelines:
           traces:
             receivers: []
@@ -490,6 +494,12 @@ k8s-infra:
       capabilities:
         drop:
           - ALL
+    config:
+      service:
+        telemetry:
+          resource:
+            service.name: oriso-k8s-infra-cluster
+            deployment.environment: '${env:DEPLOYMENT_ENVIRONMENT}'
 
 # Health Dashboard
 healthDashboard:

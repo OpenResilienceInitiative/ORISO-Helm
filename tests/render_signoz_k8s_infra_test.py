@@ -10,7 +10,6 @@ from typing import Any
 
 import yaml
 
-
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -128,9 +127,7 @@ def main() -> None:
         agent_config["receivers"]
     )
     filelog = agent_config["receivers"]["filelog/k8s"]
-    assert filelog["include"] == [
-        "/var/log/pods/${env:K8S_NAMESPACE}_*/*/*.log"
-    ]
+    assert filelog["include"] == ["/var/log/pods/${env:K8S_NAMESPACE}_*/*/*.log"]
     assert filelog["start_at"] == "end"
 
     privacy = agent_config["processors"]["transform/oriso_log_privacy"]
@@ -176,9 +173,19 @@ def main() -> None:
     assert deployment_config["service"]["pipelines"]["logs"]["exporters"] == [
         "otlphttp"
     ]
-    for config in (agent_config, deployment_config):
+    expected_self_services = (
+        (agent_config, "oriso-k8s-infra-agent"),
+        (deployment_config, "oriso-k8s-infra-cluster"),
+    )
+    for config, expected_service in expected_self_services:
         self_metrics = config["service"]["telemetry"]["metrics"]
         assert self_metrics["level"] == "detailed"
+        telemetry_resource = config["service"]["telemetry"]["resource"]
+        assert telemetry_resource["service.name"] == expected_service
+        assert telemetry_resource["deployment.environment"] == (
+            "${env:DEPLOYMENT_ENVIRONMENT}"
+        )
+        assert telemetry_resource["k8s.cluster.name"] == "${env:K8S_CLUSTER_NAME}"
         exporter = self_metrics["readers"][0]["periodic"]["exporter"]["otlp"]
         assert exporter["endpoint"] == "${env:OTEL_EXPORTER_OTLP_ENDPOINT}"
 
@@ -189,9 +196,7 @@ def main() -> None:
             f"caritas-k8s-infra-{component}-caritas",
         )
         resources = {
-            resource
-            for rule in role["rules"]
-            for resource in rule.get("resources", [])
+            resource for rule in role["rules"] for resource in rule.get("resources", [])
         }
         verbs = {verb for rule in role["rules"] for verb in rule.get("verbs", [])}
         assert "secrets" not in resources
@@ -227,14 +232,22 @@ def main() -> None:
             overlay="values-dev.yaml",
         )
     )
-    assert env_by_name(find(predev, "DaemonSet", "caritas-k8s-infra-otel-agent"))[
-        "K8S_CLUSTER_NAME"
-    ]["value"] == "oriso-predev"
-    assert env_by_name(find(dev, "DaemonSet", "caritas-k8s-infra-otel-agent"))[
-        "K8S_CLUSTER_NAME"
-    ]["value"] == "oriso-dev"
+    assert (
+        env_by_name(find(predev, "DaemonSet", "caritas-k8s-infra-otel-agent"))[
+            "K8S_CLUSTER_NAME"
+        ]["value"]
+        == "oriso-predev"
+    )
+    assert (
+        env_by_name(find(dev, "DaemonSet", "caritas-k8s-infra-otel-agent"))[
+            "K8S_CLUSTER_NAME"
+        ]["value"]
+        == "oriso-dev"
+    )
 
-    print("PASS: official SigNoz k8s-infra signals are scoped, identified, and privacy-safe")
+    print(
+        "PASS: official SigNoz k8s-infra signals are scoped, identified, and privacy-safe"
+    )
 
 
 if __name__ == "__main__":
