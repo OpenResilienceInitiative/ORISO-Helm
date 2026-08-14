@@ -184,9 +184,33 @@ def main() -> None:
     assert ingress_annotations[
         "nginx.ingress.kubernetes.io/cors-allow-headers"
     ] == "Content-Type"
-    assert "nginx.ingress.kubernetes.io/cors-allow-credentials" not in (
-        ingress_annotations
-    )
+    assert ingress_annotations[
+        "nginx.ingress.kubernetes.io/cors-allow-credentials"
+    ] == "false"
+
+    # Element Call submits its OpenID credentials in the POST JSON body. The
+    # browser preflight therefore needs POST plus Content-Type, but never
+    # cookie/HTTP-auth credential sharing across origins.
+    element_call_preflight = {
+        "origin": "https://your-domain.example.com",
+        "method": "POST",
+        "request_headers": {"Content-Type"},
+    }
+    assert element_call_preflight["origin"] == ingress_annotations[
+        "nginx.ingress.kubernetes.io/cors-allow-origin"
+    ]
+    assert element_call_preflight["method"] in {
+        method.strip()
+        for method in ingress_annotations[
+            "nginx.ingress.kubernetes.io/cors-allow-methods"
+        ].split(",")
+    }
+    assert element_call_preflight["request_headers"] <= {
+        header.strip()
+        for header in ingress_annotations[
+            "nginx.ingress.kubernetes.io/cors-allow-headers"
+        ].split(",")
+    }
 
     rendered = yaml.safe_dump_all(documents)
     assert "LIVEKIT_FULL_ACCESS_HOMESERVERS" in rendered
