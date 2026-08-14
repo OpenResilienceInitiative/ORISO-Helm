@@ -38,6 +38,12 @@ def test_removed_runtime_contracts_do_not_render() -> None:
     documents = [document for document in yaml.safe_load_all(result.stdout) if document]
     rendered = result.stdout
     assert "LIVE_SERVICE_API_URL" not in rendered
+    assert "/service/liveproxy" not in rendered
+    assert "/service/live(/|$)(.*)" not in rendered
+    assert "userservice-live-alias-ingress" not in rendered
+    assert "rcToken" not in rendered
+    assert "rcUserId" not in rendered
+    assert "rcGroupId" not in rendered
     assert not any(
         document.get("kind") == "Ingress"
         and document.get("metadata", {}).get("name")
