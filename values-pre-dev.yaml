@@ -53,6 +53,5 @@ userService:
   # alongside serviceEncryptionAppkey and the SMTP credentials — see the entry
   # under `userService:` in secrets.yaml.default. The chart marks it `required`,
   # so rendering this overlay without those secret values fails loudly at deploy
-  # time instead of shipping an empty key. Before Pre-Dev takes this chart
-  # (blocked on ORISO-Helm#110), the value has to exist in the Pre-Dev secret
-  # values file or the UserService rollout CrashLoops.
+  # time instead of shipping an empty key. The value must exist in the Pre-Dev
+  # secret values file or the UserService rollout CrashLoops.
