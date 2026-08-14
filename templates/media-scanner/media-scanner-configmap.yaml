@@ -150,7 +150,12 @@ data:
             block(EXIT_CHECK_FAILED, "ai check timed out -> block")
         if result.returncode != EXIT_CLEAN:
             sys.stderr.write(result.stderr)
-            block(result.returncode or EXIT_CHECK_FAILED, "ai check did not clear the file -> block")
+            if result.returncode == EXIT_REJECTED:
+                block(EXIT_REJECTED, "ai check rejected the file -> block")
+            # Anything else — including a negative code from a signal-killed
+            # subprocess — is a check that did not happen, and a check that
+            # did not happen must never be cached as a verdict (exit 2).
+            block(EXIT_CHECK_FAILED, "ai check did not complete -> block")
         {{- end }}
 
         print("scan: clean -> release", file=sys.stderr)
@@ -278,11 +283,14 @@ data:
         except (KeyError, IndexError, TypeError, AttributeError):
             block(EXIT_CHECK_FAILED, "unexpected provider schema -> block")
 
-        if "UNSAFE" in answer:
+        # Exact verdicts only. A substring match would release any chatty
+        # answer that merely contains the word SAFE ("I CANNOT TELL IF THIS
+        # IS SAFE"); the contract is an explicit SAFE, everything else blocks.
+        if answer == "UNSAFE":
             block(EXIT_REJECTED, "UNSAFE -> block")
-        if "SAFE" in answer:
+        if answer == "SAFE":
             sys.exit(EXIT_CLEAN)
-        block(EXIT_CHECK_FAILED, "unparseable answer -> block")
+        block(EXIT_CHECK_FAILED, "unparseable answer %r -> block" % answer[:80])
 
 
     if __name__ == "__main__":
