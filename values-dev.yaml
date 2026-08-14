@@ -11,8 +11,19 @@
 global:
   # Seed dummy tenants/users so the app is immediately explorable in dev.
   initializeDummyData: true
+  observability:
+    deploymentEnvironment: "dev"
   matrix:
     matrixServerName: "matrix.oriso.org"
+
+signoz:
+  enabled: true
+
+k8s-infra:
+  enabled: true
+  global:
+    clusterName: "oriso-dev"
+    deploymentEnvironment: "dev"
 
 # Spring "dev" profile for the backend services (verbose errors, dev wiring).
 agencyService:
