@@ -127,7 +127,7 @@ spec:
       automountServiceAccountToken: false
       initContainers:
         - name: wait-for-redis
-          image: {{ printf "%s:%s" (index .Values "online-counseling-redis").imageName (index .Values "online-counseling-redis").imageVersion | quote }}
+          image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.redisCheckImage" .Values.matrixrtcAuth.redisCheckImage) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           command:
             - /bin/sh
