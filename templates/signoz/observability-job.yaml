@@ -1,0 +1,89 @@
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $managed := get $signoz "orisoObservability" | default dict -}}
+{{- if and (get $signoz "enabled" | default false) (get $managed "enabled" | default false) }}
+{{- $name := printf "%s-signoz-observability" .Release.Name -}}
+{{- $secretName := get $managed "existingSecret" | default $name -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: signoz-observability
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "30"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: signoz-observability
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: provision-and-prove
+          image: {{ required "signoz.orisoObservability.image must be set" (get $managed "image") | quote }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+          args:
+            - /opt/oriso/signoz/signoz_observability.py
+            - --mode
+            - provision
+          env:
+            - name: SIGNOZ_API_URL
+              value: {{ printf "http://%s:8080" (include "oriso.signozServiceName" .) | quote }}
+            - name: SIGNOZ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName | quote }}
+                  key: {{ get $managed "apiKeyKey" | default "apiKey" | quote }}
+            - name: SLACK_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName | quote }}
+                  key: {{ get $managed "slackWebhookUrlKey" | default "slackWebhookUrl" | quote }}
+            - name: SIGNOZ_CHANNEL_NAME
+              value: {{ get $managed "channelName" | default "ORISO Platform Alerts" | quote }}
+            - name: ORISO_ASSETS_DIR
+              value: /opt/oriso/signoz
+            - name: ORISO_ENVIRONMENT
+              value: {{ .Values.global.observability.deploymentEnvironment | quote }}
+            - name: ORISO_CLUSTER_NAME
+              value: {{ get (get (get .Values "k8s-infra" | default dict) "global" | default dict) "clusterName" | quote }}
+            - name: TEST_NOTIFICATION_ROUTE
+              value: {{ get $managed "testNotificationRoute" | default false | quote }}
+          resources:
+{{ get $managed "resources" | toYaml | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: assets
+              mountPath: /opt/oriso/signoz
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: assets
+          configMap:
+            name: {{ $name }}
+            defaultMode: 0444
+        - name: tmp
+          emptyDir: {}
+{{- end }}

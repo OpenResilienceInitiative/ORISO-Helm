@@ -1,0 +1,51 @@
+{
+  "dashboards": [
+    {
+      "slug": "oriso-live-chat",
+      "title": "ORISO Live Chat and Matrix",
+      "description": "Demand, routing, availability, room safety, Matrix processing, and notification outcomes.",
+      "panels": [
+        {"id": "queue", "title": "Queue demand state", "metric": "oriso.live_chat.queue.visibility", "timeAggregation": "rate", "spaceAggregation": "sum", "groupBy": ["demand", "outcome"]},
+        {"id": "routing", "title": "Routing decisions", "metric": "oriso.live_chat.routing.decisions", "timeAggregation": "rate", "spaceAggregation": "sum", "groupBy": ["stage", "outcome"]},
+        {"id": "availability", "title": "Redis availability store", "metric": "oriso.live_chat.availability.store.operations", "timeAggregation": "rate", "spaceAggregation": "sum", "groupBy": ["operation", "outcome"]},
+        {"id": "rooms", "title": "Matrix room creation and encryption", "metric": "oriso.matrix.room.creation", "timeAggregation": "rate", "spaceAggregation": "sum", "groupBy": ["encryption", "outcome"]},
+        {"id": "events", "title": "Matrix event processing", "metric": "oriso.matrix.event.processing", "timeAggregation": "rate", "spaceAggregation": "sum", "groupBy": ["event_type", "outcome"]},
+        {"id": "side-effects", "title": "Push and notification side effects", "metric": "oriso.matrix.side_effect.operations", "timeAggregation": "rate", "spaceAggregation": "sum", "groupBy": ["side_effect", "outcome"]}
+      ]
+    },
+    {
+      "slug": "oriso-service-reliability",
+      "title": "ORISO Service Reliability",
+      "description": "Provisioning compensation, outbound dependencies, retries, and replica safety.",
+      "panels": [
+        {"id": "compensation", "title": "Provisioning compensation", "metric": "userservice.provisioning.compensation.attempts", "timeAggregation": "rate", "spaceAggregation": "sum", "groupBy": ["workflow", "outcome"]},
+        {"id": "compensation-steps", "title": "Provisioning compensation steps", "metric": "userservice.provisioning.compensation.steps", "timeAggregation": "rate", "spaceAggregation": "sum", "groupBy": ["workflow", "resource", "outcome"]},
+        {"id": "outbound", "title": "Outbound dependency calls", "metric": "userservice.outbound.http.calls", "timeAggregation": "rate", "spaceAggregation": "sum", "groupBy": ["dependency", "outcome"]},
+        {"id": "retries", "title": "Scheduled dependency retries", "metric": "userservice.outbound.retries", "timeAggregation": "rate", "spaceAggregation": "sum", "groupBy": ["dependency", "operation"]},
+        {"id": "replicas", "title": "Replica constraint violations", "metric": "userservice.replica.constraint.violated", "timeAggregation": "latest", "spaceAggregation": "max", "groupBy": []},
+        {"id": "local-state", "title": "Residual local state risk", "metric": "userservice.replica.local_state.components", "timeAggregation": "latest", "spaceAggregation": "sum", "groupBy": ["status"]}
+      ]
+    },
+    {
+      "slug": "oriso-platform-health",
+      "title": "ORISO Kubernetes and SigNoz Health",
+      "description": "Collector freshness, Kubernetes resource health, and ClickHouse capacity.",
+      "panels": [
+        {"id": "collector", "title": "Collector accepted metric points", "metric": "otelcol_receiver_accepted_metric_points", "timeAggregation": "rate", "spaceAggregation": "sum", "groupBy": ["service.name"], "clusterScoped": true},
+        {"id": "pod-cpu", "title": "Pod CPU utilization", "metric": "k8s.pod.cpu.utilization", "timeAggregation": "avg", "spaceAggregation": "max", "groupBy": ["k8s.namespace.name"], "clusterScoped": true},
+        {"id": "pod-memory", "title": "Pod memory usage", "metric": "k8s.pod.memory.usage", "timeAggregation": "avg", "spaceAggregation": "sum", "groupBy": ["k8s.namespace.name"], "clusterScoped": true},
+        {"id": "node-condition", "title": "Node conditions", "metric": "k8s.node.condition", "timeAggregation": "latest", "spaceAggregation": "max", "groupBy": ["condition", "status"], "clusterScoped": true},
+        {"id": "clickhouse-free", "title": "ClickHouse PVC available bytes", "metric": "k8s.volume.available", "timeAggregation": "latest", "spaceAggregation": "min", "groupBy": [], "clusterScoped": true, "filter": "k8s.persistentvolumeclaim.name CONTAINS 'clickhouse'"},
+        {"id": "clickhouse-capacity", "title": "ClickHouse PVC capacity bytes", "metric": "k8s.volume.capacity", "timeAggregation": "latest", "spaceAggregation": "max", "groupBy": [], "clusterScoped": true, "filter": "k8s.persistentvolumeclaim.name CONTAINS 'clickhouse'"}
+      ]
+    }
+  ],
+  "alerts": [
+    {"slug": "provisioning-compensation-failure", "title": "Provisioning compensation is incomplete", "description": "A UserService provisioning rollback left at least one resource unrepaired.", "metric": "userservice.provisioning.compensation.attempts", "timeAggregation": "rate", "spaceAggregation": "sum", "filter": "outcome = 'partial_failure'", "op": "above", "target": 0, "severity": "critical"},
+    {"slug": "availability-store-failure", "title": "Live-chat availability store failed", "description": "Redis-backed live-chat availability operations are failing closed.", "metric": "oriso.live_chat.availability.store.operations", "timeAggregation": "rate", "spaceAggregation": "sum", "filter": "outcome = 'failure'", "op": "above", "target": 0, "severity": "critical"},
+    {"slug": "notification-failure", "title": "Live-chat notifications are failing", "description": "Matrix-related notification side effects are failing.", "metric": "oriso.matrix.side_effect.operations", "timeAggregation": "rate", "spaceAggregation": "sum", "filter": "side_effect = 'notification' AND outcome = 'failure'", "op": "above", "target": 0, "severity": "warning"},
+    {"slug": "unencrypted-room", "title": "An unencrypted Matrix room was created", "description": "At least one Matrix room creation completed without encryption enabled.", "metric": "oriso.matrix.room.creation", "timeAggregation": "rate", "spaceAggregation": "sum", "filter": "encryption = 'disabled'", "op": "above", "target": 0, "severity": "critical"},
+    {"slug": "clickhouse-capacity", "title": "SigNoz ClickHouse capacity is low", "description": "Available space on a ClickHouse persistent volume is below 2 GiB.", "metric": "k8s.volume.available", "timeAggregation": "latest", "spaceAggregation": "min", "filter": "k8s.persistentvolumeclaim.name CONTAINS 'clickhouse'", "op": "below", "target": 2147483648, "severity": "critical", "clusterScoped": true},
+    {"slug": "collector-staleness", "title": "SigNoz collector telemetry is stale", "description": "The ORISO Kubernetes collector is accepting no metric points or has stopped reporting.", "metric": "otelcol_receiver_accepted_metric_points", "timeAggregation": "rate", "spaceAggregation": "sum", "filter": "service.name = 'oriso-k8s-infra-cluster'", "op": "below", "target": 0.01, "severity": "critical", "clusterScoped": true, "notifyOnNoData": true}
+  ]
+}
