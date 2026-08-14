@@ -177,6 +177,16 @@ def main() -> None:
         ]
         == "https://your-domain.example.com"
     )
+    ingress_annotations = ingress["metadata"]["annotations"]
+    assert ingress_annotations[
+        "nginx.ingress.kubernetes.io/cors-allow-methods"
+    ] == "POST, OPTIONS"
+    assert ingress_annotations[
+        "nginx.ingress.kubernetes.io/cors-allow-headers"
+    ] == "Content-Type"
+    assert "nginx.ingress.kubernetes.io/cors-allow-credentials" not in (
+        ingress_annotations
+    )
 
     rendered = yaml.safe_dump_all(documents)
     assert "LIVEKIT_FULL_ACCESS_HOMESERVERS" in rendered
