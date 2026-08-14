@@ -58,14 +58,29 @@ set to one reachable address and is the reason Pre-Dev calls connect at all.
 
 1. Record the reviewed source commit and published OCI digest for Frontend,
    Element Call, UserService, AgencyService, both MatrixRTC authorization
-   images, and Synapse.
+   images, LiveKit, Synapse, and the shared BusyBox init/healthcheck image.
 2. Run `scripts/cutover-release-preflight.py` against the coordinated bundle.
    Zero digests, mutable tags, missing evidence, and a partial repository set
    are stop-ship conditions.
 3. Render the exact production values and confirm that no Secret object
    contains LiveKit or Matrix membership credentials.
-4. Capture the current Deployment image digests before changing the release.
-5. Confirm two schedulable nodes for the two host-networked LiveKit replicas.
+4. Generate the verified digest overlay, then capture the current Helm revision,
+   complete before-image set, target-image set, and bounded rollback command:
+
+   ```sh
+   ./scripts/capture-cutover-rollback.py \
+     --release oriso-platform \
+     --namespace caritas \
+     --target-values <generated-digest-overlay> \
+     --output-dir <new-evidence-directory>
+   ```
+
+   The command is read-only against the cluster, fails if any current cutover
+   Deployment is unready or mutable, and refuses to overwrite evidence.
+5. Confirm the single PreDev node is healthy and no call is active. PreDev uses
+   one host-networked LiveKit replica with `Recreate` and a bounded 60-second
+   termination grace period. A rollout therefore interrupts active calls and
+   must run inside the announced maintenance window.
 
 UserService and Frontend are one compatibility unit: the `rcGroupId` to
 `matrixRoomId` and `rcUserId` to `matrixUserId` API change must never be
@@ -73,8 +88,15 @@ released independently.
 
 ## Deploy
 
-Use the existing release command with the reviewed digest overlay and atomic
-rollback:
+PreDev currently has the historical `oriso-platform` Helm release, while recent
+service changes are applied through the established host-side scripts in
+`/root/predev-deploy-script`. PR #157 was closed without merge and is not a
+deployment authority. Until a protected Helm deployment workflow replaces the
+host path, evidence must identify the exact script, reviewed source commit,
+target digest, previous digest, rollout result, and generated rollback command.
+
+For the coordinated chart release, use the existing Helm release with the
+reviewed digest overlay and atomic rollback:
 
 ```sh
 helm upgrade --install oriso-platform . \
@@ -82,18 +104,18 @@ helm upgrade --install oriso-platform . \
   --values values.yaml.default \
   --values <environment-values> \
   --values <generated-digest-overlay> \
-  --atomic --wait --timeout 5h10m
+  --atomic --wait --timeout 15m
 ```
 
 The Element Call pod has a startup gate on the MatrixRTC policy gateway, so new
 widget traffic cannot become ready before authorization is available. The
-LiveKit Deployment keeps two replicas on different nodes and gives terminating
-servers five hours to drain active rooms before replacement.
+single-node LiveKit Deployment uses `Recreate`; Kubernetes must fully terminate
+the old process before starting the replacement on the same host ports.
 
 ## Mandatory verification
 
 - All Deployments show exactly the reviewed image digests.
-- Both MatrixRTC authorization Deployments and both LiveKit pods are Ready.
+- Both MatrixRTC authorization Deployments and the LiveKit pod are Ready.
 - The public gateway health check succeeds and its CORS response allows only
   the configured ORISO application origin.
 - A two-browser encrypted call passes reactions, hand raise, reconnect and
@@ -111,10 +133,11 @@ release to the digest set captured before deployment:
 
 ```sh
 helm rollback oriso-platform <previous-revision> \
-  --namespace caritas --wait --timeout 5h10m
+  --namespace caritas --wait --timeout 15m
 ```
 
-Keep the external Secrets in place during rollback. If the UserService
+Use the exact command captured in `rollback-command.txt`; do not reconstruct the
+revision from memory. Keep the external Secrets in place during rollback. If the UserService
 Liquibase migration has already run, use its tested rollback together with the
 same complete application bundle; never restore only the old Frontend or only
 the old UserService.

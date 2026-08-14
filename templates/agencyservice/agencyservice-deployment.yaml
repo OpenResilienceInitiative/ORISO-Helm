@@ -25,7 +25,7 @@ spec:
               topologyKey: kubernetes.io/hostname
       containers:
         - name: agencyservice
-          image: {{ include "oriso.immutableImage" (list "agencyService.image" .Values.agencyService.image) | quote }}
+          image: {{ include "oriso.immutableImage" (list "agencyService.image" .Values.agencyService.image .Values.global.requireImmutableImages) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: CSRF_COOKIE_PROPERTY

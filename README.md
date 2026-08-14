@@ -49,8 +49,8 @@ Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fi
 ### 3. Install / Upgrade
 
 For the coordinated Matrix-only/Matryoshka cutover, never edit image tags into
-`values.yaml`. Frontend, Element Call, UserService, AgencyService, Synapse and
-both MatrixRTC authorization images accept only complete
+the generated release overlay. Frontend, Element Call, UserService,
+AgencyService, LiveKit, Synapse and both MatrixRTC authorization images accept only complete
 `repository@sha256:<digest>` references.
 
 After the cross-repository release manifest contains reviewed registry
@@ -67,6 +67,17 @@ The command fails closed on `STOP_SHIP` placeholders, zero/wrong digests,
 missing PR or security evidence, forbidden legacy render artifacts, or any
 rendered image that differs from the manifest. It refuses to overwrite an
 existing output file.
+
+Before deployment, capture the current Helm revision, exact before/target image
+sets, and the bounded rollback command without reading or exporting Secrets:
+
+```bash
+./scripts/capture-cutover-rollback.py \
+  --release oriso-platform \
+  --namespace caritas \
+  --target-values /path/to/new-cutover-digests.yaml \
+  --output-dir /path/to/new-cutover-evidence
+```
 
 Use the verified overlay after the environment values and before secrets:
 

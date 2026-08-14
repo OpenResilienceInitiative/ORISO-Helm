@@ -28,11 +28,27 @@ def render() -> list[dict]:
             "--set-string",
             "global.secrets.redisdefaultPass=test-redis-password",
             "--set-string",
+            "userService.smtpUser=smtp-canary-user",
+            "--set-string",
+            "userService.smtpPassword=smtp-canary-password",
+            "--set",
+            "global.requireImmutableImages=true",
+            "--set-string",
             f"frontend.image=ghcr.io/openresilienceinitiative/oriso-frontend@sha256:{TEST_DIGEST}",
+            "--set-string",
+            f"elementCall.image=ghcr.io/openresilienceinitiative/element-call@sha256:{TEST_DIGEST}",
+            "--set-string",
+            f"elementCall.healthcheckImage=busybox@sha256:{TEST_DIGEST}",
             "--set-string",
             f"userService.image=ghcr.io/openresilienceinitiative/oriso-userservice@sha256:{TEST_DIGEST}",
             "--set-string",
             f"agencyService.image=ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{TEST_DIGEST}",
+            "--set-string",
+            f"matrix.image=matrixdotorg/synapse@sha256:{TEST_DIGEST}",
+            "--set-string",
+            f"matrix.initImage=busybox@sha256:{TEST_DIGEST}",
+            "--set-string",
+            f"livekit.image=docker.io/livekit/livekit-server@sha256:{TEST_DIGEST}",
         ],
         capture_output=True,
         text=True,
@@ -69,6 +85,7 @@ def main() -> None:
         frontend["spec"]["template"]["spec"]["containers"][0]["image"],
         userservice["spec"]["template"]["spec"]["containers"][0]["image"],
         agencyservice["spec"]["template"]["spec"]["containers"][0]["image"],
+        livekit["spec"]["template"]["spec"]["containers"][0]["image"],
     ]
     for image in images:
         assert re.fullmatch(r"[^@\s]+@sha256:[a-f0-9]{64}", image)
@@ -80,12 +97,9 @@ def main() -> None:
         f"ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{TEST_DIGEST}",
     }
     assert expected_cutover_images.issubset(set(images))
-    assert livekit["spec"]["replicas"] == 2
-    assert livekit["spec"]["strategy"] == {
-        "type": "RollingUpdate",
-        "rollingUpdate": {"maxUnavailable": 1, "maxSurge": 0},
-    }
-    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 18000
+    assert livekit["spec"]["replicas"] == 1
+    assert livekit["spec"]["strategy"] == {"type": "Recreate"}
+    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 60
 
     rendered = yaml.safe_dump_all(documents)
     assert "matrix-backup-cronjob-github" not in rendered

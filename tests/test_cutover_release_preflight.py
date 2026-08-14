@@ -36,6 +36,7 @@ def ready_manifest() -> dict:
             "ghcr.io/openresilienceinitiative/"
             f"matrixrtc-authorization-service@sha256:{DIGEST}"
         ),
+        "livekit": f"docker.io/livekit/livekit-server@sha256:{DIGEST}",
         "synapse": f"matrixdotorg/synapse@sha256:{DIGEST}",
         "synapseInit": f"busybox@sha256:{DIGEST}",
     }
@@ -111,9 +112,11 @@ class CutoverReleasePreflightTest(unittest.TestCase):
         self.assertEqual(
             values,
             {
+                "global": {"requireImmutableImages": True},
                 "frontend": {"image": manifest["registryRelease"]["frontend"]},
                 "elementCall": {
-                    "image": manifest["registryRelease"]["elementCall"]
+                    "image": manifest["registryRelease"]["elementCall"],
+                    "healthcheckImage": manifest["registryRelease"]["synapseInit"],
                 },
                 "userService": {
                     "image": manifest["registryRelease"]["userService"]
@@ -133,6 +136,7 @@ class CutoverReleasePreflightTest(unittest.TestCase):
                         ]
                     },
                 },
+                "livekit": {"image": manifest["registryRelease"]["livekit"]},
                 "matrix": {
                     "image": manifest["registryRelease"]["synapse"],
                     "initImage": manifest["registryRelease"]["synapseInit"],
@@ -143,6 +147,15 @@ class CutoverReleasePreflightTest(unittest.TestCase):
     def test_future_provider_name_is_not_blanket_forbidden(self) -> None:
         self.assertNotIn("jitsi", self.preflight.FORBIDDEN_RENDERED_LEGACY)
         self.assertIn("jitsi-meet", self.preflight.FORBIDDEN_RENDERED_LEGACY)
+
+    def test_current_predev_snapshot_is_a_valid_source_bundle(self) -> None:
+        manifest = ready_manifest()
+        for repository in manifest["repositories"]:
+            repository["branch"] = "pre-dev"
+            repository["preDevBase"] = repository["sourceCommit"]
+            repository["commitsAhead"] = 0
+
+        self.preflight.validate_and_build_values(manifest)
 
     def test_stop_ship_or_local_evidence_cannot_become_helm_input(self) -> None:
         manifest = ready_manifest()
@@ -197,8 +210,26 @@ class CutoverReleasePreflightTest(unittest.TestCase):
                 str(CHART_DIR / "values.yaml.default"),
                 "-f",
                 str(CHART_DIR / "secrets.yaml.default"),
-                "--set-string",
-                "frontend.image=ghcr.io/openresilienceinitiative/oriso-frontend:latest",
+            "--set-string",
+            "frontend.image=ghcr.io/openresilienceinitiative/oriso-frontend:latest",
+            "--set-string",
+            f"elementCall.image=ghcr.io/openresilienceinitiative/element-call@sha256:{DIGEST}",
+            "--set-string",
+            f"elementCall.healthcheckImage=busybox@sha256:{DIGEST}",
+            "--set-string",
+            f"userService.image=ghcr.io/openresilienceinitiative/oriso-userservice@sha256:{DIGEST}",
+            "--set-string",
+            f"agencyService.image=ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{DIGEST}",
+            "--set-string",
+            f"matrix.image=matrixdotorg/synapse@sha256:{DIGEST}",
+            "--set-string",
+            f"matrix.initImage=busybox@sha256:{DIGEST}",
+            "--set",
+            "global.requireImmutableImages=true",
+            "--set-string",
+            "userService.smtpUser=smtp-canary-user",
+            "--set-string",
+            "userService.smtpPassword=smtp-canary-password",
             ],
             capture_output=True,
             text=True,

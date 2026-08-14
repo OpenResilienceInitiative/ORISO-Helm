@@ -80,7 +80,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: bootstrap
-          image: {{ include "oriso.immutableImage" (list "matrix.image" .Values.matrix.image) | quote }}
+          image: {{ include "oriso.immutableImage" (list "matrix.image" .Values.matrix.image .Values.global.requireImmutableImages) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: MATRIX_BASE_URL

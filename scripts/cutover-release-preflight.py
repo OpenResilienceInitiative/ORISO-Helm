@@ -14,13 +14,13 @@ from collections.abc import Mapping
 import yaml
 
 EXPECTED_REPOSITORIES = {
-    "ORISO-Frontend": "integration/matryoshka-cutover",
-    "ORISO-ElementCall": "integration/matryoshka-cleanup",
-    "ORISO-UserService": "refactor/remove-rocketchat-adapter",
-    "ORISO-AgencyService": "refactor/remove-rocketchat-config",
-    "ORISO-Livekit": "security/matrixrtc-auth-gateway",
-    "ORISO-Helm": "security/matrixrtc-auth",
-    "ORISO-E2E": "test/matryoshka-call-gate",
+    "ORISO-Frontend",
+    "ORISO-ElementCall",
+    "ORISO-UserService",
+    "ORISO-AgencyService",
+    "ORISO-Livekit",
+    "ORISO-Helm",
+    "ORISO-E2E",
 }
 
 IMAGE_REPOSITORIES = {
@@ -34,6 +34,7 @@ IMAGE_REPOSITORIES = {
     "matrixrtcAuthorizationService": (
         "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service"
     ),
+    "livekit": "docker.io/livekit/livekit-server",
     "synapse": "matrixdotorg/synapse",
     "synapseInit": "busybox",
 }
@@ -138,10 +139,23 @@ def validate_source_bundle(manifest: Mapping) -> None:
             raise ValueError(
                 f"repositories[{index}].preDevBase must be a Git commit"
             )
-        if item.get("branch") != EXPECTED_REPOSITORIES.get(name):
-            raise ValueError(f"repositories[{index}].branch is not the cutover branch")
-        if not isinstance(item.get("commitsAhead"), int) or item["commitsAhead"] < 1:
-            raise ValueError(f"repositories[{index}].commitsAhead must be positive")
+        branch = item.get("branch")
+        if not isinstance(branch, str) or not branch.strip():
+            raise ValueError(f"repositories[{index}].branch must be set")
+        commits_ahead = item.get("commitsAhead")
+        if not isinstance(commits_ahead, int) or commits_ahead < 0:
+            raise ValueError(
+                f"repositories[{index}].commitsAhead must be zero or positive"
+            )
+        if branch == "pre-dev":
+            if item.get("sourceCommit") != item.get("preDevBase") or commits_ahead != 0:
+                raise ValueError(
+                    f"repositories[{index}] pre-dev snapshot must have matching commits"
+                )
+        elif commits_ahead < 1:
+            raise ValueError(
+                f"repositories[{index}] branch snapshot must be ahead of pre-dev"
+            )
         names.add(name)
     if len(repositories) != len(EXPECTED_REPOSITORIES) or names != set(
         EXPECTED_REPOSITORIES
@@ -203,14 +217,19 @@ def validate_and_build_values(manifest: object) -> dict:
     require_true(release_gates, REQUIRED_RELEASE_GATES, "releaseGates")
 
     return {
+        "global": {"requireImmutableImages": True},
         "frontend": {"image": registry["frontend"]},
-        "elementCall": {"image": registry["elementCall"]},
+        "elementCall": {
+            "image": registry["elementCall"],
+            "healthcheckImage": registry["synapseInit"],
+        },
         "userService": {"image": registry["userService"]},
         "agencyService": {"image": registry["agencyService"]},
         "matrixrtcAuth": {
             "gateway": {"image": registry["matrixrtcPolicyGateway"]},
             "upstream": {"image": registry["matrixrtcAuthorizationService"]},
         },
+        "livekit": {"image": registry["livekit"]},
         "matrix": {
             "image": registry["synapse"],
             "initImage": registry["synapseInit"],
@@ -240,6 +259,7 @@ def rendered_images(documents: list[dict]) -> dict[str, str]:
         "matrixrtcAuthorizationService": container_image(
             "matrixrtc-authorization-service"
         ),
+        "livekit": container_image("livekit"),
         "synapse": container_image("matrix-synapse"),
         "synapseInit": synapse_spec["initContainers"][0]["image"],
     }
@@ -267,6 +287,10 @@ def verify_render(chart_dir: pathlib.Path, values: dict) -> None:
                 overlay.name,
                 "--set-string",
                 "global.secrets.redisdefaultPass=test-redis-password",
+                "--set-string",
+                "userService.smtpUser=smtp-canary-user",
+                "--set-string",
+                "userService.smtpPassword=smtp-canary-password",
             ],
             capture_output=True,
             text=True,
@@ -287,6 +311,7 @@ def verify_render(chart_dir: pathlib.Path, values: dict) -> None:
         "agencyService": values["agencyService"]["image"],
         "matrixrtcPolicyGateway": values["matrixrtcAuth"]["gateway"]["image"],
         "matrixrtcAuthorizationService": values["matrixrtcAuth"]["upstream"]["image"],
+        "livekit": values["livekit"]["image"],
         "synapse": values["matrix"]["image"],
         "synapseInit": values["matrix"]["initImage"],
     }
