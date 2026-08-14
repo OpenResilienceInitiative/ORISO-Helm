@@ -16,3 +16,7 @@ keys.txt
 # Java/Maven build output (keycloak SPI source lives in ORISO-Keycloak, not here)
 **/target/
 keycloak-image/
+
+# Python test/runtime bytecode
+__pycache__/
+*.py[cod]

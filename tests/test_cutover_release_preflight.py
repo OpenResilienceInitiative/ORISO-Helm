@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
-import subprocess
 import unittest
 
 CHART_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -186,27 +185,16 @@ class CutoverReleasePreflightTest(unittest.TestCase):
 
         self.preflight.verify_render(CHART_DIR, values)
 
-    def test_chart_rejects_a_mutable_cutover_image_tag(self) -> None:
-        result = subprocess.run(
-            [
-                "helm",
-                "template",
-                "mutable-image-must-fail",
-                str(CHART_DIR),
-                "-f",
-                str(CHART_DIR / "values.yaml.default"),
-                "-f",
-                str(CHART_DIR / "secrets.yaml.default"),
-                "--set-string",
-                "frontend.image=ghcr.io/openresilienceinitiative/oriso-frontend:latest",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+    def test_release_preflight_rejects_a_mutable_cutover_image_tag(self) -> None:
+        manifest = ready_manifest()
+        manifest["registryRelease"]["frontend"] = (
+            "ghcr.io/openresilienceinitiative/oriso-frontend:latest"
         )
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("frontend.image must use repository@sha256", result.stderr)
+        with self.assertRaisesRegex(
+            ValueError, "registryRelease.frontend must use repository@sha256"
+        ):
+            self.preflight.validate_and_build_values(manifest)
 
 if __name__ == "__main__":
     unittest.main()

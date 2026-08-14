@@ -55,6 +55,7 @@ IPV4 = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES = [
+    "templates/_helpers.tpl",
     "templates/matrix/matrix-configmaps.yaml",
     "templates/userservice/userservice-configmap-env.yaml",
     "templates/agencyservice/agencyservice-configmap-env.yaml",
