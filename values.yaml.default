@@ -214,11 +214,12 @@ matrixrtcAuth:
     livekitApiKeyKey: "livekit-api-key"
     livekitApiSecretKey: "livekit-api-secret"
     redisUrlKey: "redis-url"
+  # Pinned by digest — these images are the LiveKit authorization boundary.
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.2"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway@sha256:2bc86a3a178d26fbc8ab09887c75bc2f1dd8e2b6e41cacf836bad060124fec06"
     pullPolicy: ""
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.2"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service@sha256:d62ecfd22cfbc2081d3814e63fc7fe2d969aab9fbba54881cd51552d971fd714"
     pullPolicy: ""
   service:
     port: 3010
@@ -299,7 +300,7 @@ consultingTypeService:
 tenantService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.2"
+  imageVersion: "dev"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -404,7 +405,7 @@ signoz:
 healthDashboard:
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: "2.0.2"
+    tag: dev
     pullPolicy: ""
   replicas: 1
   namespace: ""
