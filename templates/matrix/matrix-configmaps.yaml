@@ -118,16 +118,18 @@ data:
     # KDG epic #282 task 2: the rc_* blocks previously set every rate limit to
     # 100000/s, which effectively disabled Synapse's built-in abuse protection
     # (registration floods, login/credential-stuffing attempts, join/invite
-    # spam). Removing them restores Synapse's shipped defaults. Internal
-    # service traffic stays unaffected via exempt_from_ratelimiting below.
-
-    # Exempt internal network from rate limiting. serverPublicIp is optional —
-    # `compact` drops it when unset, so there is a single render path and no
-    # whitespace-trimming edge case inside this block scalar.
-    exempt_from_ratelimiting:
-      {{- range compact (list "10.42.0.0/16" .Values.matrix.serverPublicIp "127.0.0.1") }}
-      - {{ . | quote }}
-      {{- end }}
+    # spam). Removing them restores Synapse's shipped defaults.
+    #
+    # `exempt_from_ratelimiting` used to sit here to carve out internal
+    # service traffic, but it is not a real Synapse homeserver.yaml key (see
+    # https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html) —
+    # it silently did nothing, so internal traffic was never actually exempt.
+    # Synapse has no global/per-IP exemption option; the supported mechanisms
+    # are per-user overrides via the Admin API
+    # (`POST /_synapse/admin/v1/users/<user_id>/override_ratelimiting`) or the
+    # `get_ratelimit_override_for_user` module callback. Neither is wired up
+    # here — internal service traffic runs under the same shipped rc_* limits
+    # as everything else for now.
 
     # Enable Sliding Sync (Matrix 2.0) for INSTANT real-time synchronization
     # MSC4140 delayed events let Element Call schedule a crash-safe leave event.
