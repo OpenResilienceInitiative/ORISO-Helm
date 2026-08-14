@@ -122,6 +122,25 @@ def assert_images_pinned(deployment: dict) -> None:
         assert ":latest" not in image, "%s floats on latest: %s" % (container["name"], image)
 
 
+def assert_clamav_runs_unprivileged(deployment: dict) -> None:
+    # The official image's /init entrypoint expects root and crashes under the
+    # pod's runAsUser; per ClamAV's docs, non-root pods must run the image's
+    # clamav user (100:101) through /init-unprivileged. Anything else leaves
+    # the sidecar in CrashLoopBackOff and every download failing closed.
+    containers = deployment["spec"]["template"]["spec"]["containers"]
+    clamav = next(container for container in containers if container["name"] == "clamav")
+    assert clamav["command"] == ["/init-unprivileged"], (
+        "clamav must boot via /init-unprivileged, its default /init requires root"
+    )
+    assert clamav["securityContext"]["runAsUser"] == 100
+    assert clamav["securityContext"]["runAsGroup"] == 101
+    # The signature DB is baked into the image at /var/lib/clamav; a volume
+    # there would shadow it and tie pod start-up to database.clamav.net.
+    assert not clamav.get("volumeMounts"), (
+        "clamav must not mount volumes over the image's baked-in signature DB"
+    )
+
+
 def assert_secrets_by_reference(documents: list[dict], deployment: dict) -> None:
     # The chart must never materialise a secret of its own from values.
     for document in documents:
@@ -136,6 +155,7 @@ def assert_clamav_only(chart: str) -> None:
 
     deployment = get(documents, "Deployment", "media-scanner")
     assert_images_pinned(deployment)
+    assert_clamav_runs_unprivileged(deployment)
     assert_secrets_by_reference(documents, deployment)
 
     config_map = get(documents, "ConfigMap", "media-scanner-config")

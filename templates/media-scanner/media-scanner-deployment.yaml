@@ -74,10 +74,23 @@ spec:
         - name: clamav
           image: {{ .Values.mediaScanner.clamavImage | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          # The image's default /init entrypoint expects to start as root (it
+          # creates /run/clamav before dropping privileges) and dies instantly
+          # under the pod's non-root user. Non-root deployments must use the
+          # image's own clamav user (100:101) with /init-unprivileged instead:
+          # https://docs.clamav.net/manual/Installing/Docker.html
+          # No volumes on purpose: the signature DB ships in the image under
+          # /var/lib/clamav (owned by clamav), and the writable root filesystem
+          # covers freshclam updates plus clamd's /tmp socket. An emptyDir over
+          # /var/lib/clamav would shadow the baked-in DB and make every pod
+          # start depend on egress to database.clamav.net.
+          command: ["/init-unprivileged"]
           ports:
             - containerPort: {{ .Values.mediaScanner.clamavPort }}
               protocol: TCP
           securityContext:
+            runAsUser: 100
+            runAsGroup: 101
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
