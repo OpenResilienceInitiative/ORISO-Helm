@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import subprocess
 import sys
 from typing import Any
@@ -11,6 +12,15 @@ from typing import Any
 import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def assert_vendored_chart_defaults() -> None:
+    """A fresh clone must contain the dependency defaults needed to render it."""
+    values_path = Path(CHART_DIR) / "charts" / "k8s-infra" / "values.yaml"
+    assert values_path.is_file(), "vendored k8s-infra values.yaml is missing"
+    values = yaml.safe_load(values_path.read_text(encoding="utf-8"))
+    assert values["otelDeployment"]["serviceAccount"]["create"] is True
+    assert values["otelAgent"]["serviceAccount"]["create"] is True
 
 
 def render(
@@ -94,6 +104,7 @@ def parse_config(config_map: dict[str, Any], key: str) -> dict[str, Any]:
 
 
 def main() -> None:
+    assert_vendored_chart_defaults()
     enabled = documents(render(signoz_enabled=True, infra_enabled=True))
     agent = find(enabled, "DaemonSet", "caritas-k8s-infra-otel-agent")
     cluster_collector = find(
