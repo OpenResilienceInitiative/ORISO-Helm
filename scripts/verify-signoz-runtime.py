@@ -294,7 +294,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--release", default="caritas")
     parser.add_argument("--namespace", default="caritas")
-    parser.add_argument("--service-account", default="oriso-clickhouse-operator")
+    parser.add_argument("--service-account", default="caritas-clickhouse-operator")
     parser.add_argument(
         "--pvc-snapshot",
         required=True,

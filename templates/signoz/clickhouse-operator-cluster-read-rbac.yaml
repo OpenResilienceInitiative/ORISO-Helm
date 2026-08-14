@@ -3,7 +3,8 @@
 {{- $clickhouse := get $signoz "clickhouse" | default dict -}}
 {{- $operator := get $clickhouse "clickhouseOperator" | default dict -}}
 {{- $serviceAccount := get $operator "serviceAccount" | default dict -}}
-{{- $serviceAccountName := required "signoz.clickhouse.clickhouseOperator.serviceAccount.name is required when signoz is enabled" (get $serviceAccount "name") -}}
+{{- $defaultServiceAccountName := printf "%s-clickhouse-operator" .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- $serviceAccountName := get $serviceAccount "name" | default $defaultServiceAccountName -}}
 {{- $operatorNamespace := get $clickhouse "namespace" | default .Release.Namespace -}}
 {{- $roleName := printf "%s-clickhouse-operator-cluster-read" .Release.Name | trunc 63 | trimSuffix "-" -}}
 apiVersion: rbac.authorization.k8s.io/v1

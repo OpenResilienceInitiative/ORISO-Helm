@@ -71,7 +71,7 @@ class VerifySigNozRuntimeTest(unittest.TestCase):
         result = self.verify.verify_runtime(
             "caritas",
             "caritas",
-            "oriso-clickhouse-operator",
+            "caritas-clickhouse-operator",
             {
                 "data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0": "pvc-uid-1"
             },
@@ -105,7 +105,7 @@ class VerifySigNozRuntimeTest(unittest.TestCase):
             self.verify.verify_runtime(
                 "caritas",
                 "caritas",
-                "oriso-clickhouse-operator",
+                "caritas-clickhouse-operator",
                 {
                     "data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0": "pvc-uid-1"
                 },
@@ -117,7 +117,7 @@ class VerifySigNozRuntimeTest(unittest.TestCase):
             self.verify.verify_runtime(
                 "caritas",
                 "caritas",
-                "oriso-clickhouse-operator",
+                "caritas-clickhouse-operator",
                 {
                     "data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0": "different-uid"
                 },

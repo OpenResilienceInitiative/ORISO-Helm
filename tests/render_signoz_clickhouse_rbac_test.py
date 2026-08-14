@@ -95,6 +95,8 @@ def test_clickhouse_operator_has_read_only_cluster_discovery() -> None:
     cluster_role = find(documents, "ClusterRole", role_name)
     binding = find(documents, "ClusterRoleBinding", role_name)
     namespace_role = find(documents, "Role", "caritas-clickhouse-operator")
+    operator = find(documents, "Deployment", "caritas-clickhouse-operator")
+    operator_service_account = "caritas-clickhouse-operator"
 
     assert resources_for(cluster_role, "apiextensions.k8s.io") == {
         "customresourcedefinitions"
@@ -119,10 +121,15 @@ def test_clickhouse_operator_has_read_only_cluster_discovery() -> None:
     assert binding["subjects"] == [
         {
             "kind": "ServiceAccount",
-            "name": "oriso-clickhouse-operator",
+            "name": operator_service_account,
             "namespace": "caritas",
         }
     ]
+    assert (
+        operator["spec"]["template"]["spec"]["serviceAccountName"]
+        == operator_service_account
+    )
+    find(documents, "ServiceAccount", operator_service_account)
 
     assert "persistentvolumes" not in resources_for(namespace_role, "")
     assert "customresourcedefinitions" not in resources_for(

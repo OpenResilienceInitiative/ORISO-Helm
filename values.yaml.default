@@ -321,8 +321,9 @@ signoz:
       size: 20Gi
     clickhouseOperator:
       serviceAccount:
-        # Stable name consumed by the parent chart's read-only ClusterRoleBinding.
-        name: "oriso-clickhouse-operator"
+        # Empty keeps the subchart's release-derived identity. The parent
+        # ClusterRoleBinding resolves the same default and honors overrides.
+        name: ""
 
 # Health Dashboard
 healthDashboard:
