@@ -36,6 +36,22 @@ collector, and UserService diagnostic-metrics PRs are merged into `pre-dev`.
 Confirm the runtime image digests separately; a merged chart is not deployment
 evidence.
 
+For the first installation in an environment, use this staged bootstrap. Do not
+merge and release the complete stack in one step:
+
+1. Merge and deploy the ClickHouse RBAC and Kubernetes-collector changes while
+   managed observability is still absent. Run the active ingestion gate from
+   `runbooks/signoz-runtime-acceptance.md` and require a healthy SigNoz UI.
+2. Create the administrator API key in that now-running SigNoz instance and
+   provision `caritas-signoz-observability` with the API key and approved Slack
+   webhook through the operator secret-management workflow.
+3. Merge and deploy this managed-observability child. Its post-upgrade hook must
+   pass before the release is accepted.
+
+On later upgrades the Secret already exists, so the reviewed release may update
+the collector and managed assets together. Re-run both gates after every
+upgrade.
+
 Create an admin-role SigNoz service account and API key. Store that key and the
 Slack incoming-webhook URL in the environment's secret-management workflow as:
 
