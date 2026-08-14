@@ -319,6 +319,10 @@ signoz:
   clickhouse:
     persistence:
       size: 20Gi
+    clickhouseOperator:
+      serviceAccount:
+        # Stable name consumed by the parent chart's read-only ClusterRoleBinding.
+        name: "oriso-clickhouse-operator"
 
 # Health Dashboard
 healthDashboard:

@@ -38,7 +38,6 @@ rules:
   - apiGroups:
       - ""
     resources:
-      - persistentvolumes
       - pods
     verbs:
       - get
@@ -133,13 +132,6 @@ rules:
       - ""
     resources:
       - secrets
-    verbs:
-      - get
-      - list
-  - apiGroups:
-      - apiextensions.k8s.io
-    resources:
-      - customresourcedefinitions
     verbs:
       - get
       - list

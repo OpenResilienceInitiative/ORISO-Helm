@@ -149,11 +149,51 @@ helm upgrade --install caritas ./ -n caritas --create-namespace \
   --set signoz.enabled=true
 ```
 
-The SigNoz UI is exposed at `https://signoz.<global.domainName>` by the parent
+The SigNoz UI is exposed at `https://<global.domainName>/signoz/` by the parent
 chart ingress. If SigNoz is deployed somewhere else, leave `signoz.enabled=false`
 and set both `global.observability.otlpEnabled=true` and
 `global.observability.otlpCollectorHost=<collector-host>:4318`. No
 `secrets.yaml` change is required for the bundled default SigNoz install.
+
+Before the upgrade, capture the retained ClickHouse PVC identities:
+
+```bash
+kubectl --namespace caritas get pvc \
+  --selector clickhouse.altinity.com/chi=oriso-platform-clickhouse \
+  -o json > signoz-pvcs-before.json
+```
+
+After the upgrade, run the read-only ClickHouse/SigNoz acceptance gate. It proves
+the operator has cluster-wide discovery but no cluster-wide mutation, the
+ClickHouse installation and migrator completed, SigNoz and its collector rolled
+out, the OTLP gRPC/HTTP endpoints are ready, the retained PVC names and UIDs did
+not change, and recent operator/collector logs contain no forbidden, deletion,
+no-op, or export-failure loop:
+
+```bash
+./scripts/verify-signoz-runtime.py \
+  --release oriso-platform \
+  --namespace caritas \
+  --pvc-snapshot signoz-pvcs-before.json \
+  --output signoz-runtime-evidence.json
+```
+
+Then provide a read-only SigNoz service-account key through `SIGNOZ_API_KEY` and
+run the synthetic ingestion proof. The script opens temporary local
+port-forwards, sends one uniquely marked OTLP trace, metric, and log, queries all
+three through SigNoz's authenticated v5 API, and writes a secret-free artifact:
+
+```bash
+./scripts/verify-signoz-ingestion.py \
+  --release oriso-platform \
+  --namespace caritas \
+  --environment predev \
+  --output signoz-ingestion-evidence.json
+```
+
+Readiness alone is not accepted as ingestion proof. The API key is read only
+from the process environment, never accepted as a command-line argument, and is
+not included in the evidence file.
 
 The KDG-safe pseudonymization pipeline that would make turning production
 telemetry on safe is built but also off by default
