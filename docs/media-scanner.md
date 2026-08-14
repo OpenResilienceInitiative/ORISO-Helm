@@ -47,6 +47,15 @@ Two further edges are closed on purpose:
   `/_matrix/client/v1/media/{download,thumbnail}`. Uploads stay open — the
   scanner has to be able to fetch the file it is judging.
 
+One consequence deserves its own sentence: `allowedMimeTypes` is enforced on
+the download path, so it retroactively applies to media that was uploaded
+before the scanner existed. The default list is the four image formats the
+product lets users upload; any PDF, audio, or video file already sitting in
+the media repository becomes undownloadable the moment the scanner is
+enabled. That is the intended fail-closed behaviour — if an environment holds
+legitimate pre-scanner media in other formats, widen the list deliberately
+before flipping `enabled`.
+
 ## Enabling it (ClamAV only)
 
 1. Create the request secret out-of-band. It derives the key pair the scanner

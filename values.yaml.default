@@ -131,8 +131,13 @@ mediaScanner:
   clamavTimeoutSeconds: 60
   # Where the scanner fetches the original media from (in-cluster, not via the edge).
   matrixApiUrl: "http://matrix-synapse:8008"
-  # Anything outside this list fails the scan. Matches the formats the product
-  # actually allows to be uploaded.
+  # Anything outside this list fails the scan — and the scan gates DOWNLOADS,
+  # so together with blockDirectMediaAccess this list IS the media policy:
+  # files of any other type that already sit in the media repository (PDFs,
+  # audio, video) become undownloadable the moment the scanner is enabled.
+  # Matches the formats the product allows to be uploaded, so nothing the app
+  # itself produced is cut off; widen it consciously before enabling in an
+  # environment that holds pre-scanner media in other formats.
   allowedMimeTypes:
     - "image/jpeg"
     - "image/png"
