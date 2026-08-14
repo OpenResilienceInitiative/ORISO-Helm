@@ -128,6 +128,14 @@ class CutoverReleasePreflightTest(unittest.TestCase):
                 },
                 "matrixrtcAuth": {
                     "redisCheckImage": manifest["registryRelease"]["redisCheck"],
+                    "existingSecret": {
+                        "name": "matrixrtc-auth-runtime",
+                        "membershipTokenKey": "matrix-membership-token",
+                        "callPolicyTokenKey": "matrix-call-policy-token",
+                        "livekitApiKeyKey": "livekit-api-key",
+                        "livekitApiSecretKey": "livekit-api-secret",
+                        "redisUrlKey": "redis-url",
+                    },
                     "gateway": {
                         "image": manifest["registryRelease"]["matrixrtcPolicyGateway"]
                     },
@@ -137,7 +145,13 @@ class CutoverReleasePreflightTest(unittest.TestCase):
                         ]
                     },
                 },
-                "livekit": {"image": manifest["registryRelease"]["livekit"]},
+                "livekit": {
+                    "image": manifest["registryRelease"]["livekit"],
+                    "existingConfigSecret": {
+                        "name": "livekit-config-runtime",
+                        "key": "config.yaml",
+                    },
+                },
                 "matrix": {
                     "image": manifest["registryRelease"]["synapse"],
                     "initImage": manifest["registryRelease"]["synapseInit"],

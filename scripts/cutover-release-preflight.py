@@ -221,10 +221,24 @@ def validate_and_build_values(manifest: object) -> dict:
         "agencyService": {"image": registry["agencyService"]},
         "matrixrtcAuth": {
             "redisCheckImage": registry["redisCheck"],
+            "existingSecret": {
+                "name": "matrixrtc-auth-runtime",
+                "membershipTokenKey": "matrix-membership-token",
+                "callPolicyTokenKey": "matrix-call-policy-token",
+                "livekitApiKeyKey": "livekit-api-key",
+                "livekitApiSecretKey": "livekit-api-secret",
+                "redisUrlKey": "redis-url",
+            },
             "gateway": {"image": registry["matrixrtcPolicyGateway"]},
             "upstream": {"image": registry["matrixrtcAuthorizationService"]},
         },
-        "livekit": {"image": registry["livekit"]},
+        "livekit": {
+            "image": registry["livekit"],
+            "existingConfigSecret": {
+                "name": "livekit-config-runtime",
+                "key": "config.yaml",
+            },
+        },
         "matrix": {
             "image": registry["synapse"],
             "initImage": registry["synapseInit"],
@@ -308,6 +322,42 @@ def verify_render(chart_dir: pathlib.Path, values: dict) -> None:
         raise ValueError(f"Helm render failed: {result.stderr.strip()}")
 
     documents = [document for document in yaml.safe_load_all(result.stdout) if document]
+    deployments = {
+        document.get("metadata", {}).get("name"): document
+        for document in documents
+        if document.get("kind") == "Deployment"
+    }
+    runtime_secret = "matrixrtc-auth-runtime"
+    for deployment_name in (
+        "matrixrtc-auth-policy-gateway",
+        "matrixrtc-authorization-service",
+    ):
+        secret_names = {
+            volume.get("secret", {}).get("secretName")
+            for volume in deployments[deployment_name]["spec"]["template"]["spec"].get(
+                "volumes", []
+            )
+        }
+        if runtime_secret not in secret_names:
+            raise ValueError(f"{deployment_name} does not use {runtime_secret}")
+    userservice_env = deployments["userservice"]["spec"]["template"]["spec"][
+        "containers"
+    ][0]["env"]
+    policy_secret = next(
+        item["valueFrom"]["secretKeyRef"]
+        for item in userservice_env
+        if item.get("name") == "MATRIXRTC_CALL_POLICY_TOKEN"
+    )
+    if policy_secret != {
+        "name": runtime_secret,
+        "key": "matrix-call-policy-token",
+    }:
+        raise ValueError("UserService does not use the external MatrixRTC policy token")
+    livekit_secret = deployments["livekit"]["spec"]["template"]["spec"]["volumes"][0][
+        "secret"
+    ]
+    if livekit_secret.get("secretName") != "livekit-config-runtime":
+        raise ValueError("LiveKit does not use livekit-config-runtime")
     actual_images = rendered_images(documents)
     expected_images = {
         "frontend": values["frontend"]["image"],
