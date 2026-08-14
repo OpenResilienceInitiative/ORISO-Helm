@@ -34,9 +34,15 @@ def render() -> list[dict]:
             "--set-string",
             f"frontend.image=ghcr.io/openresilienceinitiative/oriso-frontend@sha256:{TEST_DIGEST}",
             "--set-string",
+            f"elementCall.image=ghcr.io/openresilienceinitiative/element-call@sha256:{TEST_DIGEST}",
+            "--set-string",
             f"userService.image=ghcr.io/openresilienceinitiative/oriso-userservice@sha256:{TEST_DIGEST}",
             "--set-string",
             f"agencyService.image=ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{TEST_DIGEST}",
+            "--set-string",
+            f"matrix.image=matrixdotorg/synapse@sha256:{TEST_DIGEST}",
+            "--set-string",
+            f"matrix.initImage=busybox@sha256:{TEST_DIGEST}",
         ],
         capture_output=True,
         text=True,
@@ -84,12 +90,9 @@ def main() -> None:
         f"ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{TEST_DIGEST}",
     }
     assert expected_cutover_images.issubset(set(images))
-    assert livekit["spec"]["replicas"] == 2
-    assert livekit["spec"]["strategy"] == {
-        "type": "RollingUpdate",
-        "rollingUpdate": {"maxUnavailable": 1, "maxSurge": 0},
-    }
-    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 18000
+    assert livekit["spec"]["replicas"] == 1
+    assert livekit["spec"]["strategy"] == {"type": "Recreate"}
+    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 60
 
     rendered = yaml.safe_dump_all(documents)
     assert "matrix-backup-cronjob-github" not in rendered
