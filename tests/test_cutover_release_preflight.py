@@ -244,6 +244,13 @@ class CutoverReleasePreflightTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("frontend.image must use repository@sha256", result.stderr)
 
+    def test_chart_rejects_a_mutable_redis_check_image(self) -> None:
+        values = self.preflight.validate_and_build_values(ready_manifest())
+        values["matrixrtcAuth"]["redisCheckImage"] = "docker.io/library/redis:7-alpine"
+
+        with self.assertRaisesRegex(ValueError, "matrixrtcAuth.redisCheckImage"):
+            self.preflight.verify_render(CHART_DIR, values)
+
 
 if __name__ == "__main__":
     unittest.main()

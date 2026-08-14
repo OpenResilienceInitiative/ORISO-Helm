@@ -94,9 +94,9 @@ def main() -> None:
     assert gateway_env["MATRIXRTC_CALL_POLICY_TOKEN_FILE"]["value"] == (
         "/run/secrets/call-policy-token"
     )
-    gateway_secret_items = gateway["spec"]["template"]["spec"]["volumes"][0]["secret"][
-        "items"
-    ]
+    gateway_secret = gateway["spec"]["template"]["spec"]["volumes"][0]["secret"]
+    assert gateway_secret["secretName"] == "matrixrtc-auth-runtime"
+    gateway_secret_items = gateway_secret["items"]
     assert {
         "key": "matrix-call-policy-token",
         "path": "call-policy-token",
@@ -108,6 +108,12 @@ def main() -> None:
             "name": "matrixrtc-auth-runtime",
             "key": "matrix-call-policy-token",
         }
+    }
+    upstream_secret = upstream["spec"]["template"]["spec"]["volumes"][0]["secret"]
+    assert upstream_secret["secretName"] == "matrixrtc-auth-runtime"
+    assert {item["key"] for item in upstream_secret["items"]} == {
+        "livekit-api-key",
+        "livekit-api-secret",
     }
 
     # The ingress controller lives in its own namespace. A bare podSelector
