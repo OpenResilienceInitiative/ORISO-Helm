@@ -150,7 +150,7 @@ livekit:
   # hostNetwork ports — the replica must fully terminate before its replacement starts.
   deploymentStrategy: Recreate
   terminationGracePeriodSeconds: 60
-  image: "docker.io/livekit/livekit-server:v1.13.5"
+  image: "docker.io/livekit/livekit-server:v1.13.5@sha256:3497163e15c48fef6e7830c78716f9e9d5edc28abf7aa90b61c86e93bbc306b1"
   existingConfigSecret:
     name: "livekit-config"
     key: "config.yaml"

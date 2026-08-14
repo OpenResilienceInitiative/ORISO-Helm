@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 
@@ -61,8 +62,8 @@ class ReadbackContractTest(unittest.TestCase):
 
 
 class CollectorPipelineContractTest(unittest.TestCase):
-    def test_requires_otlp_receiver_and_clickhouse_exporter_per_signal(self) -> None:
-        config = {
+    def setUp(self) -> None:
+        self.config = {
             "receivers": {"otlp": {"protocols": {"grpc": {}, "http": {}}}},
             "exporters": {
                 "clickhousetraces": {},
@@ -87,10 +88,45 @@ class CollectorPipelineContractTest(unittest.TestCase):
             },
         }
 
-        MODULE.validate_collector_config(config)
-        config["service"]["pipelines"]["logs"]["exporters"] = []
-        with self.assertRaisesRegex(RuntimeError, "logs.*ClickHouse exporter"):
-            MODULE.validate_collector_config(config)
+    def test_accepts_complete_three_signal_pipeline(self) -> None:
+        MODULE.validate_collector_config(self.config)
+
+    def test_requires_both_otlp_protocols(self) -> None:
+        for protocol in ("grpc", "http"):
+            with self.subTest(protocol=protocol):
+                config = deepcopy(self.config)
+                del config["receivers"]["otlp"]["protocols"][protocol]
+                with self.assertRaisesRegex(RuntimeError, protocol):
+                    MODULE.validate_collector_config(config)
+
+    def test_requires_otlp_receiver_in_every_signal_pipeline(self) -> None:
+        for signal in ("traces", "metrics", "logs"):
+            with self.subTest(signal=signal):
+                config = deepcopy(self.config)
+                config["service"]["pipelines"][signal]["receivers"] = []
+                with self.assertRaisesRegex(RuntimeError, f"{signal}.*OTLP receiver"):
+                    MODULE.validate_collector_config(config)
+
+    def test_requires_declared_clickhouse_exporter_for_every_signal(self) -> None:
+        required_exporters = {
+            "traces": "clickhousetraces",
+            "metrics": "signozclickhousemetrics",
+            "logs": "clickhouselogsexporter",
+        }
+        for signal, exporter in required_exporters.items():
+            with self.subTest(signal=signal):
+                config = deepcopy(self.config)
+                del config["exporters"][exporter]
+                with self.assertRaisesRegex(RuntimeError, f"{signal}.*ClickHouse exporter"):
+                    MODULE.validate_collector_config(config)
+
+    def test_requires_clickhouse_exporter_in_every_signal_pipeline(self) -> None:
+        for signal in ("traces", "metrics", "logs"):
+            with self.subTest(signal=signal):
+                config = deepcopy(self.config)
+                config["service"]["pipelines"][signal]["exporters"] = []
+                with self.assertRaisesRegex(RuntimeError, f"{signal}.*ClickHouse exporter"):
+                    MODULE.validate_collector_config(config)
 
 
 if __name__ == "__main__":
