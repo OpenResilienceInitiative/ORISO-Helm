@@ -71,6 +71,16 @@ set to one reachable address and is the reason Pre-Dev calls connect at all.
    Render the exact production values and confirm that no Secret object named
    `matrixrtc-auth-runtime` or `livekit-config-runtime` is present and none of
    their credential values occurs anywhere in the render.
+   Then create the redacted consistency artifact:
+
+   ```sh
+   ./scripts/verify-matrixrtc-runtime-secrets.py \
+     --namespace caritas \
+     --output <new-evidence-directory>/matrixrtc-runtime-secrets.json
+   ```
+
+   The verifier rejects Helm ownership, placeholders, malformed Redis URLs,
+   missing keys, and LiveKit key/secret mismatches without printing any value.
 4. Generate the verified digest overlay, then capture the current Helm revision,
    complete before-image set, target-image set, and bounded rollback command:
 

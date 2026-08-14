@@ -134,6 +134,19 @@ verify every required key. Then deploy the chart that references them. This name
 prevents Helm from deleting the new runtime Secrets when it prunes the old
 managed objects. Remove the old Secrets only after the cutover is verified.
 
+Run the fail-closed Secret preflight before either the baseline or target Helm
+revision:
+
+```bash
+./scripts/verify-matrixrtc-runtime-secrets.py \
+  --namespace caritas \
+  --output /path/to/matrixrtc-runtime-secret-evidence.json
+```
+
+The command reads the Secrets locally through `kubectl`, rejects missing,
+placeholder, Helm-owned, malformed, or mismatched credentials, and writes only
+Secret names, key names, and boolean results. It never writes credential values.
+
 The gateway resolves every new call/reconnect against UserService before a
 LiveKit grant is issued. A tenant permission change therefore affects already
 open browser tabs on their next call, reconnect, or rejoin. Policy lookup is
