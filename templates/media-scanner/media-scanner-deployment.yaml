@@ -1,0 +1,127 @@
+{{- if .Values.mediaScanner.enabled }}
+# matrix-content-scanner + ClamAV sidecar (epic ORISO-Admin#366, ADR-019).
+# The scan script reaches clamd on localhost; both images are pinned by digest
+# so a rebuilt `latest` can never silently change what runs in the media path.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: media-scanner
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: media-scanner
+spec:
+  replicas: {{ .Values.mediaScanner.replicas }}
+  selector:
+    matchLabels:
+      app: media-scanner
+  template:
+    metadata:
+      labels:
+        app: media-scanner
+      annotations:
+        # Roll the pods when the scan script or the scanner config changes.
+        checksum/config: {{ include (print $.Template.BasePath "/media-scanner/media-scanner-configmap.yaml") . | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: content-scanner
+          image: {{ .Values.mediaScanner.image | quote }}
+          imagePullPolicy: IfNotPresent
+          args: ["-c", "/config/config.yaml"]
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: request-secret
+              mountPath: /crypto
+              readOnly: true
+            {{- if .Values.mediaScanner.aiCheck.enabled }}
+            - name: ai-secret
+              mountPath: /secrets
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp/mcs
+          resources:
+            {{- toYaml .Values.mediaScanner.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /_matrix/media_proxy/unstable/public_key
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /_matrix/media_proxy/unstable/public_key
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+        - name: clamav
+          image: {{ .Values.mediaScanner.clamavImage | quote }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: {{ .Values.mediaScanner.clamavPort }}
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.mediaScanner.clamavResources | nindent 12 }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.mediaScanner.clamavPort }}
+            # clamd loads its signature database on boot; until it answers, the
+            # pod stays out of the service and downloads fail closed at the edge
+            # rather than bypassing the scan.
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 10
+      volumes:
+        - name: config
+          configMap:
+            name: media-scanner-config
+            items:
+              - key: config.yaml
+                path: config.yaml
+        - name: scripts
+          configMap:
+            name: media-scanner-config
+            defaultMode: 0555
+            items:
+              - key: scan.py
+                path: scan.py
+              - key: ai-check.py
+                path: ai-check.py
+        - name: request-secret
+          secret:
+            secretName: {{ .Values.mediaScanner.requestSecret.existingSecret | quote }}
+            items:
+              - key: {{ .Values.mediaScanner.requestSecret.key | quote }}
+                path: request-secret
+        {{- if .Values.mediaScanner.aiCheck.enabled }}
+        - name: ai-secret
+          secret:
+            secretName: {{ .Values.mediaScanner.aiCheck.existingSecret | quote }}
+            items:
+              - key: {{ .Values.mediaScanner.aiCheck.key | quote }}
+                path: api-key
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+{{- end }}

@@ -102,6 +102,87 @@ elementCall:
   image: "ghcr.io/openresilienceinitiative/element-call:2.0.2"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
+# ---------- Media security (epic ORISO-Admin#366, ADR-019) -----------------------------------------------------------
+
+# matrix-content-scanner in front of Matrix media downloads: ClamAV first, and
+# — only where a signed sub-processor agreement is on record — an image check.
+# Fail-closed, i.e. an unchecked or rejected file is never released.
+#
+# OFF by default. Enabling it is a deliberate, per-environment act that needs
+# two secrets to exist first (see requestSecret / aiCheck below); the chart
+# refuses to render rather than inventing them. Nothing in this file changes a
+# running environment on its own.
+#
+# Two independent switches, do not confuse them:
+#   mediaScanner.enabled     — infra: is the scanner deployed and in the path.
+#   featureMediaAiScan*      — app, per tenant and chat type (TenantService):
+#                              does the app ask for an AI verdict at all.
+# The plain virus scan rides on the inline-display family, not on the AI one.
+mediaScanner:
+  enabled: false
+  replicas: 1
+  # Pinned by digest — a moving `latest` in the media path would change what
+  # judges user files without any review. Tag equivalents are noted for humans.
+  # vectorim/matrix-content-scanner:v1.3.0
+  image: "docker.io/vectorim/matrix-content-scanner@sha256:dd73aa09d9cd8fe0be50a7f67466bb31aa677320aa4d8f3b1dc2efb267fc214c"
+  # clamav/clamav:1.5.4
+  clamavImage: "docker.io/clamav/clamav@sha256:78810772a92b4a9168115bc6b2e0ffd702640893b9577f8c3d0432762d2655c4"
+  clamavPort: 3310
+  clamavTimeoutSeconds: 60
+  # Where the scanner fetches the original media from (in-cluster, not via the edge).
+  matrixApiUrl: "http://matrix-synapse:8008"
+  # Anything outside this list fails the scan. Matches the formats the product
+  # actually allows to be uploaded.
+  allowedMimeTypes:
+    - "image/jpeg"
+    - "image/png"
+    - "image/webp"
+    - "image/gif"
+  # Serve the scanner's own API host-wide so clients can reach
+  # /_matrix/media_proxy/... . Close the unscanned route at the same time —
+  # a scanner you can walk around is not a scanner.
+  blockDirectMediaAccess: true
+  proxyTimeoutSeconds: 120
+  maxUploadSize: "25m"
+  # Derives the key pair the scanner uses to decrypt Olm-encrypted POST bodies,
+  # i.e. the encrypted-media path where the client forwards its file keys.
+  # Create out-of-band, never in a committed values file:
+  #   head -c 32 /dev/urandom | base64
+  #   kubectl create secret generic media-scanner-request-secret \
+  #     --from-literal=request-secret='<value>'
+  requestSecret:
+    existingSecret: ""
+    key: "request-secret"
+  aiCheck:
+    # Gated by ORISO-Admin#734: the vision provider is an external
+    # sub-processor of chat images. Rendering fails unless the signed
+    # zero-retention agreement is recorded below.
+    enabled: false
+    subProcessorAgreementSigned: false
+    endpoint: "https://api.mistral.ai/v1/chat/completions"
+    model: "pixtral-12b-2409"
+    timeoutSeconds: 20
+    # Referenced, never inlined.
+    existingSecret: ""
+    key: "api-key"
+  resultCache:
+    maxSize: 1024
+    ttl: "1h"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  clamavResources:
+    requests:
+      cpu: "200m"
+      memory: "1Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+
 # ---------- Infrastructure Services ----------------------------------------------------------------------------------
 
 admin:

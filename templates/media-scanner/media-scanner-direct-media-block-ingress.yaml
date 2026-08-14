@@ -1,0 +1,42 @@
+{{- if and .Values.mediaScanner.enabled .Values.mediaScanner.blockDirectMediaAccess }}
+# Closes the direct-Synapse bypass (issue #283 acceptance criterion).
+#
+# Routing downloads through the scanner is only a real guarantee if the
+# unscanned route is gone. Each path below is more specific than the `/_matrix`
+# prefix of matrix-client-ingress, so nginx matches it first and answers 403 at
+# the edge instead of handing the file out unscanned.
+#
+# Only retrieval is blocked — downloads and thumbnails, on both the legacy
+# (`/_matrix/media/...`) and the authenticated (`/_matrix/client/v1/media/...`)
+# endpoints. Upload stays open on purpose: files must still reach the media
+# repository, otherwise the scanner has nothing to fetch and judge.
+#
+# Staging note: set mediaScanner.blockDirectMediaAccess=false while a client
+# that does not yet speak the scanner protocol is still in the field. Leaving it
+# at the default `true` is the fail-closed position.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      return 403 '{"errcode":"M_FORBIDDEN","error":"Media must be fetched through the content scanner."}';
+  name: media-scanner-direct-media-block-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: '{{ .Values.global.domainName }}'
+    http:
+      paths:
+      {{- range $path := list "/_matrix/media/v3/download" "/_matrix/media/v3/thumbnail" "/_matrix/media/r0/download" "/_matrix/media/r0/thumbnail" "/_matrix/media/v1/download" "/_matrix/media/v1/thumbnail" "/_matrix/client/v1/media/download" "/_matrix/client/v1/media/thumbnail" }}
+      - backend:
+          service:
+            name: media-scanner
+            port:
+              number: 8080
+        path: {{ $path | quote }}
+        pathType: Prefix
+      {{- end }}
+{{- end }}

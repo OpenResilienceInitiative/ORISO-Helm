@@ -1,0 +1,279 @@
+{{- if .Values.mediaScanner.enabled }}
+{{- if not .Values.mediaScanner.requestSecret.existingSecret }}
+{{- fail "mediaScanner.enabled requires mediaScanner.requestSecret.existingSecret (32 random bytes, base64-encoded, under key `request-secret`). Create it out-of-band: `head -c 32 /dev/urandom | base64`. The chart never generates or commits this secret." }}
+{{- end }}
+{{- if .Values.mediaScanner.aiCheck.enabled }}
+{{- if not .Values.mediaScanner.aiCheck.subProcessorAgreementSigned }}
+{{- fail "mediaScanner.aiCheck.enabled requires mediaScanner.aiCheck.subProcessorAgreementSigned=true. The AI vision check sends chat images to an external sub-processor; a signed zero-retention KDG/AVV agreement must be recorded first (ORISO-Admin#734)." }}
+{{- end }}
+{{- if not .Values.mediaScanner.aiCheck.existingSecret }}
+{{- fail "mediaScanner.aiCheck.enabled requires mediaScanner.aiCheck.existingSecret (key: `api-key`). API keys are referenced, never inlined into a values file." }}
+{{- end }}
+{{- end }}
+# Media scanning (epic ORISO-Admin#366 phase 2, ADR-019, issue #283).
+#
+# matrix-content-scanner sits in front of Matrix media downloads: a client only
+# receives a file after the scanner has cleared it. The verdict comes from the
+# scan script below, which runs ClamAV first and — only when the AI family is
+# switched on and its sub-processor agreement is recorded — an image check.
+#
+# Fail-closed everywhere. Every unreachable, uncertain or errored check exits
+# non-zero, which the scanner treats as "do not release": the file then only
+# sits in the media repository, undownloadable.
+#
+# Exit code convention (see result_cache.exit_codes_to_ignore below):
+#   0 = clean, release
+#   1 = the file itself was rejected (infected, forbidden content) — cacheable
+#   2 = the check could not be performed (clamd down, timeout, bad response).
+#       Still blocks, but is deliberately NOT cached, so a transient outage
+#       cannot pin a clean file to "blocked" for the whole cache TTL.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: media-scanner-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: media-scanner
+data:
+  # Config schema of the pinned matrix-content-scanner release
+  # ({{ .Values.mediaScanner.image }}). Re-validate against config.sample.yaml
+  # whenever the pin is bumped — the upstream schema changes between releases
+  # (`server` became `web`, the Olm pickle keys became `request_secret_path`).
+  config.yaml: |
+    web:
+      host: 0.0.0.0
+      port: 8080
+    scan:
+      script: /scripts/scan.py
+      temp_directory: /tmp/mcs
+      allowed_mimetypes:
+        {{- range .Values.mediaScanner.allowedMimeTypes }}
+        - {{ . | quote }}
+        {{- end }}
+    result_cache:
+      max_size: {{ .Values.mediaScanner.resultCache.maxSize }}
+      ttl: {{ .Values.mediaScanner.resultCache.ttl | quote }}
+      # 2 = "check could not be performed"; never cache that verdict.
+      exit_codes_to_ignore: [2]
+    download:
+      # Media is fetched from Synapse in-cluster, never back through the edge.
+      base_homeserver_url: {{ .Values.mediaScanner.matrixApiUrl | quote }}
+    crypto:
+      # Derives the key pair used to decrypt Olm-encrypted POST bodies, i.e. the
+      # encrypted-media path where the client forwards its file keys
+      # (ORISO-Frontend#1072). Supplied by reference only.
+      request_secret_path: /crypto/request-secret
+  scan.py: |
+    #!/usr/bin/env python3
+    """Fail-closed media scan (ADR-019).
+
+    Called by matrix-content-scanner with the path of one decrypted file.
+    Exit 0 releases the file; anything else blocks it.
+    """
+    import socket
+    import struct
+    import subprocess
+    import sys
+
+    CLAMD_HOST = "127.0.0.1"
+    CLAMD_PORT = {{ .Values.mediaScanner.clamavPort }}
+    CLAMD_TIMEOUT = {{ .Values.mediaScanner.clamavTimeoutSeconds }}
+    CHUNK = 65536
+
+    EXIT_CLEAN = 0
+    EXIT_REJECTED = 1
+    EXIT_CHECK_FAILED = 2
+
+
+    def block(code, message):
+        print("scan: %s" % message, file=sys.stderr)
+        sys.exit(code)
+
+
+    def clamav_verdict(path):
+        """Ask clamd over its INSTREAM protocol. Returns the raw reply."""
+        with socket.create_connection((CLAMD_HOST, CLAMD_PORT), CLAMD_TIMEOUT) as sock:
+            sock.settimeout(CLAMD_TIMEOUT)
+            sock.sendall(b"zINSTREAM\0")
+            with open(path, "rb") as handle:
+                while True:
+                    chunk = handle.read(CHUNK)
+                    if not chunk:
+                        break
+                    sock.sendall(struct.pack("!L", len(chunk)) + chunk)
+            sock.sendall(struct.pack("!L", 0))
+            reply = b""
+            while b"\0" not in reply:
+                received = sock.recv(4096)
+                if not received:
+                    break
+                reply += received
+        return reply.replace(b"\0", b"").decode("utf-8", "replace").strip()
+
+
+    def main():
+        if len(sys.argv) < 2 or not sys.argv[1]:
+            block(EXIT_CHECK_FAILED, "no file argument -> block")
+        path = sys.argv[1]
+
+        try:
+            with open(path, "rb") as handle:
+                if not handle.read(1):
+                    block(EXIT_REJECTED, "empty file -> block")
+        except OSError as error:
+            block(EXIT_CHECK_FAILED, "unreadable file (%s) -> block" % error)
+
+        # 1) Virus scan via the ClamAV sidecar. Anything other than an explicit
+        #    "OK" blocks; an unreachable clamd blocks as a check failure, so a
+        #    signature-update outage can never release an unscanned file.
+        try:
+            reply = clamav_verdict(path)
+        except (OSError, socket.timeout) as error:
+            block(EXIT_CHECK_FAILED, "clamd unreachable (%s) -> block" % error)
+
+        if reply.endswith("FOUND"):
+            block(EXIT_REJECTED, "clamav: %s -> block" % reply)
+        if not reply.endswith("OK"):
+            block(EXIT_CHECK_FAILED, "clamav returned %r -> block" % reply)
+
+        # 2) AI image check — only when the AI family is switched on for this
+        #    environment, which requires a recorded sub-processor agreement.
+        {{- if .Values.mediaScanner.aiCheck.enabled }}
+        result = subprocess.run(
+            [sys.executable, "/scripts/ai-check.py", path],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != EXIT_CLEAN:
+            sys.stderr.write(result.stderr)
+            block(result.returncode or EXIT_CHECK_FAILED, "ai check did not clear the file -> block")
+        {{- end }}
+
+        print("scan: clean -> release", file=sys.stderr)
+        sys.exit(EXIT_CLEAN)
+
+
+    if __name__ == "__main__":
+        main()
+  ai-check.py: |
+    #!/usr/bin/env python3
+    """Vision check for images, fail-closed.
+
+    This file is the single integration point with the external vision
+    provider. Swapping it for a self-hosted model changes nothing else in the
+    pipeline. Non-images are passed through untouched — ClamAV has already run.
+    """
+    import base64
+    import json
+    import sys
+    import urllib.error
+    import urllib.request
+
+    ENDPOINT = "{{ .Values.mediaScanner.aiCheck.endpoint }}"
+    MODEL = "{{ .Values.mediaScanner.aiCheck.model }}"
+    TIMEOUT = {{ .Values.mediaScanner.aiCheck.timeoutSeconds }}
+    KEY_PATH = "/secrets/api-key"
+
+    EXIT_CLEAN = 0
+    EXIT_REJECTED = 1
+    EXIT_CHECK_FAILED = 2
+
+    IMAGE_SIGNATURES = (
+        (b"\xff\xd8\xff", "image/jpeg"),
+        (b"\x89PNG\r\n\x1a\n", "image/png"),
+        (b"GIF87a", "image/gif"),
+        (b"GIF89a", "image/gif"),
+    )
+
+
+    def block(code, message):
+        print("ai-check: %s" % message, file=sys.stderr)
+        sys.exit(code)
+
+
+    def image_mime(head):
+        for signature, mime in IMAGE_SIGNATURES:
+            if head.startswith(signature):
+                return mime
+        if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+            return "image/webp"
+        return None
+
+
+    def main():
+        path = sys.argv[1] if len(sys.argv) > 1 else ""
+        if not path:
+            block(EXIT_CHECK_FAILED, "no file argument -> block")
+
+        try:
+            with open(path, "rb") as handle:
+                head = handle.read(16)
+                handle.seek(0)
+                payload = handle.read()
+        except OSError as error:
+            block(EXIT_CHECK_FAILED, "unreadable file (%s) -> block" % error)
+
+        mime = image_mime(head)
+        if mime is None:
+            # Not an image: nothing for a vision model to judge.
+            sys.exit(EXIT_CLEAN)
+
+        try:
+            with open(KEY_PATH, "r", encoding="utf-8") as handle:
+                api_key = handle.read().strip()
+        except OSError:
+            api_key = ""
+        if not api_key:
+            block(EXIT_CHECK_FAILED, "no API key -> block")
+
+        body = json.dumps(
+            {
+                "model": MODEL,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Answer with exactly SAFE or UNSAFE. "
+                                "UNSAFE = nudity, sexual, or otherwise harmful imagery.",
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": "data:%s;base64,%s"
+                                % (mime, base64.b64encode(payload).decode("ascii")),
+                            },
+                        ],
+                    }
+                ],
+            }
+        ).encode("utf-8")
+
+        request = urllib.request.Request(
+            ENDPOINT,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": "Bearer %s" % api_key,
+                "Content-Type": "application/json",
+                # Contractually agreed zero retention, asserted per request.
+                "X-Zero-Retention": "true",
+            },
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+                answer = response.read().decode("utf-8", "replace").upper()
+        except (urllib.error.URLError, OSError) as error:
+            block(EXIT_CHECK_FAILED, "provider unreachable (%s) -> block" % error)
+
+        if "UNSAFE" in answer:
+            block(EXIT_REJECTED, "UNSAFE -> block")
+        if "SAFE" in answer:
+            sys.exit(EXIT_CLEAN)
+        block(EXIT_CHECK_FAILED, "unparseable answer -> block")
+
+
+    if __name__ == "__main__":
+        main()
+{{- end }}

@@ -1,0 +1,42 @@
+{{- if .Values.mediaScanner.enabled }}
+# Client media downloads route through the content scanner (issue #283).
+#
+# matrix-content-scanner serves its own API namespace, `/_matrix/media_proxy/`,
+# which Synapse does not answer, so this rule adds a route rather than
+# overriding one. Clients reach it via VITE_MEDIA_SCANNER_URL (frontend
+# configmap) and use:
+#   GET  .../unstable/download/{server}/{mediaId}   unencrypted media
+#   GET  .../unstable/thumbnail/{server}/{mediaId}  unencrypted thumbnails
+#   POST .../unstable/download_encrypted            E2EE media, client forwards
+#   POST .../unstable/scan_encrypted                the file keys (FE#1072)
+#   GET  .../unstable/public_key                    key the client encrypts to
+#
+# Fail-closed: there is no fallback backend. If the scanner is down or scaled to
+# zero the edge answers 5xx and the client keeps the file blocked — it never
+# silently falls through to Synapse.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+    # Scanning a large file takes longer than a plain proxy GET.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.mediaScanner.proxyTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.mediaScanner.proxyTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.mediaScanner.maxUploadSize | quote }}
+  name: media-scanner-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: '{{ .Values.global.domainName }}'
+    http:
+      paths:
+      - backend:
+          service:
+            name: media-scanner
+            port:
+              number: 8080
+        path: /_matrix/media_proxy
+        pathType: Prefix
+{{- end }}
