@@ -53,6 +53,8 @@ def build_minimal_chart(destination: str) -> None:
 
 
 def helm_template(chart: str, *values: str) -> subprocess.CompletedProcess:
+    if shutil.which("helm") is None:
+        raise AssertionError("helm is required to run this guard")
     command = ["helm", "template", "media-scanner", chart]
     for values_file in values:
         command.extend(["-f", values_file])

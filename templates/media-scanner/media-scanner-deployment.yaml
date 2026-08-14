@@ -1,4 +1,4 @@
-{{- if .Values.mediaScanner.enabled }}
+{{- if (.Values.mediaScanner).enabled }}
 # matrix-content-scanner + ClamAV sidecar (epic ORISO-Admin#366, ADR-019).
 # The scan script reaches clamd on localhost; both images are pinned by digest
 # so a rebuilt `latest` can never silently change what runs in the media path.
@@ -30,7 +30,7 @@ spec:
       containers:
         - name: content-scanner
           image: {{ .Values.mediaScanner.image | quote }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           args: ["-c", "/config/config.yaml"]
           ports:
             - containerPort: 8080
@@ -73,7 +73,7 @@ spec:
             periodSeconds: 30
         - name: clamav
           image: {{ .Values.mediaScanner.clamavImage | quote }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           ports:
             - containerPort: {{ .Values.mediaScanner.clamavPort }}
               protocol: TCP

@@ -71,7 +71,15 @@ Two further edges are closed on purpose:
    The chart refuses to render without that reference rather than inventing a
    secret or accepting one from a values file.
 
-3. Roll out, then verify:
+3. Roll out:
+
+   ```bash
+   helm upgrade --install caritas ./ -n caritas --create-namespace \
+     --wait-for-jobs --timeout 15m \
+     -f values.yaml -f secrets.yaml
+   ```
+
+   Then verify:
    - `GET https://<domain>/_matrix/media_proxy/unstable/public_key` returns a key
    - an EICAR file uploaded in a chat is never retrievable through the client
      media path

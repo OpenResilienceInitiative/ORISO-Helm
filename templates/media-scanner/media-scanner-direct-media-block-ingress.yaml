@@ -1,4 +1,4 @@
-{{- if and .Values.mediaScanner.enabled .Values.mediaScanner.blockDirectMediaAccess }}
+{{- if and (.Values.mediaScanner).enabled (.Values.mediaScanner).blockDirectMediaAccess }}
 # Closes the direct-Synapse bypass (issue #283 acceptance criterion).
 #
 # Routing downloads through the scanner is only a real guarantee if the
@@ -22,6 +22,7 @@ metadata:
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
     nginx.ingress.kubernetes.io/configuration-snippet: |
+      default_type application/json;
       return 403 '{"errcode":"M_FORBIDDEN","error":"Media must be fetched through the content scanner."}';
   name: media-scanner-direct-media-block-ingress
 spec:

@@ -1,4 +1,4 @@
-{{- if .Values.mediaScanner.enabled }}
+{{- if (.Values.mediaScanner).enabled }}
 # Client media downloads route through the content scanner (issue #283).
 #
 # matrix-content-scanner serves its own API namespace, `/_matrix/media_proxy/`,

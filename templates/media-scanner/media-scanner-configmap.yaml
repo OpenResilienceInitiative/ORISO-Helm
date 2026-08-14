@@ -1,4 +1,4 @@
-{{- if .Values.mediaScanner.enabled }}
+{{- if (.Values.mediaScanner).enabled }}
 {{- if not .Values.mediaScanner.requestSecret.existingSecret }}
 {{- fail "mediaScanner.enabled requires mediaScanner.requestSecret.existingSecret (32 random bytes, base64-encoded, under key `request-secret`). Create it out-of-band: `head -c 32 /dev/urandom | base64`. The chart never generates or commits this secret." }}
 {{- end }}
@@ -139,11 +139,15 @@ data:
         # 2) AI image check — only when the AI family is switched on for this
         #    environment, which requires a recorded sub-processor agreement.
         {{- if .Values.mediaScanner.aiCheck.enabled }}
-        result = subprocess.run(
-            [sys.executable, "/scripts/ai-check.py", path],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "/scripts/ai-check.py", path],
+                capture_output=True,
+                text=True,
+                timeout={{ add .Values.mediaScanner.aiCheck.timeoutSeconds 10 }},
+            )
+        except subprocess.TimeoutExpired:
+            block(EXIT_CHECK_FAILED, "ai check timed out -> block")
         if result.returncode != EXIT_CLEAN:
             sys.stderr.write(result.stderr)
             block(result.returncode or EXIT_CHECK_FAILED, "ai check did not clear the file -> block")
@@ -263,9 +267,16 @@ data:
 
         try:
             with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-                answer = response.read().decode("utf-8", "replace").upper()
+                parsed = json.loads(response.read().decode("utf-8", "replace"))
         except (urllib.error.URLError, OSError) as error:
             block(EXIT_CHECK_FAILED, "provider unreachable (%s) -> block" % error)
+        except ValueError as error:
+            block(EXIT_CHECK_FAILED, "unparseable provider body (%s) -> block" % error)
+
+        try:
+            answer = parsed["choices"][0]["message"]["content"].strip().upper()
+        except (KeyError, IndexError, TypeError, AttributeError):
+            block(EXIT_CHECK_FAILED, "unexpected provider schema -> block")
 
         if "UNSAFE" in answer:
             block(EXIT_REJECTED, "UNSAFE -> block")
