@@ -12,7 +12,7 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 data:
   signoz_observability.py: |-
-{{ .Files.Get "scripts/signoz_observability.py" | nindent 4 }}
+{{ required "scripts/signoz_observability.py must exist for signoz.orisoObservability" (.Files.Get "scripts/signoz_observability.py") | nindent 4 }}
   observability-catalog.json: |-
-{{ .Files.Get "files/signoz/observability-catalog.json" | nindent 4 }}
+{{ required "files/signoz/observability-catalog.json must exist for signoz.orisoObservability" (.Files.Get "files/signoz/observability-catalog.json") | nindent 4 }}
 {{- end }}

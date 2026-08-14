@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import os
+import pathlib
 import subprocess
 import sys
+import tempfile
 from typing import Any
 
 import yaml
@@ -19,6 +21,7 @@ def render_result(
     overlay: str = "values-pre-dev.yaml",
     signoz_enabled: bool = True,
     infra_enabled: bool = True,
+    extra_args: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     command = [
         "helm",
@@ -47,6 +50,7 @@ def render_result(
         f"signoz.enabled={'true' if signoz_enabled else 'false'}",
         "--set",
         f"k8s-infra.enabled={'true' if infra_enabled else 'false'}",
+        *extra_args,
     ]
     return subprocess.run(command, capture_output=True, text=True, check=False)
 
@@ -106,7 +110,76 @@ def main() -> None:
         "key": "slackWebhookUrl",
     }
     assert env["TEST_NOTIFICATION_ROUTE"]["value"] == "true"
+    assert env["SIGNOZ_API_URL"]["value"] == "http://caritas-signoz:8080"
     assert "slack" not in str(container["args"]).lower()
+
+    custom_port_result = render_result(
+        enabled=True,
+        extra_args=("--set", "signoz.signoz.service.port=18080"),
+    )
+    assert custom_port_result.returncode == 0, custom_port_result.stderr
+    custom_port_documents = [
+        item for item in yaml.safe_load_all(custom_port_result.stdout) if item
+    ]
+    custom_port_job = find(
+        custom_port_documents, "Job", "caritas-signoz-observability"
+    )
+    custom_port_env = {
+        item["name"]: item
+        for item in custom_port_job["spec"]["template"]["spec"]["containers"][0][
+            "env"
+        ]
+    }
+    assert custom_port_env["SIGNOZ_API_URL"]["value"] == "http://caritas-signoz:18080"
+
+    null_resources_result = render_result(
+        enabled=True,
+        extra_args=("--set-json", "signoz.orisoObservability.resources=null"),
+    )
+    assert null_resources_result.returncode == 0, null_resources_result.stderr
+    null_resources_documents = [
+        item for item in yaml.safe_load_all(null_resources_result.stdout) if item
+    ]
+    null_resources_job = find(
+        null_resources_documents, "Job", "caritas-signoz-observability"
+    )
+    assert (
+        null_resources_job["spec"]["template"]["spec"]["containers"][0][
+            "resources"
+        ]
+        == {}
+    )
+
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        chart = pathlib.Path(temporary_directory)
+        (chart / "templates").mkdir()
+        (chart / "Chart.yaml").write_text(
+            "apiVersion: v2\nname: missing-observability-assets\nversion: 0.1.0\n",
+            encoding="utf-8",
+        )
+        template = pathlib.Path(
+            CHART_DIR, "templates", "signoz", "observability-configmap.yaml"
+        ).read_text(encoding="utf-8")
+        (chart / "templates" / "observability-configmap.yaml").write_text(
+            template, encoding="utf-8"
+        )
+        missing_assets = subprocess.run(
+            [
+                "helm",
+                "template",
+                "caritas",
+                str(chart),
+                "--set",
+                "signoz.enabled=true",
+                "--set",
+                "signoz.orisoObservability.enabled=true",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert missing_assets.returncode != 0
+        assert "scripts/signoz_observability.py must exist" in missing_assets.stderr
 
     dev = render(enabled=True, overlay="values-dev.yaml")
     dev_job = find(dev, "Job", "caritas-signoz-observability")

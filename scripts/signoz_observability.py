@@ -661,6 +661,7 @@ def _query_contract(query: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("managed SigNoz query must contain exactly one aggregation")
     aggregation = aggregations[0]
     return {
+        "disabled": query.get("disabled"),
         "metricName": aggregation.get("metricName"),
         "timeAggregation": aggregation.get("timeAggregation"),
         "spaceAggregation": aggregation.get("spaceAggregation"),

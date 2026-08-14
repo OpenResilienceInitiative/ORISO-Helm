@@ -370,12 +370,35 @@ class LiveConformanceContractTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "stored dashboard query drift"):
             MODULE.validate_live_dashboard(current, expected, environment="pre-dev")
 
+    def test_live_dashboard_contract_rejects_a_disabled_query(self) -> None:
+        expected = self.dashboards[0]
+        current = json.loads(json.dumps(expected))
+        MODULE.dashboard_builder_queries(current)[0]["disabled"] = True
+
+        with self.assertRaisesRegex(RuntimeError, "stored dashboard query drift"):
+            MODULE.validate_live_dashboard(current, expected, environment="pre-dev")
+
     def test_live_alert_contract_rejects_a_different_notification_channel(self) -> None:
         expected = self.alerts[0]
         current = json.loads(json.dumps(expected))
         current["condition"]["thresholds"]["spec"][0]["channels"] = ["other"]
 
         with self.assertRaisesRegex(RuntimeError, "stored alert route drift"):
+            MODULE.validate_live_alert(
+                current,
+                expected,
+                environment="pre-dev",
+                channel_name="ORISO Platform Alerts",
+            )
+
+    def test_live_alert_contract_rejects_a_disabled_query(self) -> None:
+        expected = self.alerts[0]
+        current = json.loads(json.dumps(expected))
+        current["condition"]["compositeQuery"]["queries"][0]["spec"][
+            "disabled"
+        ] = True
+
+        with self.assertRaisesRegex(RuntimeError, "stored alert query drift"):
             MODULE.validate_live_alert(
                 current,
                 expected,

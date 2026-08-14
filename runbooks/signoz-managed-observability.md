@@ -10,11 +10,14 @@ from the active OTLP/ClickHouse acceptance in
 The post-install/post-upgrade Job `caritas-signoz-observability` idempotently
 creates or updates:
 
-- `ORISO Live Chat and Matrix`: demand, routing, Redis availability, room
+- display title `ORISO Live Chat and Matrix [<environment>]`, identity
+  `oriso-live-chat-<environment>`: demand, routing, Redis availability, room
   encryption, Matrix processing, push, and notification outcomes;
-- `ORISO Service Reliability`: provisioning compensation, dependency calls,
-  retries, and replica-safety constraints;
-- `ORISO Kubernetes and SigNoz Health`: collector freshness, pod/node health,
+- display title `ORISO Service Reliability [<environment>]`, identity
+  `oriso-service-reliability-<environment>`: provisioning compensation,
+  dependency calls, retries, and replica-safety constraints;
+- display title `ORISO Kubernetes and SigNoz Health [<environment>]`, identity
+  `oriso-platform-health-<environment>`: collector freshness, pod/node health,
   and ClickHouse PVC capacity;
 - six active alerts for incomplete compensation, Redis failure, notification
   failure, unencrypted rooms, low ClickHouse capacity, and stale collector
@@ -58,19 +61,35 @@ instead of retrying for the full readiness timeout.
 
 ## PreDev release and proof
 
+Create the local operator values file from the reviewed defaults, then configure
+`global.domainName`, `global.keycloak.realm`, and the Matrix server-name fields
+for the target environment. Keep this environment-local file out of Git:
+
+```bash
+cp values.yaml.default values.yaml
+```
+
 Render before applying:
 
 ```bash
 helm template caritas . -n caritas \
-  -f values.yaml.default -f secrets.yaml -f values-pre-dev.yaml \
+  -f values.yaml -f secrets.yaml -f values-pre-dev.yaml \
   > /tmp/oriso-predev-rendered.yaml
 ```
 
-Apply only through the normal reviewed PreDev release workflow. The hook waits
-for the SigNoz API, upserts the managed assets, sends one contextual route-test
-notification, executes every dashboard and alert query, requires fresh
-`pre-dev`/`oriso-predev` collector data, and fails if `dev`/`oriso-dev` data is
-visible.
+Apply only through the normal reviewed PreDev release workflow, which executes:
+
+```bash
+helm upgrade --install caritas . \
+  --namespace caritas --create-namespace \
+  -f values.yaml -f secrets.yaml -f values-pre-dev.yaml \
+  --wait-for-jobs --timeout 15m
+```
+
+The hook waits for the SigNoz API, upserts the managed assets, sends one
+contextual route-test notification, executes every dashboard and alert query,
+requires fresh `pre-dev`/`oriso-predev` collector data, and fails if
+`dev`/`oriso-dev` data is visible.
 
 Read the retained evidence:
 

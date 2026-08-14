@@ -3,6 +3,9 @@
 {{- if and (get $signoz "enabled" | default false) (get $managed "enabled" | default false) }}
 {{- $name := printf "%s-signoz-observability" .Release.Name -}}
 {{- $secretName := get $managed "existingSecret" | default $name -}}
+{{- $signozApp := get $signoz "signoz" | default dict -}}
+{{- $signozService := get $signozApp "service" | default dict -}}
+{{- $signozServicePort := get $signozService "port" | default 8080 -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -43,7 +46,7 @@ spec:
             - provision
           env:
             - name: SIGNOZ_API_URL
-              value: {{ printf "http://%s:8080" (include "oriso.signozServiceName" .) | quote }}
+              value: {{ printf "http://%s:%v" (include "oriso.signozServiceName" .) $signozServicePort | quote }}
             - name: SIGNOZ_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -65,7 +68,7 @@ spec:
             - name: TEST_NOTIFICATION_ROUTE
               value: {{ get $managed "testNotificationRoute" | default false | quote }}
           resources:
-{{ get $managed "resources" | toYaml | nindent 12 }}
+{{ get $managed "resources" | default dict | toYaml | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
