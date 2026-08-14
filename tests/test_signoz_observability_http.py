@@ -75,6 +75,8 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "id": f"route-{rule_id}",
                     "kind": "rule",
+                    "name": rule_id,
+                    "expression": f'rule_id == "{rule_id}"',
                     "channels": rule["condition"]["thresholds"]["spec"][0]["channels"],
                 }
                 for rule_id, rule in self.state.rules.items()

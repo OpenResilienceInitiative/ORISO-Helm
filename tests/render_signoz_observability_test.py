@@ -89,6 +89,8 @@ def main() -> None:
     assert container["securityContext"]["readOnlyRootFilesystem"] is True
     assert container["securityContext"]["allowPrivilegeEscalation"] is False
     assert container["securityContext"]["runAsNonRoot"] is True
+    assert container["securityContext"]["runAsUser"] == 65532
+    assert container["securityContext"]["runAsGroup"] == 65532
     assert container["resources"]["requests"]["cpu"]
     assert container["resources"]["limits"]["memory"]
 

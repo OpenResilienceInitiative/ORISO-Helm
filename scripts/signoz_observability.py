@@ -655,6 +655,134 @@ def _wait_for_signal_data(
         time.sleep(10)
 
 
+def _query_contract(query: dict[str, Any]) -> dict[str, Any]:
+    aggregations = query.get("aggregations", [])
+    if len(aggregations) != 1:
+        raise RuntimeError("managed SigNoz query must contain exactly one aggregation")
+    aggregation = aggregations[0]
+    return {
+        "metricName": aggregation.get("metricName"),
+        "timeAggregation": aggregation.get("timeAggregation"),
+        "spaceAggregation": aggregation.get("spaceAggregation"),
+        "filter": query.get("filter", {}).get("expression", ""),
+        "groupBy": sorted(item.get("name") for item in query.get("groupBy", [])),
+    }
+
+
+def _assert_no_protected_fields(value: Any, label: str) -> None:
+    encoded = json.dumps(value, sort_keys=True).lower()
+    leaked = sorted(term for term in FORBIDDEN_TERMS if term in encoded)
+    if leaked:
+        raise RuntimeError(f"{label} contains protected fields: {leaked}")
+
+
+def validate_live_dashboard(
+    current: dict[str, Any],
+    expected: dict[str, Any],
+    *,
+    environment: str,
+) -> list[dict[str, Any]]:
+    if current.get("schemaVersion") != "v6" or current.get("name") != expected["name"]:
+        raise RuntimeError(f"stored dashboard identity drift: {expected['name']}")
+    if current.get("spec", {}).get("variables"):
+        raise RuntimeError(
+            f"stored dashboard has unconstrained variables: {expected['name']}"
+        )
+    tags = {(item.get("key"), item.get("value")) for item in current.get("tags", [])}
+    required_tags = {("managed-by", "oriso-helm"), ("environment", environment)}
+    if not required_tags.issubset(tags):
+        raise RuntimeError(f"stored dashboard tag drift: {expected['name']}")
+
+    current_queries = dashboard_builder_queries(current)
+    expected_queries = dashboard_builder_queries(expected)
+    current_contracts = sorted(
+        (_query_contract(query) for query in current_queries),
+        key=lambda item: json.dumps(item, sort_keys=True),
+    )
+    expected_contracts = sorted(
+        (_query_contract(query) for query in expected_queries),
+        key=lambda item: json.dumps(item, sort_keys=True),
+    )
+    if current_contracts != expected_contracts:
+        raise RuntimeError(f"stored dashboard query drift: {expected['name']}")
+    environment_filter = f"deployment.environment = '{environment}'"
+    for query in current_queries:
+        contract = _query_contract(query)
+        if environment_filter not in contract["filter"]:
+            raise RuntimeError(f"stored dashboard query drift: {expected['name']}")
+        if not set(contract["groupBy"]).issubset(ALLOWED_GROUPS):
+            raise RuntimeError(
+                f"stored dashboard has unbounded grouping: {expected['name']}"
+            )
+    _assert_no_protected_fields(current, f"stored dashboard {expected['name']}")
+    return current_queries
+
+
+def validate_live_alert(
+    current: dict[str, Any],
+    expected: dict[str, Any],
+    *,
+    environment: str,
+    channel_name: str,
+) -> dict[str, Any]:
+    if (
+        current.get("alert") != expected["alert"]
+        or current.get("schemaVersion") != "v2alpha1"
+        or current.get("version") != "v5"
+        or current.get("disabled")
+    ):
+        raise RuntimeError(f"stored alert identity or state drift: {expected['alert']}")
+    settings = current.get("notificationSettings", {})
+    if settings.get("groupBy") != ["environment"] or settings.get("usePolicy"):
+        raise RuntimeError(f"stored alert grouping drift: {expected['alert']}")
+    labels = current.get("labels", {})
+    if (
+        labels.get("environment") != environment
+        or labels.get("managed_by") != "oriso_helm"
+    ):
+        raise RuntimeError(f"stored alert label drift: {expected['alert']}")
+
+    current_threshold = current["condition"]["thresholds"]["spec"][0]
+    expected_threshold = expected["condition"]["thresholds"]["spec"][0]
+    for key in ("name", "target", "matchType", "op"):
+        if current_threshold.get(key) != expected_threshold.get(key):
+            raise RuntimeError(f"stored alert threshold drift: {expected['alert']}")
+    if current_threshold.get("channels") != [channel_name]:
+        raise RuntimeError(f"stored alert route drift: {expected['alert']}")
+
+    current_query = current["condition"]["compositeQuery"]["queries"][0]["spec"]
+    expected_query = expected["condition"]["compositeQuery"]["queries"][0]["spec"]
+    if _query_contract(current_query) != _query_contract(expected_query):
+        raise RuntimeError(f"stored alert query drift: {expected['alert']}")
+    if f"deployment.environment = '{environment}'" not in current_query.get(
+        "filter", {}
+    ).get("expression", ""):
+        raise RuntimeError(f"stored alert query drift: {expected['alert']}")
+    _assert_no_protected_fields(current, f"stored alert {expected['alert']}")
+    return current_query
+
+
+def validate_managed_routes(
+    routes: list[dict[str, Any]],
+    *,
+    rule_ids: list[str],
+    channel_name: str,
+) -> None:
+    for rule_id in rule_ids:
+        matching = [
+            route
+            for route in routes
+            if route.get("kind") == "rule"
+            and route.get("name") == rule_id
+            and rule_id in route.get("expression", "")
+            and route.get("channels") == [channel_name]
+        ]
+        if len(matching) != 1:
+            raise RuntimeError(
+                f"managed alert route is missing or ambiguous: {rule_id}"
+            )
+
+
 def prove_conformance(
     client: SignozClient,
     dashboards: list[dict[str, Any]],
@@ -680,26 +808,34 @@ def prove_conformance(
         if not listed:
             raise RuntimeError(f"managed dashboard is missing: {expected['name']}")
         current = _unwrap(client.request("GET", f"/api/v2/dashboards/{listed['id']}"))
-        if not isinstance(current, dict) or current.get("schemaVersion") != "v6":
+        if not isinstance(current, dict):
             raise RuntimeError(
                 f"managed dashboard is not readable as v6: {expected['name']}"
             )
-        for query in dashboard_builder_queries(expected):
+        for query in validate_live_dashboard(
+            current, expected, environment=environment
+        ):
             _execute_query(client, query)
 
     listed_alerts = {item.get("alert"): item for item in _list(client, "/api/v2/rules")}
+    managed_rule_ids: list[str] = []
+    freshness_query: dict[str, Any] | None = None
     for expected in alerts:
         current = listed_alerts.get(expected["alert"])
-        if (
-            not current
-            or current.get("schemaVersion") != "v2alpha1"
-            or current.get("disabled")
-        ):
+        if not current:
             raise RuntimeError(
                 f"managed alert is missing, obsolete, or disabled: {expected['alert']}"
             )
-        query = expected["condition"]["compositeQuery"]["queries"][0]["spec"]
+        query = validate_live_alert(
+            current,
+            expected,
+            environment=environment,
+            channel_name=channel_name,
+        )
         _execute_query(client, query)
+        managed_rule_ids.append(str(current["id"]))
+        if expected.get("_orisoSlug") == "collector-staleness":
+            freshness_query = query
 
     channels = _list(client, "/api/v1/channels")
     if not any(
@@ -708,18 +844,11 @@ def prove_conformance(
     ):
         raise RuntimeError("managed Slack notification channel is missing")
     routes = _list(client, "/api/v1/route_policies")
-    matching_routes = [
-        route
-        for route in routes
-        if route.get("kind") == "rule" and channel_name in route.get("channels", [])
-    ]
-    if len(matching_routes) < len(alerts):
-        raise RuntimeError("not every managed alert has an enabled notification route")
-
-    freshness = next(
-        item for item in alerts if item.get("_orisoSlug") == "collector-staleness"
+    validate_managed_routes(
+        routes, rule_ids=managed_rule_ids, channel_name=channel_name
     )
-    freshness_query = freshness["condition"]["compositeQuery"]["queries"][0]["spec"]
+    if freshness_query is None:
+        raise RuntimeError("managed collector-staleness alert is missing")
     expected_response = _wait_for_signal_data(client, freshness_query)
     if not response_has_positive_signal_data(expected_response):
         raise RuntimeError(f"collector telemetry is stale or missing in {environment}")

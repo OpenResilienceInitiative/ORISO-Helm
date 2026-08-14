@@ -350,5 +350,62 @@ class UpsertContractTest(unittest.TestCase):
         )
 
 
+class LiveConformanceContractTest(unittest.TestCase):
+    def setUp(self) -> None:
+        dashboards, alerts = MODULE.load_assets(ASSETS)
+        self.dashboards, self.alerts = MODULE.materialize_assets(
+            dashboards,
+            alerts,
+            environment="pre-dev",
+            cluster_name="oriso-predev",
+            channel_name="ORISO Platform Alerts",
+        )
+
+    def test_live_dashboard_contract_rejects_a_removed_environment_filter(self) -> None:
+        expected = self.dashboards[0]
+        current = json.loads(json.dumps(expected))
+        query = MODULE.dashboard_builder_queries(current)[0]
+        query["filter"]["expression"] = "outcome = 'failure'"
+
+        with self.assertRaisesRegex(RuntimeError, "stored dashboard query drift"):
+            MODULE.validate_live_dashboard(current, expected, environment="pre-dev")
+
+    def test_live_alert_contract_rejects_a_different_notification_channel(self) -> None:
+        expected = self.alerts[0]
+        current = json.loads(json.dumps(expected))
+        current["condition"]["thresholds"]["spec"][0]["channels"] = ["other"]
+
+        with self.assertRaisesRegex(RuntimeError, "stored alert route drift"):
+            MODULE.validate_live_alert(
+                current,
+                expected,
+                environment="pre-dev",
+                channel_name="ORISO Platform Alerts",
+            )
+
+    def test_route_contract_requires_a_route_for_each_managed_rule_id(self) -> None:
+        routes = [
+            {
+                "kind": "rule",
+                "name": "rule-1",
+                "expression": 'threshold_name == "critical" && rule_id == "rule-1"',
+                "channels": ["ORISO Platform Alerts"],
+            },
+            {
+                "kind": "rule",
+                "name": "unrelated-rule",
+                "expression": 'rule_id == "unrelated-rule"',
+                "channels": ["ORISO Platform Alerts"],
+            },
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "rule-2"):
+            MODULE.validate_managed_routes(
+                routes,
+                rule_ids=["rule-1", "rule-2"],
+                channel_name="ORISO Platform Alerts",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
