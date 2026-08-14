@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
-import subprocess
 import unittest
 
 CHART_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -14,7 +13,9 @@ DIGEST = "1" * 64
 
 
 def load_preflight():
-    spec = importlib.util.spec_from_file_location("cutover_release_preflight", SCRIPT_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "cutover_release_preflight", SCRIPT_PATH
+    )
     if spec is None or spec.loader is None:
         raise AssertionError(f"cannot load {SCRIPT_PATH}")
     module = importlib.util.module_from_spec(spec)
@@ -112,20 +113,14 @@ class CutoverReleasePreflightTest(unittest.TestCase):
             values,
             {
                 "frontend": {"image": manifest["registryRelease"]["frontend"]},
-                "elementCall": {
-                    "image": manifest["registryRelease"]["elementCall"]
-                },
-                "userService": {
-                    "image": manifest["registryRelease"]["userService"]
-                },
+                "elementCall": {"image": manifest["registryRelease"]["elementCall"]},
+                "userService": {"image": manifest["registryRelease"]["userService"]},
                 "agencyService": {
                     "image": manifest["registryRelease"]["agencyService"]
                 },
                 "matrixrtcAuth": {
                     "gateway": {
-                        "image": manifest["registryRelease"][
-                            "matrixrtcPolicyGateway"
-                        ]
+                        "image": manifest["registryRelease"]["matrixrtcPolicyGateway"]
                     },
                     "upstream": {
                         "image": manifest["registryRelease"][
@@ -152,13 +147,15 @@ class CutoverReleasePreflightTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "ready-for-predev"):
             self.preflight.validate_and_build_values(manifest)
 
-    def test_wrong_repository_zero_digest_and_missing_evidence_fail_closed(self) -> None:
+    def test_wrong_repository_zero_digest_and_missing_evidence_fail_closed(
+        self,
+    ) -> None:
         cases = []
 
         wrong_repository = ready_manifest()
-        wrong_repository["registryRelease"]["frontend"] = (
-            f"ghcr.io/example/not-oriso@sha256:{DIGEST}"
-        )
+        wrong_repository["registryRelease"][
+            "frontend"
+        ] = f"ghcr.io/example/not-oriso@sha256:{DIGEST}"
         cases.append((wrong_repository, "frontend"))
 
         zero_digest = ready_manifest()
@@ -183,30 +180,24 @@ class CutoverReleasePreflightTest(unittest.TestCase):
     def test_ready_manifest_renders_exact_images_and_no_chat_legacy(self) -> None:
         manifest = ready_manifest()
         values = self.preflight.validate_and_build_values(manifest)
+        values["userService"].update(
+            {
+                "smtpUser": "smtp-canary-user",
+                "smtpPassword": "smtp-canary-password",
+            }
+        )
 
         self.preflight.verify_render(CHART_DIR, values)
 
-    def test_chart_rejects_a_mutable_cutover_image_tag(self) -> None:
-        result = subprocess.run(
-            [
-                "helm",
-                "template",
-                "mutable-image-must-fail",
-                str(CHART_DIR),
-                "-f",
-                str(CHART_DIR / "values.yaml.default"),
-                "-f",
-                str(CHART_DIR / "secrets.yaml.default"),
-                "--set-string",
-                "frontend.image=ghcr.io/openresilienceinitiative/oriso-frontend:latest",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+    def test_preflight_rejects_a_mutable_cutover_image_tag(self) -> None:
+        manifest = ready_manifest()
+        manifest["registryRelease"][
+            "frontend"
+        ] = "ghcr.io/openresilienceinitiative/oriso-frontend:latest"
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("frontend.image must use repository@sha256", result.stderr)
+        with self.assertRaisesRegex(ValueError, "frontend"):
+            self.preflight.validate_and_build_values(manifest)
+
 
 if __name__ == "__main__":
     unittest.main()

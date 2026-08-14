@@ -4,7 +4,6 @@ from pathlib import Path
 
 import yaml
 
-
 CHART_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -20,6 +19,10 @@ class OtpEmailThemeTest(unittest.TestCase):
                 str(CHART_ROOT / "values.yaml.default"),
                 "-f",
                 str(CHART_ROOT / "secrets.yaml.default"),
+                "--set-string",
+                "userService.smtpUser=smtp-canary-user",
+                "--set-string",
+                "userService.smtpPassword=smtp-canary-password",
             ],
             check=True,
             capture_output=True,
@@ -39,11 +42,14 @@ class OtpEmailThemeTest(unittest.TestCase):
         )
         template = email_theme["data"]["otp-email.ftl"]
 
-        self.assertIn("<html lang=\"${locale.language}\">", template)
+        self.assertIn('<html lang="${locale.language}">', template)
         self.assertIn(">ORISO</td>", template)
-        self.assertIn("aria-label=\"${kcSanitize(msg(\"emailCodeAriaLabel\", otp))?no_esc}\"", template)
+        self.assertIn(
+            'aria-label="${kcSanitize(msg("emailCodeAriaLabel", otp))?no_esc}"',
+            template,
+        )
         self.assertIn("user-select:all", template)
-        self.assertIn("${kcSanitize(msg(\"emailCopyHint\"))?no_esc}", template)
+        self.assertIn('${kcSanitize(msg("emailCopyHint"))?no_esc}', template)
         self.assertNotIn("data:image", template)
         self.assertNotIn("<script", template)
         self.assertNotIn("onclick=", template)
@@ -55,8 +61,12 @@ class OtpEmailThemeTest(unittest.TestCase):
             and document.get("metadata", {}).get("name")
             == "keycloak-configmap-theme-email-messages"
         )
-        self.assertIn("emailHeading=Ihr 2FA-Code", messages["data"]["messages_de.properties"])
-        self.assertIn("emailHeading=Your 2FA code", messages["data"]["messages_en.properties"])
+        self.assertIn(
+            "emailHeading=Ihr 2FA-Code", messages["data"]["messages_de.properties"]
+        )
+        self.assertIn(
+            "emailHeading=Your 2FA code", messages["data"]["messages_en.properties"]
+        )
 
 
 if __name__ == "__main__":
