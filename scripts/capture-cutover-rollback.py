@@ -35,9 +35,7 @@ IMAGE_REPOSITORIES = {
     "elementCall": DEPLOYMENT_REPOSITORIES["element-call"],
     "userService": DEPLOYMENT_REPOSITORIES["userservice"],
     "agencyService": DEPLOYMENT_REPOSITORIES["agencyservice"],
-    "matrixrtcPolicyGateway": DEPLOYMENT_REPOSITORIES[
-        "matrixrtc-auth-policy-gateway"
-    ],
+    "matrixrtcPolicyGateway": DEPLOYMENT_REPOSITORIES["matrixrtc-auth-policy-gateway"],
     "matrixrtcAuthorizationService": DEPLOYMENT_REPOSITORIES[
         "matrixrtc-authorization-service"
     ],
@@ -78,9 +76,10 @@ def extract_deployed_images(deployments: list[dict]) -> dict[str, str]:
         names.add(name)
         replicas = deployment.get("spec", {}).get("replicas", 1)
         status = deployment.get("status", {})
-        if status.get("readyReplicas", 0) != replicas or status.get(
-            "updatedReplicas", 0
-        ) != replicas:
+        if (
+            status.get("readyReplicas", 0) != replicas
+            or status.get("updatedReplicas", 0) != replicas
+        ):
             raise ValueError(f"{name} is not fully ready and updated")
 
         pod_spec = deployment["spec"]["template"]["spec"]
@@ -101,6 +100,21 @@ def extract_deployed_images(deployments: list[dict]) -> dict[str, str]:
     return images
 
 
+def extract_manifest_images(manifest: str) -> dict[str, str]:
+    deployments = [
+        document
+        for document in yaml.safe_load_all(manifest)
+        if isinstance(document, dict) and document.get("kind") == "Deployment"
+    ]
+    synthetic_live = []
+    for deployment in deployments:
+        item = dict(deployment)
+        replicas = item.get("spec", {}).get("replicas", 1)
+        item["status"] = {"readyReplicas": replicas, "updatedReplicas": replicas}
+        synthetic_live.append(item)
+    return extract_deployed_images(synthetic_live)
+
+
 def run_text(command: list[str]) -> str:
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     if result.returncode != 0:
@@ -116,7 +130,10 @@ def collect_before_state(
     helm_status = json.loads(
         run(["helm", "status", release, "--namespace", namespace, "-o", "json"])
     )
-    revision = helm_status.get("version")
+    revision_value = helm_status.get("version")
+    if isinstance(revision_value, str) and revision_value.isdigit():
+        revision_value = int(revision_value)
+    revision = revision_value
     if not isinstance(revision, int) or revision < 1:
         raise ValueError("Helm status did not return a positive release revision")
 
@@ -131,6 +148,37 @@ def collect_before_state(
         "json",
     ]
     deployment_list = json.loads(run(command))
+    live_images = extract_deployed_images(deployment_list.get("items", []))
+    try:
+        helm_images = extract_manifest_images(
+            run(
+                [
+                    "helm",
+                    "get",
+                    "manifest",
+                    release,
+                    "--namespace",
+                    namespace,
+                    "--revision",
+                    str(revision),
+                ]
+            )
+        )
+    except (ValueError, yaml.YAMLError) as error:
+        raise ValueError(
+            "Helm baseline normalization is required before cutover: "
+            f"revision {revision} does not contain a complete immutable image set ({error})"
+        ) from error
+    if helm_images != live_images:
+        changed = sorted(
+            name
+            for name in set(helm_images) | set(live_images)
+            if helm_images.get(name) != live_images.get(name)
+        )
+        raise ValueError(
+            "Helm baseline normalization is required before cutover: "
+            f"revision {revision} differs from live images for {', '.join(changed)}"
+        )
     return {
         "apiVersion": "oriso.org/v1alpha1",
         "kind": "MatrixRTCCutoverBeforeState",
@@ -138,7 +186,8 @@ def collect_before_state(
         "release": release,
         "namespace": namespace,
         "helmRevision": revision,
-        "images": extract_deployed_images(deployment_list.get("items", [])),
+        "helmManifestMatchesLive": True,
+        "images": live_images,
     }
 
 
@@ -160,7 +209,9 @@ def target_images_from_values(values: object) -> dict[str, str]:
             "synapseInit": values["matrix"]["initImage"],
         }
     except (KeyError, TypeError) as error:
-        raise ValueError(f"target values are missing a cutover image: {error}") from error
+        raise ValueError(
+            f"target values are missing a cutover image: {error}"
+        ) from error
 
     for name, repository in IMAGE_REPOSITORIES.items():
         require_image(name, images[name], repository)
@@ -227,7 +278,13 @@ def main() -> int:
         target = target_images_from_values(values)
         before = collect_before_state(args.release, args.namespace)
         write_artifacts(args.output_dir, before, target, args.timeout)
-    except (OSError, TypeError, ValueError, json.JSONDecodeError, yaml.YAMLError) as error:
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+        yaml.YAMLError,
+    ) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1
     print(f"PASS: wrote exact rollback evidence to {args.output_dir}")

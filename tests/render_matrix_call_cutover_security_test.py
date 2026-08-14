@@ -106,6 +106,13 @@ def main() -> None:
     assert "synapse_secure_password_2025" not in rendered
     assert "YOUR_GITHUB_TOKEN" not in rendered
     assert "caritas-matrix-backups" not in rendered
+    for secret_name in ("matrixrtc-auth-runtime", "livekit-config-runtime"):
+        assert not any(
+            document.get("kind") == "Secret"
+            and document.get("metadata", {}).get("name") == secret_name
+            for document in documents
+        )
+        assert secret_name in rendered
 
     print("PASS: all chat cutover images are immutable; no unsafe backup job renders")
 

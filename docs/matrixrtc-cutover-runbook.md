@@ -7,30 +7,34 @@ second release workflow.
 ## One-time secret and identity preparation
 
 Configure a dedicated, non-admin Matrix user such as
-`@matrixrtc-auth:matrix.oriso.org` in `matrixrtcAuth.membershipReaderUserId` and
-set `matrixrtcAuth.membershipReaderPassword` in the environment `secrets.yaml`.
-During Helm install, the chart registers or reuses that user through Synapse's
-shared registration secret, logs in, and patches the resulting client access
-token into `matrixrtc-auth-secrets`. The Frontend invites this user to each new
-call room. The policy gateway can therefore accept that invite and call
-`joined_members`, but it cannot inspect any unrelated room or use Synapse
-administration APIs.
-
-Populate `matrixrtcAuth.membershipReaderPassword` and `livekit.api.*` in the
-environment `secrets.yaml`. `matrixrtcAuth.membershipToken` is only a manual
-override; leave it blank for automatic bootstrap. Helm renders
-`matrixrtc-auth-secrets` during install. It contains:
+`@matrixrtc-auth:matrix.oriso.org` in `matrixrtcAuth.membershipReaderUserId`.
+Provision `matrixrtc-auth-runtime` outside Helm with:
 
 - `matrix-membership-token`
+- `call-policy-token`
 - `livekit-api-key`
 - `livekit-api-secret`
 - `redis-url`
 
-Helm also renders `livekit-config` with the `config.yaml` key. The LiveKit
-configuration contains the same API key and secret, the authorization service
-webhook, and the shared Redis connection required for a multi-node LiveKit
-cluster. These values must stay in ignored environment secret files and must
-not be committed to Git.
+Provision `livekit-config-runtime` outside Helm with the `config.yaml` key.
+The LiveKit configuration contains the same API key and secret, the
+authorization-service webhook, and the shared Redis connection. Use files or
+the environment's secret controller; never pass these values as Helm values or
+command-line arguments. The chart references both Secrets but renders neither,
+so they never enter Helm release history.
+
+Provision the membership reader and obtain its access token through the
+protected environment process before deployment. Helm has no Synapse
+registration credential and no permission to create identities or patch
+runtime Secrets. The Frontend invites this user to each new call room. The policy gateway can therefore call
+`joined_members`, but it cannot inspect unrelated rooms or use Synapse admin
+APIs.
+
+PreDev currently has the old Helm-managed `matrixrtc-auth-secrets` and
+`livekit-config`. Before the baseline normalization, copy their data to the new
+external names without printing it and verify all required keys. Do not reuse the
+old names: Helm prunes its old managed objects during the first upgrade. Delete
+the old Secrets only after the complete cutover is verified.
 
 That configuration must also pin the address LiveKit advertises to clients:
 
@@ -62,21 +66,26 @@ set to one reachable address and is the reason Pre-Dev calls connect at all.
 2. Run `scripts/cutover-release-preflight.py` against the coordinated bundle.
    Zero digests, mutable tags, missing evidence, and a partial repository set
    are stop-ship conditions.
-3. Render the exact production values and confirm that no Secret object
-   contains LiveKit or Matrix membership credentials.
+3. Confirm the two external Runtime Secrets exist with every required key.
+   Render the exact production values and confirm that no Secret object named
+   `matrixrtc-auth-runtime` or `livekit-config-runtime` is present and none of
+   their credential values occurs anywhere in the render.
 4. Generate the verified digest overlay, then capture the current Helm revision,
    complete before-image set, target-image set, and bounded rollback command:
 
    ```sh
    ./scripts/capture-cutover-rollback.py \
-     --release oriso-platform \
+     --release caritas \
      --namespace caritas \
      --target-values <generated-digest-overlay> \
      --output-dir <new-evidence-directory>
    ```
 
    The command is read-only against the cluster, fails if any current cutover
-   Deployment is unready or mutable, and refuses to overwrite evidence.
+   Deployment is unready or mutable, and refuses to overwrite evidence. It also
+   compares the live images with the manifest stored in the captured Helm
+   revision. A revision that differs from the live cluster is not an atomic
+   rollback point.
 5. Confirm the single PreDev node is healthy and no call is active. PreDev uses
    one host-networked LiveKit replica with `Recreate` and a bounded 60-second
    termination grace period. A rollout therefore interrupts active calls and
@@ -88,18 +97,26 @@ released independently.
 
 ## Deploy
 
-PreDev currently has the historical `oriso-platform` Helm release, while recent
-service changes are applied through the established host-side scripts in
-`/root/predev-deploy-script`. PR #157 was closed without merge and is not a
-deployment authority. Until a protected Helm deployment workflow replaces the
-host path, evidence must identify the exact script, reviewed source commit,
-target digest, previous digest, rollout result, and generated rollback command.
+PreDev's Helm release is named `caritas` in namespace `caritas`. Recent service
+changes were applied through the host-side scripts in
+`/root/predev-deploy-script`; those scripts can leave Helm revision history
+behind the actual Deployment images. PR #157 was closed without merge and is
+not a deployment authority.
+
+If the rollback capture reports Helm/live drift, stop. First normalize a
+baseline using this reviewed chart and an overlay that maps every currently
+running binary to its immutable digest. Deploy that baseline through Helm,
+verify all workloads and public probes, and rerun the capture. This creates a
+new revision whose stored manifest exactly matches the cluster while retaining
+the no-Rocket.Chat/no-Jitsi chart boundary. The target cutover is a second Helm
+revision; its atomic rollback point is the verified baseline revision. Do not
+use a historical revision whose images differ from the live cluster.
 
 For the coordinated chart release, use the existing Helm release with the
 reviewed digest overlay and atomic rollback:
 
 ```sh
-helm upgrade --install oriso-platform . \
+helm upgrade --install caritas . \
   --namespace caritas \
   --values values.yaml.default \
   --values <environment-values> \
@@ -132,7 +149,7 @@ Do not roll back a single repository or Deployment. Roll back the complete Helm
 release to the digest set captured before deployment:
 
 ```sh
-helm rollback oriso-platform <previous-revision> \
+helm rollback caritas <previous-revision> \
   --namespace caritas --wait --timeout 15m
 ```
 
