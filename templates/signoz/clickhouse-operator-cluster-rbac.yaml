@@ -6,7 +6,8 @@
 {{- end -}}
 {{- if and (get $signoz "enabled" | default false) $clickhouseEnabled -}}
 {{- $operatorName := include "oriso.signozClickhouseOperatorFullname" . -}}
-{{- $clusterRoleName := printf "%s-cluster-discovery" $operatorName | trunc 63 | trimSuffix "-" -}}
+{{- $namespaceHash := sha256sum .Release.Namespace | trunc 8 -}}
+{{- $clusterRoleName := printf "%s-%s-cluster-discovery" ($operatorName | trunc 36 | trimSuffix "-") $namespaceHash -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

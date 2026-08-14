@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -13,7 +14,7 @@ import yaml
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def render(signoz_enabled: bool) -> list[dict]:
+def render(signoz_enabled: bool, namespace: str = "caritas") -> list[dict]:
     result = subprocess.run(
         [
             "helm",
@@ -21,7 +22,7 @@ def render(signoz_enabled: bool) -> list[dict]:
             "caritas",
             CHART_DIR,
             "--namespace",
-            "caritas",
+            namespace,
             "-f",
             os.path.join(CHART_DIR, "values.yaml.default"),
             "-f",
@@ -59,16 +60,20 @@ def find(documents: list[dict], kind: str, name: str) -> dict:
 
 def main() -> None:
     enabled = render(True)
+    namespace_hash = hashlib.sha256(b"caritas").hexdigest()[:8]
+    cluster_role_name = (
+        f"caritas-clickhouse-operator-{namespace_hash}-cluster-discovery"
+    )
     operator = find(enabled, "Deployment", "caritas-clickhouse-operator")
     cluster_role = find(
         enabled,
         "ClusterRole",
-        "caritas-clickhouse-operator-cluster-discovery",
+        cluster_role_name,
     )
     cluster_role_binding = find(
         enabled,
         "ClusterRoleBinding",
-        "caritas-clickhouse-operator-cluster-discovery",
+        cluster_role_name,
     )
 
     rules = {
@@ -114,17 +119,27 @@ def main() -> None:
         }
     ]
 
+    other_namespace = "another-caritas"
+    other_documents = render(True, namespace=other_namespace)
+    other_namespace_hash = hashlib.sha256(other_namespace.encode()).hexdigest()[:8]
+    other_cluster_role_name = (
+        f"caritas-clickhouse-operator-{other_namespace_hash}-cluster-discovery"
+    )
+    assert other_cluster_role_name != cluster_role_name
+    find(other_documents, "ClusterRole", other_cluster_role_name)
+    find(other_documents, "ClusterRoleBinding", other_cluster_role_name)
+
     disabled_names = {
         (document.get("kind"), document.get("metadata", {}).get("name"))
         for document in render(False)
     }
     assert (
         "ClusterRole",
-        "caritas-clickhouse-operator-cluster-discovery",
+        cluster_role_name,
     ) not in disabled_names
     assert (
         "ClusterRoleBinding",
-        "caritas-clickhouse-operator-cluster-discovery",
+        cluster_role_name,
     ) not in disabled_names
 
     print("PASS: SigNoz ClickHouse operator has least-privilege cluster discovery RBAC")
