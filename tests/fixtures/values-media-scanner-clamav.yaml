@@ -1,0 +1,9 @@
+# ClamAV-only scanner overlay used by tests/render_media_scanner_test.py.
+# Mirrors the intended Pre-Dev enablement: virus scan on, AI check off.
+global:
+  domainName: "pre-dev.example.org"
+
+mediaScanner:
+  enabled: true
+  requestSecret:
+    existingSecret: "media-scanner-request-secret"
