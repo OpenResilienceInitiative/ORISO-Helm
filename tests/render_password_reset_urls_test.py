@@ -163,9 +163,11 @@ def assert_smtp_wiring_renders(
         None,
     )
     assert deployment is not None, "UserService Deployment was not rendered"
-    env_names = {
-        e["name"]
-        for e in deployment["spec"]["template"]["spec"]["containers"][0].get("env", [])
+    env_entries = {
+        entry["name"]: entry
+        for entry in deployment["spec"]["template"]["spec"]["containers"][0].get(
+            "env", []
+        )
     }
     missing = {
         "SMTP_HOST",
@@ -174,8 +176,19 @@ def assert_smtp_wiring_renders(
         "SMTP_FROM",
         "SMTP_USER",
         "SMTP_PASSWORD",
-    } - env_names
+    } - env_entries.keys()
     assert not missing, f"UserService Deployment must import {sorted(missing)}"
+
+    for key in ("SMTP_USER", "SMTP_PASSWORD"):
+        entry = env_entries[key]
+        ref = (entry.get("valueFrom") or {}).get("secretKeyRef") or {}
+        assert "value" not in entry, f"{key} must never render as inline plaintext"
+        assert (
+            ref.get("name") == "userservice-secret"
+        ), f"{key} must read from userservice-secret, got {ref.get('name')!r}"
+        assert (
+            ref.get("key") == key
+        ), f"{key} must read its matching Secret key, got {ref.get('key')!r}"
     print(f"PASS: explicit {label} values wire SMTP transport and credentials")
 
 
