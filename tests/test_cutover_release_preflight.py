@@ -189,15 +189,16 @@ class CutoverReleasePreflightTest(unittest.TestCase):
 
         self.preflight.verify_render(CHART_DIR, values)
 
-    def test_preflight_rejects_a_mutable_cutover_image_tag(self) -> None:
+    def test_release_preflight_rejects_a_mutable_cutover_image_tag(self) -> None:
         manifest = ready_manifest()
-        manifest["registryRelease"][
-            "frontend"
-        ] = "ghcr.io/openresilienceinitiative/oriso-frontend:latest"
+        manifest["registryRelease"]["frontend"] = (
+            "ghcr.io/openresilienceinitiative/oriso-frontend:latest"
+        )
 
-        with self.assertRaisesRegex(ValueError, "frontend"):
+        with self.assertRaisesRegex(
+            ValueError, "registryRelease.frontend must use repository@sha256"
+        ):
             self.preflight.validate_and_build_values(manifest)
-
 
 if __name__ == "__main__":
     unittest.main()

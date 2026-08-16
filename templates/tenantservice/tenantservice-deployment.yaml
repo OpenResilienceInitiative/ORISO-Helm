@@ -50,6 +50,11 @@ spec:
               secretKeyRef:
                 key: SPRING_DATASOURCE_PASSWORD
                 name: tenantservice-secret  
+          - name: SETTINGS_SMTP_PASSWORD_ENCRYPTION_SECRET
+            valueFrom:
+              secretKeyRef:
+                key: SETTINGS_SMTP_PASSWORD_ENCRYPTION_SECRET
+                name: tenantservice-secret
           - name: KEYCLOAK_AUTH_SERVER_URL
             valueFrom:
               configMapKeyRef:

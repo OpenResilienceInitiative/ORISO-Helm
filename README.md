@@ -34,9 +34,10 @@ Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fi
 
 - `global.secrets.*Password` / `*Pass` — database and service passwords
 - `global.secrets.matrixRegistrationSharedSecret` — Matrix shared secret
+- `global.secrets.matrixOidcClientSecret` — Matrix Synapse OIDC client secret (Keycloak client `matrix-synapse`); rotate the Keycloak client secret whenever this changes
 - `global.keycloak.technicalUser.password` — Keycloak technical user password
 - `global.keycloak.serviceTechUserId` — Keycloak technical user ID
-- `postgres.postgresPassword` — PostgreSQL root password
+- `postgres.postgresPassword` — Matrix Postgres credentials (also the connection Synapse itself uses for `database.args` since KDG epic #282 task 4 wired the homeserver at this StatefulSet instead of the previously-configured, unused sqlite3 file)
 - `global.matrix.matrixAdminUsername` / `matrixAdminPassword` — Matrix admin credentials (must live under `global:` so subcharts can read them)
 - `online-counseling-mongodb.*Password` / `*Pass` — MongoDB passwords
 - `online-counseling-mariadb.dbRootPassword` — MariaDB root password
