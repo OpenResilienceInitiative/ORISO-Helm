@@ -28,9 +28,9 @@ def render() -> list[dict]:
             "--set-string",
             "global.secrets.redisdefaultPass=test-redis-password",
             "--set-string",
-            "userService.smtpUser=smtp-canary-user",
+            "userService.smtpUser=smtp-test-user",
             "--set-string",
-            "userService.smtpPassword=smtp-canary-password",
+            "userService.smtpPassword=smtp-test-password",
             "--set",
             "global.requireImmutableImages=true",
             "--set-string",
@@ -104,9 +104,10 @@ def main() -> None:
         f"ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{TEST_DIGEST}",
     }
     assert expected_cutover_images.issubset(set(images))
-    assert livekit["spec"]["replicas"] == 1
-    assert livekit["spec"]["strategy"] == {"type": "Recreate"}
-    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 60
+
+    # The LiveKit single-node rollout shape (replicas, strategy, grace period)
+    # is asserted by tests/render_livekit_rollout_test.py, which also covers the
+    # multi-replica guard rails. This test only guards image immutability.
 
     rendered = yaml.safe_dump_all(documents)
     assert "matrix-backup-cronjob-github" not in rendered

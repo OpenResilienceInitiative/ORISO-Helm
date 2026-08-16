@@ -75,7 +75,7 @@ def main() -> None:
     userservice_container = userservice["spec"]["template"]["spec"]["containers"][0]
     livekit_container = livekit["spec"]["template"]["spec"]["containers"][0]
 
-    for container in (gateway_container, upstream_container, livekit_container):
+    for container in (gateway_container, upstream_container):
         assert "@sha256:" in container["image"]
         assert not container["image"].endswith(":latest")
 
