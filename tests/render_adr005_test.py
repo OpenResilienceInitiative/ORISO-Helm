@@ -119,6 +119,14 @@ def render(chart: str, server_public_ip: str) -> str:
                 "matrixRegistrationSharedSecret": "test-shared-secret",
             }
         },
+        # The Synapse homeserver config wires the database at the chart's
+        # Postgres instance, whose credentials live in secrets.yaml.default —
+        # which this minimal chart deliberately does not copy.
+        "postgres": {
+            "postgresUser": "test-matrix-postgres-user",
+            "postgresPassword": "test-matrix-postgres-password",
+            "postgresDB": "test-matrix-postgres-db",
+        },
     }
     ov = os.path.join(chart, "overlay.yaml")
     with open(ov, "w") as fh:
