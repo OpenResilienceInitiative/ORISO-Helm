@@ -22,8 +22,9 @@ Invariants asserted (task requirements 1-6):
     2. ``server_name`` equals the configured domain and is never a bare IPv4.
     3. Federation is closed: ``federation_domain_whitelist == []`` and
        ``allow_public_rooms_over_federation`` is false.
-    4. ``exempt_from_ratelimiting`` is correct in BOTH branches of the optional
-       ``serverPublicIp`` value.
+    4. ``exempt_from_ratelimiting`` is absent from the rendered config (it is
+       not a real Synapse key — see the comment in matrix-configmaps.yaml) in
+       BOTH branches of the optional ``serverPublicIp`` value.
     5. The well-known ``m.server`` values and the nginx discovery ``server_name``
        use the configured domain, not an IP.
     6. Single source of truth: every propagated ``MATRIX_SERVER_NAME`` (user/agency/
@@ -55,6 +56,7 @@ IPV4 = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES = [
+    "templates/_helpers.tpl",
     "templates/matrix/matrix-configmaps.yaml",
     "templates/userservice/userservice-configmap-env.yaml",
     "templates/agencyservice/agencyservice-configmap-env.yaml",
@@ -116,6 +118,14 @@ def render(chart: str, server_public_ip: str) -> str:
                 "redisdefaultPass": "test-redis-pass",
                 "matrixRegistrationSharedSecret": "test-shared-secret",
             }
+        },
+        # postgres.* live in secrets.yaml.default, which this minimal chart does
+        # not copy, so they are seeded here like the other secrets above.
+        # matrix-configmaps.yaml references all three.
+        "postgres": {
+            "postgresUser": "test-postgres-user",
+            "postgresPassword": "test-postgres-pass",
+            "postgresDB": "test-postgres-db",
         },
     }
     ov = os.path.join(chart, "overlay.yaml")
@@ -198,18 +208,18 @@ def main() -> None:
             f"allow_public_rooms_over_federation is false; got {allow_pub!r}",
         )
 
-        # --- Requirement 4: exempt_from_ratelimiting, BOTH branches --------------
-        exempt_a = hs_a.get("exempt_from_ratelimiting") if hs_a else None
+        # --- Requirement 4: exempt_from_ratelimiting is absent, BOTH branches ----
+        # Not a real Synapse config key (verified against the official config
+        # docs) — asserting its absence guards against it being reintroduced.
         check(
-            exempt_a == ["10.42.0.0/16", "127.0.0.1"],
-            "exempt_from_ratelimiting (serverPublicIp unset) == ['10.42.0.0/16', "
-            f"'127.0.0.1']; got {exempt_a!r}",
+            "exempt_from_ratelimiting" not in (hs_a or {}),
+            "exempt_from_ratelimiting is absent from rendered homeserver.yaml "
+            "(serverPublicIp unset); it is not a real Synapse config key",
         )
-        exempt_b = hs_b.get("exempt_from_ratelimiting") if hs_b else None
         check(
-            exempt_b == ["10.42.0.0/16", PUBLIC_IP, "127.0.0.1"],
-            f"exempt_from_ratelimiting (serverPublicIp={PUBLIC_IP}) == ['10.42.0.0/16', "
-            f"'{PUBLIC_IP}', '127.0.0.1']; got {exempt_b!r}",
+            "exempt_from_ratelimiting" not in (hs_b or {}),
+            "exempt_from_ratelimiting is absent from rendered homeserver.yaml "
+            f"(serverPublicIp={PUBLIC_IP}); it is not a real Synapse config key",
         )
 
         # --- Requirement 5: well-known m.server + nginx server_name use domain ---
