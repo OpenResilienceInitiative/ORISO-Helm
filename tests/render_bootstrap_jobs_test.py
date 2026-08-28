@@ -35,14 +35,13 @@ def resource(docs, kind, name):
 
 
 def assert_install_only_job(docs, name):
+    # Bootstrap jobs are install-only by design: seeds must never rerun on
+    # upgrades (see render_bootstrap_hooks_install_only_test.py).
     job = resource(docs, "Job", name)
     annotations = job["metadata"].get("annotations", {})
     hooks = {hook.strip() for hook in annotations.get("helm.sh/hook", "").split(",")}
     assert hooks == {"post-install"}
-    assert (
-        annotations.get("helm.sh/hook-delete-policy")
-        == "before-hook-creation,hook-succeeded"
-    )
+    assert annotations.get("helm.sh/hook-delete-policy") == "before-hook-creation,hook-succeeded"
     return job
 
 
@@ -71,4 +70,6 @@ def test_seed_jobs_are_install_only_and_wait_for_liquibase():
         assert "INSERT IGNORE" in sql
         assert "DELETE FROM" not in sql.upper()
         assert "TRUNCATE" not in sql.upper()
+        # Fixed seeded ids; exact SETVAL values are covered by
+        # render_bootstrap_sequence_setval_test.py.
         assert "SETVAL(`sequence_" in sql

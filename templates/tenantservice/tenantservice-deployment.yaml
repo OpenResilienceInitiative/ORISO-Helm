@@ -130,6 +130,15 @@ spec:
               configMapKeyRef:
                 key: USER_SERVICE_API_URL
                 name: tenantservice-configmap-env
+          # This deployment has no envFrom - every variable is declared here
+          # individually. A key added to the ConfigMap alone never reaches the
+          # pod, which is exactly how the live patch of 2026-08-19 appeared to
+          # do nothing at first.
+          - name: APP_BASE_URL
+            valueFrom:
+              configMapKeyRef:
+                key: APP_BASE_URL
+                name: tenantservice-configmap-env
           - name: FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED
             valueFrom:
               configMapKeyRef:
