@@ -12,8 +12,8 @@
     ],
     "frameworks": [],
     "description": "",
-    "analyzedAt": "2026-08-26T02:01:49.193Z",
-    "gitCommitHash": "44ddcdd0598d477dde56cd9bc12d40c3353f21f9"
+    "analyzedAt": "2026-08-27T12:31:41.478Z",
+    "gitCommitHash": "4da2dfa20d951d9b8c11893f17decf3f483dd0cd"
   },
   "nodes": [
     {
@@ -4287,7 +4287,7 @@
       "type": "config",
       "name": "tenantservice-configmap-env.yaml",
       "filePath": "templates/tenantservice/tenantservice-configmap-env.yaml",
-      "summary": "config file with 4 sections (37 lines).",
+      "summary": "config file with 4 sections (52 lines).",
       "tags": [
         "config",
         "templates"
@@ -4299,7 +4299,7 @@
       "type": "config",
       "name": "tenantservice-deployment.yaml",
       "filePath": "templates/tenantservice/tenantservice-deployment.yaml",
-      "summary": "config file with 4 sections (192 lines).",
+      "summary": "config file with 4 sections (201 lines).",
       "tags": [
         "config",
         "templates"
@@ -8723,6 +8723,21 @@
   ],
   "layers": [
     {
+      "id": "layer:domain-concepts",
+      "name": "Domain Concepts",
+      "description": "High-level domain concepts and flows (coarse enrichment pass).",
+      "nodeIds": [
+        "concept:full-stack-chart",
+        "concept:config-secret-split",
+        "concept:keycloak-subchart-theme",
+        "concept:mariadb-subchart-schemas",
+        "concept:deployment-authority",
+        "concept:chart-release-workflow",
+        "flow:deploy-platform",
+        "flow:release-chart"
+      ]
+    },
+    {
       "id": "layer:core",
       "name": "Core",
       "description": "Core application files",
@@ -8775,21 +8790,6 @@
         "file:tests/test_seed_keycloak_users.py",
         "file:tests/test_signoz_runtime_acceptance.py",
         "file:tests/test_validate_helm_workflow.py"
-      ]
-    },
-    {
-      "id": "layer:domain-concepts",
-      "name": "Domain Concepts",
-      "description": "High-level domain concepts and flows (coarse enrichment pass).",
-      "nodeIds": [
-        "concept:full-stack-chart",
-        "concept:config-secret-split",
-        "concept:keycloak-subchart-theme",
-        "concept:mariadb-subchart-schemas",
-        "concept:deployment-authority",
-        "concept:chart-release-workflow",
-        "flow:deploy-platform",
-        "flow:release-chart"
       ]
     }
   ],
