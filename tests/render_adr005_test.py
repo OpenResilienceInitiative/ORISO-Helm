@@ -119,12 +119,12 @@ def render(chart: str, server_public_ip: str) -> str:
                 "matrixRegistrationSharedSecret": "test-shared-secret",
             }
         },
-        # matrix-configmaps.yaml wires the Synapse database block from the
-        # postgres secret values, which live in secrets.yaml.default and are
-        # therefore absent from the values.yaml.default seed above.
+        # postgres.* live in secrets.yaml.default, which this minimal chart does
+        # not copy, so they are seeded here like the other secrets above.
+        # matrix-configmaps.yaml references all three.
         "postgres": {
             "postgresUser": "test-postgres-user",
-            "postgresPassword": "test-postgres-password",
+            "postgresPassword": "test-postgres-pass",
             "postgresDB": "test-postgres-db",
         },
     }
