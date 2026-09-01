@@ -206,6 +206,8 @@ online-counseling-mariadb:
   maxconnections: "1000"
 matrixrtcAuth:
   replicas: 1
+  # Keep the Redis readiness probe independently pinnable for rollback-safe releases.
+  redisCheckImage: "docker.io/library/redis:7-alpine"
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
   # Namespace of the ingress controller, needed by the NetworkPolicy.
   ingressControllerNamespace: "ingress-nginx"
