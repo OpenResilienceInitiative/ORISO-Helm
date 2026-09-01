@@ -14,44 +14,43 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEST_DIGEST = "1" * 64
 
 
-def render() -> list[dict]:
+def render(*, use_canary_images: bool = True) -> list[dict]:
+    command = [
+        "helm",
+        "template",
+        "matrix-call-security",
+        CHART_DIR,
+        "-f",
+        os.path.join(CHART_DIR, "values.yaml.default"),
+        "-f",
+        os.path.join(CHART_DIR, "secrets.yaml.default"),
+        "--set-string",
+        "global.secrets.redisdefaultPass=test-redis-password",
+        "--set-string",
+        "userService.smtpUser=smtp-test-user",
+        "--set-string",
+        "userService.smtpPassword=smtp-test-password",
+    ]
+    if use_canary_images:
+        command.extend(["--set", "global.requireImmutableImages=true"])
+        canary_images = {
+            "frontend.image": "ghcr.io/openresilienceinitiative/oriso-frontend",
+            "elementCall.image": "ghcr.io/openresilienceinitiative/element-call",
+            "elementCall.healthcheckImage": "docker.io/curlimages/curl",
+            "matrixrtcAuth.redisCheckImage": "docker.io/library/redis",
+            "userService.image": "ghcr.io/openresilienceinitiative/oriso-userservice",
+            "agencyService.image": "ghcr.io/openresilienceinitiative/oriso-agencyservice",
+            "matrix.image": "matrixdotorg/synapse",
+            "matrix.initImage": "busybox",
+            "livekit.image": "docker.io/livekit/livekit-server",
+        }
+        for value_name, repository in canary_images.items():
+            command.extend(
+                ["--set-string", f"{value_name}={repository}@sha256:{TEST_DIGEST}"]
+            )
+
     result = subprocess.run(
-        [
-            "helm",
-            "template",
-            "matrix-call-security",
-            CHART_DIR,
-            "-f",
-            os.path.join(CHART_DIR, "values.yaml.default"),
-            "-f",
-            os.path.join(CHART_DIR, "secrets.yaml.default"),
-            "--set-string",
-            "global.secrets.redisdefaultPass=test-redis-password",
-            "--set-string",
-            "userService.smtpUser=smtp-test-user",
-            "--set-string",
-            "userService.smtpPassword=smtp-test-password",
-            "--set",
-            "global.requireImmutableImages=true",
-            "--set-string",
-            f"frontend.image=ghcr.io/openresilienceinitiative/oriso-frontend@sha256:{TEST_DIGEST}",
-            "--set-string",
-            f"elementCall.image=ghcr.io/openresilienceinitiative/element-call@sha256:{TEST_DIGEST}",
-            "--set-string",
-            f"elementCall.healthcheckImage=docker.io/curlimages/curl@sha256:{TEST_DIGEST}",
-            "--set-string",
-            f"matrixrtcAuth.redisCheckImage=docker.io/library/redis@sha256:{TEST_DIGEST}",
-            "--set-string",
-            f"userService.image=ghcr.io/openresilienceinitiative/oriso-userservice@sha256:{TEST_DIGEST}",
-            "--set-string",
-            f"agencyService.image=ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{TEST_DIGEST}",
-            "--set-string",
-            f"matrix.image=matrixdotorg/synapse@sha256:{TEST_DIGEST}",
-            "--set-string",
-            f"matrix.initImage=busybox@sha256:{TEST_DIGEST}",
-            "--set-string",
-            f"livekit.image=docker.io/livekit/livekit-server@sha256:{TEST_DIGEST}",
-        ],
+        command,
         capture_output=True,
         text=True,
         check=False,
@@ -68,6 +67,45 @@ def find(documents: list[dict], kind: str, name: str) -> dict:
         if document.get("kind") == kind
         and document.get("metadata", {}).get("name") == name
     )
+
+
+def verify_default_image_contract(documents: list[dict]) -> None:
+    with open(os.path.join(CHART_DIR, "values.yaml.default"), encoding="utf-8") as source:
+        defaults = yaml.safe_load(source)
+
+    synapse = find(documents, "Deployment", "matrix-synapse")
+    rendered_images = {
+        "matrix.initImage": synapse["spec"]["template"]["spec"]["initContainers"][0][
+            "image"
+        ],
+        "matrix.image": synapse["spec"]["template"]["spec"]["containers"][0][
+            "image"
+        ],
+        "elementCall.image": find(documents, "Deployment", "element-call")["spec"][
+            "template"
+        ]["spec"]["containers"][0]["image"],
+        "frontend.image": find(documents, "Deployment", "frontend")["spec"][
+            "template"
+        ]["spec"]["containers"][0]["image"],
+        "userService.image": find(documents, "Deployment", "userservice")["spec"][
+            "template"
+        ]["spec"]["containers"][0]["image"],
+        "agencyService.image": find(documents, "Deployment", "agencyservice")[
+            "spec"
+        ]["template"]["spec"]["containers"][0]["image"],
+        "livekit.image": find(documents, "Deployment", "livekit")["spec"]["template"]
+        ["spec"]["containers"][0]["image"],
+    }
+    expected_images = {
+        "matrix.initImage": defaults["matrix"]["initImage"],
+        "matrix.image": defaults["matrix"]["image"],
+        "elementCall.image": defaults["elementCall"]["image"],
+        "frontend.image": defaults["frontend"]["image"],
+        "userService.image": defaults["userService"]["image"],
+        "agencyService.image": defaults["agencyService"]["image"],
+        "livekit.image": defaults["livekit"]["image"],
+    }
+    assert rendered_images == expected_images
 
 
 def main() -> None:
@@ -127,6 +165,10 @@ def main() -> None:
 
 def test_matrix_call_cutover_security() -> None:
     main()
+
+
+def test_default_image_values_are_rendered_exactly() -> None:
+    verify_default_image_contract(render(use_canary_images=False))
 
 
 if __name__ == "__main__":

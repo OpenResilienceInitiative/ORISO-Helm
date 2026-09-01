@@ -8,11 +8,10 @@ server-side: tenant-admin invites get
 appended by code, so the admin base URL must be the bare Admin origin —
 NOT suffixed with /admin like the password-reset admin base URL.
 
-On Pre-Dev the Admin panel lives on its own host (admin.oriso-dev.site,
-ingress ground truth: ORISO-Kubernetes/ingress/14-admin-ingress.yaml), so
-ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL must be set there or every
-tenant-admin invite mail links to the App host where the onboarding route
-does not exist.
+On Pre-Dev the Admin panel lives on its own host (admin.oriso-dev.site), so
+ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL must be supplied by the external
+environment values or every tenant-admin invite mail links to the App host
+where the onboarding route does not exist.
 """
 
 from __future__ import annotations
@@ -52,7 +51,7 @@ RESET_LINK_ENV_KEYS = (
 )
 
 
-def render(extra_values_files: list[str] | None = None) -> list[dict]:
+def render(extra_set_strings: dict[str, str] | None = None) -> list[dict]:
     cmd = [
         "helm",
         "template",
@@ -63,8 +62,8 @@ def render(extra_values_files: list[str] | None = None) -> list[dict]:
         "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
     ]
-    for values_file in extra_values_files or []:
-        cmd += ["-f", os.path.join(CHART_DIR, values_file)]
+    for key, value in (extra_set_strings or {}).items():
+        cmd += ["--set-string", f"{key}={value}"]
     # The default values configure an SMTP transport, whose render gate requires
     # credentials; real deploys carry them in the persistent secret values.
     cmd += [
@@ -113,15 +112,20 @@ def userservice_deployment_env_names(docs: list[dict]) -> set[str]:
 
 
 def assert_pre_dev_invite_urls() -> None:
-    docs = render(["values-pre-dev.yaml"])
+    docs = render(
+        {
+            "userService.accountInviteAppFrontendBaseUrl": PRE_DEV_APP_URL,
+            "userService.accountInviteAdminFrontendBaseUrl": PRE_DEV_ADMIN_URL,
+        }
+    )
     data = userservice_configmap(docs)["data"]
 
     assert data.get("ACCOUNT_INVITE_APP_FRONTEND_BASE_URL") == PRE_DEV_APP_URL, (
-        "values-pre-dev.yaml must point the app invite links at the public "
+        "external PreDev values must point app invite links at the public "
         f"App host, got {data.get('ACCOUNT_INVITE_APP_FRONTEND_BASE_URL')!r}"
     )
     assert data.get("ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL") == PRE_DEV_ADMIN_URL, (
-        "values-pre-dev.yaml must point tenant-admin invite links at the "
+        "external PreDev values must point tenant-admin invite links at the "
         "public Admin origin (code appends /admin/tenant-onboarding), got "
         f"{data.get('ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL')!r}"
     )
@@ -129,7 +133,7 @@ def assert_pre_dev_invite_urls() -> None:
         "the admin invite base URL must NOT carry the /admin suffix — "
         "InviteAcceptUrlBuilder appends /admin/tenant-onboarding itself"
     )
-    print("PASS: values-pre-dev.yaml renders both account-invite base URLs")
+    print("PASS: explicit PreDev values render both account-invite base URLs")
 
     env_names = userservice_deployment_env_names(docs)
     missing = set(LINK_ENV_KEYS) - env_names
@@ -141,7 +145,15 @@ def assert_pre_dev_invite_urls() -> None:
 
 
 def assert_reset_links_are_imported() -> None:
-    docs = render(["values-pre-dev.yaml"])
+    docs = render(
+        {
+            "userService.magicLinkFrontendBaseUrl": PRE_DEV_APP_URL,
+            "userService.passwordResetFrontendBaseUrl": PRE_DEV_APP_URL,
+            "userService.passwordResetAdminFrontendBaseUrl": (
+                f"{PRE_DEV_ADMIN_URL}/admin"
+            ),
+        }
+    )
     env_names = userservice_deployment_env_names(docs)
     missing = set(RESET_LINK_ENV_KEYS) - env_names
     assert not missing, (
@@ -153,7 +165,7 @@ def assert_reset_links_are_imported() -> None:
 
 
 def assert_upstream_clients_stay_wired() -> None:
-    docs = render(["values-pre-dev.yaml"])
+    docs = render()
     data = userservice_configmap(docs)["data"]
     env_names = userservice_deployment_env_names(docs)
     for key in UPSTREAM_CLIENT_KEYS:
@@ -176,9 +188,9 @@ def assert_omitted_when_unset() -> None:
             f"{key} must be omitted when the environment leaves it unset so "
             "the app-side fallback (system notification base URL) applies"
         )
-        assert key not in env_names, (
-            f"Deployment must not reference {key} when the ConfigMap omits it"
-        )
+        assert (
+            key not in env_names
+        ), f"Deployment must not reference {key} when the ConfigMap omits it"
     print("PASS: invite URL keys and env imports are omitted when unset")
 
 
