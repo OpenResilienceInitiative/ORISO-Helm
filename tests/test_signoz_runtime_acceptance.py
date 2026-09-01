@@ -286,6 +286,72 @@ class RunnerContractTest(unittest.TestCase):
         self.assertTrue(any("forbidden-marker-1234" in arg for arg in commands[1]))
         self.assertIn("wait", commands[2])
 
+    def test_infra_probe_pod_is_deleted_when_the_probe_fails(self) -> None:
+        """The documented cleanup must run on the failure branch, not only on success."""
+        runner = mock.Mock()
+        ok = MODULE.subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        def _run(command, *_args, **_kwargs):
+            if "run" in command:
+                raise MODULE.subprocess.CalledProcessError(1, command)
+            return ok
+
+        runner.run.side_effect = _run
+
+        with self.assertRaises(MODULE.subprocess.CalledProcessError):
+            MODULE._emit_infra_probes(
+                runner,
+                "caritas",
+                "acceptance-12345678",
+                "0123456789abcdef0123456789abcdef",
+                "0123456789abcdef",
+                "forbidden-marker-1234",
+            )
+
+        delete_commands = [
+            call.args[0] for call in runner.run.call_args_list if "delete" in call.args[0]
+        ]
+        self.assertEqual(len(delete_commands), 1)
+        self.assertEqual(
+            delete_commands[0],
+            [
+                "kubectl",
+                "-n",
+                "caritas",
+                "delete",
+                "pod",
+                "signoz-log-acceptance-12345678",
+                "--ignore-not-found",
+                "--wait=false",
+            ],
+        )
+
+    def test_infra_probe_pod_is_deleted_when_the_readiness_wait_fails(self) -> None:
+        runner = mock.Mock()
+        ok = MODULE.subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        def _run(command, *_args, **_kwargs):
+            if "wait" in command:
+                raise MODULE.subprocess.CalledProcessError(1, command)
+            return ok
+
+        runner.run.side_effect = _run
+
+        with self.assertRaises(MODULE.subprocess.CalledProcessError):
+            MODULE._emit_infra_probes(
+                runner,
+                "caritas",
+                "acceptance-12345678",
+                "0123456789abcdef0123456789abcdef",
+                "0123456789abcdef",
+                "forbidden-marker-1234",
+            )
+
+        self.assertTrue(
+            any("delete" in call.args[0] for call in runner.run.call_args_list),
+            "a timed-out probe pod must still be removed",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
