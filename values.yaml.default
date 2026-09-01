@@ -206,6 +206,8 @@ online-counseling-mariadb:
   maxconnections: "1000"
 matrixrtcAuth:
   replicas: 1
+  # Keep the Redis readiness probe independently pinnable for rollback-safe releases.
+  redisCheckImage: "docker.io/library/redis:7-alpine"
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
   # Namespace of the ingress controller, needed by the NetworkPolicy.
   ingressControllerNamespace: "ingress-nginx"
@@ -236,7 +238,7 @@ livekit:
   # hostNetwork ports — the replica must fully terminate before its replacement starts.
   deploymentStrategy: Recreate
   terminationGracePeriodSeconds: 60
-  image: "docker.io/livekit/livekit-server:v1.13.5"
+  image: "docker.io/livekit/livekit-server@sha256:3497163e15c48fef6e7830c78716f9e9d5edc28abf7aa90b61c86e93bbc306b1"
   existingConfigSecret:
     name: "livekit-config"
     key: "config.yaml"

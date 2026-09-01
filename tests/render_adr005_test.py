@@ -34,6 +34,7 @@ Invariants asserted (task requirements 1-6):
 
 Usage:  python3 tests/render_adr005_test.py     (requires ``helm`` on PATH + pyyaml)
 """
+
 from __future__ import annotations
 
 import json
@@ -113,6 +114,11 @@ def render(chart: str, server_public_ip: str) -> str:
     """Render the minimal chart and return helm's raw stdout."""
     overlay = {
         "matrix": {"matrixServerName": SENTINEL, "serverPublicIp": server_public_ip},
+        "postgres": {
+            "postgresUser": "matrix-render-canary",
+            "postgresPassword": "matrix-render-password-canary",
+            "postgresDB": "matrix-render-canary",
+        },
         "global": {
             "secrets": {
                 "redisdefaultPass": "test-redis-pass",
@@ -137,16 +143,16 @@ def render(chart: str, server_public_ip: str) -> str:
         text=True,
     )
     if proc.returncode != 0:
-        die(f"helm template failed (serverPublicIp={server_public_ip!r}):\n{proc.stderr}")
+        die(
+            f"helm template failed (serverPublicIp={server_public_ip!r}):\n{proc.stderr}"
+        )
     return proc.stdout
 
 
 def configmaps(stdout: str) -> dict:
     """Parse helm output into {configmap name: document}. Raises on invalid YAML."""
     docs = [d for d in yaml.safe_load_all(stdout) if isinstance(d, dict)]
-    return {
-        d["metadata"]["name"]: d for d in docs if d.get("kind") == "ConfigMap"
-    }
+    return {d["metadata"]["name"]: d for d in docs if d.get("kind") == "ConfigMap"}
 
 
 def parse_homeserver(cm: dict):
@@ -165,8 +171,8 @@ def main() -> None:
         chart = os.path.join(tmp, "chart")
         build_minimal_chart(chart)
 
-        stdout_a = render(chart, "")          # serverPublicIp unset (empty == unset)
-        stdout_b = render(chart, PUBLIC_IP)   # serverPublicIp provided
+        stdout_a = render(chart, "")  # serverPublicIp unset (empty == unset)
+        stdout_b = render(chart, PUBLIC_IP)  # serverPublicIp provided
 
         # --- Requirement 1: the rendered config parses as valid YAML -------------
         # (a) the whole helm output, (b) the inner homeserver.yaml block scalar.
@@ -177,13 +183,17 @@ def main() -> None:
         except yaml.YAMLError as exc:
             outer_ok = False
             print(f"  outer YAML parse error: {exc}")
-        check(outer_ok, "rendered Matrix templates parse as valid YAML (outer documents)")
+        check(
+            outer_ok, "rendered Matrix templates parse as valid YAML (outer documents)"
+        )
         if not outer_ok:
             finalize()
 
         hs_a = parse_homeserver(cm_a)
         hs_b = parse_homeserver(cm_b)
-        check(hs_a is not None, "rendered homeserver.yaml parses as a valid YAML mapping")
+        check(
+            hs_a is not None, "rendered homeserver.yaml parses as a valid YAML mapping"
+        )
 
         # --- Requirement 2: server_name is the configured domain, never IPv4 -----
         server_name = hs_a.get("server_name") if hs_a else None
@@ -197,12 +207,18 @@ def main() -> None:
         )
 
         # --- Requirement 3: federation is closed ---------------------------------
-        whitelist = hs_a.get("federation_domain_whitelist") if hs_a else "<no homeserver>"
+        whitelist = (
+            hs_a.get("federation_domain_whitelist") if hs_a else "<no homeserver>"
+        )
         check(
             whitelist == [],
             f"federation_domain_whitelist == [] (federation closed); got {whitelist!r}",
         )
-        allow_pub = hs_a.get("allow_public_rooms_over_federation") if hs_a else "<no homeserver>"
+        allow_pub = (
+            hs_a.get("allow_public_rooms_over_federation")
+            if hs_a
+            else "<no homeserver>"
+        )
         check(
             allow_pub is False,
             f"allow_public_rooms_over_federation is false; got {allow_pub!r}",
@@ -249,15 +265,18 @@ def main() -> None:
 
         # --- Requirement 6: single source of truth -------------------------------
         propagated = {
-            "userservice MATRIX_SERVER_NAME":
-                cm_a["userservice-configmap-env"]["data"]["MATRIX_SERVER_NAME"],
-            "agencyservice MATRIX_SERVER_NAME":
-                cm_a["agencyservice-configmap-env"]["data"]["MATRIX_SERVER_NAME"],
-            "tenantservice MATRIX_SERVER_NAME":
-                cm_a["tenantservice-configmap-env"]["data"]["MATRIX_SERVER_NAME"],
-            "element-call server_name":
-                json.loads(cm_a["element-call-config"]["data"]["config.json"])
-                ["default_server_config"]["m.homeserver"]["server_name"],
+            "userservice MATRIX_SERVER_NAME": cm_a["userservice-configmap-env"]["data"][
+                "MATRIX_SERVER_NAME"
+            ],
+            "agencyservice MATRIX_SERVER_NAME": cm_a["agencyservice-configmap-env"][
+                "data"
+            ]["MATRIX_SERVER_NAME"],
+            "tenantservice MATRIX_SERVER_NAME": cm_a["tenantservice-configmap-env"][
+                "data"
+            ]["MATRIX_SERVER_NAME"],
+            "element-call server_name": json.loads(
+                cm_a["element-call-config"]["data"]["config.json"]
+            )["default_server_config"]["m.homeserver"]["server_name"],
         }
         for label, value in propagated.items():
             check(
