@@ -104,8 +104,28 @@ helm upgrade --install caritas . \
 
 The hook waits for the SigNoz API, upserts the managed assets, sends one
 contextual route-test notification, executes every dashboard and alert query,
-requires fresh `pre-dev`/`oriso-predev` collector data, and fails if
-`dev`/`oriso-dev` data is visible.
+requires fresh `pre-dev`/`oriso-predev` collector data over the same five-minute
+window the collector-staleness alert evaluates, and fails if `dev`/`oriso-dev`
+data is visible.
+
+### What the notification test does and does not prove
+
+`testNotificationRoute` posts the receiver configuration to the SigNoz channel
+test endpoint. That proves the Slack webhook, the channel name, and the
+environment/cluster context of the message body. It does **not** dispatch a
+managed rule: the six persisted alert rules and the SigNoz-generated route
+policies are not exercised end to end by it. Their binding is proven
+structurally instead — `validate_managed_routes` requires exactly one `rule`
+route per managed rule id whose expression carries that id and whose channel
+list is exactly the managed channel — and each rule's own threshold route is
+checked against the same channel in `validate_live_alert`.
+
+A real end-to-end dispatch through a managed route can only be observed by
+letting a rule fire. Confirm it once per environment out of band, for example by
+watching the first genuine incident or by temporarily lowering one non-critical
+threshold under review, and note the observation in the release evidence. Do not
+add a synthetic rule trigger to this post-install hook: a hook that has to make
+an alert fire to succeed will block every deploy on alert-pipeline latency.
 
 Read the retained evidence:
 
@@ -125,7 +145,8 @@ Then run the active ingestion gate from `runbooks/signoz-runtime-acceptance.md`.
 That gate emits and reads back a synthetic correlated trace, metric, and log and
 proves Kubernetes signal breadth and log-body suppression. In the SigNoz UI,
 open all three ORISO dashboards and confirm that the tested Slack destination
-received the route-test message with environment and cluster context.
+received the route-test message with environment and cluster context. Read that
+as receiver proof only, per the note above.
 
 ## Dev promotion
 

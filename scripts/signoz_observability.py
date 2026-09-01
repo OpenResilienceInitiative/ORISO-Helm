@@ -292,6 +292,25 @@ def dashboard_builder_queries(dashboard: dict[str, Any]) -> list[dict[str, Any]]
     return queries
 
 
+def dashboard_panel_queries(
+    dashboard: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    """Builder queries keyed by panel id, so panel/query association is preserved."""
+    panels = dashboard.get("spec", {}).get("panels")
+    if not isinstance(panels, dict) or not panels:
+        raise RuntimeError("dashboard exposes no panel map")
+    return {
+        str(panel_id): dashboard_builder_queries(panel)
+        for panel_id, panel in panels.items()
+    }
+
+
+def _panel_title(panel: Any) -> str:
+    if not isinstance(panel, dict):
+        return ""
+    return str(panel.get("spec", {}).get("display", {}).get("name", ""))
+
+
 def validate_asset_contract(
     dashboards: list[dict[str, Any]],
     alerts: list[dict[str, Any]],
@@ -639,15 +658,29 @@ def _execute_query(
     return response
 
 
+def eval_window_minutes(alert: dict[str, Any]) -> int:
+    """Minutes in an alert's rolling evaluation window, e.g. `5m` -> 5."""
+    window = str(alert.get("evaluation", {}).get("spec", {}).get("evalWindow", ""))
+    match = re.fullmatch(r"(\d+)([smh])", window.strip())
+    if not match:
+        raise RuntimeError(f"unsupported alert evaluation window: {window!r}")
+    amount, unit = int(match.group(1)), match.group(2)
+    minutes = {"s": amount // 60, "m": amount, "h": amount * 60}[unit]
+    if minutes < 1:
+        raise RuntimeError(f"alert evaluation window is shorter than a minute: {window!r}")
+    return minutes
+
+
 def _wait_for_signal_data(
     client: SignozClient,
     query: dict[str, Any],
     *,
+    minutes: int = 15,
     timeout_seconds: int = 300,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
     while True:
-        response = _execute_query(client, query)
+        response = _execute_query(client, query, minutes=minutes)
         if response_has_positive_signal_data(response):
             return response
         if time.monotonic() >= deadline:
@@ -666,6 +699,10 @@ def _query_contract(query: dict[str, Any]) -> dict[str, Any]:
         "timeAggregation": aggregation.get("timeAggregation"),
         "spaceAggregation": aggregation.get("spaceAggregation"),
         "filter": query.get("filter", {}).get("expression", ""),
+        # A restrictive HAVING can filter out every aggregate while the query
+        # still returns a successful (empty) response, so it is part of the
+        # contract, not cosmetics.
+        "having": query.get("having", {}).get("expression", ""),
         "groupBy": sorted(item.get("name") for item in query.get("groupBy", [])),
     }
 
@@ -695,17 +732,34 @@ def validate_live_dashboard(
         raise RuntimeError(f"stored dashboard tag drift: {expected['name']}")
 
     current_queries = dashboard_builder_queries(current)
-    expected_queries = dashboard_builder_queries(expected)
-    current_contracts = sorted(
-        (_query_contract(query) for query in current_queries),
-        key=lambda item: json.dumps(item, sort_keys=True),
-    )
-    expected_contracts = sorted(
-        (_query_contract(query) for query in expected_queries),
-        key=lambda item: json.dumps(item, sort_keys=True),
-    )
-    if current_contracts != expected_contracts:
-        raise RuntimeError(f"stored dashboard query drift: {expected['name']}")
+    # Compare panel by panel. A dashboard-wide multiset stays identical when two
+    # panels have their queries swapped, which leaves every label misleading
+    # while every query still executes successfully.
+    current_panels = dashboard_panel_queries(current)
+    expected_panels = dashboard_panel_queries(expected)
+    if set(current_panels) != set(expected_panels):
+        raise RuntimeError(f"stored dashboard panel drift: {expected['name']}")
+    current_panel_specs = current.get("spec", {}).get("panels", {})
+    expected_panel_specs = expected.get("spec", {}).get("panels", {})
+    for panel_id, expected_panel_queries in expected_panels.items():
+        if _panel_title(current_panel_specs.get(panel_id)) != _panel_title(
+            expected_panel_specs.get(panel_id)
+        ):
+            raise RuntimeError(
+                f"stored dashboard panel title drift: {expected['name']} / {panel_id}"
+            )
+        current_panel_queries = current_panels[panel_id]
+        if len(current_panel_queries) != len(expected_panel_queries):
+            raise RuntimeError(
+                f"stored dashboard query drift: {expected['name']} / {panel_id}"
+            )
+        for current_query, expected_query in zip(
+            current_panel_queries, expected_panel_queries
+        ):
+            if _query_contract(current_query) != _query_contract(expected_query):
+                raise RuntimeError(
+                    f"stored dashboard query drift: {expected['name']} / {panel_id}"
+                )
     environment_filter = f"deployment.environment = '{environment}'"
     for query in current_queries:
         contract = _query_contract(query)
@@ -821,6 +875,7 @@ def prove_conformance(
     listed_alerts = {item.get("alert"): item for item in _list(client, "/api/v2/rules")}
     managed_rule_ids: list[str] = []
     freshness_query: dict[str, Any] | None = None
+    freshness_window_minutes = 0
     for expected in alerts:
         current = listed_alerts.get(expected["alert"])
         if not current:
@@ -837,6 +892,7 @@ def prove_conformance(
         managed_rule_ids.append(str(current["id"]))
         if expected.get("_orisoSlug") == "collector-staleness":
             freshness_query = query
+            freshness_window_minutes = eval_window_minutes(expected)
 
     channels = _list(client, "/api/v1/channels")
     if not any(
@@ -850,7 +906,13 @@ def prove_conformance(
     )
     if freshness_query is None:
         raise RuntimeError("managed collector-staleness alert is missing")
-    expected_response = _wait_for_signal_data(client, freshness_query)
+    # Probe the same window the alert evaluates. Over the default 15 minutes a
+    # collector that stopped 10 minutes ago still shows an earlier positive
+    # rate, so the gate would print PASS while the staleness alert is already
+    # firing or in no-data.
+    expected_response = _wait_for_signal_data(
+        client, freshness_query, minutes=freshness_window_minutes
+    )
     if not response_has_positive_signal_data(expected_response):
         raise RuntimeError(f"collector telemetry is stale or missing in {environment}")
 

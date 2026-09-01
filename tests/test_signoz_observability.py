@@ -406,6 +406,73 @@ class LiveConformanceContractTest(unittest.TestCase):
                 channel_name="ORISO Platform Alerts",
             )
 
+    def test_live_dashboard_contract_rejects_queries_swapped_between_panels(
+        self,
+    ) -> None:
+        """Two panels showing each other's data must not compare equal."""
+        expected = next(
+            dashboard
+            for dashboard in self.dashboards
+            if len(MODULE.dashboard_panel_queries(dashboard)) >= 2
+        )
+        current = json.loads(json.dumps(expected))
+        panels = current["spec"]["panels"]
+        first, second = list(panels)[:2]
+        first_queries = panels[first]["spec"]["queries"]
+        panels[first]["spec"]["queries"] = panels[second]["spec"]["queries"]
+        panels[second]["spec"]["queries"] = first_queries
+
+        with self.assertRaisesRegex(RuntimeError, "stored dashboard query drift"):
+            MODULE.validate_live_dashboard(current, expected, environment="pre-dev")
+
+    def test_live_dashboard_contract_rejects_a_renamed_panel(self) -> None:
+        expected = self.dashboards[0]
+        current = json.loads(json.dumps(expected))
+        panel_id = next(iter(current["spec"]["panels"]))
+        current["spec"]["panels"][panel_id]["spec"]["display"]["name"] = "Something else"
+
+        with self.assertRaisesRegex(RuntimeError, "panel title drift"):
+            MODULE.validate_live_dashboard(current, expected, environment="pre-dev")
+
+    def test_live_dashboard_contract_rejects_an_added_having_clause(self) -> None:
+        """A restrictive HAVING blanks a panel while the query still succeeds."""
+        expected = self.dashboards[0]
+        current = json.loads(json.dumps(expected))
+        MODULE.dashboard_builder_queries(current)[0]["having"] = {
+            "expression": "A > 1000000"
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "stored dashboard query drift"):
+            MODULE.validate_live_dashboard(current, expected, environment="pre-dev")
+
+    def test_live_alert_contract_rejects_an_added_having_clause(self) -> None:
+        expected = self.alerts[0]
+        current = json.loads(json.dumps(expected))
+        current["condition"]["compositeQuery"]["queries"][0]["spec"]["having"] = {
+            "expression": "A > 1000000"
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "stored alert query drift"):
+            MODULE.validate_live_alert(
+                current,
+                expected,
+                environment="pre-dev",
+                channel_name="ORISO Platform Alerts",
+            )
+
+    def test_collector_freshness_uses_the_alert_evaluation_window(self) -> None:
+        """The freshness probe must not look further back than the alert does."""
+        staleness = next(
+            alert for alert in self.alerts if alert.get("_orisoSlug") == "collector-staleness"
+        )
+        self.assertEqual(MODULE.eval_window_minutes(staleness), 5)
+        self.assertEqual(
+            MODULE.eval_window_minutes({"evaluation": {"spec": {"evalWindow": "2h"}}}),
+            120,
+        )
+        with self.assertRaisesRegex(RuntimeError, "unsupported alert evaluation window"):
+            MODULE.eval_window_minutes({"evaluation": {"spec": {"evalWindow": ""}}})
+
     def test_route_contract_requires_a_route_for_each_managed_rule_id(self) -> None:
         routes = [
             {
