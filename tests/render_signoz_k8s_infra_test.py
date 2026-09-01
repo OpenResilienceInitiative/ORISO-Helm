@@ -77,15 +77,26 @@ def documents(result: subprocess.CompletedProcess[str]) -> list[dict[str, Any]]:
 
 
 def find(items: list[dict[str, Any]], kind: str, name: str) -> dict[str, Any]:
-    return next(
-        item
-        for item in items
-        if item.get("kind") == kind and item.get("metadata", {}).get("name") == name
+    match = next(
+        (
+            item
+            for item in items
+            if item.get("kind") == kind and item.get("metadata", {}).get("name") == name
+        ),
+        None,
     )
+    if match is None:
+        raise AssertionError(f"no rendered {kind} named {name!r}")
+    return match
 
 
 def container(workload: dict[str, Any]) -> dict[str, Any]:
-    return workload["spec"]["template"]["spec"]["containers"][0]
+    containers = workload["spec"]["template"]["spec"]["containers"]
+    if not containers:
+        raise AssertionError(
+            f"{workload.get('kind')} {workload['metadata']['name']!r} renders no container"
+        )
+    return containers[0]
 
 
 def env_by_name(workload: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -142,8 +153,19 @@ def main() -> None:
     assert filelog["start_at"] == "end"
 
     privacy = agent_config["processors"]["transform/oriso_log_privacy"]
-    assert privacy["error_mode"] == "propagate"
-    statements = "\n".join(privacy["log_statements"])
+    # A malformed record must not drop the batch, and the body replacement must
+    # still run after a failing statement, so the mode may not be "propagate".
+    assert privacy["error_mode"] in {"ignore", "silent"}
+    log_statements = privacy["log_statements"]
+    body_suppression = [
+        index
+        for index, statement in enumerate(log_statements)
+        if statement.startswith("set(log.body,")
+    ]
+    assert len(body_suppression) == 1
+    # Unconditional: no `where` clause may gate the body replacement.
+    assert " where " not in log_statements[body_suppression[0]]
+    statements = "\n".join(log_statements)
     assert "ParseJSON(log.body)" in statements
     assert "set(log.cache," in statements
     assert 'cache["request"]["correlationId"]' not in statements
@@ -215,11 +237,18 @@ def main() -> None:
         assert "*" not in verbs
         assert not {"create", "delete", "patch", "update"} & verbs
 
+    disabled = documents(render(signoz_enabled=False, infra_enabled=False))
     disabled_names = {
-        (item.get("kind"), item.get("metadata", {}).get("name"))
-        for item in documents(render(signoz_enabled=False, infra_enabled=False))
+        (item.get("kind"), item.get("metadata", {}).get("name")) for item in disabled
     }
     assert not any("k8s-infra" in str(name) for _, name in disabled_names)
+    # A k8s-infra object rendered under an unrelated name must fail too, so
+    # assert on the dependency's standard labels as well.
+    for item in disabled:
+        labels = item.get("metadata", {}).get("labels") or {}
+        assert labels.get("app.kubernetes.io/name") != "k8s-infra"
+        assert "k8s-infra" not in str(labels.get("helm.sh/chart", ""))
+        assert "k8s-infra" not in str(labels.get("app.kubernetes.io/instance", ""))
 
     invalid = render(signoz_enabled=False, infra_enabled=True)
     assert invalid.returncode != 0
@@ -264,6 +293,6 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except (AssertionError, KeyError, StopIteration) as error:
-        print(f"FAIL: {error}", file=sys.stderr)
+    except (AssertionError, IndexError, KeyError, StopIteration) as error:
+        print(f"FAIL: {type(error).__name__}: {error}", file=sys.stderr)
         sys.exit(1)

@@ -529,8 +529,16 @@ k8s-infra:
         # ORISO application stdout is nested JSON. Preserve technical
         # correlation and severity while suppressing the raw free-text body,
         # stack trace, request correlation ID, and every unlisted attribute.
+        #
+        # error_mode: ignore — a single malformed record must not drop the
+        # whole log batch. ParseJSON fails on truncated JSON and the
+        # trace_id/span_id setters reject non-hex ids; with `propagate` those
+        # OTTL errors are returned to the pipeline and the entire batch is
+        # discarded. With `ignore` the collector logs the failing statement and
+        # continues, so the unconditional body replacement and keep_keys below
+        # still run: the privacy contract stays fail-closed per record.
         transform/oriso_log_privacy:
-          error_mode: propagate
+          error_mode: ignore
           log_statements:
             - 'set(log.cache, ParseJSON(log.body)) where IsMatch(log.body, "^\\s*\\{")'
             - 'set(log.attributes["trace.id"], log.cache["traceId"]) where log.cache["traceId"] != nil'

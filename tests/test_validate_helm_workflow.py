@@ -30,6 +30,17 @@ class ValidateHelmWorkflowContractTest(unittest.TestCase):
         )
         self.assertNotRegex(self.workflow, r"pip install[^\n]*\spyyaml(?:\s|$)")
 
+    def test_the_vendored_k8s_infra_subchart_is_validated_on_its_own(self):
+        """The root render gate runs with k8s-infra disabled, so lint it directly."""
+        self.assertIn("- name: Validate vendored k8s-infra subchart", self.workflow)
+        self.assertIn("helm lint charts/k8s-infra", self.workflow)
+        self.assertIn("helm template k8s-infra-validation charts/k8s-infra", self.workflow)
+        self.assertIn(
+            "helm package charts/k8s-infra --destination /tmp/k8s-infra-package",
+            self.workflow,
+        )
+        self.assertNotIn("helm upgrade --install", self.workflow)
+
     def test_a_reviewed_chart_must_be_packagable(self):
         lint_position = self.workflow.index("- name: Lint chart")
         package_position = self.workflow.index("- name: Package chart")
