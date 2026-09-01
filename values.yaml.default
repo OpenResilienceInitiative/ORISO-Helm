@@ -405,6 +405,23 @@ signoz:
   clickhouse:
     persistence:
       size: 20Gi
+  # ORISO-owned, versioned dashboards and alerting. The hook fails closed when
+  # its existing Secret or live SigNoz API is unavailable.
+  orisoObservability:
+    enabled: false
+    image: "python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844"
+    existingSecret: ""
+    apiKeyKey: apiKey
+    slackWebhookUrlKey: slackWebhookUrl
+    channelName: "ORISO Platform Alerts"
+    testNotificationRoute: false
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 250m
+        memory: 128Mi
 
 # Official SigNoz Kubernetes collection layer. Keep this separate switch
 # fail-closed: observability-validation.yaml rejects enabling it without the

@@ -18,6 +18,9 @@ global:
 
 signoz:
   enabled: true
+  orisoObservability:
+    enabled: true
+    testNotificationRoute: true
 
 k8s-infra:
   enabled: true

@@ -1,0 +1,18 @@
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $managed := get $signoz "orisoObservability" | default dict -}}
+{{- if and (get $signoz "enabled" | default false) (get $managed "enabled" | default false) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-signoz-observability" .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: signoz-observability
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  signoz_observability.py: |-
+{{ required "scripts/signoz_observability.py must exist for signoz.orisoObservability" (.Files.Get "scripts/signoz_observability.py") | nindent 4 }}
+  observability-catalog.json: |-
+{{ required "files/signoz/observability-catalog.json must exist for signoz.orisoObservability" (.Files.Get "files/signoz/observability-catalog.json") | nindent 4 }}
+{{- end }}
