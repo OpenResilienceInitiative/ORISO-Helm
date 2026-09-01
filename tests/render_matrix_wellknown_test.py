@@ -11,6 +11,7 @@ anything (ORISO-ElementCall#35, ORISO-Livekit#20).
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 
@@ -43,12 +44,15 @@ def extract_location_block(snippet: str, path: str) -> str:
     """Return the body of the active `location = <path>` block, or "".
 
     Lines commented out with `#` are ignored, so a disabled handler cannot
-    satisfy the assertions below.
+    satisfy the assertions below. The path must be followed by the opening
+    brace: a substring match also accepts a neighbouring handler such as
+    `location = /.well-known/matrix/server-extra {`, which would satisfy every
+    assertion below while the required exact-match endpoint is absent.
     """
     lines = [line for line in snippet.splitlines() if not line.strip().startswith("#")]
-    opener = f"location = {path}"
+    opener = re.compile(rf"location\s*=\s*{re.escape(path)}\s*\{{")
     for index, line in enumerate(lines):
-        if opener not in line:
+        if not opener.search(line):
             continue
         depth = 0
         body: list[str] = []
