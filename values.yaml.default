@@ -9,6 +9,8 @@ global:
   storageClass: ""
   # Override per environment only for immutable tags/digests.
   imagePullPolicy: "Always"
+  # Coordinated releases set this to true through the generated digest overlay.
+  requireImmutableImages: false
   domains:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
@@ -211,13 +213,12 @@ matrixrtcAuth:
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
   # Namespace of the ingress controller, needed by the NetworkPolicy.
   ingressControllerNamespace: "ingress-nginx"
-  bootstrap:
-    enabled: true
-    backoffLimit: 6
   existingSecret:
-    name: "matrixrtc-auth-secrets"
+    # Pre-provision this Secret outside Helm. Sensitive values must never enter
+    # rendered manifests or Helm release history.
+    name: "matrixrtc-auth-runtime"
     membershipTokenKey: "matrix-membership-token"
-    callPolicyTokenKey: "call-policy-token"
+    callPolicyTokenKey: "matrix-call-policy-token"
     livekitApiKeyKey: "livekit-api-key"
     livekitApiSecretKey: "livekit-api-secret"
     redisUrlKey: "redis-url"
@@ -240,7 +241,8 @@ livekit:
   terminationGracePeriodSeconds: 60
   image: "docker.io/livekit/livekit-server@sha256:3497163e15c48fef6e7830c78716f9e9d5edc28abf7aa90b61c86e93bbc306b1"
   existingConfigSecret:
-    name: "livekit-config"
+    # Pre-provision this Secret outside Helm for the same release-history boundary.
+    name: "livekit-config-runtime"
     key: "config.yaml"
 
 # RabbitMQ
@@ -356,11 +358,11 @@ userService:
   passwordResetFrontendBaseUrl: "https://your-domain.example.com"
   passwordResetAdminFrontendBaseUrl: "https://admin.your-domain.example.com/admin"
 
-  # SMTP credentials live in secrets (userService.smtpUser / smtpPassword).
-  smtpHost: "mail.dreambau.com"
+  # SMTP is environment-owned; setting a host requires credentials in secrets.
+  smtpHost: ""
   smtpPort: 587
   smtpSecure: false
-  smtpFrom: "ORISO Platform <monty.burns@oriso.org>"
+  smtpFrom: ""
 
   # Bare origins for account-invite links (TEN-INV-U6/U7); unset = system-notification base URL.
   # accountInviteAppFrontendBaseUrl: "https://your-domain.example.com"

@@ -56,7 +56,6 @@ def test_seed_jobs_are_install_only_and_wait_for_liquibase():
     tenant_job = assert_install_only_job(docs, "tenant-bootstrap")
     topic_job = assert_install_only_job(docs, "topic-bootstrap")
     assert_install_only_job(docs, "keycloak-bootstrap-users")
-    assert_install_only_job(docs, "matrixrtc-bootstrap-token")
     assert_install_only_job(docs, "create-mongo-users")
 
     for script in (container_script(tenant_job), container_script(topic_job)):

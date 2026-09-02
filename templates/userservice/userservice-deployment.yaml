@@ -28,7 +28,7 @@ spec:
       restartPolicy: Always
       containers:
         - name: userservice
-          image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
+          image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image .Values.global.requireImmutableImages) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: MATRIXRTC_CALL_POLICY_TOKEN
@@ -284,11 +284,6 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   key: KEYCLOAK_RESOURCE
-                  name: userservice-configmap-env
-            - name: LIVE_SERVICE_API_URL
-              valueFrom:
-                configMapKeyRef:
-                  key: LIVE_SERVICE_API_URL
                   name: userservice-configmap-env
             - name: MAIL_SERVICE_API_MAILS_SEND
               valueFrom:

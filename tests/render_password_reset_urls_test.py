@@ -78,6 +78,8 @@ def render_environment(
         "--set-string",
         f"userService.passwordResetAdminFrontendBaseUrl={admin_url}",
         "--set-string",
+        "userService.smtpHost=mail.dreambau.com",
+        "--set-string",
         f"userService.smtpFrom={SMTP_FROM}",
     ]
     if smtp_user is not None:
