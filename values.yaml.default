@@ -99,15 +99,65 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call:2.0.3"
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.4"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
+
+# ---------- Media security (epic ORISO-Admin#366, ADR-019) -----------------------------------------------------------
+
+# Fail-closed media scanner, off by default — see docs/media-scanner.md before enabling.
+mediaScanner:
+  enabled: false
+  replicas: 1
+  # vectorim/matrix-content-scanner:v1.3.0
+  image: "docker.io/vectorim/matrix-content-scanner@sha256:dd73aa09d9cd8fe0be50a7f67466bb31aa677320aa4d8f3b1dc2efb267fc214c"
+  # clamav/clamav:1.5.4
+  clamavImage: "docker.io/clamav/clamav@sha256:78810772a92b4a9168115bc6b2e0ffd702640893b9577f8c3d0432762d2655c4"
+  clamavPort: 3310
+  clamavTimeoutSeconds: 60
+  matrixApiUrl: "http://matrix-synapse:8008"
+  allowedMimeTypes:
+    - "image/jpeg"
+    - "image/png"
+    - "image/webp"
+    - "image/gif"
+  blockDirectMediaAccess: true
+  proxyTimeoutSeconds: 120
+  maxUploadSize: "25m"
+  requestSecret:
+    existingSecret: ""
+    key: "request-secret"
+  aiCheck:
+    enabled: false
+    subProcessorAgreementSigned: false
+    endpoint: "https://api.mistral.ai/v1/chat/completions"
+    model: "pixtral-12b-2409"
+    timeoutSeconds: 20
+    existingSecret: ""
+    key: "api-key"
+  resultCache:
+    maxSize: 1024
+    ttl: "1h"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  clamavResources:
+    requests:
+      cpu: "200m"
+      memory: "1Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
 
 # ---------- Infrastructure Services ----------------------------------------------------------------------------------
 
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.3"
+  imageVersion: "2.0.4"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -134,10 +184,10 @@ matrixrtcAuth:
     livekitApiSecretKey: "livekit-api-secret"
     redisUrlKey: "redis-url"
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.2"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.4"
     pullPolicy: ""
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.2"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.4"
     pullPolicy: ""
   service:
     port: 3010
@@ -151,7 +201,8 @@ livekit:
   terminationGracePeriodSeconds: 60
   image: "docker.io/livekit/livekit-server:v1.13.5"
   existingConfigSecret:
-    name: "livekit-config"
+    # Pre-provision this Secret outside Helm for the same release-history boundary.
+    name: "livekit-config-runtime"
     key: "config.yaml"
 
 # RabbitMQ
@@ -168,7 +219,7 @@ online-counseling-redis:
 # Keycloak
 online-counseling-keycloak:
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
-  imageVersion: "2.0.2"
+  imageVersion: "2.0.4"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
@@ -185,7 +236,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.3"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.4"
 
   keycloakResource: "agency-service"
 
@@ -202,7 +253,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "2.0.3"
+  imageVersion: "2.0.4"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -218,7 +269,7 @@ consultingTypeService:
 tenantService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.3"
+  imageVersion: "2.0.4"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -232,7 +283,7 @@ tenantService:
 # User service
 userService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.3"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.4"
   serviceURL: "http://userservice:8080"
 
   keycloakResource: "user-service"
@@ -267,11 +318,11 @@ userService:
   passwordResetFrontendBaseUrl: "https://your-domain.example.com"
   passwordResetAdminFrontendBaseUrl: "https://admin.your-domain.example.com/admin"
 
-  # SMTP credentials live in secrets (userService.smtpUser / smtpPassword).
-  smtpHost: "mail.dreambau.com"
+  # SMTP is environment-owned; setting a host requires credentials in secrets.
+  smtpHost: ""
   smtpPort: 587
   smtpSecure: false
-  smtpFrom: "ORISO Platform <monty.burns@oriso.org>"
+  smtpFrom: ""
 
   # Bare origins for account-invite links (TEN-INV-U6/U7); unset = system-notification base URL.
   # accountInviteAppFrontendBaseUrl: "https://your-domain.example.com"
@@ -297,7 +348,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.3"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.4"
 
 nginxController:
   enabled: true
@@ -323,7 +374,7 @@ signoz:
 healthDashboard:
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: "2.0.2"
+    tag: "2.0.4"
     pullPolicy: ""
   replicas: 1
   namespace: ""

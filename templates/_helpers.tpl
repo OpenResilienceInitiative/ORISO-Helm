@@ -1,7 +1,6 @@
 {{/*
-Render one complete OCI image reference. Tags and digests are both accepted so
-development environments can deploy mutable dev tags when release digests are
-not available.
+Render one complete OCI image reference. Release overlays can enable the strict
+digest-only gate while local development keeps accepting mutable tags.
 */}}
 {{- define "oriso.immutableImage" -}}
 {{- $valueName := index . 0 -}}
@@ -59,4 +58,55 @@ the bundled SigNoz chart is enabled, use its in-cluster collector service.
 {{- define "oriso.signozExternalUrl" -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
 {{- default (printf "https://%s/signoz" .Values.global.domainName) (get $signoz "externalUrl" | default "") -}}
+{{- end -}}
+
+{{/*
+Mirror the vendored ClickHouse chart's public naming contract so the parent
+chart can bind cluster-scoped discovery permissions to the exact operator
+service account. The render contract compares this result with the rendered
+operator Deployment and will fail if an upstream chart update changes it.
+*/}}
+{{- define "oriso.signozClickhouseFullname" -}}
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $clickhouse := get $signoz "clickhouse" | default dict -}}
+{{- $fullnameOverride := get $clickhouse "fullnameOverride" | default "" -}}
+{{- if $fullnameOverride -}}
+{{- $fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := get $clickhouse "nameOverride" | default "clickhouse" -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "oriso.signozClickhouseOperatorFullname" -}}
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $clickhouse := get $signoz "clickhouse" | default dict -}}
+{{- $operator := get $clickhouse "clickhouseOperator" | default dict -}}
+{{- printf "%s-%s" (include "oriso.signozClickhouseFullname" .) (get $operator "name" | default "operator") | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "oriso.signozClickhouseOperatorServiceAccountName" -}}
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $clickhouse := get $signoz "clickhouse" | default dict -}}
+{{- $operator := get $clickhouse "clickhouseOperator" | default dict -}}
+{{- $serviceAccount := get $operator "serviceAccount" | default dict -}}
+{{- $create := true -}}
+{{- if hasKey $serviceAccount "create" -}}
+{{- $create = get $serviceAccount "create" -}}
+{{- end -}}
+{{- if $create -}}
+{{- get $serviceAccount "name" | default (include "oriso.signozClickhouseOperatorFullname" .) -}}
+{{- else -}}
+{{- get $serviceAccount "name" | default "default" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "oriso.signozClickhouseNamespace" -}}
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $clickhouse := get $signoz "clickhouse" | default dict -}}
+{{- get $clickhouse "namespace" | default .Release.Namespace -}}
 {{- end -}}
