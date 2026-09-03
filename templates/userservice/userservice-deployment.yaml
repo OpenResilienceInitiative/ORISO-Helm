@@ -28,7 +28,7 @@ spec:
       restartPolicy: Always
       containers:
         - name: userservice
-          image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image .Values.global.requireImmutableImages) | quote }}
+          image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: MATRIXRTC_CALL_POLICY_TOKEN

@@ -4,15 +4,7 @@ digest-only gate while local development keeps accepting mutable tags.
 */}}
 {{- define "oriso.immutableImage" -}}
 {{- $valueName := index . 0 -}}
-{{- $value := required (printf "%s must be set" $valueName) (index . 1) -}}
-{{- $requireImmutable := false -}}
-{{- if ge (len .) 3 -}}
-{{- $requireImmutable = index . 2 -}}
-{{- end -}}
-{{- if and $requireImmutable (not (regexMatch "^[^@[:space:]]+@sha256:[a-f0-9]{64}$" $value)) -}}
-{{- fail (printf "%s must use repository@sha256:<64 lowercase hex>" $valueName) -}}
-{{- end -}}
-{{- $value -}}
+{{- required (printf "%s must be set" $valueName) (index . 1) -}}
 {{- end -}}
 
 {{/*

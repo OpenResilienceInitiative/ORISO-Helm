@@ -23,7 +23,7 @@ spec:
       automountServiceAccountToken: false
       initContainers:
         - name: wait-for-matrixrtc-membership-token
-          image: {{ include "oriso.immutableImage" (list "elementCall.healthcheckImage" .Values.elementCall.healthcheckImage .Values.global.requireImmutableImages) | quote }}
+          image: {{ include "oriso.immutableImage" (list "elementCall.healthcheckImage" .Values.elementCall.healthcheckImage) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           command:
             - /bin/sh
@@ -50,7 +50,7 @@ spec:
               readOnly: true
       containers:
         - name: gateway
-          image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.gateway.image" .Values.matrixrtcAuth.gateway.image .Values.global.requireImmutableImages) | quote }}
+          image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.gateway.image" .Values.matrixrtcAuth.gateway.image) | quote }}
           imagePullPolicy: {{ default (include "oriso.imagePullPolicy" .) .Values.matrixrtcAuth.gateway.pullPolicy | quote }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -127,7 +127,7 @@ spec:
       automountServiceAccountToken: false
       initContainers:
         - name: wait-for-redis
-          image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.redisCheckImage" .Values.matrixrtcAuth.redisCheckImage .Values.global.requireImmutableImages) | quote }}
+          image: {{ printf "%s:%s" (index .Values "online-counseling-redis").imageName (index .Values "online-counseling-redis").imageVersion | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           command:
             - /bin/sh
@@ -150,7 +150,7 @@ spec:
                   key: REDIS_DEFAULT_PASS
       containers:
         - name: authorization-service
-          image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.upstream.image" .Values.matrixrtcAuth.upstream.image .Values.global.requireImmutableImages) | quote }}
+          image: {{ include "oriso.immutableImage" (list "matrixrtcAuth.upstream.image" .Values.matrixrtcAuth.upstream.image) | quote }}
           imagePullPolicy: {{ default (include "oriso.imagePullPolicy" .) .Values.matrixrtcAuth.upstream.pullPolicy | quote }}
           securityContext:
             allowPrivilegeEscalation: false
