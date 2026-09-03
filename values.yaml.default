@@ -209,16 +209,17 @@ online-counseling-mariadb:
 matrixrtcAuth:
   replicas: 1
   # Keep the Redis readiness probe independently pinnable for rollback-safe releases.
-  redisCheckImage: "docker.io/library/redis:7-alpine"
+  redisCheckImage: "redis:7-alpine"
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
   # Namespace of the ingress controller, needed by the NetworkPolicy.
   ingressControllerNamespace: "ingress-nginx"
+  bootstrap:
+    enabled: true
+    backoffLimit: 6
   existingSecret:
-    # Pre-provision this Secret outside Helm. Sensitive values must never enter
-    # rendered manifests or Helm release history.
-    name: "matrixrtc-auth-runtime"
+    name: "matrixrtc-auth-secrets"
     membershipTokenKey: "matrix-membership-token"
-    callPolicyTokenKey: "matrix-call-policy-token"
+    callPolicyTokenKey: "call-policy-token"
     livekitApiKeyKey: "livekit-api-key"
     livekitApiSecretKey: "livekit-api-secret"
     redisUrlKey: "redis-url"

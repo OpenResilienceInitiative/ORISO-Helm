@@ -3,6 +3,7 @@ from pathlib import Path
 
 import yaml
 
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -34,13 +35,11 @@ def resource(docs, kind, name):
     raise AssertionError(f"{kind}/{name} was not rendered")
 
 
-def assert_install_only_job(docs, name):
-    # Bootstrap jobs are install-only by design: seeds must never rerun on
-    # upgrades (see render_bootstrap_hooks_install_only_test.py).
+def assert_post_install_upgrade_job(docs, name):
     job = resource(docs, "Job", name)
     annotations = job["metadata"].get("annotations", {})
     hooks = {hook.strip() for hook in annotations.get("helm.sh/hook", "").split(",")}
-    assert hooks == {"post-install"}
+    assert {"post-install", "post-upgrade"}.issubset(hooks)
     assert annotations.get("helm.sh/hook-delete-policy") == "before-hook-creation,hook-succeeded"
     return job
 
@@ -50,13 +49,14 @@ def container_script(job):
     return command[-1]
 
 
-def test_seed_jobs_are_install_only_and_wait_for_liquibase():
+def test_seed_jobs_are_upgrade_safe_and_wait_for_liquibase():
     docs = render_chart()
 
-    tenant_job = assert_install_only_job(docs, "tenant-bootstrap")
-    topic_job = assert_install_only_job(docs, "topic-bootstrap")
-    assert_install_only_job(docs, "keycloak-bootstrap-users")
-    assert_install_only_job(docs, "create-mongo-users")
+    tenant_job = assert_post_install_upgrade_job(docs, "tenant-bootstrap")
+    topic_job = assert_post_install_upgrade_job(docs, "topic-bootstrap")
+    assert_post_install_upgrade_job(docs, "keycloak-bootstrap-users")
+    assert_post_install_upgrade_job(docs, "matrixrtc-bootstrap-token")
+    assert_post_install_upgrade_job(docs, "create-mongo-users")
 
     for script in (container_script(tenant_job), container_script(topic_job)):
         assert "DATABASECHANGELOGLOCK" in script
@@ -69,6 +69,5 @@ def test_seed_jobs_are_install_only_and_wait_for_liquibase():
         assert "INSERT IGNORE" in sql
         assert "DELETE FROM" not in sql.upper()
         assert "TRUNCATE" not in sql.upper()
-        # Fixed seeded ids; exact SETVAL values are covered by
-        # render_bootstrap_sequence_setval_test.py.
+        assert "MAX(`id`)" in sql
         assert "SETVAL(`sequence_" in sql

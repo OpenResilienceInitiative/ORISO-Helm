@@ -98,6 +98,13 @@ spec:
             name: userservice
             port:
               number: 8080
+        path: /service/liveproxy
+        pathType: Prefix
+      - backend:
+          service:
+            name: userservice
+            port:
+              number: 8080
         path: /service/useradmin
         pathType: Prefix
       - backend:
