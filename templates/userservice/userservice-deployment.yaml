@@ -285,11 +285,6 @@ spec:
                 configMapKeyRef:
                   key: KEYCLOAK_RESOURCE
                   name: userservice-configmap-env
-            - name: LIVE_SERVICE_API_URL
-              valueFrom:
-                configMapKeyRef:
-                  key: LIVE_SERVICE_API_URL
-                  name: userservice-configmap-env
             - name: MAIL_SERVICE_API_MAILS_SEND
               valueFrom:
                 configMapKeyRef:

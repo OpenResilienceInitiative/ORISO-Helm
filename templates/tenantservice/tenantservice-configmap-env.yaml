@@ -21,6 +21,21 @@ data:
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: {{ .Values.global.springSecurityOAuth2ResourceserverJWTJWKSETURI }}   
   USER_SERVICE_API_URL: {{ .Values.userService.serviceURL }}  
   CONSULTING_TYPE_SERVICE_API_URL: {{ .Values.consultingTypeService.serviceURL }}  
+  # APP_BASE_URL is the app frontend origin TenantDpaFacade prefixes onto the
+  # DPA sign link (`buildSignLink` = APP_BASE_URL + "/dpa-sign/" + token).
+  # application.properties leaves `app.base.url` EMPTY, so without this key the
+  # link ships path-only, UserService rejects it as "signLink is invalid" (400),
+  # and the Admin panel translates that into "please enter a valid e-mail
+  # address" — blaming the address for a missing config two services away.
+  # Observed on pre-dev 2026-08-19; every failed attempt still minted a sign
+  # link, so five failures throttled the onboarding for 14 days.
+  # Same FQDN and same derivation as consultingtypeservice, deliberately, so
+  # the two cannot drift apart.
+{{- if .Values.global.enableTls }}
+  APP_BASE_URL: "https://{{ .Values.global.domainName }}"
+{{- else }}
+  APP_BASE_URL: "http://{{ .Values.global.domainName }}"
+{{- end }}
   MATRIX_API_URL: {{ .Values.matrix.matrixApiUrl }}
   MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}
   FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED: {{ .Values.global.multitenancyWithSingleDomainEnabled | quote }}

@@ -12,7 +12,6 @@ import yaml
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INSTALL_ONLY_BOOTSTRAP_JOBS = {
     "create-mongo-users",
-    "matrixrtc-bootstrap-token",
     "keycloak-bootstrap-users",
     "tenant-bootstrap",
     "topic-bootstrap",
