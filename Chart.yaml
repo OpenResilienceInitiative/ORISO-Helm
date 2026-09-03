@@ -1,7 +1,7 @@
 name: online-counseling
 description: Helm chart for the online counseling plattform
-version: 2.0.2
-appVersion: "2.0.2"
+version: 2.0.3
+appVersion: "2.0.3"
 apiVersion: v2
 keywords:
   - online-counseling

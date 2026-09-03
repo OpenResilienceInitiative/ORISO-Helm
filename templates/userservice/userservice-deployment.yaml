@@ -320,6 +320,11 @@ spec:
                 secretKeyRef:
                   key: STATISTICS_MESSAGE_COUNT_HMAC_SECRET
                   name: userservice-secret
+            - name: MATRIXRTC_CALL_POLICY_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: MATRIXRTC_CALL_POLICY_HMAC_SECRET
+                  name: userservice-secret
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:

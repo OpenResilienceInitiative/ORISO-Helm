@@ -99,7 +99,7 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call:2.0.2"
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.3"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # ---------- Infrastructure Services ----------------------------------------------------------------------------------
@@ -107,7 +107,7 @@ elementCall:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.2"
+  imageVersion: "2.0.3"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -185,7 +185,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.2"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.3"
 
   keycloakResource: "agency-service"
 
@@ -202,7 +202,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "2.0.2"
+  imageVersion: "2.0.3"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -218,7 +218,7 @@ consultingTypeService:
 tenantService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.2"
+  imageVersion: "2.0.3"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -232,7 +232,7 @@ tenantService:
 # User service
 userService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.2"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.3"
   serviceURL: "http://userservice:8080"
 
   keycloakResource: "user-service"
@@ -297,7 +297,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.2"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.3"
 
 nginxController:
   enabled: true
