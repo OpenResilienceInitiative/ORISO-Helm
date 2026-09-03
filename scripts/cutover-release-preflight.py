@@ -14,13 +14,13 @@ from collections.abc import Mapping
 import yaml
 
 EXPECTED_REPOSITORIES = {
-    "ORISO-Frontend": "integration/matryoshka-cutover",
-    "ORISO-ElementCall": "integration/matryoshka-cleanup",
-    "ORISO-UserService": "refactor/remove-rocketchat-adapter",
-    "ORISO-AgencyService": "refactor/remove-rocketchat-config",
-    "ORISO-Livekit": "security/matrixrtc-auth-gateway",
-    "ORISO-Helm": "security/matrixrtc-auth",
-    "ORISO-E2E": "test/matryoshka-call-gate",
+    "ORISO-Frontend",
+    "ORISO-ElementCall",
+    "ORISO-UserService",
+    "ORISO-AgencyService",
+    "ORISO-Livekit",
+    "ORISO-Helm",
+    "ORISO-E2E",
 }
 
 IMAGE_REPOSITORIES = {
@@ -34,8 +34,11 @@ IMAGE_REPOSITORIES = {
     "matrixrtcAuthorizationService": (
         "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service"
     ),
+    "livekit": "docker.io/livekit/livekit-server",
     "synapse": "matrixdotorg/synapse",
     "synapseInit": "busybox",
+    "healthcheck": "docker.io/curlimages/curl",
+    "redisCheck": "docker.io/library/redis",
 }
 
 REQUIRED_SECURITY_EVIDENCE = (
@@ -109,9 +112,7 @@ def validate_source_bundle(manifest: Mapping) -> None:
     if policy.get("rocketChatFallbackAllowed") is not False:
         raise ValueError("policy.rocketChatFallbackAllowed must be false")
     if policy.get("legacyEmbeddedJitsiFallbackAllowed") is not False:
-        raise ValueError(
-            "policy.legacyEmbeddedJitsiFallbackAllowed must be false"
-        )
+        raise ValueError("policy.legacyEmbeddedJitsiFallbackAllowed must be false")
     if policy.get("matrixWidgetHostOwnsCrypto") is not True:
         raise ValueError("policy.matrixWidgetHostOwnsCrypto must be true")
     if policy.get("disposablePreDevAccounts") is not True:
@@ -131,37 +132,44 @@ def validate_source_bundle(manifest: Mapping) -> None:
         if not isinstance(name, str):
             raise ValueError(f"repositories[{index}].name must be a string")
         if not re.fullmatch(r"[a-f0-9]{7,40}", str(item.get("sourceCommit", ""))):
-            raise ValueError(
-                f"repositories[{index}].sourceCommit must be a Git commit"
-            )
+            raise ValueError(f"repositories[{index}].sourceCommit must be a Git commit")
         if not re.fullmatch(r"[a-f0-9]{7,40}", str(item.get("preDevBase", ""))):
+            raise ValueError(f"repositories[{index}].preDevBase must be a Git commit")
+        branch = item.get("branch")
+        if not isinstance(branch, str) or not branch.strip():
+            raise ValueError(f"repositories[{index}].branch must be set")
+        commits_ahead = item.get("commitsAhead")
+        if not isinstance(commits_ahead, int) or commits_ahead < 0:
             raise ValueError(
-                f"repositories[{index}].preDevBase must be a Git commit"
+                f"repositories[{index}].commitsAhead must be zero or positive"
             )
-        if item.get("branch") != EXPECTED_REPOSITORIES.get(name):
-            raise ValueError(f"repositories[{index}].branch is not the cutover branch")
-        if not isinstance(item.get("commitsAhead"), int) or item["commitsAhead"] < 1:
-            raise ValueError(f"repositories[{index}].commitsAhead must be positive")
+        if branch == "pre-dev":
+            if item.get("sourceCommit") != item.get("preDevBase") or commits_ahead != 0:
+                raise ValueError(
+                    f"repositories[{index}] pre-dev snapshot must have matching commits"
+                )
+        elif commits_ahead < 1:
+            raise ValueError(
+                f"repositories[{index}] branch snapshot must be ahead of pre-dev"
+            )
         names.add(name)
     if len(repositories) != len(EXPECTED_REPOSITORIES) or names != set(
         EXPECTED_REPOSITORIES
     ):
         raise ValueError(
-            "repositories must contain exactly " + ", ".join(sorted(EXPECTED_REPOSITORIES))
+            "repositories must contain exactly "
+            + ", ".join(sorted(EXPECTED_REPOSITORIES))
         )
 
 
 def validate_registry_images(registry: Mapping) -> None:
     missing = set(IMAGE_REPOSITORIES) - set(registry)
     if missing:
-        raise ValueError(
-            "registryRelease is missing " + ", ".join(sorted(missing))
-        )
+        raise ValueError("registryRelease is missing " + ", ".join(sorted(missing)))
     extras = set(registry) - set(IMAGE_REPOSITORIES)
     if extras:
         raise ValueError(
-            "registryRelease contains unexpected entries "
-            + ", ".join(sorted(extras))
+            "registryRelease contains unexpected entries " + ", ".join(sorted(extras))
         )
 
     for name, expected_repository in IMAGE_REPOSITORIES.items():
@@ -203,13 +211,33 @@ def validate_and_build_values(manifest: object) -> dict:
     require_true(release_gates, REQUIRED_RELEASE_GATES, "releaseGates")
 
     return {
+        "global": {"requireImmutableImages": True},
         "frontend": {"image": registry["frontend"]},
-        "elementCall": {"image": registry["elementCall"]},
+        "elementCall": {
+            "image": registry["elementCall"],
+            "healthcheckImage": registry["healthcheck"],
+        },
         "userService": {"image": registry["userService"]},
         "agencyService": {"image": registry["agencyService"]},
         "matrixrtcAuth": {
+            "redisCheckImage": registry["redisCheck"],
+            "existingSecret": {
+                "name": "matrixrtc-auth-runtime",
+                "membershipTokenKey": "matrix-membership-token",
+                "callPolicyTokenKey": "matrix-call-policy-token",
+                "livekitApiKeyKey": "livekit-api-key",
+                "livekitApiSecretKey": "livekit-api-secret",
+                "redisUrlKey": "redis-url",
+            },
             "gateway": {"image": registry["matrixrtcPolicyGateway"]},
             "upstream": {"image": registry["matrixrtcAuthorizationService"]},
+        },
+        "livekit": {
+            "image": registry["livekit"],
+            "existingConfigSecret": {
+                "name": "livekit-config-runtime",
+                "key": "config.yaml",
+            },
         },
         "matrix": {
             "image": registry["synapse"],
@@ -231,6 +259,16 @@ def rendered_images(documents: list[dict]) -> dict[str, str]:
         ]
 
     synapse_spec = deployments["matrix-synapse"]["spec"]["template"]["spec"]
+    element_call_spec = deployments["element-call"]["spec"]["template"]["spec"]
+    gateway_spec = deployments["matrixrtc-auth-policy-gateway"]["spec"]["template"][
+        "spec"
+    ]
+    authorization_spec = deployments["matrixrtc-authorization-service"]["spec"][
+        "template"
+    ]["spec"]
+    healthcheck_image = element_call_spec["initContainers"][0]["image"]
+    if gateway_spec["initContainers"][0]["image"] != healthcheck_image:
+        raise ValueError("Element Call and MatrixRTC gateway healthcheck images differ")
     return {
         "frontend": container_image("frontend"),
         "elementCall": container_image("element-call"),
@@ -240,8 +278,11 @@ def rendered_images(documents: list[dict]) -> dict[str, str]:
         "matrixrtcAuthorizationService": container_image(
             "matrixrtc-authorization-service"
         ),
+        "livekit": container_image("livekit"),
         "synapse": container_image("matrix-synapse"),
         "synapseInit": synapse_spec["initContainers"][0]["image"],
+        "healthcheck": healthcheck_image,
+        "redisCheck": authorization_spec["initContainers"][0]["image"],
     }
 
 
@@ -280,9 +321,43 @@ def verify_render(chart_dir: pathlib.Path, values: dict) -> None:
     if result.returncode != 0:
         raise ValueError(f"Helm render failed: {result.stderr.strip()}")
 
-    documents = [
-        document for document in yaml.safe_load_all(result.stdout) if document
+    documents = [document for document in yaml.safe_load_all(result.stdout) if document]
+    deployments = {
+        document.get("metadata", {}).get("name"): document
+        for document in documents
+        if document.get("kind") == "Deployment"
+    }
+    runtime_secret = "matrixrtc-auth-runtime"
+    for deployment_name in (
+        "matrixrtc-auth-policy-gateway",
+        "matrixrtc-authorization-service",
+    ):
+        secret_names = {
+            volume.get("secret", {}).get("secretName")
+            for volume in deployments[deployment_name]["spec"]["template"]["spec"].get(
+                "volumes", []
+            )
+        }
+        if runtime_secret not in secret_names:
+            raise ValueError(f"{deployment_name} does not use {runtime_secret}")
+    userservice_env = deployments["userservice"]["spec"]["template"]["spec"][
+        "containers"
+    ][0]["env"]
+    policy_secret = next(
+        item["valueFrom"]["secretKeyRef"]
+        for item in userservice_env
+        if item.get("name") == "MATRIXRTC_CALL_POLICY_TOKEN"
+    )
+    if policy_secret != {
+        "name": runtime_secret,
+        "key": "matrix-call-policy-token",
+    }:
+        raise ValueError("UserService does not use the external MatrixRTC policy token")
+    livekit_secret = deployments["livekit"]["spec"]["template"]["spec"]["volumes"][0][
+        "secret"
     ]
+    if livekit_secret.get("secretName") != "livekit-config-runtime":
+        raise ValueError("LiveKit does not use livekit-config-runtime")
     actual_images = rendered_images(documents)
     expected_images = {
         "frontend": values["frontend"]["image"],
@@ -291,8 +366,11 @@ def verify_render(chart_dir: pathlib.Path, values: dict) -> None:
         "agencyService": values["agencyService"]["image"],
         "matrixrtcPolicyGateway": values["matrixrtcAuth"]["gateway"]["image"],
         "matrixrtcAuthorizationService": values["matrixrtcAuth"]["upstream"]["image"],
+        "livekit": values["livekit"]["image"],
         "synapse": values["matrix"]["image"],
         "synapseInit": values["matrix"]["initImage"],
+        "healthcheck": values["elementCall"]["healthcheckImage"],
+        "redisCheck": values["matrixrtcAuth"]["redisCheckImage"],
     }
     if actual_images != expected_images:
         raise ValueError(
@@ -343,9 +421,7 @@ def main() -> int:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1
 
-    suffix = (
-        f"; wrote {args.output_values}" if args.output_values is not None else ""
-    )
+    suffix = f"; wrote {args.output_values}" if args.output_values is not None else ""
     print(f"PASS: coordinated cutover manifest and rendered images agree{suffix}")
     return 0
 

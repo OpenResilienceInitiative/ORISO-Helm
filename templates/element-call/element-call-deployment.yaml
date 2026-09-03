@@ -22,7 +22,7 @@ spec:
     spec:
       initContainers:
         - name: wait-for-matrixrtc-auth
-          image: {{ include "oriso.immutableImage" (list "elementCall.healthcheckImage" .Values.elementCall.healthcheckImage) | quote }}
+          image: {{ include "oriso.immutableImage" (list "elementCall.healthcheckImage" .Values.elementCall.healthcheckImage .Values.global.requireImmutableImages) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           command:
             - sh
@@ -42,7 +42,7 @@ spec:
               drop: ["ALL"]
       containers:
       - name: element-call
-        image: {{ include "oriso.immutableImage" (list "elementCall.image" .Values.elementCall.image) | quote }}
+        image: {{ include "oriso.immutableImage" (list "elementCall.image" .Values.elementCall.image .Values.global.requireImmutableImages) | quote }}
         imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
         ports:
           - containerPort: 80

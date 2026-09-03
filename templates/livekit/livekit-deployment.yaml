@@ -59,7 +59,7 @@ spec:
       terminationGracePeriodSeconds: {{ $terminationGrace }}
       containers:
         - name: livekit
-          image: {{ include "oriso.immutableImage" (list "livekit.image" .Values.livekit.image) | quote }}
+          image: {{ include "oriso.immutableImage" (list "livekit.image" .Values.livekit.image .Values.global.requireImmutableImages) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           args:
             - --config

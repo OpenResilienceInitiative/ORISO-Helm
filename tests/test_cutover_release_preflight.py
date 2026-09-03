@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+import subprocess
 import unittest
 
 CHART_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -37,8 +38,11 @@ def ready_manifest() -> dict:
             "ghcr.io/openresilienceinitiative/"
             f"matrixrtc-authorization-service@sha256:{DIGEST}"
         ),
+        "livekit": f"docker.io/livekit/livekit-server@sha256:{DIGEST}",
         "synapse": f"matrixdotorg/synapse@sha256:{DIGEST}",
         "synapseInit": f"busybox@sha256:{DIGEST}",
+        "healthcheck": f"docker.io/curlimages/curl@sha256:{DIGEST}",
+        "redisCheck": f"docker.io/library/redis@sha256:{DIGEST}",
     }
     return {
         "apiVersion": "oriso.org/v1alpha1",
@@ -112,13 +116,26 @@ class CutoverReleasePreflightTest(unittest.TestCase):
         self.assertEqual(
             values,
             {
+                "global": {"requireImmutableImages": True},
                 "frontend": {"image": manifest["registryRelease"]["frontend"]},
-                "elementCall": {"image": manifest["registryRelease"]["elementCall"]},
+                "elementCall": {
+                    "image": manifest["registryRelease"]["elementCall"],
+                    "healthcheckImage": manifest["registryRelease"]["healthcheck"],
+                },
                 "userService": {"image": manifest["registryRelease"]["userService"]},
                 "agencyService": {
                     "image": manifest["registryRelease"]["agencyService"]
                 },
                 "matrixrtcAuth": {
+                    "redisCheckImage": manifest["registryRelease"]["redisCheck"],
+                    "existingSecret": {
+                        "name": "matrixrtc-auth-runtime",
+                        "membershipTokenKey": "matrix-membership-token",
+                        "callPolicyTokenKey": "matrix-call-policy-token",
+                        "livekitApiKeyKey": "livekit-api-key",
+                        "livekitApiSecretKey": "livekit-api-secret",
+                        "redisUrlKey": "redis-url",
+                    },
                     "gateway": {
                         "image": manifest["registryRelease"]["matrixrtcPolicyGateway"]
                     },
@@ -126,6 +143,13 @@ class CutoverReleasePreflightTest(unittest.TestCase):
                         "image": manifest["registryRelease"][
                             "matrixrtcAuthorizationService"
                         ]
+                    },
+                },
+                "livekit": {
+                    "image": manifest["registryRelease"]["livekit"],
+                    "existingConfigSecret": {
+                        "name": "livekit-config-runtime",
+                        "key": "config.yaml",
                     },
                 },
                 "matrix": {
@@ -138,6 +162,15 @@ class CutoverReleasePreflightTest(unittest.TestCase):
     def test_future_provider_name_is_not_blanket_forbidden(self) -> None:
         self.assertNotIn("jitsi", self.preflight.FORBIDDEN_RENDERED_LEGACY)
         self.assertIn("jitsi-meet", self.preflight.FORBIDDEN_RENDERED_LEGACY)
+
+    def test_current_predev_snapshot_is_a_valid_source_bundle(self) -> None:
+        manifest = ready_manifest()
+        for repository in manifest["repositories"]:
+            repository["branch"] = "pre-dev"
+            repository["preDevBase"] = repository["sourceCommit"]
+            repository["commitsAhead"] = 0
+
+        self.preflight.validate_and_build_values(manifest)
 
     def test_stop_ship_or_local_evidence_cannot_become_helm_input(self) -> None:
         manifest = ready_manifest()
@@ -180,14 +213,57 @@ class CutoverReleasePreflightTest(unittest.TestCase):
     def test_ready_manifest_renders_exact_images_and_no_chat_legacy(self) -> None:
         manifest = ready_manifest()
         values = self.preflight.validate_and_build_values(manifest)
-        values["userService"].update(
-            {
-                "smtpUser": "smtp-canary-user",
-                "smtpPassword": "smtp-canary-password",
-            }
-        )
 
         self.preflight.verify_render(CHART_DIR, values)
+
+    def test_chart_rejects_a_mutable_cutover_image_tag(self) -> None:
+        result = subprocess.run(
+            [
+                "helm",
+                "template",
+                "mutable-image-must-fail",
+                str(CHART_DIR),
+                "-f",
+                str(CHART_DIR / "values.yaml.default"),
+                "-f",
+                str(CHART_DIR / "secrets.yaml.default"),
+                "--set-string",
+                "frontend.image=ghcr.io/openresilienceinitiative/oriso-frontend:latest",
+                "--set-string",
+                f"elementCall.image=ghcr.io/openresilienceinitiative/element-call@sha256:{DIGEST}",
+                "--set-string",
+                f"elementCall.healthcheckImage=docker.io/curlimages/curl@sha256:{DIGEST}",
+                "--set-string",
+                f"matrixrtcAuth.redisCheckImage=docker.io/library/redis@sha256:{DIGEST}",
+                "--set-string",
+                f"userService.image=ghcr.io/openresilienceinitiative/oriso-userservice@sha256:{DIGEST}",
+                "--set-string",
+                f"agencyService.image=ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{DIGEST}",
+                "--set-string",
+                f"matrix.image=matrixdotorg/synapse@sha256:{DIGEST}",
+                "--set-string",
+                f"matrix.initImage=busybox@sha256:{DIGEST}",
+                "--set",
+                "global.requireImmutableImages=true",
+                "--set-string",
+                "userService.smtpUser=smtp-canary-user",
+                "--set-string",
+                "userService.smtpPassword=smtp-canary-password",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("frontend.image must use repository@sha256", result.stderr)
+
+    def test_chart_rejects_a_mutable_redis_check_image(self) -> None:
+        values = self.preflight.validate_and_build_values(ready_manifest())
+        values["matrixrtcAuth"]["redisCheckImage"] = "docker.io/library/redis:7-alpine"
+
+        with self.assertRaisesRegex(ValueError, "matrixrtcAuth.redisCheckImage"):
+            self.preflight.verify_render(CHART_DIR, values)
 
     def test_release_preflight_rejects_a_mutable_cutover_image_tag(self) -> None:
         manifest = ready_manifest()
@@ -199,6 +275,7 @@ class CutoverReleasePreflightTest(unittest.TestCase):
             ValueError, "registryRelease.frontend must use repository@sha256"
         ):
             self.preflight.validate_and_build_values(manifest)
+
 
 if __name__ == "__main__":
     unittest.main()

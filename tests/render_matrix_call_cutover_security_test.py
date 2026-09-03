@@ -32,13 +32,17 @@ def render(*, use_canary_images: bool = True) -> list[dict]:
         "userService.smtpPassword=smtp-test-password",
     ]
     if use_canary_images:
+        command.extend(["--set", "global.requireImmutableImages=true"])
         canary_images = {
             "frontend.image": "ghcr.io/openresilienceinitiative/oriso-frontend",
             "elementCall.image": "ghcr.io/openresilienceinitiative/element-call",
+            "elementCall.healthcheckImage": "docker.io/curlimages/curl",
+            "matrixrtcAuth.redisCheckImage": "docker.io/library/redis",
             "userService.image": "ghcr.io/openresilienceinitiative/oriso-userservice",
             "agencyService.image": "ghcr.io/openresilienceinitiative/oriso-agencyservice",
             "matrix.image": "matrixdotorg/synapse",
             "matrix.initImage": "busybox",
+            "livekit.image": "docker.io/livekit/livekit-server",
         }
         for value_name, repository in canary_images.items():
             command.extend(
@@ -112,6 +116,8 @@ def main() -> None:
     userservice = find(documents, "Deployment", "userservice")
     agencyservice = find(documents, "Deployment", "agencyservice")
     livekit = find(documents, "Deployment", "livekit")
+    gateway = find(documents, "Deployment", "matrixrtc-auth-policy-gateway")
+    authorization = find(documents, "Deployment", "matrixrtc-authorization-service")
 
     synapse_spec = synapse["spec"]["template"]["spec"]
     images = [
@@ -121,6 +127,10 @@ def main() -> None:
         frontend["spec"]["template"]["spec"]["containers"][0]["image"],
         userservice["spec"]["template"]["spec"]["containers"][0]["image"],
         agencyservice["spec"]["template"]["spec"]["containers"][0]["image"],
+        livekit["spec"]["template"]["spec"]["containers"][0]["image"],
+        element_call["spec"]["template"]["spec"]["initContainers"][0]["image"],
+        gateway["spec"]["template"]["spec"]["initContainers"][0]["image"],
+        authorization["spec"]["template"]["spec"]["initContainers"][0]["image"],
     ]
     for image in images:
         assert re.fullmatch(r"[^@\s]+@sha256:[a-f0-9]{64}", image)
@@ -132,15 +142,23 @@ def main() -> None:
         f"ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{TEST_DIGEST}",
     }
     assert expected_cutover_images.issubset(set(images))
-    assert livekit["spec"]["replicas"] == 1
-    assert livekit["spec"]["strategy"] == {"type": "Recreate"}
-    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 60
+
+    # The LiveKit single-node rollout shape (replicas, strategy, grace period)
+    # is asserted by tests/render_livekit_rollout_test.py, which also covers the
+    # multi-replica guard rails. This test only guards image immutability.
 
     rendered = yaml.safe_dump_all(documents)
     assert "matrix-backup-cronjob-github" not in rendered
     assert "synapse_secure_password_2025" not in rendered
     assert "YOUR_GITHUB_TOKEN" not in rendered
     assert "caritas-matrix-backups" not in rendered
+    for secret_name in ("matrixrtc-auth-runtime", "livekit-config-runtime"):
+        assert not any(
+            document.get("kind") == "Secret"
+            and document.get("metadata", {}).get("name") == secret_name
+            for document in documents
+        )
+        assert secret_name in rendered
 
     print("PASS: all chat cutover images are immutable; no unsafe backup job renders")
 
