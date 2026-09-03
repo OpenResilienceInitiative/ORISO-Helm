@@ -1,5 +1,74 @@
 apiVersion: v1
 data:
+  backup.sh: "#!/bin/bash\nset -e\n\necho \"==========================================\"\necho
+    \"Matrix PostgreSQL Backup Script\"\necho \"Started at: $(date)\"\necho \"==========================================\"\n\n#
+    Configuration\nBACKUP_DIR=\"/backup/matrix\"\nWAL_ARCHIVE_DIR=\"/backup/wal_archive\"\nTIMESTAMP=$(date
+    +%Y%m%d_%H%M%S)\nBACKUP_FILE=\"matrix_synapse_${TIMESTAMP}.sql.gz\"\nRETENTION_DAYS=30\n\n#
+    Database credentials\nexport PGHOST=\"matrix-postgres-service\"\nexport PGPORT=\"5432\"\nexport
+    PGUSER=\"${POSTGRES_USER}\"\nexport PGPASSWORD=\"${POSTGRES_PASSWORD}\"\nexport
+    PGDATABASE=\"${POSTGRES_DB}\"\n\n# Create backup directories\nmkdir -p \"${BACKUP_DIR}\"\nmkdir
+    -p \"${WAL_ARCHIVE_DIR}\"\n\necho \"\"\necho \"\U0001F4CA Database Information:\"\npsql
+    -c \"SELECT version();\" | head -3\npsql -c \"SELECT pg_size_pretty(pg_database_size('${PGDATABASE}'))
+    as db_size;\"\n\necho \"\"\necho \"\U0001F4BE Creating backup: ${BACKUP_FILE}\"\n\n#
+    Create backup with pg_dump\npg_dump --verbose \\\n        --format=plain \\\n
+    \       --no-owner \\\n        --no-acl \\\n        --encoding=UTF8 \\\n        --compress=0
+    \\\n        \"${PGDATABASE}\" | gzip -9 > \"${BACKUP_DIR}/${BACKUP_FILE}\"\n\n#
+    Verify backup was created\nif [ ! -f \"${BACKUP_DIR}/${BACKUP_FILE}\" ]; then\n
+    \   echo \"❌ ERROR: Backup file was not created!\"\n    exit 1\nfi\n\nBACKUP_SIZE=$(du
+    -h \"${BACKUP_DIR}/${BACKUP_FILE}\" | cut -f1)\necho \"✅ Backup created successfully:
+    ${BACKUP_SIZE}\"\n\n# Generate checksum\necho \"\"\necho \"\U0001F510 Generating
+    checksum...\"\ncd \"${BACKUP_DIR}\"\nsha256sum \"${BACKUP_FILE}\" > \"${BACKUP_FILE}.sha256\"\ncat
+    \"${BACKUP_FILE}.sha256\"\n\n# Create backup metadata\ncat > \"${BACKUP_DIR}/${BACKUP_FILE}.metadata\"
+    << EOF\n{\n  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\n  \"database\":
+    \"${PGDATABASE}\",\n  \"size\": \"$(stat -f%z \"${BACKUP_DIR}/${BACKUP_FILE}\"
+    2>/dev/null || stat -c%s \"${BACKUP_DIR}/${BACKUP_FILE}\")\",\n  \"compressed\":
+    true,\n  \"format\": \"sql.gz\",\n  \"checksum\": \"$(cat ${BACKUP_FILE}.sha256
+    | cut -d' ' -f1)\"\n}\nEOF\n\necho \"\"\necho \"\U0001F4CB Backup Details:\"\ncat
+    \"${BACKUP_DIR}/${BACKUP_FILE}.metadata\"\n\n# WAL Archive status\necho \"\"\necho
+    \"\U0001F4DA WAL Archive Status:\"\nWAL_COUNT=$(find \"${WAL_ARCHIVE_DIR}\" -type
+    f 2>/dev/null | wc -l)\nWAL_SIZE=$(du -sh \"${WAL_ARCHIVE_DIR}\" 2>/dev/null |
+    cut -f1)\necho \"WAL Files: ${WAL_COUNT}\"\necho \"WAL Archive Size: ${WAL_SIZE}\"\n\n#
+    Cleanup old backups\necho \"\"\necho \"\U0001F9F9 Cleaning up old backups (older
+    than ${RETENTION_DAYS} days)...\"\nfind \"${BACKUP_DIR}\" -name \"matrix_synapse_*.sql.gz\"
+    -type f -mtime +${RETENTION_DAYS} -delete\nfind \"${BACKUP_DIR}\" -name \"matrix_synapse_*.sha256\"
+    -type f -mtime +${RETENTION_DAYS} -delete\nfind \"${BACKUP_DIR}\" -name \"matrix_synapse_*.metadata\"
+    -type f -mtime +${RETENTION_DAYS} -delete\n\n# Cleanup old WAL files (older than
+    7 days)\necho \"\U0001F9F9 Cleaning up old WAL files (older than 7 days)...\"\nfind
+    \"${WAL_ARCHIVE_DIR}\" -type f -mtime +7 -delete\n\n# List recent backups\necho
+    \"\"\necho \"\U0001F4E6 Recent Backups:\"\nls -lh \"${BACKUP_DIR}\"/*.sql.gz 2>/dev/null
+    | tail -5 || echo \"No backups found\"\n\necho \"\"\necho \"==========================================\"\necho
+    \"✅ Backup completed successfully!\"\necho \"Finished at: $(date)\"\necho \"==========================================\"\n"
+  github-sync.sh: "#!/bin/bash\nset -e\n\necho \"==========================================\"\necho
+    \"GitHub Backup Sync Script\"\necho \"Started at: $(date)\"\necho \"==========================================\"\n\nBACKUP_DIR=\"/backup/matrix\"\nGITHUB_REPO=\"${GITHUB_REPO}\"\nGITHUB_TOKEN=\"${GITHUB_TOKEN}\"\nGITHUB_BRANCH=\"main\"\n\n#
+    Clone or update repository\nif [ -d \"/tmp/backup-repo/.git\" ]; then\n    echo
+    \"\U0001F4E5 Updating existing repository...\"\n    cd /tmp/backup-repo\n    git
+    pull origin ${GITHUB_BRANCH}\nelse\n    echo \"\U0001F4E5 Cloning repository...\"\n
+    \   git clone https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /tmp/backup-repo\n
+    \   cd /tmp/backup-repo\nfi\n\n# Create matrix backup directory\nmkdir -p matrix-backups\n\n#
+    Copy latest backup files\necho \"\U0001F4CB Copying latest backup files...\"\nLATEST_BACKUP=$(ls
+    -t ${BACKUP_DIR}/matrix_synapse_*.sql.gz 2>/dev/null | head -1)\n\nif [ -z \"$LATEST_BACKUP\"
+    ]; then\n    echo \"⚠️  No backup files found!\"\n    exit 1\nfi\n\nBACKUP_NAME=$(basename
+    \"$LATEST_BACKUP\")\ncp \"$LATEST_BACKUP\" matrix-backups/\ncp \"${LATEST_BACKUP}.sha256\"
+    matrix-backups/ 2>/dev/null || true\ncp \"${LATEST_BACKUP}.metadata\" matrix-backups/
+    2>/dev/null || true\n\n# Create backup inventory\ncat > matrix-backups/INVENTORY.md
+    << EOF\n# Matrix Synapse Database Backups\n\nLast Updated: $(date -u +%Y-%m-%dT%H:%M:%SZ)\n\n##
+    Latest Backup\n- **File**: ${BACKUP_NAME}\n- **Size**: $(du -h \"matrix-backups/${BACKUP_NAME}\"
+    | cut -f1)\n- **Date**: $(date -u)\n\n## All Backups\n\nEOF\n\nls -lh matrix-backups/*.sql.gz
+    2>/dev/null | awk '{print \"- \" $9 \" (\" $5 \")\"}' >> matrix-backups/INVENTORY.md
+    || true\n\n# Git commit and push\ngit config user.name \"Matrix Backup Bot\"\ngit
+    config user.email \"backup@caritas.local\"\n\ngit add matrix-backups/\n\nif git
+    diff --staged --quiet; then\n    echo \"✅ No changes to commit\"\nelse\n    git
+    commit -m \"Matrix backup: ${BACKUP_NAME} - $(date -u +%Y-%m-%d)\"\n    git push
+    origin ${GITHUB_BRANCH}\n    echo \"✅ Backup pushed to GitHub successfully!\"\nfi\n\necho
+    \"==========================================\"\necho \"✅ GitHub sync completed!\"\necho
+    \"Finished at: $(date)\"\necho \"==========================================\"\n"
+kind: ConfigMap
+metadata: 
+  name: matrix-backup-script
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+data:
   default.conf: |
     server {
         listen 8090;
@@ -56,25 +125,10 @@ data:
           - names: [client, federation]
             compress: false
 
-    # KDG epic #282 task 4: sqlite3 was configured here while the chart also
-    # ships a full Matrix Postgres StatefulSet (matrix-postgres-statefulset.yaml)
-    # that nothing pointed at — the two disagreed about which store Synapse
-    # actually uses. sqlite is unsupported for production Synapse, so this now
-    # wires the homeserver at the Postgres instance the chart already
-    # provisions. Pre-Dev carries no production users/message history to
-    # preserve, so no data migration path is implemented here (see the
-    # project's "no prod users -> skip migration" rule); a real go-live cutover
-    # with message-history preservation is a separate, explicit task.
     database:
-      name: psycopg2
+      name: sqlite3
       args:
-        user: {{ .Values.postgres.postgresUser | quote }}
-        password: {{ .Values.postgres.postgresPassword | quote }}
-        database: {{ .Values.postgres.postgresDB | quote }}
-        host: matrix-postgres-service
-        port: 5432
-        cp_min: 5
-        cp_max: 10
+        database: /data/homeserver.db
 
     redis:
       enabled: true
@@ -91,18 +145,15 @@ data:
 
     media_store_path: /data/media_store
 
-    # KDG epic #282 task 2: require an access token to download media.
-    # `matrix_synapse_enable_authenticated_media` was never a real Synapse
-    # config key, so it silently did nothing and is removed.
-    enable_authenticated_media: true
+    # Disable authenticated media requirement
+    enable_authenticated_media: false
+    matrix_synapse_enable_authenticated_media: false
 
     registration_shared_secret: {{ .Values.global.secrets.matrixRegistrationSharedSecret }}
     report_stats: false
-    # KDG epic #282 task 2: accounts are provisioned exclusively via
-    # Keycloak/UserService per ADR-005, so open client-API self-registration
-    # serves no purpose and is closed.
-    enable_registration: false
-    public_baseurl: {{ .Values.matrix.matrixApiUrl }}
+    enable_registration: true
+    enable_registration_without_verification: true
+    public_baseurl: {{ .Values.matrix.matrixApiUrl }}   
 
     suppress_key_validation_warnings: true
     trusted_key_servers:
@@ -115,21 +166,57 @@ data:
       - "stun:stun1.l.google.com:19302"
     turn_allow_guests: true
 
-    # KDG epic #282 task 2: the rc_* blocks previously set every rate limit to
-    # 100000/s, which effectively disabled Synapse's built-in abuse protection
-    # (registration floods, login/credential-stuffing attempts, join/invite
-    # spam). Removing them restores Synapse's shipped defaults.
-    #
-    # `exempt_from_ratelimiting` used to sit here to carve out internal
-    # service traffic, but it is not a real Synapse homeserver.yaml key (see
-    # https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html) —
-    # it silently did nothing, so internal traffic was never actually exempt.
-    # Synapse has no global/per-IP exemption option; the supported mechanisms
-    # are per-user overrides via the Admin API
-    # (`POST /_synapse/admin/v1/users/<user_id>/override_ratelimiting`) or the
-    # `get_ratelimit_override_for_user` module callback. Neither is wired up
-    # here — internal service traffic runs under the same shipped rc_* limits
-    # as everything else for now.
+    # Rate limiting - set to 100000 to effectively never hit limits
+    rc_message:
+      per_second: 100000
+      burst_count: 100000
+
+    rc_registration:
+      per_second: 100000
+      burst_count: 100000
+
+    rc_login:
+      address:
+        per_second: 100000
+        burst_count: 100000
+      account:
+        per_second: 100000
+        burst_count: 100000
+      failed_attempts:
+        per_second: 100000
+        burst_count: 100000
+
+    rc_admin_redaction:
+      per_second: 100000
+      burst_count: 100000
+
+    rc_joins:
+      local:
+        per_second: 100000
+        burst_count: 100000
+      remote:
+        per_second: 100000
+        burst_count: 100000
+
+    rc_3pid_validation:
+      per_second: 100000
+      burst_count: 100000
+
+    rc_invites:
+      per_room:
+        per_second: 100000
+        burst_count: 100000
+      per_user:
+        per_second: 100000
+        burst_count: 100000
+
+    # Exempt internal network from rate limiting. serverPublicIp is optional —
+    # `compact` drops it when unset, so there is a single render path and no
+    # whitespace-trimming edge case inside this block scalar.
+    exempt_from_ratelimiting:
+      {{- range compact (list "10.42.0.0/16" .Values.matrix.serverPublicIp "127.0.0.1") }}
+      - {{ . | quote }}
+      {{- end }}
 
     # Enable Sliding Sync (Matrix 2.0) for INSTANT real-time synchronization
     # MSC4140 delayed events let Element Call schedule a crash-safe leave event.
@@ -154,11 +241,7 @@ data:
         discover: false
         issuer: {{ .Values.global.springSecurityOAuth2ResourceserverJWTIssuerURI }}
         client_id: "matrix-synapse"
-        # KDG epic #282 task 3: previously hardcoded "caritas-matrix-secret-2025"
-        # (committed to repo history). Now sourced from secret management; the
-        # Keycloak client secret must be rotated alongside setting the real
-        # value here.
-        client_secret: {{ .Values.global.secrets.matrixOidcClientSecret | quote }}
+        client_secret: "caritas-matrix-secret-2025"
         scopes: ["openid", "profile", "email"]
         authorization_endpoint:  {{ .Values.global.authorizationendpoint }} 
         token_endpoint:  {{ .Values.global.tokenendpoint }} 

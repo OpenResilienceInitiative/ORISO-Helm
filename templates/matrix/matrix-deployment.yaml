@@ -22,7 +22,7 @@ spec:
     spec:       
       initContainers:
         - name: fix-permissions
-          image: {{ include "oriso.immutableImage" (list "matrix.initImage" .Values.matrix.initImage .Values.global.requireImmutableImages) | quote }}
+          image: {{ include "oriso.immutableImage" (list "matrix.initImage" .Values.matrix.initImage) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           command:
           - sh
@@ -37,7 +37,7 @@ spec:
             mountPath: /data
       containers:
       - name: synapse
-        image: {{ include "oriso.immutableImage" (list "matrix.image" .Values.matrix.image .Values.global.requireImmutableImages) | quote }}
+        image: {{ include "oriso.immutableImage" (list "matrix.image" .Values.matrix.image) | quote }}
         imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
         env:
           - name: SYNAPSE_SERVER_NAME
