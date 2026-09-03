@@ -104,32 +104,28 @@ elementCall:
 
 # ---------- Media security (epic ORISO-Admin#366, ADR-019) -----------------------------------------------------------
 
-# Fail-closed matrix-content-scanner in front of Matrix media downloads; off by default.
+# Fail-closed media scanner, off by default — see docs/media-scanner.md before enabling.
 mediaScanner:
   enabled: false
   replicas: 1
-  # Digest-pinned (vectorim/matrix-content-scanner:v1.3.0).
+  # vectorim/matrix-content-scanner:v1.3.0
   image: "docker.io/vectorim/matrix-content-scanner@sha256:dd73aa09d9cd8fe0be50a7f67466bb31aa677320aa4d8f3b1dc2efb267fc214c"
-  # Digest-pinned (clamav/clamav:1.5.4).
+  # clamav/clamav:1.5.4
   clamavImage: "docker.io/clamav/clamav@sha256:78810772a92b4a9168115bc6b2e0ffd702640893b9577f8c3d0432762d2655c4"
   clamavPort: 3310
   clamavTimeoutSeconds: 60
   matrixApiUrl: "http://matrix-synapse:8008"
-  # Download policy: anything outside this list fails the scan — widen consciously before enabling.
   allowedMimeTypes:
     - "image/jpeg"
     - "image/png"
     - "image/webp"
     - "image/gif"
-  # Closes the unscanned media route while the scanner serves /_matrix/media_proxy/... .
   blockDirectMediaAccess: true
   proxyTimeoutSeconds: 120
   maxUploadSize: "25m"
-  # Pre-provision out-of-band (head -c 32 /dev/urandom | base64); required when enabled.
   requestSecret:
     existingSecret: ""
     key: "request-secret"
-  # External vision sub-processor — rendering fails unless the signed zero-retention agreement is recorded (ORISO-Admin#734).
   aiCheck:
     enabled: false
     subProcessorAgreementSigned: false
