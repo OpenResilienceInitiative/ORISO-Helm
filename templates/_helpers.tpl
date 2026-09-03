@@ -30,13 +30,14 @@ Enabling the bundled SigNoz dependency turns this on automatically unless
 global.observability.autoEnableWithSignoz is explicitly false.
 */}}
 {{- define "oriso.observabilityEnabled" -}}
+{{- $observability := get .Values.global "observability" | default dict -}}
 {{- $autoEnableWithSignoz := true -}}
-{{- if hasKey .Values.global.observability "autoEnableWithSignoz" -}}
-{{- $autoEnableWithSignoz = .Values.global.observability.autoEnableWithSignoz -}}
+{{- if hasKey $observability "autoEnableWithSignoz" -}}
+{{- $autoEnableWithSignoz = get $observability "autoEnableWithSignoz" -}}
 {{- end -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
 {{- $signozEnabled := get $signoz "enabled" | default false -}}
-{{- if or .Values.global.observability.otlpEnabled (and $signozEnabled $autoEnableWithSignoz) -}}true{{- else -}}false{{- end -}}
+{{- if or (get $observability "otlpEnabled") (and $signozEnabled $autoEnableWithSignoz) -}}true{{- else -}}false{{- end -}}
 {{- end -}}
 
 {{/*
@@ -44,10 +45,11 @@ Resolve the OTLP HTTP collector host. A manually supplied collector wins; when
 the bundled SigNoz chart is enabled, use its in-cluster collector service.
 */}}
 {{- define "oriso.otlpCollectorHost" -}}
+{{- $observability := get .Values.global "observability" | default dict -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
 {{- $signozEnabled := get $signoz "enabled" | default false -}}
-{{- if .Values.global.observability.otlpCollectorHost -}}
-{{- .Values.global.observability.otlpCollectorHost -}}
+{{- if get $observability "otlpCollectorHost" -}}
+{{- get $observability "otlpCollectorHost" -}}
 {{- else if $signozEnabled -}}
 {{- printf "%s.%s:%v" (include "oriso.signozOtelCollectorServiceName" .) .Release.Namespace (get $signoz "orisoOtelCollectorHttpPort" | default 4318) -}}
 {{- end -}}
