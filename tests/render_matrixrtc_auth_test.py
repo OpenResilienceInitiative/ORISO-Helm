@@ -26,8 +26,6 @@ def render() -> list[dict]:
             "--set-string",
             "global.secrets.redisdefaultPass=test-redis-password",
             "--set-string",
-            "matrixrtcAuth.callPolicyToken=test-only-call-policy-token-with-at-least-48-characters",
-            "--set-string",
             "userService.smtpUser=smtp-canary-user",
             "--set-string",
             "userService.smtpPassword=smtp-canary-password",
@@ -60,21 +58,24 @@ def main() -> None:
     assert ("ConfigMap", "livekit-token-service-script") not in names
     assert ("ConfigMap", "livekit-token-service-configmap-env") not in names
     assert ("Deployment", "livekit-token-service") not in names
+    assert ("Job", "matrixrtc-bootstrap-token") not in names
+    assert ("ServiceAccount", "matrixrtc-bootstrap") not in names
+    assert ("Role", "matrixrtc-bootstrap") not in names
 
     gateway = find(documents, "Deployment", "matrixrtc-auth-policy-gateway")
     upstream = find(documents, "Deployment", "matrixrtc-authorization-service")
     userservice = find(documents, "Deployment", "userservice")
     livekit = find(documents, "Deployment", "livekit")
     ingress = find(documents, "Ingress", "livekit-jwt-ingress")
-    auth_secret = find(documents, "Secret", "matrixrtc-auth-secrets")
-    find(documents, "Secret", "livekit-config")
+    assert ("Secret", "matrixrtc-auth-runtime") not in names
+    assert ("Secret", "livekit-config-runtime") not in names
 
     gateway_container = gateway["spec"]["template"]["spec"]["containers"][0]
     upstream_container = upstream["spec"]["template"]["spec"]["containers"][0]
     userservice_container = userservice["spec"]["template"]["spec"]["containers"][0]
     livekit_container = livekit["spec"]["template"]["spec"]["containers"][0]
 
-    for container in (gateway_container, upstream_container, livekit_container):
+    for container in (gateway_container, upstream_container):
         assert "@sha256:" in container["image"]
         assert not container["image"].endswith(":latest")
 
@@ -84,10 +85,7 @@ def main() -> None:
         upstream_container["image"].split("@", maxsplit=1)[0]
         == "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service"
     )
-    upstream_env = {
-        entry["name"]: entry
-        for entry in upstream_container["env"]
-    }
+    upstream_env = {entry["name"]: entry for entry in upstream_container["env"]}
     assert upstream_env["LIVEKIT_LOG_LEVEL"]["value"] == "off"
     gateway_env = {entry["name"]: entry for entry in gateway_container["env"]}
     assert gateway_env["MATRIXRTC_CALL_POLICY_URL"]["value"] == (
@@ -96,26 +94,27 @@ def main() -> None:
     assert gateway_env["MATRIXRTC_CALL_POLICY_TOKEN_FILE"]["value"] == (
         "/run/secrets/call-policy-token"
     )
-    gateway_secret_items = gateway["spec"]["template"]["spec"]["volumes"][0][
-        "secret"
-    ]["items"]
+    gateway_secret = gateway["spec"]["template"]["spec"]["volumes"][0]["secret"]
+    assert gateway_secret["secretName"] == "matrixrtc-auth-runtime"
+    gateway_secret_items = gateway_secret["items"]
     assert {
-        "key": "call-policy-token",
+        "key": "matrix-call-policy-token",
         "path": "call-policy-token",
     } in gateway_secret_items
 
-    userservice_env = {
-        entry["name"]: entry for entry in userservice_container["env"]
-    }
+    userservice_env = {entry["name"]: entry for entry in userservice_container["env"]}
     assert userservice_env["MATRIXRTC_CALL_POLICY_TOKEN"]["valueFrom"] == {
         "secretKeyRef": {
-            "name": "matrixrtc-auth-secrets",
-            "key": "call-policy-token",
+            "name": "matrixrtc-auth-runtime",
+            "key": "matrix-call-policy-token",
         }
     }
-    call_policy_token = auth_secret["stringData"]["call-policy-token"]
-    assert len(call_policy_token) >= 48
-    assert call_policy_token not in {"", "changeme"}
+    upstream_secret = upstream["spec"]["template"]["spec"]["volumes"][0]["secret"]
+    assert upstream_secret["secretName"] == "matrixrtc-auth-runtime"
+    assert {item["key"] for item in upstream_secret["items"]} == {
+        "livekit-api-key",
+        "livekit-api-secret",
+    }
 
     # The ingress controller lives in its own namespace. A bare podSelector
     # would silently deny it and every /livekit/jwt request would 502, so the
@@ -162,18 +161,56 @@ def main() -> None:
     assert livekit["spec"]["replicas"] == 1
     assert livekit["spec"]["strategy"] == {"type": "Recreate"}
     assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 60
-    assert livekit["spec"]["template"]["spec"]["volumes"][0]["secret"]["secretName"] == (
-        "livekit-config"
-    )
+    assert livekit["spec"]["template"]["spec"]["volumes"][0]["secret"][
+        "secretName"
+    ] == ("livekit-config-runtime")
 
     ingress_backend = ingress["spec"]["rules"][0]["http"]["paths"][0]["backend"]
     assert ingress_backend["service"]["name"] == "matrixrtc-auth-policy-gateway"
-    assert ingress["metadata"]["annotations"][
-        "nginx.ingress.kubernetes.io/limit-rps"
-    ] == "10"
-    assert ingress["metadata"]["annotations"][
+    assert (
+        ingress["metadata"]["annotations"]["nginx.ingress.kubernetes.io/limit-rps"]
+        == "10"
+    )
+    assert (
+        ingress["metadata"]["annotations"][
+            "nginx.ingress.kubernetes.io/cors-allow-origin"
+        ]
+        == "https://your-domain.example.com"
+    )
+    ingress_annotations = ingress["metadata"]["annotations"]
+    assert ingress_annotations[
+        "nginx.ingress.kubernetes.io/cors-allow-methods"
+    ] == "POST, OPTIONS"
+    assert ingress_annotations[
+        "nginx.ingress.kubernetes.io/cors-allow-headers"
+    ] == "Content-Type"
+    assert ingress_annotations[
+        "nginx.ingress.kubernetes.io/cors-allow-credentials"
+    ] == "false"
+
+    # Element Call submits its OpenID credentials in the POST JSON body. The
+    # browser preflight therefore needs POST plus Content-Type, but never
+    # cookie/HTTP-auth credential sharing across origins.
+    element_call_preflight = {
+        "origin": "https://your-domain.example.com",
+        "method": "POST",
+        "request_headers": {"Content-Type"},
+    }
+    assert element_call_preflight["origin"] == ingress_annotations[
         "nginx.ingress.kubernetes.io/cors-allow-origin"
-    ] == "https://your-domain.example.com"
+    ]
+    assert element_call_preflight["method"] in {
+        method.strip()
+        for method in ingress_annotations[
+            "nginx.ingress.kubernetes.io/cors-allow-methods"
+        ].split(",")
+    }
+    assert element_call_preflight["request_headers"] <= {
+        header.strip()
+        for header in ingress_annotations[
+            "nginx.ingress.kubernetes.io/cors-allow-headers"
+        ].split(",")
+    }
 
     rendered = yaml.safe_dump_all(documents)
     assert "LIVEKIT_FULL_ACCESS_HOMESERVERS" in rendered
@@ -181,10 +218,19 @@ def main() -> None:
     assert "MATRIX_ADMIN_TOKEN_FILE" not in rendered
     assert "matrix-admin-token" not in rendered
     assert "LIVEKIT_API_SECRET" not in rendered
+    for canary in (
+        "test-only-livekit-key",
+        "test-only-livekit-secret",
+        "test-only-call-policy-token",
+        "test-only-membership-reader-password",
+    ):
+        assert canary not in rendered
     assert "kind: NetworkPolicy" in rendered
     assert "kind: PodDisruptionBudget" in rendered
 
-    print("PASS: MatrixRTC auth renders one public policy gateway and external secret references")
+    print(
+        "PASS: MatrixRTC auth renders one public policy gateway and external secret references"
+    )
 
 
 if __name__ == "__main__":

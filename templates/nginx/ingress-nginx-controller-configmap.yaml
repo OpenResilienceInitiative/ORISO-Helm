@@ -10,4 +10,14 @@ metadata:
 data:
   allow-snippet-annotations: "true"
   annotations-risk-level: "Critical"
+  # KDG epic #282 task 7: the ingress-nginx default upstream log format logs
+  # $remote_addr (client IP) and $request, which embeds the full request URI
+  # including the query string — magic-link / password-reset tokens travel as
+  # GET parameters and would otherwise land in this log unmasked. This format
+  # drops the client IP entirely and logs $uri instead of $request so no query
+  # string (and therefore no token) is ever written. How long the resulting
+  # log lines are retained (D7) is a separate operator decision, still open.
+  log-format-upstream: '[$time_local] "$request_method $uri $server_protocol"
+    $status $body_bytes_sent $request_time [$proxy_upstream_name] $upstream_status
+    $req_id'
 {{- end }}
