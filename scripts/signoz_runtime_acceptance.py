@@ -239,6 +239,28 @@ def _kubectl(runner: Runner, namespace: str, *arguments: str) -> str:
     return runner.run(["kubectl", "-n", namespace, *arguments]).stdout.strip()
 
 
+def _clickhouse_statefulset(runner: Runner, namespace: str, release: str) -> str:
+    payload = json.loads(
+        _kubectl(
+            runner,
+            namespace,
+            "get",
+            "statefulset",
+            "-l",
+            f"clickhouse.altinity.com/chi={release}-clickhouse",
+            "-o",
+            "json",
+        )
+    )
+    names = [item.get("metadata", {}).get("name") for item in payload.get("items", [])]
+    names = [name for name in names if name]
+    if len(names) != 1:
+        raise RuntimeError(
+            "expected exactly one ClickHouse StatefulSet, found " + str(len(names))
+        )
+    return names[0]
+
+
 def _check_runtime_readiness(
     runner: Runner, namespace: str, release: str, timeout: str
 ) -> None:
@@ -247,9 +269,10 @@ def _check_runtime_readiness(
     if chi.get("metadata", {}).get("deletionTimestamp"):
         raise RuntimeError(f"ClickHouseInstallation {chi_name} is deleting")
 
+    clickhouse_statefulset = _clickhouse_statefulset(runner, namespace, release)
     rollout_targets = (
         f"deployment/{release}-clickhouse-operator",
-        f"statefulset/{release}-clickhouse-cluster-0-0",
+        f"statefulset/{clickhouse_statefulset}",
         f"deployment/{release}-signoz-otel-collector",
         f"statefulset/{release}-signoz",
     )

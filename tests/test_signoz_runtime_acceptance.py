@@ -129,5 +129,54 @@ class CollectorPipelineContractTest(unittest.TestCase):
                     MODULE.validate_collector_config(config)
 
 
+class ClickHouseRuntimeDiscoveryTest(unittest.TestCase):
+    def test_discovers_operator_statefulset_by_clickhouse_installation_label(self) -> None:
+        class FakeRunner:
+            def __init__(self) -> None:
+                self.commands: list[list[str]] = []
+
+            def run(self, command: list[str], input_text: str | None = None):
+                self.commands.append(command)
+                return type(
+                    "Result",
+                    (),
+                    {
+                        "stdout": json.dumps(
+                            {
+                                "items": [
+                                    {
+                                        "metadata": {
+                                            "name": "chi-caritas-clickhouse-cluster-0-0"
+                                        }
+                                    }
+                                ]
+                            }
+                        )
+                    },
+                )()
+
+        runner = FakeRunner()
+
+        self.assertEqual(
+            MODULE._clickhouse_statefulset(runner, "caritas", "caritas"),
+            "chi-caritas-clickhouse-cluster-0-0",
+        )
+        self.assertEqual(
+            runner.commands,
+            [
+                [
+                    "kubectl",
+                    "-n",
+                    "caritas",
+                    "get",
+                    "statefulset",
+                    "-l",
+                    "clickhouse.altinity.com/chi=caritas-clickhouse",
+                    "-o",
+                    "json",
+                ]
+            ],
+        )
+
 if __name__ == "__main__":
     unittest.main()
