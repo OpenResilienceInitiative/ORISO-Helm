@@ -9,11 +9,9 @@ Run after the loop exits green, before PR prep. Record results in `04-test-evide
 
 Order (stop escalating when confidence is sufficient):
 
-1. Targeted vitest files for every touched module: `npx vitest run <files>`
-2. `npm run lint:scripts` and, if styles changed, `npm run lint:style`
-3. `npm run test:unit` if changes span multiple modules
-4. `npm run build` if imports, types, or config changed
-5. UI changes: Browser check of the affected screens; save screenshots into the task folder; verify keyboard/focus behavior per AGENTS.md
+1. `helm lint` when chart, values, or templates changed; otherwise "not applicable"
+2. `helm template` for the same Helm-path changes; otherwise "not applicable"
+3. Do not run Vitest or npm scripts in this repo
 
 Evidence format in `04-test-evidence.md` — one line per check:
 

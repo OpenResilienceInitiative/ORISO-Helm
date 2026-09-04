@@ -11,8 +11,8 @@ When invoked:
 
 1. Read the problem brief (`00-problem-brief.md` in the task folder) and existing templates/values.
 2. Identify affected charts, values keys, and deployment risks.
-3. Produce content for `01-spike.md` and `02-implementation-plan.md`.
-4. Every subtask needs a concrete verify command (`helm lint` / `helm template` as already used in this repo).
+3. Produce content for `01-spike.md` and `02-implementation-plan.md`. The parent workflow must persist those files (this subagent is readonly).
+4. Every subtask needs a concrete verify command. Use `helm lint` / `helm template` only when chart, values, or template inputs change; otherwise mark verify as "not applicable".
 5. If requirements are incomplete, list only the smallest set of blocking questions.
 6. Respect ORISO invariants: branch from `dev`, do not invent values keys, do not weaken image pins or security defaults.
 

@@ -12,9 +12,9 @@ Structure:
 - **Objective**: one line
 - **Impacted files**: paths only
 - **Subtasks**: table with columns `#`, `Subtask`, `Files`, `Verify with`, `Status`
-    - Each subtask must be small enough for one loop iteration and have a concrete verify command (e.g. `npx vitest run src/foo.test.ts`)
+    - Each subtask must be small enough for one loop iteration and have a concrete verify command using this repo’s toolchain (`helm lint`, `helm template` when chart/values/templates change; otherwise "not applicable")
     - Status values: `todo`, `doing`, `done`, `blocked`
-- **Verification checklist**: which of `npm run test:unit`, `lint:scripts`, `lint:style`, `build`, Browser check apply to this task
+- **Verification checklist**: `helm lint` and `helm template` when Helm paths are touched; otherwise "not applicable"
 - **Risks**
 
 Update the Status column as the loop progresses — this file is the loop's source of truth for what's next.
