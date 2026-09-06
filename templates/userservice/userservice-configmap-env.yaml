@@ -150,7 +150,8 @@ data:
   # ADR-016 addendum (2026-09-05) / KDG #1116. Days after archiving (or after creation for a
   # discussion never archived) until the team discussion room, row and participants are purged.
   # 0 or less switches the job off. 90 is the DPIA figure, pending data protection officer sign-off.
-  TEAM_DISCUSSION_ARCHIVE_RETENTION_DAYS: {{ .Values.userService.teamDiscussion.archiveRetentionDays | default 90 | quote }}
+  # hasKey instead of `default`: Helm treats 0 as empty, which would turn "off" back into 90.
+  TEAM_DISCUSSION_ARCHIVE_RETENTION_DAYS: {{ if hasKey (.Values.userService.teamDiscussion | default dict) "archiveRetentionDays" }}{{ .Values.userService.teamDiscussion.archiveRetentionDays | quote }}{{ else }}"90"{{ end }}
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: "{{ .Values.global.keycloak.authServerUrl }}/realms/{{ .Values.global.keycloak.realm }}"
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: "{{ .Values.global.keycloak.authServerUrl }}{{ .Values.global.keycloak.openidConnectUrl }}/certs"
   # OBS-P2: OTLP traces/metrics to the SigNoz gateway collector. Property
