@@ -98,6 +98,27 @@ spec:
             - name: KC_HOSTNAME_STRICT_HTTPS
               value: "false"
             {{- end }}
+            {{- with .Values.emailBranding }}
+            {{- $origin := trimSuffix "/" (required "keycloak emailBranding.appUrl is required" .appUrl) }}
+            - name: ORISO_APP_URL
+              value: {{ $origin | quote }}
+            - name: ORISO_PRIVACY_URL
+              value: {{ default (printf "%s/datenschutz" $origin) .privacyUrl | quote }}
+            - name: ORISO_IMPRINT_URL
+              value: {{ default (printf "%s/impressum" $origin) .imprintUrl | quote }}
+            - name: ORISO_SETTINGS_URL
+              value: {{ printf "%s/profile/settings" $origin | quote }}
+            - name: ORISO_UNSUBSCRIBE_URL
+              value: {{ printf "%s/profile/settings/notifications" $origin | quote }}
+            - name: ORISO_LOGIN_URL
+              value: {{ printf "%s/login" $origin | quote }}
+            {{- range $name, $value := dict "ORISO_PLATFORM_NAME" .platformName "ORISO_ORG_NAME" .orgName "ORISO_ORG_ADDRESS" .orgAddress "ORISO_CONTACT_LINE" .contactLine "ORISO_LOGO_URL" .logoUrl "ORISO_PRIMARY_COLOR" .primaryColor "ORISO_ACCENT_COLOR" .accentColor }}
+            {{- if $value }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             - name: KC_LOG_LEVEL
               valueFrom:
                 configMapKeyRef:
