@@ -147,6 +147,10 @@ data:
   SUPPORT_ACCESS_HANDSHAKE_TTL_SECONDS: {{ .Values.userService.supportAccess.handshakeTtlSeconds | default 300 | quote }}
   SUPPORT_ACCESS_SESSION_TTL_HOURS: {{ .Values.userService.supportAccess.sessionTtlHours | default 4 | quote }}
   SUPPORT_ACCESS_AUDIT_RETENTION_MONTHS: {{ .Values.userService.supportAccess.auditRetentionMonths | default 12 | quote }}
+  # ADR-016 addendum (2026-09-05) / KDG #1116. Days after archiving (or after creation for a
+  # discussion never archived) until the team discussion room, row and participants are purged.
+  # 0 or less switches the job off. 90 is the DPIA figure, pending data protection officer sign-off.
+  TEAM_DISCUSSION_ARCHIVE_RETENTION_DAYS: {{ .Values.userService.teamDiscussion.archiveRetentionDays | default 90 | quote }}
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: "{{ .Values.global.keycloak.authServerUrl }}/realms/{{ .Values.global.keycloak.realm }}"
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: "{{ .Values.global.keycloak.authServerUrl }}{{ .Values.global.keycloak.openidConnectUrl }}/certs"
   # OBS-P2: OTLP traces/metrics to the SigNoz gateway collector. Property

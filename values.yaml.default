@@ -308,6 +308,11 @@ userService:
     sessionTtlHours: 4
     auditRetentionMonths: 12
 
+  # ADR-016 addendum (2026-09-05) / KDG #1116: team discussion archive purge. Days after
+  # archiving until room, row and participants are deleted; 0 or less switches the job off.
+  teamDiscussion:
+    archiveRetentionDays: 90
+
   # 2FA / OTP login posture — enabled by default.
   otpAllowedForUsers: "true"
   otpAllowedForConsultants: "true"
