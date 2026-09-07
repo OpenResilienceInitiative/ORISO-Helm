@@ -258,6 +258,9 @@ online-counseling-redis:
 
 # Keycloak
 online-counseling-keycloak:
+  # Optional theme overrides. Set appUrl plus a verified first-party logoUrl
+  # per environment; other values retain the generated theme defaults.
+  emailBranding: {}
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
   imageVersion: "2.0.2"
 
