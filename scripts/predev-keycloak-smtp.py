@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import sys
+import socket
+import ssl
 import urllib.request
 
 ORIGIN = 'https://predev.oriso.org'
@@ -39,18 +41,20 @@ def setting(settings, name):
     return value.get('value') if isinstance(value, dict) else value
 
 
-def candidate(settings, credentials):
+def candidate(settings, credentials, implicit_tls_port=None):
     if setting(settings, 'Enabled') is not True:
         raise Refused('Platform SMTP transport is not enabled')
     secure = setting(settings, 'Secure')
-    if secure is not True:
+    if secure not in (True, False) or not isinstance(secure, bool):
+        raise Refused('Invalid SMTP secure setting')
+    if secure is not True and implicit_tls_port is None:
         # Keycloak 26.6.3 enables STARTTLS but does not require it. Do not weaken
         # UserService's mail.smtp.starttls.required=true or guess a different port.
         raise Refused('Required STARTTLS cannot be represented by this Keycloak provider')
     port = setting(settings, 'Port')
     if isinstance(port, bool) or not str(port).isdigit() or not 1 <= int(port) <= 65535:
         raise Refused('Invalid SMTP port')
-    result = {'host': setting(settings, 'Host'), 'port': str(port),
+    result = {'host': setting(settings, 'Host'), 'port': str(implicit_tls_port if implicit_tls_port is not None else port),
               'from': setting(settings, 'From'), 'auth': 'true',
               'ssl': 'true', 'starttls': 'false',
               'user': credentials.get('globalSmtpUsername'),
@@ -72,11 +76,23 @@ def matches(smtp, expected):
             and isinstance(smtp.get('password'), str) and bool(smtp['password']))
 
 
-def run(action, origin, realm, marker, auth, request=http, keycloak_prefix='/auth'):
+def verify_implicit_tls(host, port):
+    # The default context requires certificate-chain and hostname validation.
+    # Probe only TLS; no SMTP authentication or message is sent.
+    context = ssl.create_default_context()
+    with socket.create_connection((host, port), timeout=15) as connection:
+        with context.wrap_socket(connection, server_hostname=host):
+            pass
+
+
+def run(action, origin, realm, marker, auth, request=http, keycloak_prefix='/auth',
+        implicit_tls_port=None, tls_probe=verify_implicit_tls):
     if origin != ORIGIN or realm != REALM or keycloak_prefix not in ('', '/auth'):
         raise Refused('Only the fixed PreDev realm target is permitted')
     if action not in ('apply', 'restore', 'check'):
         raise Refused('Unknown operation')
+    if implicit_tls_port is not None and (implicit_tls_port != 465 or action != 'apply'):
+        raise Refused('Only apply permits the explicit implicit-TLS port 465 override')
     marker = Path(marker)
     token = auth.get('keycloakToken')
     if not isinstance(token, str) or not token:
@@ -110,10 +126,23 @@ def run(action, origin, realm, marker, auth, request=http, keycloak_prefix='/aut
         credentials = call('GET', origin + '/service/settingsadmin/smtp-credentials', platform_token)
         if not isinstance(settings, dict) or not isinstance(credentials, dict):
             raise Refused('Platform SMTP source unavailable')
-        smtp = candidate(settings, credentials)
+        smtp = candidate(settings, credentials, implicit_tls_port)
+        transport_override = None
+        if implicit_tls_port is not None:
+            try:
+                tls_probe(smtp['host'], implicit_tls_port)
+            except Exception:
+                raise Refused('Implicit-TLS certificate verification failed; no realm write') from None
+            transport_override = {'type': 'explicit-implicit-tls',
+                                  'sourcePort': setting(settings, 'Port'),
+                                  'sourceSecure': setting(settings, 'Secure'),
+                                  'selectedPort': implicit_tls_port,
+                                  'certificateVerified': True}
         record = {'version': 1, 'origin': origin, 'realm': realm,
                   'keycloakPrefix': keycloak_prefix, 'originalSmtp': {},
                   'candidatePublic': public_shape(smtp)}
+        if transport_override is not None:
+            record['transportOverride'] = transport_override
         # Exclusive write before PUT preserves an empty-original marker even if
         # the response is lost. Never persist user/password or token hashes.
         fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -159,11 +188,12 @@ def main():
     parser.add_argument('--realm', required=True)
     parser.add_argument('--marker', required=True)
     parser.add_argument('--keycloak-prefix', choices=['', '/auth'], default='/auth')
+    parser.add_argument('--implicit-tls-port', type=int, choices=[465])
     args = parser.parse_args()
     try:
         auth = json.load(sys.stdin)
         result = run(args.action, args.origin, args.realm, args.marker, auth,
-                     keycloak_prefix=args.keycloak_prefix)
+                     keycloak_prefix=args.keycloak_prefix, implicit_tls_port=args.implicit_tls_port)
         print(json.dumps(result))
     except Refused as error:
         print(str(error), file=sys.stderr)

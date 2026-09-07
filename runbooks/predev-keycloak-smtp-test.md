@@ -29,10 +29,22 @@ verified root deployment can use `--keycloak-prefix ''`. Redirects are refused.
 local Maven artifact with `javap -c -p`: `buildEmailProperties` maps `starttls` to
 `mail.smtp.starttls.enable` only, and does not forward arbitrary SMTP map keys or
 set `mail.smtp.starttls.required`. UserService requires STARTTLS when secure=false.
-Consequently this helper refuses secure=false; it supports only the exact existing
-implicit-TLS source (`globalSmtpSecure=true`) and does not guess a new port or
-weaken TLS. If the source requires STARTTLS, stop and report this configuration
-limitation. There is no realm-only required-STARTTLS switch in the inspected provider.
+Consequently the default helper refuses secure=false and does not guess a new
+port or weaken TLS. There is no realm-only required-STARTTLS switch in the inspected
+provider.
+
+For an explicitly coordinated PreDev test, `apply --implicit-tls-port 465` selects
+implicit TLS on **the same source host with the same source credentials**. This
+option is never automatic and no other override port is accepted. Before writing
+the marker or realm, the helper connects to that host on 465 using Python's default
+SSL context with certificate-chain and hostname verification (SNI is the source
+hostname). The probe does not authenticate or send mail. A failed probe stops
+without a realm write; there is no fallback. Source CTS settings remain unchanged.
+The nonsecret marker records `transportOverride` with original port/secure,
+selected port and certificate verification. Apply's realm readback verifies
+ssl=true, starttls=false, port=465. This is an explicit transport test override,
+not a claim that the source was already configured for 465. Check/restore use the
+same marker without repeating the override option.
 
 UserService can prefer its SMTP_USER/SMTP_PASSWORD environment over CTS credentials.
 This helper explicitly copies the CTS platform source; if claiming parity with
@@ -50,6 +62,8 @@ host/port/from/TLS flags. Username, password, tokens and secret hashes are exclu
 python3 scripts/predev-keycloak-smtp.py apply \
   --origin https://predev.oriso.org --realm online-beratung \
   --marker /absolute/operator-artifacts/keycloak-smtp-empty-original.json
+# For the explicitly coordinated same-host TLS test only, append:
+# --implicit-tls-port 465
 
 python3 scripts/predev-keycloak-smtp.py check \
   --origin https://predev.oriso.org --realm online-beratung \

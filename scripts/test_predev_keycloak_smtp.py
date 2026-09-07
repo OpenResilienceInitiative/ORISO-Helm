@@ -99,6 +99,43 @@ class SmtpTest(unittest.TestCase):
         self.assertNotIn('private', str(error.exception))
         self.assertEqual(json.loads(self.marker.read_text())['originalSmtp'], {})
 
+    def test_explicit_tls_override_verifies_same_host_and_records_override(self):
+        self.settings['globalSmtpSecure'] = False
+        self.settings['globalSmtpPort'] = 587
+        probes = []
+        result = self.run_action('apply', implicit_tls_port=465,
+                                 tls_probe=lambda host, port: probes.append((host, port)))
+        self.assertEqual(result['state'], 'candidate-verified')
+        self.assertEqual(probes, [('smtp.example.org', 465)])
+        self.assertEqual(self.smtp['port'], '465')
+        self.assertEqual(self.settings['globalSmtpPort'], 587)
+        self.assertIs(self.settings['globalSmtpSecure'], False)
+        marker = json.loads(self.marker.read_text())
+        self.assertEqual(marker['transportOverride'], {'type': 'explicit-implicit-tls', 'sourcePort': 587, 'sourceSecure': False, 'selectedPort': 465, 'certificateVerified': True})
+        self.assertEqual(self.run_action('restore')['state'], 'empty-restored')
+
+    def test_failed_tls_probe_never_writes_or_creates_marker(self):
+        self.settings['globalSmtpSecure'] = False
+        def fail(host, port): raise RuntimeError('private-server-error')
+        with self.assertRaises(h.Refused) as error:
+            self.run_action('apply', implicit_tls_port=465, tls_probe=fail)
+        self.assertNotIn('private', str(error.exception))
+        self.assertFalse(self.marker.exists())
+        self.assertFalse(any(c[0] == 'PUT' for c in self.calls))
+
+    def test_only_explicit_465_override_allowed(self):
+        for port in [587, 25, 0]:
+            with self.assertRaises(h.Refused): self.run_action('apply', implicit_tls_port=port)
+        self.assertFalse(self.calls)
+
+    def test_tls_probe_uses_default_trust_and_source_hostname(self):
+        with patch.object(h.ssl, 'create_default_context') as make_context, patch.object(h.socket, 'create_connection') as connect:
+            h.verify_implicit_tls('smtp.example.org', 465)
+            make_context.assert_called_once_with()
+            connect.assert_called_once_with(('smtp.example.org', 465), timeout=15)
+            make_context.return_value.wrap_socket.assert_called_once_with(
+                connect.return_value.__enter__.return_value, server_hostname='smtp.example.org')
+
     def test_cli_never_logs_auth_or_raw_errors(self):
         stdout, stderr = io.StringIO(), io.StringIO()
         args = ['helper', 'apply', '--origin', 'https://predev.oriso.org', '--realm', 'online-beratung', '--marker', str(self.marker)]
