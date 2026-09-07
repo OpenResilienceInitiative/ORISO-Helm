@@ -147,8 +147,8 @@ data:
   SUPPORT_ACCESS_HANDSHAKE_TTL_SECONDS: {{ .Values.userService.supportAccess.handshakeTtlSeconds | default 300 | quote }}
   SUPPORT_ACCESS_SESSION_TTL_HOURS: {{ .Values.userService.supportAccess.sessionTtlHours | default 4 | quote }}
   SUPPORT_ACCESS_AUDIT_RETENTION_MONTHS: {{ .Values.userService.supportAccess.auditRetentionMonths | default 12 | quote }}
-  # ADR-016 addendum (2026-09-05) / KDG #1116. Days after archiving (or after creation for a
-  # discussion never archived) until the team discussion room, row and participants are purged.
+  # ADR-016 addendum (2026-09-05) / KDG #1116. Days after archiving until an ARCHIVED team
+  # discussion's room, row and participants are purged (OPEN discussions are never purged).
   # 0 or less switches the job off. Off unless a value is set explicitly: the 90-day DPIA figure
   # is pending data protection officer sign-off, so the chart never enables deletion on its own.
   # hasKey instead of `default`: Helm treats 0 as empty, which would drop an explicit "off".

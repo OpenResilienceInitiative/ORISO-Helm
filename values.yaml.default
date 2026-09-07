@@ -309,7 +309,8 @@ userService:
     auditRetentionMonths: 12
 
   # ADR-016 addendum (2026-09-05) / KDG #1116: team discussion archive purge. Days after
-  # archiving until room, row and participants are deleted; 0 or less switches the job off.
+  # archiving until an ARCHIVED discussion's room, row and participants are deleted (OPEN ones
+  # are never purged); 0 or less switches the job off.
   # Ships OFF (0) until the data protection officer signs off the retention period. The DPIA
   # proposal is 90; set that value in the environment overlay once approved.
   teamDiscussion:
