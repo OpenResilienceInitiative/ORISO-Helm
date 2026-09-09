@@ -410,6 +410,195 @@ signoz:
     persistence:
       size: 20Gi
 
+# Official SigNoz Kubernetes collection layer. Keep this separate switch
+# fail-closed: observability-validation.yaml rejects enabling it without the
+# bundled SigNoz backend and complete environment identity.
+k8s-infra:
+  enabled: false
+  global:
+    clusterName: ""
+    deploymentEnvironment: ""
+    cloud: other
+  # Empty is intentional. As a dependency the upstream chart derives the
+  # sibling service `<release>-signoz-otel-collector:4318`.
+  otelCollectorEndpoint: null
+  otelInsecure: true
+  presets:
+    otlpExporter:
+      enabled: false
+    otlphttpExporter:
+      enabled: true
+    selfTelemetry:
+      metrics:
+        enabled: true
+    logsCollection:
+      enabled: true
+      startAt: end
+      includeFilePath: true
+      includeFileName: false
+      whitelist:
+        enabled: true
+        signozLogs: false
+        namespaces:
+          - '${env:K8S_NAMESPACE}'
+        pods: []
+        containers: []
+        additionalInclude: []
+      blacklist:
+        enabled: true
+        signozLogs: true
+        namespaces:
+          - kube-system
+        pods: []
+        containers: []
+        additionalExclude: []
+      operators:
+        - id: container-parser
+          type: container
+    hostMetrics:
+      enabled: true
+    kubeletMetrics:
+      enabled: true
+    kubernetesAttributes:
+      enabled: true
+    clusterMetrics:
+      enabled: true
+    k8sEvents:
+      enabled: true
+      namespaces:
+        - '${env:K8S_NAMESPACE}'
+  otelAgent:
+    clusterRole:
+      rules:
+        - apiGroups:
+            - ""
+          resources:
+            - pods
+            - namespaces
+            - nodes
+            - persistentvolumeclaims
+          verbs:
+            - get
+            - list
+            - watch
+        - apiGroups:
+            - apps
+            - extensions
+          resources:
+            - replicasets
+          verbs:
+            - get
+            - list
+            - watch
+        - apiGroups:
+            - batch
+          resources:
+            - jobs
+          verbs:
+            - get
+            - list
+            - watch
+        - apiGroups:
+            - ""
+          resources:
+            - nodes/stats
+            - nodes/proxy
+          verbs:
+            - get
+    ports:
+      otlp:
+        enabled: false
+        hostPort: ""
+      otlp-http:
+        enabled: false
+        hostPort: ""
+      zipkin:
+        enabled: false
+        hostPort: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
+    config:
+      processors:
+        # ORISO application stdout is nested JSON. Preserve technical
+        # correlation and severity while suppressing the raw free-text body,
+        # stack trace, request correlation ID, and every unlisted attribute.
+        #
+        # error_mode: ignore — a single malformed record must not drop the
+        # whole log batch. ParseJSON fails on truncated JSON and the
+        # trace_id/span_id setters reject non-hex ids; with `propagate` those
+        # OTTL errors are returned to the pipeline and the entire batch is
+        # discarded. With `ignore` the collector logs the failing statement and
+        # continues, so the unconditional body replacement and keep_keys below
+        # still run: the privacy contract stays fail-closed per record.
+        transform/oriso_log_privacy:
+          error_mode: ignore
+          log_statements:
+            - 'set(log.cache, ParseJSON(log.body)) where IsMatch(log.body, "^\\s*\\{")'
+            - 'set(log.attributes["trace.id"], log.cache["traceId"]) where log.cache["traceId"] != nil'
+            - 'set(log.attributes["span.id"], log.cache["spanId"]) where log.cache["spanId"] != nil'
+            - 'set(log.trace_id.string, log.cache["traceId"]) where log.cache["traceId"] != nil'
+            - 'set(log.span_id.string, log.cache["spanId"]) where log.cache["spanId"] != nil'
+            - 'set(log.attributes["log.level"], log.cache["log"]["level"]) where log.cache["log"]["level"] != nil'
+            - 'set(log.severity_text, log.cache["log"]["level"]) where log.cache["log"]["level"] != nil'
+            - 'set(log.attributes["log.logger"], log.cache["log"]["logger"]) where log.cache["log"]["logger"] != nil'
+            - 'set(log.attributes["service.name"], log.cache["serviceName"]) where log.cache["serviceName"] != nil'
+            - 'set(log.body, "[ORISO log body suppressed by privacy policy]")'
+            - 'keep_keys(log.attributes, ["trace.id", "span.id", "log.level", "log.logger", "service.name"])'
+      service:
+        telemetry:
+          resource:
+            service.name: oriso-k8s-infra-agent
+            deployment.environment: '${env:DEPLOYMENT_ENVIRONMENT}'
+        pipelines:
+          traces:
+            receivers: []
+            processors:
+              - batch
+            exporters: []
+          metrics:
+            receivers: []
+            processors:
+              - batch
+            exporters: []
+          logs:
+            receivers: []
+            processors:
+              - transform/oriso_log_privacy
+              - batch
+            exporters: []
+  otelDeployment:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL
+    config:
+      service:
+        telemetry:
+          resource:
+            service.name: oriso-k8s-infra-cluster
+            deployment.environment: '${env:DEPLOYMENT_ENVIRONMENT}'
+
 # Health Dashboard
 healthDashboard:
   image:

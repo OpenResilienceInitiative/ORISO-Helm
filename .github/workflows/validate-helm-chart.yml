@@ -52,6 +52,19 @@ jobs:
       - name: Package chart
         run: helm package . --destination /tmp/oriso-chart-package
 
+      # The root chart renders k8s-infra only through the render contracts, and
+      # `helm lint .` runs with `k8s-infra.enabled: false`. Validate the
+      # vendored subchart on its own defaults as well, so a bad re-vendor is
+      # caught here instead of at deploy time.
+      - name: Validate vendored k8s-infra subchart
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm lint charts/k8s-infra
+          helm template k8s-infra-validation charts/k8s-infra \
+            --namespace validation >/tmp/k8s-infra-rendered.yaml
+          helm package charts/k8s-infra --destination /tmp/k8s-infra-package
+
       - name: Run unit tests
         run: python -m unittest discover -s tests -p 'test_*.py'
 

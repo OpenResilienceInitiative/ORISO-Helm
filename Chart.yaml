@@ -30,3 +30,7 @@ dependencies:
     version: 0.135.1
     repository: https://charts.signoz.io
     condition: signoz.enabled
+  - name: k8s-infra
+    version: 0.17.0
+    repository: file://charts/k8s-infra
+    condition: k8s-infra.enabled

@@ -1,19 +1,28 @@
-# Pre-Dev overlay for the ORISO chart — mail-link and invite-link wiring only.
+# Pre-Dev overlay for the ORISO chart.
 #
 # Apply ON TOP of the base values, e.g.:
 #   helm template ./ -f values.yaml.default -f secrets.yaml.default -f values-pre-dev.yaml
 #
-# IMPORTANT: Pre-Dev still runs the release rendered from the archived
-# ORISO-Kubernetes chart (ORISO-Helm#110); a `helm upgrade` from this chart
-# against the live Pre-Dev cluster is NOT allowed until that migration lands.
-# This file is the maintained source of truth for the values below; the live
-# rollout happens through a scoped ConfigMap/Secret patch by the deployment
-# contact (see runbooks/password-reset-runtime-config.md).
+# ORISO-Helm is the current release authority. A merge is still not deployment
+# evidence; apply reviewed chart changes through the normal PreDev release flow.
 #
 # Host ground truth (live Pre-Dev ingresses, mirrored in
 # ORISO-Kubernetes/ingress/13-frontend-ingress.yaml and 14-admin-ingress.yaml):
 #   frontend-ingress  app.oriso-dev.site    -> oriso-platform-frontend
 #   admin-ingress     admin.oriso-dev.site  -> oriso-platform-admin
+
+global:
+  observability:
+    deploymentEnvironment: "pre-dev"
+
+signoz:
+  enabled: true
+
+k8s-infra:
+  enabled: true
+  global:
+    clusterName: "oriso-predev"
+    deploymentEnvironment: "pre-dev"
 
 userService:
   # Magic Link + self-service password reset. UserService appends
@@ -44,6 +53,5 @@ userService:
   # alongside serviceEncryptionAppkey and the SMTP credentials — see the entry
   # under `userService:` in secrets.yaml.default. The chart marks it `required`,
   # so rendering this overlay without those secret values fails loudly at deploy
-  # time instead of shipping an empty key. Before Pre-Dev takes this chart
-  # (blocked on ORISO-Helm#110), the value has to exist in the Pre-Dev secret
-  # values file or the UserService rollout CrashLoops.
+  # time instead of shipping an empty key. The value must exist in the Pre-Dev
+  # secret values file or the UserService rollout CrashLoops.
