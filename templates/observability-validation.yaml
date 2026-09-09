@@ -13,8 +13,16 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- $k8sInfra := get .Values "k8s-infra" | default dict -}}
 {{- $k8sInfraEnabled := get $k8sInfra "enabled" | default false -}}
 {{- $signozEnabled := get $signoz "enabled" | default false -}}
+{{- $managed := get $signoz "orisoObservability" | default dict -}}
+{{- $managedEnabled := get $managed "enabled" | default false -}}
+{{- if and $managedEnabled (not $signozEnabled) -}}
+{{- fail "signoz.orisoObservability.enabled=true requires signoz.enabled=true" -}}
+{{- end -}}
 {{- if and $k8sInfraEnabled (not $signozEnabled) -}}
 {{- fail "k8s-infra.enabled=true requires signoz.enabled=true" -}}
+{{- end -}}
+{{- if and $managedEnabled (not $k8sInfraEnabled) -}}
+{{- fail "signoz.orisoObservability.enabled=true requires k8s-infra.enabled=true" -}}
 {{- end -}}
 {{- if $k8sInfraEnabled -}}
 {{- $infraGlobal := get $k8sInfra "global" | default dict -}}
