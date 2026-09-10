@@ -102,6 +102,20 @@ elementCall:
   image: "ghcr.io/openresilienceinitiative/element-call:dev"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
+# Storybook is a development surface and stays absent unless an environment
+# explicitly enables it together with an ingress authentication secret.
+storybook:
+  enabled: false
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
+  adminImage: "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
+  pullPolicy: Always
+  imagePullSecrets: []
+  resources: {}
+  ingress:
+    authSecret: ""
+    authRealm: "ORISO Storybook"
+
 # ---------- Media security (epic ORISO-Admin#366, ADR-019) -----------------------------------------------------------
 
 # Fail-closed media scanner, off by default — see docs/media-scanner.md before enabling.

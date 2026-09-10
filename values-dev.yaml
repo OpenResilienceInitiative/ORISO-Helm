@@ -14,6 +14,17 @@ global:
   matrix:
     matrixServerName: "matrix.oriso.org"
 
+storybook:
+  enabled: true
+  image: "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
+  adminImage: "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
+  imagePullSecrets:
+    - name: registry-secret
+  ingress:
+    # Provision this Secret in the release namespace before enabling the route.
+    # It must contain an nginx-compatible `auth` htpasswd entry.
+    authSecret: "storybook-basic-auth"
+
 # Spring "dev" profile for the backend services (verbose errors, dev wiring).
 agencyService:
   springProfilesActive: "dev"
