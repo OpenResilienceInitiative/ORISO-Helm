@@ -110,6 +110,7 @@ storybook:
   image: "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
   adminImage: "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
   pullPolicy: Always
+  imagePullSecrets: []
   resources: {}
   ingress:
     authSecret: ""

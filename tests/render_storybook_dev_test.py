@@ -13,6 +13,7 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def render(*values_files: str) -> list[dict]:
+    """Render the chart with the requested values files and return YAML docs."""
     command = [
         "helm",
         "template",
@@ -42,6 +43,7 @@ def render(*values_files: str) -> list[dict]:
 
 
 def main() -> None:
+    """Assert Storybook is disabled by default and correctly enabled for Dev."""
     baseline = render()
     assert not any(
         doc.get("metadata", {}).get("name") == "storybook-frontend"
@@ -65,13 +67,21 @@ def main() -> None:
 
     container = resources[("Deployment", "storybook-frontend")]["spec"]["template"]["spec"]["containers"][0]
     assert container["image"] == "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
+    assert resources[("Deployment", "storybook-frontend")]["spec"]["template"]["spec"]["imagePullSecrets"] == [
+        {"name": "registry-secret"}
+    ]
     admin_container = resources[("Deployment", "storybook-admin")]["spec"]["template"]["spec"]["containers"][0]
     assert admin_container["image"] == "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
+    assert resources[("Deployment", "storybook-admin")]["spec"]["template"]["spec"]["imagePullSecrets"] == [
+        {"name": "registry-secret"}
+    ]
 
     ingress = resources[("Ingress", "storybook-dev-ingress")]
     annotations = ingress["metadata"]["annotations"]
     assert annotations["nginx.ingress.kubernetes.io/auth-type"] == "basic"
     assert annotations["nginx.ingress.kubernetes.io/auth-secret"] == "storybook-basic-auth"
+    assert annotations["nginx.ingress.kubernetes.io/use-regex"] == "true"
+    assert annotations["nginx.ingress.kubernetes.io/rewrite-target"] == "/$2"
     assert annotations["nginx.ingress.kubernetes.io/configuration-snippet"] == (
         'if ($uri = "/storybook-admin") {\n'
         "  return 308 /storybook-admin/;\n"
