@@ -66,12 +66,20 @@ def main() -> None:
     container = resources[("Deployment", "storybook-frontend")]["spec"]["template"]["spec"]["containers"][0]
     assert container["image"] == "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
     admin_container = resources[("Deployment", "storybook-admin")]["spec"]["template"]["spec"]["containers"][0]
-    assert admin_container["image"] == "ghcr.io/openresilienceinitiative/oriso-admin-storybook:dev"
+    assert admin_container["image"] == "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
 
     ingress = resources[("Ingress", "storybook-dev-ingress")]
     annotations = ingress["metadata"]["annotations"]
     assert annotations["nginx.ingress.kubernetes.io/auth-type"] == "basic"
     assert annotations["nginx.ingress.kubernetes.io/auth-secret"] == "storybook-basic-auth"
+    assert annotations["nginx.ingress.kubernetes.io/configuration-snippet"] == (
+        'if ($uri = "/storybook-admin") {\n'
+        "  return 308 /storybook-admin/;\n"
+        "}\n"
+        'if ($uri = "/storybook-frontend") {\n'
+        "  return 308 /storybook-frontend/;\n"
+        "}\n"
+    )
     paths = ingress["spec"]["rules"][0]["http"]["paths"]
     assert {path["path"] for path in paths} == {
         "/storybook-admin(/|$)(.*)",

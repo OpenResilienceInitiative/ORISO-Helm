@@ -1,9 +1,9 @@
 # Dev Storybook
 
 The Frontend and Admin workflows publish the current `dev` component
-documentation as `ghcr.io/openresilienceinitiative/oriso-storybook:dev` and
-`ghcr.io/openresilienceinitiative/oriso-admin-storybook:dev`. This chart serves
-them at `https://dev.oriso.org/storybook-frontend/` and
+documentation as `ghcr.io/openresilienceinitiative/oriso-storybook:dev`. This
+chart serves the frontend and admin Storybook workloads at
+`https://dev.oriso.org/storybook-frontend/` and
 `https://dev.oriso.org/storybook-admin/` when the Dev overlay is applied.
 
 Storybook contains internal development documentation, so its ingress requires
@@ -22,7 +22,9 @@ helm lint . -f values.yaml.default -f secrets.yaml.default -f values-dev.yaml
 After deployment, verify the boundary and the current story:
 
 1. An unauthenticated request to `/storybook-frontend/` returns `401`.
-2. An authenticated browser opens both Storybook indexes.
-3. Open the Frontend self-help group Owner and Participant stories and confirm their
+2. Requests to `/storybook-frontend` and `/storybook-admin` redirect to the
+   trailing-slash routes.
+3. An authenticated browser opens both Storybook indexes.
+4. Open the Frontend self-help group Owner and Participant stories and confirm their
    interaction tests pass.
-4. Record the deployed Storybook image digest separately from the Helm release.
+5. Record the deployed Storybook image digest separately from the Helm release.

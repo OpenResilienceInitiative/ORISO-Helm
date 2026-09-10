@@ -108,7 +108,7 @@ storybook:
   enabled: false
   replicas: 1
   image: "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
-  adminImage: "ghcr.io/openresilienceinitiative/oriso-admin-storybook:dev"
+  adminImage: "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
   pullPolicy: Always
   resources: {}
   ingress:
