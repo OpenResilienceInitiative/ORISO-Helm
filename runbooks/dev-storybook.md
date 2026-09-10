@@ -19,6 +19,24 @@ python3 tests/render_storybook_dev_test.py
 helm lint . -f values.yaml.default -f secrets.yaml.default -f values-dev.yaml
 ```
 
+Install or upgrade the Dev overlay from a checkout of this chart:
+
+```sh
+cp values.yaml.default values.yaml
+# Configure values.yaml for Dev, including global.domainName, Keycloak realm,
+# Keycloak URLs, and Matrix server names.
+# Prepare secrets.yaml through the normal secret-management process.
+
+helm upgrade --install caritas . \
+  -n caritas \
+  --create-namespace \
+  --wait-for-jobs \
+  --timeout 15m \
+  -f values.yaml \
+  -f secrets.yaml \
+  -f values-dev.yaml
+```
+
 After deployment, verify the boundary and the current story:
 
 1. An unauthenticated request to `/storybook-frontend/` returns `401`.
