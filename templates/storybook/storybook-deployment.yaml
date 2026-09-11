@@ -1,0 +1,71 @@
+{{- if .Values.storybook.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storybook-frontend
+  labels:
+    app: storybook-frontend
+spec:
+  replicas: {{ .Values.storybook.replicas }}
+  selector:
+    matchLabels:
+      app: storybook-frontend
+  template:
+    metadata:
+      labels:
+        app: storybook-frontend
+    spec:
+      containers:
+        - name: storybook-frontend
+          image: {{ include "oriso.immutableImage" (list "storybook.image" .Values.storybook.image) | quote }}
+          imagePullPolicy: {{ .Values.storybook.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources: {{- toYaml .Values.storybook.resources | nindent 12 }}
+      {{- with .Values.storybook.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storybook-admin
+  labels:
+    app: storybook-admin
+spec:
+  replicas: {{ .Values.storybook.replicas }}
+  selector:
+    matchLabels:
+      app: storybook-admin
+  template:
+    metadata:
+      labels:
+        app: storybook-admin
+    spec:
+      containers:
+        - name: storybook-admin
+          image: {{ include "oriso.immutableImage" (list "storybook.adminImage" .Values.storybook.adminImage) | quote }}
+          imagePullPolicy: {{ .Values.storybook.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources: {{- toYaml .Values.storybook.resources | nindent 12 }}
+      {{- with .Values.storybook.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
