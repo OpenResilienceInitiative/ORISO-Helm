@@ -54,13 +54,19 @@ def find_livekit(documents: list[dict]) -> dict:
 
 
 def main() -> None:
-    livekit = find_livekit(render())
+    documents = render()
+    livekit = find_livekit(documents)
 
     assert livekit["spec"]["replicas"] == 1
     assert livekit["spec"]["strategy"] == {"type": "Recreate"}
-    assert (
-        livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"]
-        == 60
+    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 60
+    assert livekit["spec"]["template"]["spec"]["volumes"][0]["secret"][
+        "secretName"
+    ] == ("livekit-config-runtime")
+    assert not any(
+        document.get("kind") == "Secret"
+        and document.get("metadata", {}).get("name") == "livekit-config-runtime"
+        for document in documents
     )
 
     rolling = find_livekit(
@@ -76,27 +82,19 @@ def main() -> None:
         "rollingUpdate": {"maxUnavailable": 1, "maxSurge": 0},
     }
 
-    unsafe = run_helm(
-        "--set-string", "livekit.deploymentStrategy=RollingUpdate"
-    )
+    unsafe = run_helm("--set-string", "livekit.deploymentStrategy=RollingUpdate")
     assert unsafe.returncode != 0
     assert "requires livekit.replicas >= 2" in unsafe.stderr
 
-    unbounded = run_helm(
-        "--set", "livekit.terminationGracePeriodSeconds=18000"
-    )
+    unbounded = run_helm("--set", "livekit.terminationGracePeriodSeconds=18000")
     assert unbounded.returncode != 0
     assert "must be between 1 and 300 seconds" in unbounded.stderr
 
-    invalid_strategy = run_helm(
-        "--set-string", "livekit.deploymentStrategy=Replace"
-    )
+    invalid_strategy = run_helm("--set-string", "livekit.deploymentStrategy=Replace")
     assert invalid_strategy.returncode != 0
     assert "must be Recreate or RollingUpdate" in invalid_strategy.stderr
 
-    zero_grace = run_helm(
-        "--set", "livekit.terminationGracePeriodSeconds=0"
-    )
+    zero_grace = run_helm("--set", "livekit.terminationGracePeriodSeconds=0")
     assert zero_grace.returncode != 0
     assert "must be between 1 and 300 seconds" in zero_grace.stderr
 

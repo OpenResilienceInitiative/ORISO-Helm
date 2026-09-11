@@ -1,0 +1,14 @@
+# Fully gated AI overlay used by tests/render_media_scanner_test.py: the AI
+# check only renders once the zero-retention sub-processor agreement is on
+# record (ORISO-Admin#734) and the API key exists as a referenced secret.
+global:
+  domainName: "pre-dev.example.org"
+
+mediaScanner:
+  enabled: true
+  requestSecret:
+    existingSecret: "media-scanner-request-secret"
+  aiCheck:
+    enabled: true
+    subProcessorAgreementSigned: true
+    existingSecret: "media-scanner-ai-key"

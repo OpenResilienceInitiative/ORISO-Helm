@@ -32,8 +32,9 @@ Rendering technique -- two passes:
        masked by the vendored subcharts.
     2. FULL CHART for the delivery path, matching
        ``render_password_reset_urls_test.py``: values.yaml.default +
-       secrets.yaml.default (+ values-pre-dev.yaml) must actually land the env
-       var on the container, not just in the Secret.
+       secrets.yaml.default, both with and without explicit environment
+       values, must actually land the env var on the container, not just in
+       the Secret.
 
 Invariants asserted:
     1. With a secret supplied, ``STATISTICS_MESSAGE_COUNT_HMAC_SECRET`` is
@@ -45,8 +46,8 @@ Invariants asserted:
     5. The default values set (values.yaml.default + secrets.yaml.default)
        renders a NON-EMPTY secret and the Deployment imports it via
        ``secretKeyRef`` from ``userservice-secret``.
-    6. The Pre-Dev overlay renders the same way -- values-pre-dev.yaml must not
-       drop the key while overriding the UserService block.
+    6. Explicit external environment values render the same way and do not
+       drop the key while overriding the release configuration.
 
 Usage:  python3 tests/render_statistics_hmac_secret_test.py   (requires helm + pyyaml)
 """
@@ -157,8 +158,8 @@ def render_isolated(chart: str, hmac_secret):
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def render_full_chart(*extra_values: str) -> list[dict]:
-    """Render the real chart the way a deploy does, optionally with an overlay."""
+def render_full_chart(*extra_set_strings: str) -> list[dict]:
+    """Render the real chart with optional external environment settings."""
     cmd = [
         "helm",
         "template",
@@ -169,8 +170,8 @@ def render_full_chart(*extra_values: str) -> list[dict]:
         "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
     ]
-    for values_file in extra_values:
-        cmd += ["-f", os.path.join(CHART_DIR, values_file)]
+    for setting in extra_set_strings:
+        cmd += ["--set-string", setting]
     # The default values configure an SMTP transport, whose render gate requires
     # credentials; real deploys carry them in the persistent secret values.
     cmd += [
@@ -181,7 +182,10 @@ def render_full_chart(*extra_values: str) -> list[dict]:
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
-        die(f"full-chart render failed for {extra_values or ('defaults',)}:\n{proc.stderr}")
+        die(
+            "full-chart render failed for "
+            f"{extra_set_strings or ('defaults',)}:\n{proc.stderr}"
+        )
     return [doc for doc in yaml.safe_load_all(proc.stdout) if isinstance(doc, dict)]
 
 
@@ -199,9 +203,9 @@ def userservice_deployment(docs) -> dict:
     die("UserService Deployment was not rendered")
 
 
-def assert_delivered(label: str, *extra_values: str) -> None:
+def assert_delivered(label: str, *extra_set_strings: str) -> None:
     """The env var must reach the container, non-empty, for this values set."""
-    docs = render_full_chart(*extra_values)
+    docs = render_full_chart(*extra_set_strings)
 
     data = secret_doc(docs).get("data") or {}
     encoded = data.get(ENV_KEY)
@@ -213,7 +217,9 @@ def assert_delivered(label: str, *extra_values: str) -> None:
             f"(a blank value crashes UserService on boot)",
         )
 
-    container = userservice_deployment(docs)["spec"]["template"]["spec"]["containers"][0]
+    container = userservice_deployment(docs)["spec"]["template"]["spec"]["containers"][
+        0
+    ]
     env = {e["name"]: e for e in container.get("env", [])}
     if check(ENV_KEY in env, f"{label}: UserService Deployment imports {ENV_KEY}"):
         ref = (env[ENV_KEY].get("valueFrom") or {}).get("secretKeyRef") or {}
@@ -249,7 +255,10 @@ def main() -> int:
                 base64.b64decode(encoded).decode() == SENTINEL,
                 f"{ENV_KEY} base64-decodes to the configured value",
             )
-        check(doc["metadata"]["name"] == SECRET_NAME, f"Secret name is still {SECRET_NAME}")
+        check(
+            doc["metadata"]["name"] == SECRET_NAME,
+            f"Secret name is still {SECRET_NAME}",
+        )
         check(
             "SERVICE_ENCRYPTION_APPKEY" in data and "SPRING_LIQUIBASE_USER" in data,
             "pre-existing Secret keys are still rendered",
@@ -270,9 +279,12 @@ def main() -> int:
             "render FAILS when statisticsMessageCountHmacSecret is an empty string",
         )
 
-    # 5 + 6: the values sets an operator actually deploys with.
+    # 5 + 6: default values and an externally supplied environment override.
     assert_delivered("default values")
-    assert_delivered("values-pre-dev.yaml", "values-pre-dev.yaml")
+    assert_delivered(
+        "explicit environment values",
+        "global.domainName=predev.render-canary.example",
+    )
 
     if _failures:
         print(f"\n{len(_failures)} check(s) failed")

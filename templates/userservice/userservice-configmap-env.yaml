@@ -50,7 +50,6 @@ data:
   AGENCY_ADMIN_SERVICE_API_URL: "http://agencyservice.{{ .Release.Namespace }}:8080"
   MESSAGE_SERVICE_API_URL: "http://messageservice.{{ .Release.Namespace }}:8080"
   MAIL_SERVICE_API_URL: "http://mailservice.{{ .Release.Namespace }}:8080"
-  LIVE_SERVICE_API_URL: "http://liveservice.{{ .Release.Namespace }}:8080"
   CONSULTING_TYPE_SERVICE_API_URL: "http://consultingtypeservice.{{ .Release.Namespace }}:8080"
   APPOINTMENT_SERVICE_API_URL: "http://appointmentservice.{{ .Release.Namespace }}:8080"
   # Frontend base URL for the one-time links in the Magic Link login email

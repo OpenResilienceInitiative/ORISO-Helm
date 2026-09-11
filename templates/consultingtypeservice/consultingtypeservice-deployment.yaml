@@ -33,6 +33,11 @@ spec:
                 secretKeyRef:
                   key: CONSULTINGTYPESERVICE_SPRING_DATASOURCE_PASSWORD
                   name: consultingtypeservice-secret
+            - name: SETTINGS_SMTP_PASSWORD_ENCRYPTION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: SETTINGS_SMTP_PASSWORD_ENCRYPTION_SECRET
+                  name: consultingtypeservice-secret
             - name: SPRING_DATASOURCE_URL
               valueFrom:
                 configMapKeyRef:

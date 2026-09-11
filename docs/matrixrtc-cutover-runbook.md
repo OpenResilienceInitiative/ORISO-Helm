@@ -32,6 +32,28 @@ webhook, and the shared Redis connection required for a multi-node LiveKit
 cluster. These values must stay in ignored environment secret files and must
 not be committed to Git.
 
+That configuration must also pin the address LiveKit advertises to clients:
+
+```yaml
+rtc:
+  use_external_ip: false
+  node_ip: "<the node's public IPv4>"
+```
+
+Without it LiveKit enumerates every interface it can find and offers all of
+them as ICE candidates — including the node's IPv6 address and the Docker and
+flannel ranges, which no client can reach. ICE then prefers the IPv6 pair, its
+connectivity checks pass, and the call reports itself connected — but no media
+survives that path, so every session died with
+
+```
+error reading data channel … error: "dtls timeout: read/write timeout"
+```
+
+between 30 seconds and roughly two minutes in, which reads to a user as "the
+call works and then breaks". Pinning the IPv4 address collapses the candidate
+set to one reachable address and is the reason Pre-Dev calls connect at all.
+
 ## Release preflight
 
 1. Record the reviewed source commit and published OCI digest for Frontend,
