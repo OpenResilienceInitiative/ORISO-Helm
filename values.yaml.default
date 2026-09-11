@@ -171,7 +171,7 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.4"
+  imageVersion: "2.0.5"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -370,7 +370,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.4"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.5"
 
 nginxController:
   enabled: true
