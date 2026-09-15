@@ -671,7 +671,7 @@ spec:
           livenessProbe:
             exec:
               command: ["/bin/sh", "/picture-scanner/health.sh"]
-            initialDelaySeconds: 1800
+            initialDelaySeconds: 5
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3

@@ -83,6 +83,16 @@ class PictureScannerRenderTest(unittest.TestCase):
             if doc["kind"] == "Service":
                 self.assertFalse(any(str(p.get("port")) == "3310" or str(p.get("targetPort")) == "3310" for p in doc["spec"]["ports"]))
 
+    def test_early_ready_daemon_failure_is_checked_without_initial_blind_window(self):
+        probe = self.scanner(self.render({"enabled": True}))["livenessProbe"]
+        # health.sh owns refresh/loading grace. Kubernetes must start calling it early,
+        # so the first successful PING can end grace and later failures are observable.
+        first_recovery_bound = (probe.get("initialDelaySeconds", 0)
+                                + probe["periodSeconds"] * probe["failureThreshold"]
+                                + probe["timeoutSeconds"])
+        self.assertLessEqual(first_recovery_bound, 120,
+                             "early-ready daemon failures must not be blind for 30 minutes")
+
     def test_scans_entire_accepted_body_without_retaining_samples(self):
         docs = self.render({"enabled": True})
         config = next((d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "userservice-picture-scanner"), None)
