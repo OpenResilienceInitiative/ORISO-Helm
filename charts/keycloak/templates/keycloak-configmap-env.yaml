@@ -7,7 +7,7 @@ data:
     DB_ADDR: "{{ .Values.dbServer }}.{{ .Release.Namespace }}"
     DB_DATABASE: "{{ .Values.dbDatabase }}"
     PROXY_ADDRESS_FORWARDING: "true"
-    KEYCLOAK_HOSTNAME: "{{ .Values.global.domainName }}"
+    KEYCLOAK_HOSTNAME: "{{ if .Values.global.enableTls }}https{{ else }}http{{ end }}://{{ .Values.global.domainName }}/auth"
     # Logging
     # Supported log levels are ALL, DEBUG, ERROR, FATAL, INFO, OFF, TRACE and WARN.
     KEYCLOAK_LOGLEVEL: {{ .Values.keycloakLogLevel | quote }}
