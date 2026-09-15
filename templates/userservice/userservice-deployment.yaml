@@ -587,6 +587,11 @@ spec:
                 configMapKeyRef:
                   key: SUPPORT_ACCESS_AUDIT_RETENTION_MONTHS
                   name: userservice-configmap-env
+            - name: TEAM_DISCUSSION_ARCHIVE_RETENTION_DAYS
+              valueFrom:
+                configMapKeyRef:
+                  key: TEAM_DISCUSSION_ARCHIVE_RETENTION_DAYS
+                  name: userservice-configmap-env
             - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
               valueFrom:
                 configMapKeyRef:

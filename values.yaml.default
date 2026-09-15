@@ -102,6 +102,20 @@ elementCall:
   image: "ghcr.io/openresilienceinitiative/element-call:2.0.4"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
+# Storybook is a development surface and stays absent unless an environment
+# explicitly enables it together with an ingress authentication secret.
+storybook:
+  enabled: false
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
+  adminImage: "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
+  pullPolicy: Always
+  imagePullSecrets: []
+  resources: {}
+  ingress:
+    authSecret: ""
+    authRealm: "ORISO Storybook"
+
 # ---------- Media security (epic ORISO-Admin#366, ADR-019) -----------------------------------------------------------
 
 # Fail-closed media scanner, off by default — see docs/media-scanner.md before enabling.
@@ -157,7 +171,7 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.4"
+  imageVersion: "2.0.5"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -236,7 +250,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.4"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.5"
 
   keycloakResource: "agency-service"
 
@@ -269,7 +283,7 @@ consultingTypeService:
 tenantService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.4"
+  imageVersion: "2.0.5"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -283,7 +297,7 @@ tenantService:
 # User service
 userService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.4"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.5"
   serviceURL: "http://userservice:8080"
 
   keycloakResource: "user-service"
@@ -306,6 +320,14 @@ userService:
     handshakeTtlSeconds: 300
     sessionTtlHours: 4
     auditRetentionMonths: 12
+
+  # ADR-016 addendum (2026-09-05) / KDG #1116: team discussion archive purge. Days after
+  # archiving until an ARCHIVED discussion's room, row and participants are deleted (OPEN ones
+  # are never purged); 0 or less switches the job off.
+  # Ships OFF (0) until the data protection officer signs off the retention period. The DPIA
+  # proposal is 90; set that value in the environment overlay once approved.
+  teamDiscussion:
+    archiveRetentionDays: 0
 
   # 2FA / OTP login posture — enabled by default.
   otpAllowedForUsers: "true"
@@ -348,7 +370,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.4"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.5"
 
 nginxController:
   enabled: true
