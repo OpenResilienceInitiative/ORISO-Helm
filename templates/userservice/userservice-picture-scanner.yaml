@@ -27,11 +27,34 @@ data:
     set -eu
     # A pinned image's bundled database ages. Finish a successful refresh before
     # clamd's age guard runs; retry here rather than restarting into the old DB.
+    touch /tmp/picture-scanner-refreshing
+    rm -f /tmp/picture-scanner-startup-deadline
     until freshclam --stdout --user=clamav; do
       echo "Picture scanner signature refresh unavailable; retrying in 60 seconds."
       sleep 60
     done
+    echo "$(( $(date +%s) + 1800 ))" > /tmp/picture-scanner-startup-deadline
+    rm -f /tmp/picture-scanner-refreshing
     exec /init-unprivileged
+  health.sh: |
+    #!/bin/sh
+    set -eu
+    # PID 1 owns this marker only while waiting for a successful initial update.
+    [ ! -e /tmp/picture-scanner-refreshing ] || exit 0
+    deadline_file=/tmp/picture-scanner-startup-deadline
+    if [ -f "$deadline_file" ]; then
+      # A late refresh must still allow the daemon to load. Bound PING below the
+      # probe timeout, and end this grace on the first successful response.
+      if timeout 2 clamdscan --ping=1; then
+        rm -f "$deadline_file"
+        exit 0
+      fi
+      deadline=$(cat "$deadline_file")
+      case "$deadline" in ''|*[!0-9]*) exit 1 ;; esac
+      [ "$(date +%s)" -lt "$deadline" ] && exit 0
+      exit 1
+    fi
+    exec clamdscan --ping=1
   clamd.conf: |
     Foreground yes
     DatabaseDirectory /var/lib/clamav

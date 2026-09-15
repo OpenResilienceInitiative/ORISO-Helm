@@ -670,7 +670,7 @@ spec:
           # healthy Java API from endpoints. Uploads refuse until clamd is ready.
           livenessProbe:
             exec:
-              command: ["clamdscan", "--ping=1"]
+              command: ["/bin/sh", "/picture-scanner/health.sh"]
             initialDelaySeconds: 1800
             periodSeconds: 30
             timeoutSeconds: 5
