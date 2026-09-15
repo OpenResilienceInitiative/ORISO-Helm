@@ -12,10 +12,17 @@ HTTP Basic Authentication. Before the Helm upgrade, create or rotate the
 management process. The Secret must contain an nginx-compatible `auth` htpasswd
 entry. Do not commit credentials or generated htpasswd data.
 
+The Basic Auth realm is fixed to `ORISO Storybook`. The legacy
+`storybook.ingress.authRealm` value is deprecated and ignored, including custom
+labels: nginx treats `off` as disabling Basic Auth, and variable expressions can
+resolve to `off`. Existing values files remain accepted; the enabled switch,
+Secret reference and routes keep their existing behavior.
+
 Verify the rendered chart before deployment:
 
 ```sh
 python3 tests/render_storybook_dev_test.py
+python3 tests/render_storybook_auth_realm_test.py
 helm lint . -f values.yaml.default -f secrets.yaml.default -f values-dev.yaml
 ```
 
