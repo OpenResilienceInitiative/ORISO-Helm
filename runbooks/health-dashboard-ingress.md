@@ -27,7 +27,11 @@ healthDashboard:
 The Dev overlay opts in using this name. It does not provision the Secret or
 prove that the Secret exists. Leading/trailing whitespace is trimmed; a missing,
 empty or whitespace-only name stops Helm rendering. Namespace-qualified names
-containing `/` are also rejected.
+containing `/` are also rejected. The trimmed name must follow Kubernetes
+Secret-name rules: at most 253 lowercase ASCII letters, digits, hyphens and dots,
+with each nonempty dot-separated segment beginning and ending in a letter or
+digit. Numeric starts and segments longer than 63 characters are valid within
+the 253-character total limit. Invalid names stop Helm rendering.
 
 Before an authorized rollout, the operator must provision the named Secret
 through the normal secret-management process. It must contain an

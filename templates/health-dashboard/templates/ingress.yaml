@@ -4,6 +4,9 @@
 {{- if contains "/" $authSecret }}
 {{- fail "healthDashboard.ingress.authSecret must be a local Secret name without '/' in the effective HealthDashboard namespace" }}
 {{- end }}
+{{- if or (gt (len $authSecret) 253) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" $authSecret)) }}
+{{- fail "healthDashboard.ingress.authSecret must be a valid Kubernetes Secret name (DNS subdomain, at most 253 characters)" }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

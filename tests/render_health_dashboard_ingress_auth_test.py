@@ -125,8 +125,35 @@ class HealthDashboardIngressAuthTest(unittest.TestCase):
                     "in the effective HealthDashboard namespace", error,
                 )
 
+    def test_rejects_invalid_kubernetes_secret_names(self) -> None:
+        for secret in (
+            "health_auth", "Health-auth", "health auth", "-health", "health-",
+            "health..auth", "health-.auth", "health.-auth", ".health", "health.",
+            "a" * 254,
+        ):
+            with self.subTest(secret=secret):
+                error = render(health_dashboard={"ingress": {
+                    "enabled": True, "authSecret": secret,
+                }}, expect_error=True)
+                self.assertIn(
+                    "healthDashboard.ingress.authSecret must be a valid Kubernetes Secret name "
+                    "(DNS subdomain, at most 253 characters)", error,
+                )
+
+    def test_accepts_kubernetes_secret_name_boundaries(self) -> None:
+        # Secret names use DNS subdomain validation, not the stricter label helper.
+        # Kubernetes imposes only the 253-character total limit here.
+        for secret in ("123", "1health.auth-fixture", "a" * 64, "a" * 253):
+            with self.subTest(secret=secret):
+                resources = health_resources(render(health_dashboard={"ingress": {
+                    "enabled": True, "authSecret": secret,
+                }}))
+                annotations = resources["Ingress"]["metadata"]["annotations"]
+                self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-secret"], secret)
+                self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-type"], "basic")
+
     def test_disabled_does_not_require_secret(self) -> None:
-        for secret in (None, "", " \t\n "):
+        for secret in (None, "", " \t\n ", "health_auth"):
             with self.subTest(secret=repr(secret)):
                 resources = health_resources(render(health_dashboard={"ingress": {
                     "enabled": False, "authSecret": secret,
