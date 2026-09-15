@@ -63,14 +63,7 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 5
         securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
-            add:
-            - NET_BIND_SERVICE
-          runAsNonRoot: true
-          runAsUser: 101
+          runAsUser: 0
         volumeMounts:
           - mountPath: /app/config.json
             name: element-call-config
