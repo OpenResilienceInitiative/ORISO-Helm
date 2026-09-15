@@ -297,6 +297,18 @@ tenantService:
 
 # User service
 userService:
+  # Internal consultant pictures (#1048). Opt-in only; no environment is enabled here.
+  pictureScanner:
+    enabled: false
+    # Official ClamAV 1.5.4 with signatures; this digest supports linux/amd64.
+    image: "docker.io/clamav/clamav@sha256:9cb27d7660bdf66e9878c832cb433dd8aa152cfbe16f3c2c0084c80b04ae22b4"
+    resources:
+      requests:
+        cpu: 250m
+        memory: 3Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
   replicas: 1
   image: "ghcr.io/openresilienceinitiative/oriso-userservice:dev"
   serviceURL: "http://userservice:8080"

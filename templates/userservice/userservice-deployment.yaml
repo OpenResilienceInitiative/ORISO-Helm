@@ -15,7 +15,15 @@ spec:
     metadata:
       labels:
         app: userservice
+      {{- if (.Values.userService.pictureScanner).enabled }}
+      annotations:
+        checksum/picture-scanner: {{ include (print $.Template.BasePath "/userservice/userservice-picture-scanner.yaml") . | sha256sum }}
+      {{- end }}
     spec:
+      {{- if (.Values.userService.pictureScanner).enabled }}
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      {{- end }}
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -31,6 +39,14 @@ spec:
           image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            {{- if (.Values.userService.pictureScanner).enabled }}
+            - name: CONSULTANT_PICTURE_SCANNER_ENABLED
+              value: "true"
+            - name: CONSULTANT_PICTURE_SCANNER_PORT
+              value: "3310"
+            - name: CONSULTANT_PICTURE_SCANNER_TIMEOUT_MILLIS
+              value: "5000"
+            {{- end }}
             - name: MATRIXRTC_CALL_POLICY_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -619,6 +635,56 @@ spec:
           volumeMounts:
             - mountPath: /import
               name: userservice-import
+        {{- if (.Values.userService.pictureScanner).enabled }}
+        - name: consultant-picture-scanner
+          image: {{ .Values.userService.pictureScanner.image | quote }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          command: ["/bin/sh", "/picture-scanner/start.sh"]
+          env:
+            - name: CLAMD_STARTUP_TIMEOUT
+              value: "1800"
+            - name: FRESHCLAM_CHECKS
+              value: "12"
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # The bundled database remains visible and writable for FreshClam.
+          # Incoming image bytes use only the memory-backed /tmp volume.
+          volumeMounts:
+            - name: picture-scanner-config
+              mountPath: /picture-scanner
+              readOnly: true
+            - name: picture-scanner-config
+              mountPath: /etc/clamav/clamd.conf
+              subPath: clamd.conf
+              readOnly: true
+            - name: picture-scanner-tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.userService.pictureScanner.resources | nindent 12 }}
+          # No readiness/startup probe: signature loading must not remove the
+          # healthy Java API from endpoints. Uploads refuse until clamd is ready.
+          livenessProbe:
+            exec:
+              command: ["clamdscan", "--ping=1"]
+            initialDelaySeconds: 1800
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+        {{- end }}
       volumes:
+        {{- if (.Values.userService.pictureScanner).enabled }}
+        - name: picture-scanner-config
+          configMap:
+            name: userservice-picture-scanner
+        - name: picture-scanner-tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        {{- end }}
         - name: userservice-import
           emptyDir: {}
