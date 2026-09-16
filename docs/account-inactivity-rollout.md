@@ -18,16 +18,37 @@ rolls out and consumes the new environment values.
 The last two values populate `ACCOUNT_INACTIVITY_ENABLED` and
 `ACCOUNT_INACTIVITY_DRY_RUN`. UserService owns the daily UTC cron default.
 
-1. Deploy the reviewed UserService version with the database migrations and the
-   `/users/account-inactivity/access` endpoint. Keep execution disabled.
-2. Check the candidate report and migration baseline. If scheduling reports is
+1. Deploy the reviewed [TenantService provider (PR #257)](https://github.com/OpenResilienceInitiative/ORISO-TenantService/pull/257)
+   first, including its public creation-policy defaults. Keep all three settings
+   at 24 months until every account-creation writer supports policy snapshots.
+2. Pause new-account provisioning and drain old UserService writers before the
+   migration establishes its rollout cutoff. Keep provisioning paused throughout
+   the migration and new UserService rollout. An old node creating a person after
+   that cutoff cannot assign the required creation-time snapshot; a normal rolling
+   deployment without this pause is insufficient. Keep destructive execution
+   disabled while deploying the reviewed UserService version and migrations.
+3. Verify that all serving writers use the new version and that the bootstrap
+   inventory reports `inventoryComplete: true`, `missingNew: 0`, and `failed: 0`.
+   Inspect unresolved inventory entries before reopening provisioning. Unknown
+   creation times or post-cutoff identities without snapshots require explicit
+   operator repair using a confirmed creation-time policy; never guess a policy
+   or silently assign today's settings. Re-run the inventory after repair and
+   require the same clean result before reopening provisioning or enabling
+   execution.
+4. Check the candidate report and migration baseline. If scheduling reports is
    useful, set `enabled: true`, leaving `dryRun: true`.
-3. Enable the ingress gate. Validate anonymous public requests, active JWTs,
+5. Enable the ingress gate. Validate anonymous public requests, active JWTs,
    rejected suspended JWTs, tenant headers and all rewritten API paths. The
    internal URL must resolve from the ingress controller to the release namespace.
-4. Only after the reviewed report and runtime checks, explicitly set
-   `enabled: true` and `dryRun: false`. Record the deployed image/configuration,
-   evidence and operator decision on the parent issue.
+6. Only after the reviewed report, clean bootstrap inventory and runtime checks,
+   explicitly set `enabled: true` and `dryRun: false`. Record the deployed
+   image/configuration, evidence and operator decision on the parent issue.
+
+The new UserService access filter immediately denies authenticated human accounts
+without a lifecycle snapshot. This protection is independent of the destructive
+scheduler flag and the optional ingress gate; leaving execution disabled does
+not make missing snapshots accessible. Complete the coordinated provisioning
+pause and inventory checks before returning the new backend to normal use.
 
 Disabling execution does not clear existing suspension records. Do not turn off
 an already active access gate as a substitute for authorized reactivation: doing
