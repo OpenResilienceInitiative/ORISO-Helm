@@ -349,7 +349,7 @@ userService:
 
   # Bare origins for account-invite links (admin must NOT end in /admin); override per environment.
   accountInviteAppFrontendBaseUrl: "https://your-domain.example.com"
-  accountInviteAdminFrontendBaseUrl: "https://admin.your-domain.example.com"
+  accountInviteAdminFrontendBaseUrl: "https://your-domain.example.com"
 
   firebaseConfigurationCredentialsFilePath: "/firebase/firebase-credentials.json"
   firebaseConfigurationNotificationMessage: "Du hast eine neue Nachricht erhalten"
