@@ -347,9 +347,9 @@ userService:
   smtpSecure: false
   smtpFrom: ""
 
-  # Bare origins for account-invite links (TEN-INV-U6/U7); unset = system-notification base URL.
-  # accountInviteAppFrontendBaseUrl: "https://your-domain.example.com"
-  # accountInviteAdminFrontendBaseUrl: "https://admin.your-domain.example.com"
+  # Bare origins for account-invite links (admin must NOT end in /admin); override per environment.
+  accountInviteAppFrontendBaseUrl: "https://your-domain.example.com"
+  accountInviteAdminFrontendBaseUrl: "https://your-domain.example.com"
 
   firebaseConfigurationCredentialsFilePath: "/firebase/firebase-credentials.json"
   firebaseConfigurationNotificationMessage: "Du hast eine neue Nachricht erhalten"
