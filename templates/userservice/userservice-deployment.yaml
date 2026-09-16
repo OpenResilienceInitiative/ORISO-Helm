@@ -96,20 +96,24 @@ spec:
                   key: PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL
                   name: userservice-configmap-env
             {{- end }}
-            {{- if .Values.userService.accountInviteAppFrontendBaseUrl }}
+            # Mail-link origins are always rendered (see the ConfigMap), so they
+            # are always referenced — an unset value must not silently fall back
+            # to the app's compiled production host.
+            - name: SYSTEM_NOTIFICATION_FRONTEND_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: SYSTEM_NOTIFICATION_FRONTEND_BASE_URL
+                  name: userservice-configmap-env
             - name: ACCOUNT_INVITE_APP_FRONTEND_BASE_URL
               valueFrom:
                 configMapKeyRef:
                   key: ACCOUNT_INVITE_APP_FRONTEND_BASE_URL
                   name: userservice-configmap-env
-            {{- end }}
-            {{- if .Values.userService.accountInviteAdminFrontendBaseUrl }}
             - name: ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL
               valueFrom:
                 configMapKeyRef:
                   key: ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL
                   name: userservice-configmap-env
-            {{- end }}
             - name: IDENTITY_OTP_URL
               valueFrom:
                 configMapKeyRef:

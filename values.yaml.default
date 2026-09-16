@@ -347,7 +347,10 @@ userService:
   smtpSecure: false
   smtpFrom: ""
 
-  # Bare origins for account-invite links (TEN-INV-U6/U7); unset = system-notification base URL.
+  # Bare origins embedded in invite and notification mails (TEN-INV-U6/U7). Unset = derived from
+  # global.domainName (this environment's own origin). Never leave them pointing elsewhere: before
+  # 2026-09-16 an unset value let the app's compiled production host (https://app.oriso.org) win.
+  # systemNotificationFrontendBaseUrl: "https://your-domain.example.com"
   # accountInviteAppFrontendBaseUrl: "https://your-domain.example.com"
   # accountInviteAdminFrontendBaseUrl: "https://admin.your-domain.example.com"
 
