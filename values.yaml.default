@@ -3,6 +3,8 @@ cert-manager:
   enabled: true
 
 global:
+  # Kubernetes service DNS suffix, supplied by the cluster operator.
+  clusterDomain: "cluster.local"
   # Enable only after the lifecycle endpoint and candidate report are verified.
   accountInactivity:
     accessGateEnabled: false
@@ -188,6 +190,8 @@ online-counseling-mariadb:
 # Off until the gateway image, dedicated secrets and RTC network acceptance pass.
 matrixrtcLifecycle:
   enabled: false
+  # Change with every externally managed token rotation to restart both consumers.
+  tokenRevision: ""
   existingSecret:
     name: ""
     tokenKey: "media-lifecycle-token"
@@ -196,6 +200,8 @@ matrixrtcLifecycle:
       name: ""
       key: "config.yaml"
     nodeIp: ""
+    # Exact kubernetes.io/hostname label of the node owning nodeIp.
+    nodeHostname: ""
 matrixrtcAuth:
   replicas: 1
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"

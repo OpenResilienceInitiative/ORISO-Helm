@@ -41,8 +41,9 @@ Other content-retention workflows are unchanged.
    settings through LiveKit v1.13.5 CLI flags. No runtime Secret is rewritten.
 4. Supply that real public IPv4 as `matrixrtcLifecycle.livekit.nodeIp`.
    Only one SFU replica is supported in this mode. Verify the scheduled node
-   owns that public address; constrain scheduling to that node operationally
-   before activation. Multi-node support needs a per-node address design.
+   owns that public address. Set `matrixrtcLifecycle.livekit.nodeHostname` to
+   that node’s exact `kubernetes.io/hostname` label; the chart requires it and
+   pins the SFU with a node selector before activation. Multi-node support needs a per-node address design.
 5. Verify that the cluster CNI supports the configured hostPorts and enforces
    the rendered NetworkPolicies. Allow inbound **TCP 7881 and UDP 7882** at
    the node firewall. Do not expose TCP 7880 through a host listener,
@@ -53,6 +54,7 @@ Activation values (names and IP are operator-supplied, not defaults):
 ```yaml
 matrixrtcLifecycle:
   enabled: true
+  tokenRevision: "initial"
   existingSecret:
     name: <dedicated lifecycle Secret>
     tokenKey: media-lifecycle-token
@@ -60,6 +62,7 @@ matrixrtcLifecycle:
     existingConfigSecret:
       name: <separate lifecycle LiveKit config Secret>
       key: config.yaml
+    nodeHostname: <verified-node-hostname-label>
     nodeIp: <verified public IPv4 of the SFU node>
 ```
 
@@ -153,3 +156,18 @@ with `help-verbose` and `ports` on 2026-09-16. The pulled manifest digest was
 All rendered network and logging CLI flags were accepted; `ports` reported HTTP
 7880, ICE/TCP 7881, and ICE/UDP 7882. This checks the binary configuration only,
 not deployed CNI/firewall reachability. No image pin was changed.
+
+## Token rotation and cluster DNS
+
+Set `global.clusterDomain` to the cluster's service DNS suffix (default
+`cluster.local`); both API and media ingress auth upstreams use it.
+
+For every lifecycle shared-token rotation, provision the new token in the
+existing dedicated Secret, then change `matrixrtcLifecycle.tokenRevision`
+(for example, an operator change identifier) and apply the reviewed Helm release.
+Both UserService and the policy gateway hash this value into their pod template
+and must finish rolling out. The gateway reads the mounted token only at startup;
+UserService reads its environment only at startup. Changing the Secret alone is
+insufficient. Expect a fail-closed interruption while old and new tokens coexist;
+use a maintenance window, verify both rollouts, and test admission plus revocation
+before ending it. Never place the token itself in Helm values or revision fields.

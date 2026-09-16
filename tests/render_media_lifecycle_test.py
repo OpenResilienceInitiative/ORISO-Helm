@@ -20,6 +20,8 @@ ENABLED = {
     "matrixrtcLifecycle.existingSecret.name": "test-media-lifecycle",
     "matrixrtcLifecycle.livekit.existingConfigSecret.name": "test-livekit-lifecycle",
     "matrixrtcLifecycle.livekit.nodeIp": "203.0.113.10",
+    "matrixrtcLifecycle.livekit.nodeHostname": "sfu-node-1",
+    "matrixrtcLifecycle.tokenRevision": "initial",
 }
 
 def run_helm(overrides=None):
@@ -79,8 +81,28 @@ class MediaLifecycleRenderTest(unittest.TestCase):
         self.assertIn("--rtc.port_range_end=0", args)
         self.assertIn("--logging.level=info", args)
 
+    def test_media_is_pinned_to_the_operator_verified_node(self):
+        self.assertEqual(pod(render(ENABLED), "livekit")["nodeSelector"],
+                         {"kubernetes.io/hostname": "sfu-node-1"})
+
+    def test_token_revision_rolls_both_secret_consumers(self):
+        before = render(ENABLED)
+        after = render({**ENABLED, "matrixrtcLifecycle.tokenRevision": "rotated"})
+        for name in ["userservice", "matrixrtc-auth-policy-gateway"]:
+            annotations = lambda docs: find(docs, "Deployment", name)["spec"]["template"]["metadata"]["annotations"]
+            self.assertNotEqual(annotations(before)["checksum/media-lifecycle"], annotations(after)["checksum/media-lifecycle"])
+
+    def test_custom_cluster_domain_is_used_by_all_lifecycle_auth_upstreams(self):
+        docs = render({**ENABLED, "global.clusterDomain": "cluster.example", "global.accountInactivity.accessGateEnabled": "true"})
+        urls = [d["metadata"].get("annotations", {}).get("nginx.ingress.kubernetes.io/auth-url") for d in docs if d["kind"] == "Ingress"]
+        urls = [url for url in urls if url]
+        self.assertGreater(len(urls), 1)
+        self.assertTrue(all(".svc.cluster.example:" in url for url in urls))
+
     def test_activation_rejects_missing_or_reused_runtime_prerequisites(self):
         cases = [
+            {"matrixrtcLifecycle.livekit.nodeHostname": ""},
+            {"matrixrtcLifecycle.tokenRevision": ""},
             {"matrixrtcLifecycle.existingSecret.name": ""},
             {"matrixrtcLifecycle.livekit.existingConfigSecret.name": ""},
             {"matrixrtcLifecycle.livekit.existingConfigSecret.name": "livekit-config-runtime"},

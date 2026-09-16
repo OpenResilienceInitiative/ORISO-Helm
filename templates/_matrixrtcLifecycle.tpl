@@ -5,6 +5,8 @@
 {{- fail "matrixrtcLifecycle.enabled must be a boolean" -}}
 {{- end -}}
 {{- if $cfg.enabled -}}
+{{- $_ := required "matrixrtcLifecycle.tokenRevision is required and must change on token rotation" $cfg.tokenRevision -}}
+{{- $_ := required "matrixrtcLifecycle.livekit.nodeHostname must identify the node owning nodeIp" $cfg.livekit.nodeHostname -}}
 {{- $secret := required "matrixrtcLifecycle.existingSecret.name must name a separately provisioned dedicated secret" $cfg.existingSecret.name -}}
 {{- $_ := required "matrixrtcLifecycle.existingSecret.tokenKey is required" $cfg.existingSecret.tokenKey -}}
 {{- $config := required "matrixrtcLifecycle.livekit.existingConfigSecret.name must name a separately provisioned lifecycle config secret" $cfg.livekit.existingConfigSecret.name -}}

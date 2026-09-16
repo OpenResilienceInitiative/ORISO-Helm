@@ -47,6 +47,10 @@ spec:
       labels:
         app: livekit
     spec:
+      {{- if $lifecycle.enabled }}
+      nodeSelector:
+        kubernetes.io/hostname: {{ $lifecycle.livekit.nodeHostname | quote }}
+      {{- end }}
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:

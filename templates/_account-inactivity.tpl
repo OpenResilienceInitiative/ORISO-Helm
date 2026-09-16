@@ -4,7 +4,7 @@
 
 {{- define "oriso.accountInactivity.authAnnotations" -}}
 {{- if eq (include "oriso.accountInactivity.accessGateEnabled" .) "true" }}
-nginx.ingress.kubernetes.io/auth-url: "http://userservice.{{ .Release.Namespace }}.svc.cluster.local:8080/users/account-inactivity/access"
+nginx.ingress.kubernetes.io/auth-url: "http://userservice.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain | default "cluster.local" }}:8080/users/account-inactivity/access"
 nginx.ingress.kubernetes.io/auth-method: "GET"
 nginx.ingress.kubernetes.io/auth-proxy-set-headers: "{{ .Release.Namespace }}/account-inactivity-auth-headers"
 {{- end }}
