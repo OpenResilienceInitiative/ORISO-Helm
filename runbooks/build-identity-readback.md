@@ -151,12 +151,12 @@ Local validation commands:
 ```bash
 npm run test:runtime-version:unit
 npm run test:runtime-version:fixtures
-npm run test:runtime-version -- --list --project=dev --project=fixtures
+npm run test:runtime-version -- --project=dev --list
 ```
 
-Unit tests exercise the expectation and comparison rules. Browser fixtures fulfil
+Unit tests exercise the expectation, runner-selection and comparison rules. Browser fixtures fulfil
 all requests locally and exercise DOM readback with correct/wrong/missing/mixed
-identities. `--list` proves only discovery. None of these local results proves a
+identities. `--list` proves only discovery for one explicitly selected live project. None of these local results proves a
 Dev/PreDev deployment; use the explicit environment command for that. A missing
 browser installation or unavailable target is an unmet prerequisite, not PASS.
 
