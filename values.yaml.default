@@ -315,6 +315,19 @@ userService:
   redisPort: 6379
   consultantAvailabilityRedisTtlSeconds: 120
 
+  # ADR-020 P2 feed-update signal. UserService nudges a recipient's clients over Matrix
+  # (content-free to-device event) when a row lands in their Activity-Timeline feed, so the feed
+  # refreshes at once instead of on the next 15 s client poll.
+  #   enabled        — "false" switches signalling off without a rollback; the 15 s poll remains
+  #                    the guaranteed floor, so nothing breaks, it only gets slower again.
+  #   coalesceMillis — per-recipient trailing window. A burst of N rows for one recipient costs
+  #                    one to-device message at the end of the window, not N. Raise it to cut
+  #                    Synapse load, lower it to cut latency; 0 sends one signal per row. The
+  #                    client debounces its refresh by a further 400 ms.
+  feedSignal:
+    enabled: "true"
+    coalesceMillis: 500
+
   # ADR-018 Global Support Access — see runbooks/support-access-enablement.md.
   supportAccess:
     enabled: "false"
