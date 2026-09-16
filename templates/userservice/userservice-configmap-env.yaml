@@ -5,6 +5,8 @@ metadata:
     app: userservice-configmap-env
   name: userservice-configmap-env
 data:
+  ACCOUNT_INACTIVITY_ENABLED: {{ dig "accountInactivity" "enabled" false .Values.userService | quote }}
+  ACCOUNT_INACTIVITY_DRY_RUN: {{ dig "accountInactivity" "dryRun" true .Values.userService | quote }}
   # General
   # DPA_SIGN_FRONTEND_BASE_URL is the app frontend base URL embedded in the
   # DPA-signing email (DpaForwardEmailService). It is the same FQDN as

@@ -13,6 +13,8 @@ spec:
     type: RollingUpdate
   template:
     metadata:
+      annotations:
+        checksum/account-inactivity: {{ printf "%v/%v" (dig "accountInactivity" "enabled" false .Values.userService) (dig "accountInactivity" "dryRun" true .Values.userService) | sha256sum | quote }}
       labels:
         app: userservice
     spec:
@@ -31,6 +33,16 @@ spec:
           image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            - name: ACCOUNT_INACTIVITY_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: ACCOUNT_INACTIVITY_ENABLED
+            - name: ACCOUNT_INACTIVITY_DRY_RUN
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: ACCOUNT_INACTIVITY_DRY_RUN
             - name: MATRIXRTC_CALL_POLICY_TOKEN
               valueFrom:
                 secretKeyRef:

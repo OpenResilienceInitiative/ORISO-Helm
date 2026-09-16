@@ -3,6 +3,9 @@ cert-manager:
   enabled: true
 
 global:
+  # Enable only after the lifecycle endpoint and candidate report are verified.
+  accountInactivity:
+    accessGateEnabled: false
 
   domainName: "your-domain.example.com"
   # Empty = cluster default StorageClass.
@@ -297,6 +300,9 @@ tenantService:
 
 # User service
 userService:
+  accountInactivity:
+    enabled: false
+    dryRun: true
   replicas: 1
   image: "ghcr.io/openresilienceinitiative/oriso-userservice:dev"
   serviceURL: "http://userservice:8080"
