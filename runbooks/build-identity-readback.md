@@ -45,6 +45,11 @@ not inspect a registry or prove that an operator's provenance record is truthful
 
 ## Prepare independent expectations
 
+**App is the Frontend browser surface.** Its source commit and image reference
+are recorded in `commits.frontend` and `images.frontend`; its URL is
+`effectiveConfig.appUrl`. Admin uses the separate `admin` fields and
+`effectiveConfig.adminUrl`.
+
 In the ORISO-E2E checkout containing
 [E2E 76](https://github.com/OpenResilienceInitiative/ORISO-E2E/issues/76), use Node 22
 and the committed lockfile. Before inspecting the page, record:
