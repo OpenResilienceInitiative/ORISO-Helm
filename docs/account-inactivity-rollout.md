@@ -28,7 +28,7 @@ The last two values populate `ACCOUNT_INACTIVITY_ENABLED` and
    deployment without this pause is insufficient. Keep destructive execution
    disabled while deploying the reviewed UserService version and migrations.
 3. Verify that all serving writers use the new version and that the bootstrap
-   inventory reports `inventoryComplete: true`, `missingNew: 0`, and `failed: 0`.
+   inventory reports `complete: true`, `missingNew: 0`, and `failed: 0`.
    Inspect unresolved inventory entries before reopening provisioning. Unknown
    creation times or post-cutoff identities without snapshots require explicit
    operator repair using a confirmed creation-time policy; never guess a policy
