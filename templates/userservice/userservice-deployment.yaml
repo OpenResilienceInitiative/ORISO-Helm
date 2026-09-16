@@ -96,14 +96,9 @@ spec:
                   key: PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL
                   name: userservice-configmap-env
             {{- end }}
-            # Mail-link origins are always rendered (see the ConfigMap), so they
+            # Invite origins are always rendered (see the ConfigMap), so they
             # are always referenced — an unset value must not silently fall back
             # to the app's compiled production host.
-            - name: SYSTEM_NOTIFICATION_FRONTEND_BASE_URL
-              valueFrom:
-                configMapKeyRef:
-                  key: SYSTEM_NOTIFICATION_FRONTEND_BASE_URL
-                  name: userservice-configmap-env
             - name: ACCOUNT_INVITE_APP_FRONTEND_BASE_URL
               valueFrom:
                 configMapKeyRef:
@@ -159,6 +154,23 @@ spec:
                 configMapKeyRef:
                   key: DPA_SIGN_FRONTEND_BASE_URL
                   name: userservice-configmap-env
+            - name: SYSTEM_NOTIFICATION_FRONTEND_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: SYSTEM_NOTIFICATION_FRONTEND_BASE_URL
+                  name: userservice-configmap-env
+            - name: EMAIL_BRANDING_NAME
+              valueFrom:
+                configMapKeyRef:
+                  key: EMAIL_BRANDING_NAME
+                  name: userservice-configmap-env
+            {{- if .Values.userService.emailBrandingLogoUrl }}
+            - name: EMAIL_BRANDING_LOGO_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: EMAIL_BRANDING_LOGO_URL
+                  name: userservice-configmap-env
+            {{- end }}
             - name: ASKER_IMPORT_FILENAME
               valueFrom:
                 configMapKeyRef:

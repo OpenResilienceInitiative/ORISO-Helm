@@ -347,12 +347,18 @@ userService:
   smtpSecure: false
   smtpFrom: ""
 
-  # Bare origins embedded in invite and notification mails (TEN-INV-U6/U7). Unset = derived from
-  # global.domainName (this environment's own origin). Never leave them pointing elsewhere: before
-  # 2026-09-16 an unset value let the app's compiled production host (https://app.oriso.org) win.
-  # systemNotificationFrontendBaseUrl: "https://your-domain.example.com"
+  # Bare origins embedded in invite mails (TEN-INV-U6/U7; admin must NOT end in
+  # /admin). Unset = derived from global.domainName (this environment's own origin), so leave them
+  # commented unless an environment serves the Admin panel on a separate host. Never leave them
+  # pointing elsewhere: before 2026-09-16 an unset value let the app's compiled production host
+  # (https://app.oriso.org) win.
   # accountInviteAppFrontendBaseUrl: "https://your-domain.example.com"
   # accountInviteAdminFrontendBaseUrl: "https://admin.your-domain.example.com"
+
+  # Platform-level email branding for mails without a tenant context.
+  emailBrandingName: "ORISO"
+  # Absolute https URL of the platform logo; empty = mails render without a logo.
+  emailBrandingLogoUrl: ""
 
   firebaseConfigurationCredentialsFilePath: "/firebase/firebase-credentials.json"
   firebaseConfigurationNotificationMessage: "Du hast eine neue Nachricht erhalten"

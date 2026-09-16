@@ -59,12 +59,11 @@ userService:
   magicLinkFrontendBaseUrl: "https://dev.oriso.org"
   passwordResetFrontendBaseUrl: "https://dev.oriso.org"
   passwordResetAdminFrontendBaseUrl: "https://dev.oriso.org/admin"
-  # Invite and notification mail links. Bare origins (the app appends
+  # Invite mail links. Bare origins (the app appends
   # /admin/tenant-onboarding/{token} etc.). Explicit here even though the chart
   # now derives them from global.domainName: the live dev cluster carried these
   # keys out-of-band while this file did not, and the gap mailed production
   # links (https://app.oriso.org) to tenant-admin invitees (2026-09-16).
-  systemNotificationFrontendBaseUrl: "https://dev.oriso.org"
   accountInviteAppFrontendBaseUrl: "https://dev.oriso.org"
   accountInviteAdminFrontendBaseUrl: "https://dev.oriso.org"
 
