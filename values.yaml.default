@@ -185,6 +185,17 @@ online-counseling-mariadb:
   imageName: "mariadb"
   imageVersion: "11.0.6"
   maxconnections: "1000"
+# Off until the gateway image, dedicated secrets and RTC network acceptance pass.
+matrixrtcLifecycle:
+  enabled: false
+  existingSecret:
+    name: ""
+    tokenKey: "media-lifecycle-token"
+  livekit:
+    existingConfigSecret:
+      name: ""
+      key: "config.yaml"
+    nodeIp: ""
 matrixrtcAuth:
   replicas: 1
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"

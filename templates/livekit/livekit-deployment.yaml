@@ -1,3 +1,5 @@
+{{- include "oriso.matrixrtcLifecycle.validate" . -}}
+{{- $lifecycle := .Values.matrixrtcLifecycle -}}
 {{- $strategy := required "livekit.deploymentStrategy is required" .Values.livekit.deploymentStrategy -}}
 {{- $replicasRaw := toString .Values.livekit.replicas -}}
 {{- $terminationGraceRaw := toString .Values.livekit.terminationGracePeriodSeconds -}}
@@ -52,8 +54,8 @@ spec:
                 matchLabels:
                   app: livekit
               topologyKey: kubernetes.io/hostname
-      hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      hostNetwork: {{ not $lifecycle.enabled }}
+      dnsPolicy: {{ ternary "ClusterFirst" "ClusterFirstWithHostNet" $lifecycle.enabled }}
       enableServiceLinks: false
       restartPolicy: Always
       terminationGracePeriodSeconds: {{ $terminationGrace }}
@@ -64,17 +66,41 @@ spec:
           args:
             - --config
             - /etc/livekit/config.yaml
+            {{- if $lifecycle.enabled }}
+            - --node-ip
+            - {{ $lifecycle.livekit.nodeIp | quote }}
+            - --bind
+            - "0.0.0.0"
+            - --port=7880
+            - --rtc.use_external_ip=false
+            - --rtc.tcp_port=7881
+            - --udp-port=7882
+            - --rtc.port_range_start=0
+            - --rtc.port_range_end=0
+            # Debug signaling responses can contain refreshed participant tokens.
+            - --logging.level=info
+            {{- end }}
           ports:
             - containerPort: 7880
               name: http
               protocol: TCP
+            {{- if $lifecycle.enabled }}
+            - containerPort: 7881
+              hostPort: 7881
+              name: rtc-tcp
+              protocol: TCP
+            - containerPort: 7882
+              hostPort: 7882
+              name: rtc-udp
+              protocol: UDP
+            {{- end }}
           volumeMounts:
             - name: livekit-config
               mountPath: /etc/livekit
       volumes:
         - name: livekit-config
           secret:
-            secretName: {{ .Values.livekit.existingConfigSecret.name | quote }}
+            secretName: {{ (ternary $lifecycle.livekit.existingConfigSecret.name .Values.livekit.existingConfigSecret.name $lifecycle.enabled) | quote }}
             items:
-              - key: {{ .Values.livekit.existingConfigSecret.key | quote }}
+              - key: {{ (ternary $lifecycle.livekit.existingConfigSecret.key .Values.livekit.existingConfigSecret.key $lifecycle.enabled) | quote }}
                 path: config.yaml

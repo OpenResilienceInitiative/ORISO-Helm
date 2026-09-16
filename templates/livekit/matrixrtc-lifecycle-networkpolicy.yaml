@@ -1,0 +1,35 @@
+{{- if .Values.matrixrtcLifecycle.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: matrixrtc-lifecycle-livekit
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: livekit
+  policyTypes: [Ingress]
+  ingress:
+    # Signaling and RoomService are private; only the gated ingress and
+    # lifecycle gateway may reach the SFU's HTTP port.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.matrixrtcAuth.ingressControllerNamespace | default "ingress-nginx" | quote }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+              app.kubernetes.io/component: controller
+        - podSelector:
+            matchLabels:
+              app: matrixrtc-auth-policy-gateway
+      ports:
+        - protocol: TCP
+          port: 7880
+    # Encrypted RTC transports remain reachable directly by participants.
+    - ports:
+        - protocol: TCP
+          port: 7881
+        - protocol: UDP
+          port: 7882
+{{- end }}

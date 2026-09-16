@@ -26,10 +26,34 @@ spec:
         - podSelector:
             matchLabels:
               app: element-call
+        {{- if .Values.matrixrtcLifecycle.enabled }}
+        - podSelector:
+            matchLabels:
+              app: userservice
+        - podSelector:
+            matchLabels:
+              app: livekit
+        {{- end }}
       ports:
         - protocol: TCP
           port: 3010
   egress:
+    {{- if .Values.matrixrtcLifecycle.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: livekit
+      ports:
+        - protocol: TCP
+          port: 7880
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- end }}
     - to:
         - podSelector:
             matchLabels:

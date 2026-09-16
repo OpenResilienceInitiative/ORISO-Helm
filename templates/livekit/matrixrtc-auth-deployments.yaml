@@ -17,6 +17,8 @@ spec:
       app: matrixrtc-auth-policy-gateway
   template:
     metadata:
+      annotations:
+        checksum/media-lifecycle: {{ .Values.matrixrtcLifecycle | toJson | sha256sum | quote }}
       labels:
         app: matrixrtc-auth-policy-gateway
     spec:
@@ -61,6 +63,22 @@ spec:
             capabilities:
               drop: ["ALL"]
           env:
+            - name: MATRIXRTC_LIFECYCLE_ENABLED
+              value: {{ .Values.matrixrtcLifecycle.enabled | quote }}
+            {{- if .Values.matrixrtcLifecycle.enabled }}
+            - name: MATRIXRTC_LIFECYCLE_TOKEN_FILE
+              value: /run/lifecycle/token
+            - name: MATRIXRTC_LIFECYCLE_REDIS_URL_FILE
+              value: /run/secrets/redis-url
+            - name: MATRIXRTC_LIFECYCLE_LIVEKIT_KEY_FILE
+              value: /run/secrets/livekit-api-key
+            - name: MATRIXRTC_LIFECYCLE_LIVEKIT_SECRET_FILE
+              value: /run/secrets/livekit-api-secret
+            - name: MATRIXRTC_LIFECYCLE_LIVEKIT_URL
+              value: http://livekit:7880
+            - name: MATRIXRTC_LIFECYCLE_POLICY_URL
+              value: http://userservice:8080/internal/matrixrtc/media-access
+            {{- end }}
             - name: MATRIXRTC_ALLOWED_ORIGINS
               value: "https://{{ .Values.global.domainName }}"
             - name: MATRIX_SERVER_NAME
@@ -84,6 +102,11 @@ spec:
             - name: auth-secrets
               mountPath: /run/secrets
               readOnly: true
+            {{- if .Values.matrixrtcLifecycle.enabled }}
+            - name: lifecycle-secret
+              mountPath: /run/lifecycle
+              readOnly: true
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /health
@@ -101,6 +124,22 @@ spec:
                 path: matrix-membership-token
               - key: {{ .Values.matrixrtcAuth.existingSecret.callPolicyTokenKey | quote }}
                 path: call-policy-token
+              {{- if .Values.matrixrtcLifecycle.enabled }}
+              - key: {{ .Values.matrixrtcAuth.existingSecret.redisUrlKey | quote }}
+                path: redis-url
+              - key: {{ .Values.matrixrtcAuth.existingSecret.livekitApiKeyKey | quote }}
+                path: livekit-api-key
+              - key: {{ .Values.matrixrtcAuth.existingSecret.livekitApiSecretKey | quote }}
+                path: livekit-api-secret
+              {{- end }}
+        {{- if .Values.matrixrtcLifecycle.enabled }}
+        - name: lifecycle-secret
+          secret:
+            secretName: {{ .Values.matrixrtcLifecycle.existingSecret.name | quote }}
+            items:
+              - key: {{ .Values.matrixrtcLifecycle.existingSecret.tokenKey | quote }}
+                path: token
+        {{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
