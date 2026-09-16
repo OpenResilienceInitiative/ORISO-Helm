@@ -77,10 +77,11 @@ data:
   {{- end }}
   # Account-invite origins. ALWAYS rendered, derived from global.domainName
   # unless a value overrides them (Pre-Dev: separate admin host); the
-  # notification origin above is derived the same way. Before 2026-09-16 these were omitted when unset, which let the
-  # app's compiled fallback (https://app.oriso.org = production) win — dev
-  # tenant-admin invite mails linked to production, which has no ingress for
-  # that host and answers with the ingress fake certificate.
+  # notification origin above is derived the same way. Before 2026-09-16 these
+  # were omitted when unset, which let the app's compiled fallback (the
+  # production host) win over the environment's own origin — dev tenant-admin
+  # invite mails linked to production, which has no ingress for that host and
+  # answers with the ingress fake certificate (ORISO-Helm#349).
   # InviteAcceptUrlBuilder appends the route itself (/admin/tenant-onboarding/
   # {token} for tenant-admin, /account-invite/{token} otherwise), so both
   # are bare origins — the admin one must NOT end in /admin.

@@ -28,9 +28,11 @@ origins and the admin one must **not** end in `/admin`:
 | `ACCOUNT_INVITE_APP_FRONTEND_BASE_URL` | `https://app.oriso-dev.site` |
 | `ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL` | `https://admin.oriso-dev.site` |
 
-When unset, both fall back to the system-notification base URL (default
-`https://app.oriso.org`). On Pre-Dev the Admin panel lives on its own host,
-so the admin value is **required** — otherwise every tenant-admin invite
+When unset, the chart renders both from the environment's own origin
+(`global.domainName` + `global.enableTls`), exactly like `APP_BASE_URL` — the
+keys are always present, so the app's compiled fallback can never win
+(ORISO-Helm#349). On Pre-Dev the Admin panel lives on its own host, so the
+admin value is still **required** there — otherwise every tenant-admin invite
 links to the App host, which does not serve the onboarding route.
 
 ## Applying it per environment
