@@ -51,7 +51,10 @@ RESET_LINK_ENV_KEYS = (
 )
 
 
-def render(extra_set_strings: dict[str, str] | None = None) -> list[dict]:
+def render(
+    extra_set_strings: dict[str, str] | None = None,
+    extra_sets: dict[str, str] | None = None,
+) -> list[dict]:
     cmd = [
         "helm",
         "template",
@@ -64,6 +67,10 @@ def render(extra_set_strings: dict[str, str] | None = None) -> list[dict]:
     ]
     for key, value in (extra_set_strings or {}).items():
         cmd += ["--set-string", f"{key}={value}"]
+    # Typed values (booleans) go through --set; --set-string would hand the
+    # template a string where it expects a bool.
+    for key, value in (extra_sets or {}).items():
+        cmd += ["--set", f"{key}={value}"]
     # The default values configure an SMTP transport, whose render gate requires
     # credentials; real deploys carry them in the persistent secret values.
     cmd += [
@@ -195,7 +202,7 @@ def assert_derived_from_own_origin_when_unset() -> None:
         )
         assert key in env_names, f"Deployment must import {key}"
         assert "app.oriso.org" not in data[key]
-    docs = render({"global.domainName": domain, "global.enableTls": "false"})
+    docs = render({"global.domainName": domain}, extra_sets={"global.enableTls": "false"})
     data = userservice_configmap(docs)["data"]
     for key in LINK_ENV_KEYS:
         assert data.get(key) == f"http://{domain}", (
