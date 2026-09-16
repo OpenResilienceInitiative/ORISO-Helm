@@ -131,6 +131,10 @@ data:
   IDENTITY_OTP_ALLOWED_FOR_CONSULTANTS: {{ .Values.userService.otpAllowedForConsultants | default "false" | quote }}
   IDENTITY_OTP_ALLOWED_FOR_SINGLE_TENANT_ADMINS: {{ .Values.userService.otpAllowedForSingleTenantAdmins | default "false" | quote }}
   IDENTITY_OTP_ALLOWED_FOR_TENANT_SUPER_ADMINS: {{ .Values.userService.otpAllowedForTenantSuperAdmins | default "false" | quote }}
+  # The Admin panel makes 2FA mandatory for agency admins, so enrolment defaults to allowed.
+  # Only an unset value falls back to "true"; `default` would also turn an explicit boolean false into "true".
+  IDENTITY_OTP_ALLOWED_FOR_AGENCY_ADMINS: {{ if kindIs "invalid" .Values.userService.otpAllowedForAgencyAdmins }}"true"{{ else }}{{ .Values.userService.otpAllowedForAgencyAdmins | toString | quote }}{{ end }}
+  IDENTITY_OTP_ALLOWED_FOR_RESTRICTED_AGENCY_ADMINS: {{ if kindIs "invalid" .Values.userService.otpAllowedForRestrictedAgencyAdmins }}"true"{{ else }}{{ .Values.userService.otpAllowedForRestrictedAgencyAdmins | toString | quote }}{{ end }}
   # logstash
   LOGSTASH_HOST: {{ .Values.global.logstashHost }}
   FEATURE_APPOINTMENT_ENABLED: "false"

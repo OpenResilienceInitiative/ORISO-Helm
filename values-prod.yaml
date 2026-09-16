@@ -42,6 +42,9 @@ userService:
   otpAllowedForConsultants: "true"
   otpAllowedForSingleTenantAdmins: "true"
   otpAllowedForTenantSuperAdmins: "true"
+  # Admin panel requires 2FA for agency admins; the backend must allow enrolment.
+  otpAllowedForAgencyAdmins: "true"
+  otpAllowedForRestrictedAgencyAdmins: "true"
 
   # DECISION REQUIRED: production frontend domain for Magic Link login and
   # password-reset email links. Not guessed here — go-live is 2026-10-01 and

@@ -335,6 +335,9 @@ userService:
   otpAllowedForConsultants: "true"
   otpAllowedForSingleTenantAdmins: "true"
   otpAllowedForTenantSuperAdmins: "true"
+  # Admin panel requires 2FA for agency admins; the backend must allow enrolment.
+  otpAllowedForAgencyAdmins: "true"
+  otpAllowedForRestrictedAgencyAdmins: "true"
 
   # Must be overridden per environment; password reset fails closed if unset.
   magicLinkFrontendBaseUrl: "https://your-domain.example.com"
