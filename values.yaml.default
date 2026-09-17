@@ -3,6 +3,11 @@ cert-manager:
   enabled: true
 
 global:
+  # Kubernetes service DNS suffix, supplied by the cluster operator.
+  clusterDomain: "cluster.local"
+  # Enable only after the lifecycle endpoint and candidate report are verified.
+  accountInactivity:
+    accessGateEnabled: false
 
   domainName: "your-domain.example.com"
   # Empty = cluster default StorageClass.
@@ -182,6 +187,21 @@ online-counseling-mariadb:
   imageName: "mariadb"
   imageVersion: "11.0.6"
   maxconnections: "1000"
+# Off until the gateway image, dedicated secrets and RTC network acceptance pass.
+matrixrtcLifecycle:
+  enabled: false
+  # Change with every externally managed token rotation to restart both consumers.
+  tokenRevision: ""
+  existingSecret:
+    name: ""
+    tokenKey: "media-lifecycle-token"
+  livekit:
+    existingConfigSecret:
+      name: ""
+      key: "config.yaml"
+    nodeIp: ""
+    # Exact kubernetes.io/hostname label of the node owning nodeIp.
+    nodeHostname: ""
 matrixrtcAuth:
   replicas: 1
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
@@ -297,6 +317,9 @@ tenantService:
 
 # User service
 userService:
+  accountInactivity:
+    enabled: false
+    dryRun: true
   replicas: 1
   image: "ghcr.io/openresilienceinitiative/oriso-userservice:dev"
   serviceURL: "http://userservice:8080"

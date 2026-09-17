@@ -13,6 +13,9 @@ spec:
     type: RollingUpdate
   template:
     metadata:
+      annotations:
+        checksum/media-lifecycle: {{ .Values.matrixrtcLifecycle | toJson | sha256sum | quote }}
+        checksum/account-inactivity: {{ printf "%v/%v" (dig "accountInactivity" "enabled" false .Values.userService) (dig "accountInactivity" "dryRun" true .Values.userService) | sha256sum | quote }}
       labels:
         app: userservice
     spec:
@@ -31,6 +34,33 @@ spec:
           image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            - name: MATRIXRTC_LIFECYCLE_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: MATRIXRTC_LIFECYCLE_ENABLED
+            - name: ACCOUNT_INACTIVITY_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: ACCOUNT_INACTIVITY_ENABLED
+            - name: ACCOUNT_INACTIVITY_DRY_RUN
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: ACCOUNT_INACTIVITY_DRY_RUN
+            - name: MATRIXRTC_LIFECYCLE_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: MATRIXRTC_LIFECYCLE_BASE_URL
+            {{- if .Values.matrixrtcLifecycle.enabled }}
+            - name: MATRIXRTC_LIFECYCLE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.matrixrtcLifecycle.existingSecret.name | quote }}
+                  key: {{ .Values.matrixrtcLifecycle.existingSecret.tokenKey | quote }}
+            {{- end }}
             - name: MATRIXRTC_CALL_POLICY_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -428,9 +458,9 @@ spec:
                   key: LOGSTASH_HOST
                   name: userservice-configmap-env
             - name: USER_REGISTEREDONLY_DELETEWORKFLOW_ENABLED
-              value: "true"
+              value: "false"
             - name: USER_REGISTEREDONLY_DELETEWORKFLOW_AFTERSESSIONPURGE_ENABLED
-              value: "true"
+              value: "false"
             - name: IDENTITY_OTP_ALLOWED_FOR_USERS
               valueFrom:
                 configMapKeyRef:

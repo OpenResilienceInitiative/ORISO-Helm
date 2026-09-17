@@ -2,6 +2,13 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   annotations:
+    {{- if .Values.matrixrtcLifecycle.enabled }}
+    nginx.ingress.kubernetes.io/auth-url: {{ printf "http://matrixrtc-auth-policy-gateway.%s.svc.%s:3010/internal/lifecycle/admit" .Release.Namespace (.Values.global.clusterDomain | default "cluster.local") | quote }}
+    nginx.ingress.kubernetes.io/auth-method: "GET"
+    # Signaling URLs may carry participant access_token credentials.
+    nginx.ingress.kubernetes.io/enable-access-log: "false"
+    nginx.ingress.kubernetes.io/auth-proxy-set-headers: {{ printf "%s/matrixrtc-lifecycle-auth-headers" .Release.Namespace | quote }}
+    {{- end }}
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/proxy-read-timeout: '3600'
     nginx.ingress.kubernetes.io/proxy-send-timeout: '3600'
