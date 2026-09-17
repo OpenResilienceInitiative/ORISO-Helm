@@ -1,0 +1,82 @@
+{{- $scanner := .Values.userService.pictureScanner | default dict -}}
+{{- if and (hasKey $scanner "enabled") (not (kindIs "bool" $scanner.enabled)) -}}
+{{- fail "userService.pictureScanner.enabled must be a boolean" -}}
+{{- end -}}
+{{- if $scanner.enabled -}}
+{{- if not (regexMatch "^.+@sha256:[a-f0-9]{64}$" ($scanner.image | default "")) -}}
+{{- fail "userService.pictureScanner.image must be pinned by digest" -}}
+{{- end -}}
+{{- $resources := $scanner.resources | default dict -}}
+{{- if or (empty (dig "requests" "memory" "" $resources)) (empty (dig "limits" "memory" "" $resources)) -}}
+{{- fail "userService.pictureScanner.resources must specify memory requests and limits" -}}
+{{- end -}}
+{{- range $kind := list "requests" "limits" -}}
+{{- $memory := printf "%v" (dig $kind "memory" "" $resources) -}}
+{{- if or (not (regexMatch "^[0-9]+(\\.[0-9]+)?([KMGTPE]i|[kMGTPE]|m)?$" $memory)) (le (float64 (regexFind "^[0-9]+(\\.[0-9]+)?" $memory)) 0.0) -}}
+{{- fail "userService.pictureScanner memory requests and limits must be valid positive quantities" -}}
+{{- end -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: userservice-picture-scanner
+  namespace: {{ .Release.Namespace }}
+data:
+  start.sh: |
+    #!/bin/sh
+    set -eu
+    # A pinned image's bundled database ages. Finish a successful refresh before
+    # clamd's age guard runs; retry here rather than restarting into the old DB.
+    touch /tmp/picture-scanner-refreshing
+    rm -f /tmp/picture-scanner-startup-deadline
+    until freshclam --stdout --user=clamav; do
+      echo "Picture scanner signature refresh unavailable; retrying in 60 seconds."
+      sleep 60
+    done
+    echo "$(( $(date +%s) + 1800 ))" > /tmp/picture-scanner-startup-deadline
+    rm -f /tmp/picture-scanner-refreshing
+    exec /init-unprivileged
+  health.sh: |
+    #!/bin/sh
+    set -eu
+    # PID 1 owns this marker only while waiting for a successful initial update.
+    [ ! -e /tmp/picture-scanner-refreshing ] || exit 0
+    deadline_file=/tmp/picture-scanner-startup-deadline
+    if [ -f "$deadline_file" ]; then
+      # A late refresh must still allow the daemon to load. Bound PING below the
+      # probe timeout, and end this grace on the first successful response.
+      if timeout 2 clamdscan --ping=1; then
+        rm -f "$deadline_file"
+        exit 0
+      fi
+      deadline=$(cat "$deadline_file")
+      case "$deadline" in ''|*[!0-9]*) exit 1 ;; esac
+      [ "$(date +%s)" -lt "$deadline" ] && exit 0
+      exit 1
+    fi
+    exec clamdscan --ping=1
+  clamd.conf: |
+    Foreground yes
+    DatabaseDirectory /var/lib/clamav
+    LocalSocket /tmp/clamd.sock
+    LocalSocketMode 600
+    TCPSocket 3310
+    TCPAddr 127.0.0.1
+    TemporaryDirectory /tmp
+    MaxThreads 2
+    MaxQueue 4
+    StreamMaxLength 5M
+    MaxFileSize 6M
+    MaxScanSize 20M
+    AlertExceedsMax yes
+    ReadTimeout 10
+    CommandReadTimeout 5
+    SendBufTimeout 1000
+    SelfCheck 60
+    FailIfCvdOlderThan 7
+    ConcurrentDatabaseReload yes
+    LogClean no
+    LogVerbose no
+    LeaveTemporaryFiles no
+    ForceToDisk no
+{{- end }}
