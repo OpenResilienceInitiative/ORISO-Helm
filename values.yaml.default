@@ -297,6 +297,11 @@ tenantService:
 
 # User service
 userService:
+  # Per client IP and ingress-controller replica, shared by the two public entry paths.
+  # Other UserService routes retain their existing policy.
+  publicEntryRateLimit:
+    requestsPerSecond: 5
+    burstMultiplier: 2
   replicas: 1
   image: "ghcr.io/openresilienceinitiative/oriso-userservice:dev"
   serviceURL: "http://userservice:8080"
