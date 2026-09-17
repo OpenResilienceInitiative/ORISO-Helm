@@ -1,0 +1,63 @@
+# Production overlay for the ORISO chart.
+#
+# Apply ON TOP of your base values, e.g.:
+#   helm upgrade --install caritas ./ -n caritas --create-namespace \
+#     -f values.yaml -f values-prod.yaml -f secrets.yaml
+#
+# The base values.yaml.default is already prod-safe (springProfilesActive:prod,
+# initializeDummyData:false), so this overlay is mostly explicit re-assertion +
+# the decisions a production operator must make. Tracking: #24.
+#
+# The production hoster runs this via ArgoCD on gridscale; align the values
+# below (and ingress/cert-manager toggles) with them — see issue #25.
+
+global:
+  initializeDummyData: false
+  matrix:
+    matrixServerName: "matrix.oriso.org"
+  observability:
+    otlpEnabled: false
+    deploymentEnvironment: "production"
+
+agencyService:
+  springProfilesActive: "prod"
+  liquibaseContexts: "production"
+tenantService:
+  springProfilesActive: "prod"
+  liquibaseContexts: "prod"
+consultingTypeService:
+  liquibaseContexts: "prod"
+userService:
+  springProfilesActive: "prod"
+
+  # ADR-018 Global Support Access is off in production. Enabling it is a deliberate policy decision
+  # that presupposes real Global Support Admin accounts with enrolled second factors and an agreed
+  # operational alerting posture — it is not a rollout default.
+  supportAccess:
+    enabled: "false"
+  # OTP is enabled by default in prod to match the platform security posture.
+  # This is login posture only and is unrelated to message/data encryption
+  # (always on).
+  otpAllowedForUsers: "true"
+  otpAllowedForConsultants: "true"
+  otpAllowedForSingleTenantAdmins: "true"
+  otpAllowedForTenantSuperAdmins: "true"
+
+  # DECISION REQUIRED: production frontend domain for Magic Link login and
+  # password-reset email links. Not guessed here — go-live is 2026-10-01 and
+  # the domain isn't live yet (https://app.oriso.org currently fails TLS
+  # verification). Set both to the real production frontend URL before
+  # go-live, the same way environment deployment values set them to
+  # https://app.oriso-dev.site. Until set, password reset fails closed (no
+  # email sent); Magic Link emails a broken link.
+  # magicLinkFrontendBaseUrl: "https://TODO-set-before-go-live"
+  # passwordResetFrontendBaseUrl: "https://TODO-set-before-go-live"
+  # passwordResetAdminFrontendBaseUrl: "https://TODO-set-before-go-live/admin"
+
+# Matrix federation identity (ADR-005 canonical server_name). Fixed across
+# environments; values.yaml.default ships a placeholder ("your-server.local").
+matrix:
+  synapseServerName: "matrix.oriso.org"
+  matrixServerName: "matrix.oriso.org"
+matrixrtcAuth:
+  membershipReaderUserId: "@matrixrtc-auth:matrix.oriso.org"
