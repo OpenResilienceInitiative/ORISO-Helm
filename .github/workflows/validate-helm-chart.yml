@@ -78,11 +78,39 @@ jobs:
 
       - name: Run render contracts
         shell: bash
+        # Every contract runs, then the step reports all of them. `set -e` with a
+        # bare loop stops at the first failure, so a branch with several unrelated
+        # render defects surfaces them one per push -- and these contracts had not
+        # run since 09.09, because this workflow was keyed on pre-dev and master.
+        # Reporting once beats N round trips. Nothing is tolerated: any failure
+        # still fails the step.
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          failed=()
           for test_file in tests/render_*_test.py; do
-            python "$test_file"
+            echo "::group::${test_file}"
+            if python "$test_file"; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error file=${test_file}::render contract failed"
+              failed+=("$test_file")
+            fi
           done
+
+          total=$(ls tests/render_*_test.py | wc -l)
+          echo "### Render contracts" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ ${#failed[@]} -eq 0 ]; then
+            echo "All ${total} contracts passed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "${#failed[@]} of ${total} failed:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          for test_file in "${failed[@]}"; do
+            echo "- \`${test_file}\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+          exit 1
 
       - name: Run shell guardrails
         shell: bash
