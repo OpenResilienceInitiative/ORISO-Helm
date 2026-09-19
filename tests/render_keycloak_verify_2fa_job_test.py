@@ -9,6 +9,7 @@ Requires `helm` on PATH, like every other render test here.
 """
 
 import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -156,3 +157,27 @@ def test_a_missing_check_script_can_be_made_fatal():
     )
 
     assert container_env(find(docs, "Job", JOB_NAME))["REQUIRE_CHECK_SCRIPT"] == "true"
+
+
+def main():
+    # CI runs these files with `python <file>`, not a test runner, so every case
+    # has to be called from here. A render contract nobody calls passes forever.
+    test_the_check_runs_on_upgrade_and_not_only_on_install()
+    test_a_failed_check_leaves_its_pod_behind_to_be_read()
+    test_the_check_does_not_retry_a_real_drift_away()
+    test_the_check_never_writes_to_the_realm()
+    test_an_image_without_the_check_skips_instead_of_failing_the_release()
+    test_the_check_can_be_switched_off()
+    test_the_keycloak_address_comes_from_values()
+    test_the_default_address_stays_inside_the_cluster()
+    test_the_job_cannot_outlive_the_release()
+    test_a_missing_check_script_can_be_made_fatal()
+    print("OK: keycloak verify 2fa job render contract")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (AssertionError, KeyError) as error:
+        print(f"FAIL: {error}", file=sys.stderr)
+        sys.exit(1)
