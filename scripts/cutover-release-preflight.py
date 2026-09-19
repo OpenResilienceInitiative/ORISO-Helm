@@ -267,6 +267,16 @@ def verify_render(chart_dir: pathlib.Path, values: dict) -> None:
                 overlay.name,
                 "--set-string",
                 "global.secrets.redisdefaultPass=test-redis-password",
+                # Placeholders for secrets the chart requires but this render
+                # does not evaluate: the preflight verifies image pinning, not
+                # deployable output. Without them `helm template` aborts on
+                # tenantservice-secret.yaml and the preflight reports a render
+                # failure that has nothing to do with the release it is
+                # checking.
+                "--set-string",
+                "tenantService.smtpPasswordEncryptionSecret=preflight-placeholder",
+                "--set-string",
+                "consultingTypeService.smtpPasswordEncryptionSecret=preflight-placeholder",
             ],
             capture_output=True,
             text=True,
