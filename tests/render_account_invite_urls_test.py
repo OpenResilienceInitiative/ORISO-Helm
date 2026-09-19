@@ -51,7 +51,10 @@ RESET_LINK_ENV_KEYS = (
 )
 
 
-def render(extra_set_strings: dict[str, str] | None = None) -> list[dict]:
+def render(
+    extra_set_strings: dict[str, str] | None = None,
+    extra_sets: dict[str, str] | None = None,
+) -> list[dict]:
     cmd = [
         "helm",
         "template",
@@ -64,6 +67,10 @@ def render(extra_set_strings: dict[str, str] | None = None) -> list[dict]:
     ]
     for key, value in (extra_set_strings or {}).items():
         cmd += ["--set-string", f"{key}={value}"]
+    # Typed values (booleans) go through --set; --set-string would hand the
+    # template a string where it expects a bool.
+    for key, value in (extra_sets or {}).items():
+        cmd += ["--set", f"{key}={value}"]
     # The default values configure an SMTP transport, whose render gate requires
     # credentials; real deploys carry them in the persistent secret values.
     cmd += [
@@ -71,6 +78,9 @@ def render(extra_set_strings: dict[str, str] | None = None) -> list[dict]:
         "userService.smtpUser=smtp-canary-user",
         "--set-string",
         "userService.smtpPassword=smtp-canary-password",
+        # TenantService's secret gate (ORISO-TenantService#183) needs a value too.
+        "--set-string",
+        "tenantService.smtpPasswordEncryptionSecret=render-test-only-0123456789abcdef",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
@@ -174,31 +184,38 @@ def assert_upstream_clients_stay_wired() -> None:
     print("PASS: TS/AS/CTS client base URLs stay wired ConfigMap -> Deployment")
 
 
-def assert_omitted_when_unset() -> None:
-    """No half-wiring: unset invite URLs must not render keys or env imports.
+def assert_derived_from_own_origin_when_unset() -> None:
+    """Unset invite URLs render the environment's own origin, never a compiled host.
 
-    A configMapKeyRef pointing at a key the ConfigMap does not carry makes the
-    pod fail to start, so the env import must be guarded exactly like the key.
+    Before 2026-09-16 the keys were omitted when unset and the app's compiled
+    production fallback won (ORISO-Helm#349). Now both keys are always rendered
+    from global.domainName + global.enableTls, and the Deployment always imports
+    them, so a ConfigMap/Deployment half-wiring cannot occur either.
     """
-    docs = render()
+    domain = "invite-render-test.example.org"
+    docs = render({"global.domainName": domain})
     data = userservice_configmap(docs)["data"]
     env_names = userservice_deployment_env_names(docs)
     for key in LINK_ENV_KEYS:
-        assert key not in data, (
-            f"{key} must be omitted when the environment leaves it unset so "
-            "the app-side fallback (system notification base URL) applies"
+        assert data.get(key) == f"https://{domain}", (
+            f"{key} must derive from global.domainName when unset, got {data.get(key)!r}"
         )
-        assert (
-            key not in env_names
-        ), f"Deployment must not reference {key} when the ConfigMap omits it"
-    print("PASS: invite URL keys and env imports are omitted when unset")
+        assert key in env_names, f"Deployment must import {key}"
+        assert "app.oriso.org" not in data[key]
+    docs = render({"global.domainName": domain}, extra_sets={"global.enableTls": "false"})
+    data = userservice_configmap(docs)["data"]
+    for key in LINK_ENV_KEYS:
+        assert data.get(key) == f"http://{domain}", (
+            f"{key} must follow global.enableTls, got {data.get(key)!r}"
+        )
+    print("PASS: invite URL keys derive from the environment's own origin when unset")
 
 
 def main() -> None:
     assert_pre_dev_invite_urls()
     assert_reset_links_are_imported()
     assert_upstream_clients_stay_wired()
-    assert_omitted_when_unset()
+    assert_derived_from_own_origin_when_unset()
 
 
 if __name__ == "__main__":

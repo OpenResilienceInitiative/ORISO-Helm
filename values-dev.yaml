@@ -59,6 +59,13 @@ userService:
   magicLinkFrontendBaseUrl: "https://dev.oriso.org"
   passwordResetFrontendBaseUrl: "https://dev.oriso.org"
   passwordResetAdminFrontendBaseUrl: "https://dev.oriso.org/admin"
+  # Invite mail links. Bare origins (the app appends
+  # /admin/tenant-onboarding/{token} etc.). Explicit here even though the chart
+  # now derives them from global.domainName: the live dev cluster carried these
+  # keys out-of-band while this file did not, and the gap mailed production
+  # links (https://app.oriso.org) to tenant-admin invitees (2026-09-16).
+  accountInviteAppFrontendBaseUrl: "https://dev.oriso.org"
+  accountInviteAdminFrontendBaseUrl: "https://dev.oriso.org"
 
   # SMTP transport for Magic Link and password-reset mail. The credentials
   # belong in the persistent secret values, never in this file.
