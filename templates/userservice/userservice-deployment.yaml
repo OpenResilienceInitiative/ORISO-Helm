@@ -629,6 +629,15 @@ spec:
                 secretKeyRef:
                   key: MATRIX_ADMIN_PASSWORD
                   name: userservice-secret
+            {{- $suggestions := .Values.userService.identitySuggestions | default dict }}
+            {{- $lookupSecret := $suggestions.matrixAdminTokenSecret | default dict }}
+            {{- if $lookupSecret.name }}
+            - name: MATRIX_AVAILABILITY_ADMIN_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $lookupSecret.name | quote }}
+                  key: {{ $lookupSecret.key | default "access-token" | quote }}
+            {{- end }}
 
           ports:
             - containerPort: 8080

@@ -297,6 +297,18 @@ tenantService:
 
 # User service
 userService:
+  # Provision/rotate this existing Secret outside anonymous requests before enabling
+  # the new identity suggestions UI. Without it, suggestions fail closed with 503.
+  # The Synapse credential has admin privileges; the lookup code uses only GET.
+  identitySuggestions:
+    matrixAdminTokenSecret:
+      name: ""
+      key: "access-token"
+  # Per client IP and ingress-controller replica, shared by the two public entry paths.
+  # Other UserService routes retain their existing policy.
+  publicEntryRateLimit:
+    requestsPerSecond: 5
+    burstMultiplier: 2
   replicas: 1
   image: "ghcr.io/openresilienceinitiative/oriso-userservice:dev"
   serviceURL: "http://userservice:8080"
