@@ -2025,6 +2025,14 @@
           "autheticatorFlow": true,
           "flowAlias": "forms - auth-otp-form - Conditional",
           "userSetupAllowed": false
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 30,
+          "autheticatorFlow": true,
+          "flowAlias": "browser-email-otp-conditional",
+          "userSetupAllowed": false
         }
       ]
     },
@@ -2300,6 +2308,33 @@
           "autheticatorFlow": false,
           "userSetupAllowed": false,
           "authenticator": "email-authenticator",
+          "authenticatorConfig": "email-otp-config"
+        }
+      ]
+    },
+    {
+      "id": "b7f1c2e4-5a63-47d8-9c10-2ea3f8b96d41",
+      "alias": "browser-email-otp-conditional",
+      "description": "Asks for the e-mail one-time code on browser logins",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "conditional-user-configured"
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "email-form-authenticator",
           "authenticatorConfig": "email-otp-config"
         }
       ]

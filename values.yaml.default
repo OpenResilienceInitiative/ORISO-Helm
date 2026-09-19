@@ -83,6 +83,14 @@ global:
     serviceAdminClientId: "admin-cli"
     bootstrapUsers:
       enabled: true
+    # Checks after every install and upgrade that the live realm still carries
+    # the ORISO 2FA contract, and fails the hook when it does not. It never
+    # writes to the realm: reconciling stays a deliberate operator action,
+    # because the apply script rebinds to the stock flow and recreates the
+    # custom one, which would break 2FA logins for the duration of every
+    # deploy. Set to false only to silence it temporarily.
+    verifyTwoFactorContract:
+      enabled: true
 
 matrix:
   image: "matrixdotorg/synapse:v1.158.0"
