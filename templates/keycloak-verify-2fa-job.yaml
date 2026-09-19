@@ -5,7 +5,12 @@
 {{- end -}}
 {{- if $verifyEnabled }}
 {{- $kc := index .Values "online-counseling-keycloak" -}}
-{{- $adminUrl := $verify.adminUrl | default (printf "http://keycloak.%s:8080/auth" .Release.Namespace) -}}
+{{/* The endpoint lives entirely in values: a default host here would be the
+     address that actually ships, while an operator looks for it in values. tpl
+     resolves the namespace, which only the release knows. */}}
+{{- $adminUrl := required
+      "verifyTwoFactorContract.adminUrl must be set - see values.yaml.default"
+      (tpl ($verify.adminUrl | default "") .) -}}
 {{- $waitAttempts := $verify.waitAttempts | default 60 -}}
 {{- $deadlineSeconds := $verify.deadlineSeconds | default 600 -}}
 {{- $requireCheckScript := $verify.requireCheckScript | default false -}}

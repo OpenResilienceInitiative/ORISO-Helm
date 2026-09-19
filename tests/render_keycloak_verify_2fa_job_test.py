@@ -31,8 +31,12 @@ def render_chart(extra_args=()):
             str(ROOT / "values.yaml.default"),
             "-f",
             str(ROOT / "secrets.yaml.default"),
-            "--set",
-            "userService.smtpHost=",
+            "--set-string",
+            "global.secrets.redisdefaultPass=test-redis-password",
+            "--set-string",
+            "userService.smtpUser=smtp-validation-user",
+            "--set-string",
+            "userService.smtpPassword=smtp-validation-password",
             *extra_args,
         ],
         check=True,
@@ -142,6 +146,25 @@ def test_the_default_address_stays_inside_the_cluster():
     assert "your-domain" not in url
 
 
+def test_the_namespace_in_the_configured_address_is_resolved():
+    # The value carries {{ .Release.Namespace }}; only the release knows it.
+    docs = render_chart(("--namespace", "counselling-pre-dev"))
+
+    url = container_env(find(docs, "Job", JOB_NAME))["KEYCLOAK_URL"]
+    assert url == "http://keycloak.counselling-pre-dev:8080/auth"
+
+
+def test_an_empty_address_fails_the_render_rather_than_guessing():
+    # Falling back to a built-in address would point the check at an endpoint
+    # nobody chose, and report on it as if somebody had.
+    try:
+        render_chart(("--set", "global.keycloak.verifyTwoFactorContract.adminUrl="))
+    except subprocess.CalledProcessError as error:
+        assert "adminUrl must be set" in (error.stderr or "")
+    else:
+        raise AssertionError("an empty adminUrl rendered instead of failing")
+
+
 def test_the_job_cannot_outlive_the_release():
     # Helm's --timeout is client-side: it stops helm waiting, not this pod. A job
     # blocked on a bad credential would otherwise spin until the next deploy.
@@ -170,6 +193,8 @@ def main():
     test_the_check_can_be_switched_off()
     test_the_keycloak_address_comes_from_values()
     test_the_default_address_stays_inside_the_cluster()
+    test_the_namespace_in_the_configured_address_is_resolved()
+    test_an_empty_address_fails_the_render_rather_than_guessing()
     test_the_job_cannot_outlive_the_release()
     test_a_missing_check_script_can_be_made_fatal()
     print("OK: keycloak verify 2fa job render contract")

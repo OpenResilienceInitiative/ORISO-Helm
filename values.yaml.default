@@ -94,9 +94,12 @@ global:
       # Admin API as reached from INSIDE the cluster. Deliberately not
       # authServerUrl above: that is the public ingress URL, and a hook that
       # leaves the cluster to come back in fails whenever the ingress is not up
-      # yet — which during a deploy is exactly when this job runs. Empty = the
-      # in-cluster keycloak service in the release namespace.
-      adminUrl: ""
+      # yet — which during a deploy is exactly when this job runs.
+      # The whole endpoint is here rather than defaulted in the template, so an
+      # environment that answers elsewhere changes one line and sees what it is
+      # changing. {{ .Release.Namespace }} is resolved at render time; the rest
+      # is literal. Empty fails the render rather than guessing an address.
+      adminUrl: "http://keycloak.{{ .Release.Namespace }}:8080/auth"
       # Tries at 5s intervals before giving up on the admin API. Helm's
       # --timeout only stops helm waiting, it never stops this pod, so the
       # bound has to live here.

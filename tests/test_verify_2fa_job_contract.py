@@ -38,12 +38,29 @@ class VerifyTwoFactorJobContractTest(unittest.TestCase):
             hardcoded, "KEYCLOAK_URL must come from a value, not a literal"
         )
 
-    def test_the_in_cluster_default_does_not_go_out_through_the_ingress(self):
+    def test_no_endpoint_literal_survives_in_the_template(self):
+        # A default host in the template is still a hardcoded host: it is the value
+        # that actually ships, and an operator looking for it reads values, not Go
+        # templates. The whole endpoint lives in values.yaml.default; the template
+        # only resolves it.
+        # An endpoint literal is a URL. "keycloak." on its own also appears in the
+        # values path global.keycloak.*, which is not an address.
+        for literal in ("http://", "https://", ":8080"):
+            self.assertNotIn(
+                literal, self.source, f"endpoint literal {literal!r} left in template"
+            )
+
+    def test_the_default_endpoint_stays_inside_the_cluster(self):
         # global.keycloak.authServerUrl is the PUBLIC url. A hook that leaves the
         # cluster to come back in fails whenever the ingress is not up yet, which
         # during a deploy is precisely when this job runs.
         self.assertNotIn("authServerUrl", self.source)
-        self.assertIn("keycloak.%s:8080/auth", self.source)
+        self.assertIn('adminUrl: "http://keycloak.{{ .Release.Namespace }}', self.values)
+
+    def test_an_empty_admin_url_fails_the_render_instead_of_guessing(self):
+        # Falling back to a built-in address would put the literal back and would
+        # point the check at an endpoint nobody chose.
+        self.assertIn("required", self.source)
 
     def test_the_wait_for_keycloak_is_bounded(self):
         # `until ... sleep 5` with no limit outlives the release: helm's timeout is
