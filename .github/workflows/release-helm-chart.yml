@@ -1,13 +1,16 @@
 name: Release Helm Chart
 
-run-name: Release Helm chart v${{ inputs.version }}
+run-name: Release Helm chart ${{ inputs.version && format('v{0}', inputs.version) || 'at the version in Chart.yaml' }}
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version without the v prefix, for example 2.0.1
-        required: true
+        description: >-
+          Optional. Leave empty to release the version already in Chart.yaml.
+          Supply it only to assert which version you expect; a mismatch then
+          still fails.
+        required: false
         type: string
       create_tag:
         description: Create and push Git tag from main
@@ -39,14 +42,28 @@ jobs:
         uses: azure/setup-helm@v4
 
       - name: Validate release input
+        id: version
         shell: bash
+        env:
+          # Never interpolate a dispatch input into shell source: a value like
+          # $(...) would run on the runner before the branch guard below.
+          EXPECTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
 
-          VERSION="${{ inputs.version }}"
+          # Chart.yaml on main is the release intent: it got there through a
+          # reviewed release PR. Re-typing that version into the dispatch form
+          # was a second, unreviewed source of truth, and the two disagreed in
+          # 3 of the last 6 runs ("Chart.yaml version is 2.0.3, but workflow
+          # input is 2.0.4"). The input is now optional and only asserts an
+          # expectation; empty means "release what the chart says".
+          CHART_VERSION="$(awk -F': *' '$1 == "version" { print $2; exit }' Chart.yaml | tr -d '"')"
+          EXPECTED="${EXPECTED_VERSION}"
+          VERSION="${EXPECTED:-$CHART_VERSION}"
 
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Version must use MAJOR.MINOR.PATCH format, for example 2.0.1"
+            echo "Resolved version was '${VERSION}' (Chart.yaml: '${CHART_VERSION}')"
             exit 1
           fi
 
@@ -56,11 +73,13 @@ jobs:
             exit 1
           fi
 
-          CHART_VERSION="$(awk -F': *' '$1 == "version" { print $2; exit }' Chart.yaml | tr -d '"')"
           APP_VERSION="$(awk -F': *' '$1 == "appVersion" { print $2; exit }' Chart.yaml | tr -d '"')"
 
+          # Only reachable when an expectation was typed: without one, VERSION
+          # *is* CHART_VERSION. Kept so an operator can still assert the
+          # version they believe they are shipping.
           if [[ "$CHART_VERSION" != "$VERSION" ]]; then
-            echo "Chart.yaml version is ${CHART_VERSION}, but workflow input is ${VERSION}"
+            echo "Chart.yaml version is ${CHART_VERSION}, but the requested version is ${VERSION}"
             exit 1
           fi
 
@@ -73,6 +92,11 @@ jobs:
             echo "Tag v${VERSION} already exists. Choose a new version or delete the incorrect tag first."
             exit 1
           fi
+
+          # Every later step reads this, never inputs.version: with an empty
+          # input those are not the same value.
+          echo "RELEASE_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Validate Helm chart
         shell: bash
@@ -106,7 +130,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          VERSION="${{ inputs.version }}"
+          VERSION="${RELEASE_VERSION}"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -142,13 +166,13 @@ jobs:
           {
             echo "### Helm chart release"
             echo ""
-            echo "- Git tag: \`v${{ inputs.version }}\`"
-            echo "- Chart version: \`${{ inputs.version }}\`"
+            echo "- Git tag: \`v${RELEASE_VERSION}\`"
+            echo "- Chart version: \`${RELEASE_VERSION}\`"
             echo "- Registry: \`oci://${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.CHART_REPOSITORY }}/online-counseling\`"
             echo ""
             echo "Deploy with:"
             echo ""
             echo "\`\`\`bash"
-            echo "helm upgrade --install oriso oci://${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.CHART_REPOSITORY }}/online-counseling --version ${{ inputs.version }} --namespace oriso"
+            echo "helm upgrade --install oriso oci://${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.CHART_REPOSITORY }}/online-counseling --version ${RELEASE_VERSION} --namespace oriso"
             echo "\`\`\`"
           } >> "$GITHUB_STEP_SUMMARY"
