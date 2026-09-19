@@ -53,6 +53,18 @@ class ValidateHelmWorkflowContractTest(unittest.TestCase):
             "master", branches, "master is not a branch in this repository"
         )
 
+    def test_the_optional_subchart_does_not_fail_branches_without_it(self):
+        """charts/k8s-infra is vendored on pre-dev and not on dev.
+
+        Linting it unconditionally turned the whole gate red on every branch
+        that does not carry it — which is how this workflow came to be deleted
+        from dev rather than fixed. The guard skips it when absent, so the step
+        starts covering the subchart the moment it lands.
+        """
+        self.assertIn("if [ ! -f charts/k8s-infra/Chart.yaml ]; then", self.workflow)
+        # The guard must not have turned the check into a no-op.
+        self.assertIn("helm lint charts/k8s-infra", self.workflow)
+
     def test_a_reviewed_chart_must_be_packagable(self):
         lint_position = self.workflow.index("- name: Lint chart")
         package_position = self.workflow.index("- name: Package chart")

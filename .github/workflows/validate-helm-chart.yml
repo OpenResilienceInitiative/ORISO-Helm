@@ -59,6 +59,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The subchart is vendored on some branches and not on others: it is
+          # on pre-dev, not on dev. Linting it unconditionally failed this gate
+          # for the whole chart on every branch that does not carry it, which
+          # is why the gate was removed from dev in the first place. Skip when
+          # absent so it starts covering the subchart the moment it lands.
+          if [ ! -f charts/k8s-infra/Chart.yaml ]; then
+            echo "::notice::charts/k8s-infra is not vendored on this branch; skipping its validation."
+            exit 0
+          fi
           helm lint charts/k8s-infra
           helm template k8s-infra-validation charts/k8s-infra \
             --namespace validation >/tmp/k8s-infra-rendered.yaml

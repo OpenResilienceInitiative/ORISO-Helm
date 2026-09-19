@@ -75,6 +75,35 @@ class WorkflowContract(unittest.TestCase):
     def test_release_still_only_runs_from_main(self):
         self.assertIn('if [[ "${GITHUB_REF_NAME}" != "main" ]]; then', self.text)
 
+    def test_the_dispatch_input_never_reaches_shell_source(self):
+        """A dispatch input expanded into Bash runs before any guard can stop it.
+
+        `EXPECTED="${{ inputs.version }}"` is substituted into the script text,
+        so a dispatched value of `$(...)` executes on the runner — earlier than
+        the branch check that is supposed to gate this workflow. Passing it
+        through `env` makes it data.
+        """
+        self.assertIn("EXPECTED_VERSION: ${{ inputs.version }}", self.text)
+        self.assertIn('EXPECTED="${EXPECTED_VERSION}"', self.text)
+        self.assertNotIn('EXPECTED="${{ inputs.version }}"', self.text)
+
+    def test_the_resolved_version_outlives_the_validation_step(self):
+        """A shell variable dies with its step; the release needs it afterwards.
+
+        With an empty input the validation resolved VERSION from Chart.yaml,
+        but the tag step read `inputs.version` again and tagged `v`, while
+        `helm package .` used the chart's own version. One release, two
+        answers.
+        """
+        self.assertIn('echo "RELEASE_VERSION=${VERSION}" >> "$GITHUB_ENV"', self.text)
+
+        after_validation = self.text.split("RELEASE_VERSION=${VERSION}", 1)[1]
+        self.assertNotIn(
+            "inputs.version",
+            after_validation,
+            "a step after the validation still reads the raw input",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
