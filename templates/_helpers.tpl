@@ -1,6 +1,14 @@
 {{/*
-Render one complete OCI image reference. Release overlays can enable the strict
-digest-only gate while local development keeps accepting mutable tags.
+Render one complete OCI image reference, failing the render when the value is
+empty.
+
+The name is historical and overstates what this does: it does NOT require a
+digest. The strict digest-only gate was removed in edb9f6e together with the
+requireImmutableImages flag, because it belongs to the deferred MatrixRTC
+cutover contract. Until that lands, the digest requirement is enforced only by
+scripts/cutover-release-preflight.py, i.e. on the cutover path and not on a
+plain `helm upgrade`. tests/test_cutover_release_preflight.py pins both halves
+of that so the gap cannot close or widen unnoticed.
 */}}
 {{- define "oriso.immutableImage" -}}
 {{- $valueName := index . 0 -}}

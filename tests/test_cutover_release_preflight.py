@@ -186,12 +186,41 @@ class CutoverReleasePreflightTest(unittest.TestCase):
 
         self.preflight.verify_render(CHART_DIR, values)
 
-    def test_chart_rejects_a_mutable_cutover_image_tag(self) -> None:
+    def test_the_cutover_path_rejects_a_mutable_image_reference(self) -> None:
+        """A tag is a moving target; a cutover has to name the exact bytes.
+
+        The other fail-closed cases cover a wrong repository and an all-zero
+        digest. Neither catches the mistake that is actually easy to make by
+        hand: pasting the tag you just built instead of the digest it produced.
+        """
+        manifest = ready_manifest()
+        manifest["registryRelease"]["frontend"] = (
+            "ghcr.io/openresilienceinitiative/oriso-frontend:latest"
+        )
+
+        with self.assertRaisesRegex(ValueError, "must use repository@sha256"):
+            self.preflight.validate_and_build_values(manifest)
+
+    def test_the_chart_itself_does_not_yet_reject_a_mutable_tag(self) -> None:
+        """Records a known gap so it stays visible instead of being assumed shut.
+
+        `oriso.immutableImage` once failed the render on anything that was not
+        a digest. edb9f6e ("chore(sync): drop the immutable-images mechanism")
+        removed that deliberately, because the mechanism belongs to the
+        deferred MatrixRTC cutover contract -- but the helper's own doc comment
+        still promises the gate, and its name still says "immutable".
+
+        So the digest requirement holds on the preflight path above and nowhere
+        else: a plain `helm upgrade -f values.yaml.default` deploys whatever a
+        mutable tag points at today. This test asserts that current reality. It
+        turns red when someone restores the gate, which is the moment to delete
+        it and re-point the helper's comment at what it does.
+        """
         result = subprocess.run(
             [
                 "helm",
                 "template",
-                "mutable-image-must-fail",
+                "mutable-image-gap",
                 str(CHART_DIR),
                 "-f",
                 str(CHART_DIR / "values.yaml.default"),
@@ -209,8 +238,12 @@ class CutoverReleasePreflightTest(unittest.TestCase):
             check=False,
         )
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("frontend.image must use repository@sha256", result.stderr)
+        self.assertEqual(
+            result.returncode,
+            0,
+            "the chart-level digest gate appears to be back; see this test's docstring",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
