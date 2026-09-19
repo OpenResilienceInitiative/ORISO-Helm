@@ -106,3 +106,53 @@ def test_the_check_can_be_switched_off():
     )
 
     assert find(docs, "Job", JOB_NAME) is None
+
+
+def container_env(job):
+    return {
+        entry["name"]: entry.get("value")
+        for entry in job["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+
+
+def test_the_keycloak_address_comes_from_values():
+    # An environment whose Keycloak does not answer at the in-cluster default
+    # would otherwise have the job interrogate the wrong endpoint, and a check
+    # pointed at nothing still exits 0.
+    docs = render_chart(
+        (
+            "--set",
+            "global.keycloak.verifyTwoFactorContract.adminUrl=http://kc.other:8081/auth",
+        )
+    )
+
+    assert container_env(find(docs, "Job", JOB_NAME))["KEYCLOAK_URL"] == (
+        "http://kc.other:8081/auth"
+    )
+
+
+def test_the_default_address_stays_inside_the_cluster():
+    # global.keycloak.authServerUrl is the public ingress URL. A hook that leaves
+    # the cluster to come back in fails whenever the ingress is not up yet, which
+    # during a deploy is precisely when this job runs.
+    url = container_env(find(render_chart(), "Job", JOB_NAME))["KEYCLOAK_URL"]
+
+    assert url.startswith("http://keycloak.")
+    assert "your-domain" not in url
+
+
+def test_the_job_cannot_outlive_the_release():
+    # Helm's --timeout is client-side: it stops helm waiting, not this pod. A job
+    # blocked on a bad credential would otherwise spin until the next deploy.
+    job = find(render_chart(), "Job", JOB_NAME)
+
+    assert job["spec"]["activeDeadlineSeconds"] > 0
+
+
+def test_a_missing_check_script_can_be_made_fatal():
+    # Skipping is right only while the rolled-out image predates the script.
+    docs = render_chart(
+        ("--set", "global.keycloak.verifyTwoFactorContract.requireCheckScript=true")
+    )
+
+    assert container_env(find(docs, "Job", JOB_NAME))["REQUIRE_CHECK_SCRIPT"] == "true"
