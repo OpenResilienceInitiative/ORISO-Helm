@@ -93,6 +93,52 @@ class KeycloakTwoFactorRealmContractTest(unittest.TestCase):
             email_config["config"],
         )
 
+    def test_browser_flow_asks_for_the_email_code_too(self):
+        # Without this subflow the built-in `forms` flow carries auth-otp-form
+        # alone, which knows only the app credential. For an e-mail-only user its
+        # conditional-user-configured finds nothing configured, the subflow is
+        # skipped, and the browser login completes on a password alone — no error,
+        # no prompt, just a second factor that quietly is not one.
+        executions = self.flow("forms")["authenticationExecutions"]
+        subflows = [
+            execution.get("flowAlias")
+            for execution in executions
+            if execution.get("authenticatorFlow")
+        ]
+
+        self.assertIn(
+            "browser-email-otp-conditional",
+            subflows,
+            "the browser forms flow must carry the e-mail OTP subflow",
+        )
+
+    def test_browser_email_subflow_uses_the_browser_capable_authenticator(self):
+        executions = self.flow("browser-email-otp-conditional")[
+            "authenticationExecutions"
+        ]
+
+        self.assertEqual(
+            ["conditional-user-configured", "email-form-authenticator"],
+            [execution["authenticator"] for execution in executions],
+        )
+        self.assertTrue(
+            all(execution["requirement"] == "REQUIRED" for execution in executions)
+        )
+        # Same config as the direct-grant twin: length, ttl and sender belong to the
+        # realm's e-mail OTP, not to the surface asking for it. Two configs would let
+        # a code be valid in the app and expired in the browser.
+        self.assertEqual("email-otp-config", executions[1]["authenticatorConfig"])
+
+    def test_the_direct_grant_and_browser_paths_use_different_authenticators(self):
+        # email-authenticator answers with a JSON challenge a token client reads;
+        # email-form-authenticator renders a page. Swapping them silently breaks
+        # whichever surface gets the wrong one.
+        direct = self.flow("email-otp-conditional")["authenticationExecutions"]
+        browser = self.flow("browser-email-otp-conditional")["authenticationExecutions"]
+
+        self.assertEqual("email-authenticator", direct[1]["authenticator"])
+        self.assertEqual("email-form-authenticator", browser[1]["authenticator"])
+
     def test_technical_user_keeps_the_otp_spi_role(self):
         technical_user = next(
             user for user in self.realm["users"] if user["username"] == "technical"
