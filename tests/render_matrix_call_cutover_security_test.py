@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import traceback
 import sys
 
 import yaml
@@ -108,5 +109,9 @@ if __name__ == "__main__":
     try:
         main()
     except (AssertionError, KeyError, StopIteration) as error:
-        print(f"FAIL: {error}", file=sys.stderr)
+        # A bare `assert x == y` carries an empty message, so printing only
+        # str(error) yields "FAIL: " and drops the file, line and expression.
+        # Four contracts failed in CI that way, saying nothing at all.
+        detail = str(error) or traceback.format_exc().rstrip()
+        print(f"FAIL: {detail}", file=sys.stderr)
         sys.exit(1)
