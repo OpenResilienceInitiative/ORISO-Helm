@@ -359,9 +359,12 @@ userService:
   smtpSecure: false
   smtpFrom: ""
 
-  # Bare origins for account-invite links (admin must NOT end in /admin); override per environment.
-  accountInviteAppFrontendBaseUrl: "https://your-domain.example.com"
-  accountInviteAdminFrontendBaseUrl: "https://your-domain.example.com"
+  # Bare origins for account-invite links (admin must NOT end in /admin); set per environment.
+  # Left unset on purpose: userservice-configmap-env.yaml omits the key entirely when the value
+  # is empty, which is what lets the app fall back to the system notification base URL. A
+  # placeholder here is not inert -- it is truthy, so it renders and the fallback never applies.
+  # accountInviteAppFrontendBaseUrl: "https://app.example.org"
+  # accountInviteAdminFrontendBaseUrl: "https://admin.example.org"
 
   # Platform-level email branding for mails without a tenant context.
   emailBrandingName: "ORISO"
