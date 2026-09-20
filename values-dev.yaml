@@ -54,6 +54,7 @@ userService:
   otpAllowedForConsultants: "true"
   otpAllowedForSingleTenantAdmins: "true"
   otpAllowedForTenantSuperAdmins: "true"
+  otpAllowedForRestrictedAgencyAdmins: "true"
 
   # Confirmed against the live dev ingress: this environment serves the App at
   # the host root and the Admin panel under /admin on the same host
