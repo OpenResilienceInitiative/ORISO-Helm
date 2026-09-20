@@ -1,0 +1,118 @@
+{{- $verify := default (dict) .Values.global.keycloak.verifyTwoFactorContract -}}
+{{- $verifyEnabled := true -}}
+{{- if hasKey $verify "enabled" -}}
+{{- $verifyEnabled = $verify.enabled -}}
+{{- end -}}
+{{- if $verifyEnabled }}
+{{- $kc := index .Values "online-counseling-keycloak" -}}
+{{/* The endpoint lives entirely in values: a default host here would be the
+     address that actually ships, while an operator looks for it in values. tpl
+     resolves the namespace, which only the release knows. */}}
+{{- $adminUrl := required
+      "verifyTwoFactorContract.adminUrl must be set - see values.yaml.default"
+      (tpl ($verify.adminUrl | default "") .) -}}
+{{- $waitAttempts := $verify.waitAttempts | default 60 -}}
+{{- $deadlineSeconds := $verify.deadlineSeconds | default 600 -}}
+{{- $requireCheckScript := $verify.requireCheckScript | default false -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-verify-2fa-contract
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # post-upgrade as well as post-install: an existing realm is exactly the case
+    # `--import-realm` skips, so an upgrade is when drift goes unnoticed.
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "20"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 0
+  # Helm's --timeout is client-side: it stops helm waiting, it does not stop this
+  # pod. Without a deadline of its own a hung job outlives the release and is only
+  # cleaned up by before-hook-creation on the NEXT deploy.
+  activeDeadlineSeconds: {{ $deadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        app: keycloak-verify-2fa-contract
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: verify-2fa-contract
+          image: "{{ $kc.imageName }}:{{ $kc.imageVersion }}"
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          env:
+            - name: KEYCLOAK_URL
+              value: {{ $adminUrl | quote }}
+            - name: REALM
+              value: {{ .Values.global.keycloak.realm | quote }}
+            - name: WAIT_ATTEMPTS
+              value: {{ $waitAttempts | quote }}
+            - name: REQUIRE_CHECK_SCRIPT
+              value: {{ $requireCheckScript | quote }}
+            - name: KC_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN
+            - name: KC_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN_PASSWORD
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              set -eu
+              CHECK=/opt/keycloak/bin/oriso-verify-2fa-flow.sh
+
+              # Images built before ORISO-Keycloak#31 do not carry the script. While
+              # that is still the rolled-out image, skipping is the honest outcome:
+              # failing the release over a missing file would say "your realm
+              # drifted" when what is actually stale is the image.
+              #
+              # Once the image is rolled out, set requireCheckScript=true. A job
+              # that can only ever exit 0 reads exactly like a passing check, and
+              # buys a confidence about 2FA that nobody has earned.
+              if [ ! -x "$CHECK" ]; then
+                echo "$CHECK is not in this image."
+                echo "Upgrade the oriso-keycloak image to one built from"
+                echo "ORISO-Keycloak keycloak-image/ including scripts/."
+                if [ "$REQUIRE_CHECK_SCRIPT" = "true" ]; then
+                  echo "ERROR: requireCheckScript is set, so this is a failure," >&2
+                  echo "not a skip: the 2FA contract went unverified." >&2
+                  exit 2
+                fi
+                echo "SKIPPED: the 2FA contract was NOT verified in this release."
+                exit 0
+              fi
+
+              KCADM=/opt/keycloak/bin/kcadm.sh
+              ATTEMPTS=0
+              MAX_ATTEMPTS="$WAIT_ATTEMPTS"
+              until "$KCADM" config credentials \
+                  --server "$KEYCLOAK_URL" \
+                  --realm master \
+                  --user "$KC_ADMIN_USER" \
+                  --password "$KC_ADMIN_PASSWORD" >/dev/null 2>&1; do
+                ATTEMPTS=$((ATTEMPTS + 1))
+                if [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ]; then
+                  # Exit 2 is the check script's own "could not look" code, and it
+                  # is deliberately not exit 0: a Keycloak that has not answered
+                  # for this long after its own release is a finding in itself.
+                  echo "ERROR: no admin session at $KEYCLOAK_URL after" >&2
+                  echo "$MAX_ATTEMPTS attempts. Check the address and the" >&2
+                  echo "keycloak-secret-env credentials." >&2
+                  exit 2
+                fi
+                echo "waiting for Keycloak admin API ($ATTEMPTS/$MAX_ATTEMPTS)"
+                sleep 5
+              done
+
+              # The check re-authenticates against localhost when KC_ADMIN_USER is
+              # set; we already hold a session, so unset it and reuse that.
+              unset KC_ADMIN_USER
+              unset KC_ADMIN_PASSWORD
+              exec "$CHECK"
+{{- end }}
