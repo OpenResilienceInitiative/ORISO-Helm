@@ -14,6 +14,13 @@ global:
   matrix:
     matrixServerName: "matrix.oriso.org"
 
+healthDashboard:
+  ingress:
+    enabled: true
+    # Provision before rollout in healthDashboard.namespace, or the release
+    # namespace when unset. This name does not provision or verify the Secret.
+    authSecret: "health-dashboard-basic-auth"
+
 storybook:
   enabled: true
   image: "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
