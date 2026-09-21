@@ -451,6 +451,11 @@ spec:
                 configMapKeyRef:
                   key: IDENTITY_OTP_ALLOWED_FOR_TENANT_SUPER_ADMINS
                   name: userservice-configmap-env
+            - name: IDENTITY_OTP_ALLOWED_FOR_RESTRICTED_AGENCY_ADMINS
+              valueFrom:
+                configMapKeyRef:
+                  key: IDENTITY_OTP_ALLOWED_FOR_RESTRICTED_AGENCY_ADMINS
+                  name: userservice-configmap-env
             - name: STATISTICS_ENABLED
               valueFrom:
                 configMapKeyRef:

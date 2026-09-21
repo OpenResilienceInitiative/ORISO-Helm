@@ -131,6 +131,7 @@ data:
   IDENTITY_OTP_ALLOWED_FOR_CONSULTANTS: {{ .Values.userService.otpAllowedForConsultants | default "false" | quote }}
   IDENTITY_OTP_ALLOWED_FOR_SINGLE_TENANT_ADMINS: {{ .Values.userService.otpAllowedForSingleTenantAdmins | default "false" | quote }}
   IDENTITY_OTP_ALLOWED_FOR_TENANT_SUPER_ADMINS: {{ .Values.userService.otpAllowedForTenantSuperAdmins | default "false" | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_RESTRICTED_AGENCY_ADMINS: {{ .Values.userService.otpAllowedForRestrictedAgencyAdmins | default "false" | quote }}
   # logstash
   LOGSTASH_HOST: {{ .Values.global.logstashHost }}
   FEATURE_APPOINTMENT_ENABLED: "false"

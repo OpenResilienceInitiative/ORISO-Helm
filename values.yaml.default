@@ -378,6 +378,7 @@ userService:
   otpAllowedForConsultants: "true"
   otpAllowedForSingleTenantAdmins: "true"
   otpAllowedForTenantSuperAdmins: "true"
+  otpAllowedForRestrictedAgencyAdmins: "true"
 
   # Must be overridden per environment; password reset fails closed if unset.
   magicLinkFrontendBaseUrl: "https://your-domain.example.com"
