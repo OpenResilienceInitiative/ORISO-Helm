@@ -163,6 +163,12 @@ def test_placeholder_or_malformed_domains_fail() -> None:
         "dev.example.org/app",
         "dev.example.org/",
         "dev example.org",
+        "example..org",
+        "example.-org.test",
+        "example-.org.test",
+        ".example.org",
+        "dev.example.org:0",
+        "dev.example.org:65536",
     ):
         proc = helm_template("--set-string", f"global.domainName={bad}")
         assert_fails_naming(proc, "global.domainName", f"global.domainName={bad!r}")
@@ -174,6 +180,9 @@ def test_explicit_mail_url_placeholders_fail() -> None:
         ("accountInviteAdminFrontendBaseUrl", "https://your-domain.example.com"),
         ("magicLinkFrontendBaseUrl", "app.example.org"),
         ("passwordResetFrontendBaseUrl", "https://app.example.org/"),
+        ("accountInviteAppFrontendBaseUrl", "https://app..example.org"),
+        ("accountInviteAppFrontendBaseUrl", "https://app-.example.org"),
+        ("magicLinkFrontendBaseUrl", "https://app.example.org:70000"),
     ):
         proc = helm_template(
             "--set-string",
@@ -183,6 +192,17 @@ def test_explicit_mail_url_placeholders_fail() -> None:
         )
         assert_fails_naming(proc, f"userService.{key}", f"userService.{key}={bad!r}")
     print("PASS: explicit UserService mail URLs are validated, not trusted")
+
+
+def test_valid_hosts_with_port_and_path_render() -> None:
+    proc = helm_template(
+        "--set-string",
+        "global.domainName=app-1.render.example.org:8443",
+        "--set-string",
+        "userService.passwordResetAdminFrontendBaseUrl=https://admin.render.example.org:443/admin",
+    )
+    rendered(proc, "valid host with port")
+    print("PASS: valid hyphenated host, port 1-65535 and URL path render")
 
 
 def assert_public_urls_match(docs: list[dict], domain: str, explicit: dict, label: str) -> None:
@@ -195,8 +215,12 @@ def assert_public_urls_match(docs: list[dict], domain: str, explicit: dict, labe
             for marker in PLACEHOLDER_MARKERS:
                 assert marker not in value, f"{label}: {configmap}.{key}={value!r} contains {marker!r}"
             if key in explicit:
+                assert urlparse(value).scheme == "https", f"{label}: {key}={value!r} is not https"
                 assert value == explicit[key], f"{label}: {key}={value!r}, expected {explicit[key]!r}"
                 continue
+            assert urlparse(value).scheme == "https", (
+                f"{label}: {configmap}.{key}={value!r} must use https with TLS on"
+            )
             assert urlparse(value).hostname == domain, (
                 f"{label}: {configmap}.{key}={value!r} does not point at {domain}"
             )
@@ -267,6 +291,7 @@ def main() -> None:
     test_default_values_fail_naming_domain()
     test_placeholder_or_malformed_domains_fail()
     test_explicit_mail_url_placeholders_fail()
+    test_valid_hosts_with_port_and_path_render()
     test_committed_overlays_render_with_their_domain()
     test_dev_mail_links_derive_from_domain()
     test_derived_admin_reset_url_carries_admin_prefix()

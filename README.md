@@ -79,8 +79,12 @@ helm upgrade --install caritas ./ --namespace caritas --create-namespace \
 ```
 
 ```bash
-helm upgrade --install caritas ./ --namespace caritas --create-namespace --wait-for-jobs --timeout 15m -f secrets.yaml
+helm upgrade --install caritas ./ --namespace caritas --create-namespace --wait-for-jobs --timeout 15m \
+  -f values.yaml -f values-<env>.yaml -f secrets.yaml
 ```
+
+`values.yaml` (or the environment overlay `values-<env>.yaml`) must set
+`global.domainName`; without it the install fails on purpose.
 
 The first `caritas` is the Helm release name, the second is the Kubernetes namespace. Both can be changed to suit your environment.
 

@@ -384,7 +384,8 @@ userService:
   otpAllowedForRestrictedAgencyAdmins: "true"
 
   # Mail-link base URLs. Empty = derived from global.domainName
-  # (https://<domainName>, admin reset https://<domainName>/admin). Set them only
+  # (<scheme>://<domainName>, admin reset <scheme>://<domainName>/admin; scheme
+  # https, or http when global.enableTls is false). Set them only
   # when App or Admin live on another host; explicit values are validated.
   magicLinkFrontendBaseUrl: ""
   passwordResetFrontendBaseUrl: ""
@@ -397,7 +398,8 @@ userService:
   smtpFrom: ""
 
   # Bare origins for account-invite links (admin must NOT end in /admin).
-  # Empty = https://<domainName>; set only when the Admin panel has its own host.
+  # Empty = <scheme>://<domainName> (http when global.enableTls is false); set
+  # only when the Admin panel has its own host.
   accountInviteAppFrontendBaseUrl: ""
   accountInviteAdminFrontendBaseUrl: ""
 

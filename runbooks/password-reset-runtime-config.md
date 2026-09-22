@@ -2,8 +2,9 @@
 
 The chart always renders these keys (ORISO-Helm#366). An explicit
 `userService.*BaseUrl` value wins and is validated; an empty one derives from
-`global.domainName` (`https://<domainName>`, admin reset
-`https://<domainName>/admin`). An empty or placeholder `global.domainName`
+`global.domainName` (`<scheme>://<domainName>`, admin reset
+`<scheme>://<domainName>/admin`; the scheme is `https`, or `http` when
+`global.enableTls` is `false`). An empty or placeholder `global.domainName`
 fails `helm template`/`helm install`. This runbook lists the keys per
 environment and the checks that prove the feature is live.
 
@@ -31,7 +32,8 @@ origins and the admin one must **not** end in `/admin`:
 | `ACCOUNT_INVITE_APP_FRONTEND_BASE_URL` | `https://app.oriso-dev.site` |
 | `ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL` | `https://admin.oriso-dev.site` |
 
-When unset, both derive from `global.domainName` (`https://<domainName>`).
+When unset, both derive from `global.domainName` (`<scheme>://<domainName>`,
+scheme per `global.enableTls`).
 On Pre-Dev the Admin panel lives on its own host, so the admin value must be
 set explicitly — otherwise every tenant-admin invite links to the App host,
 which does not serve the onboarding route.

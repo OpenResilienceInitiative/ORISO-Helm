@@ -23,6 +23,27 @@ another host. These helpers are shared with the subcharts.
 {{- end -}}
 {{- end -}}
 
+{{/*
+Shared host[:port] check for global.domainName and the host of explicit URLs:
+DNS labels of 1-63 chars that neither start nor end with a hyphen, no empty
+labels, optional port 1-65535.
+Usage: include "oriso.validateHost" (list "global.domainName" $hostPort)
+*/}}
+{{- define "oriso.validateHost" -}}
+{{- $name := index . 0 -}}
+{{- $hostPort := index . 1 -}}
+{{- $label := "[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?" -}}
+{{- if not (regexMatch (printf "^%s(\\.%s)*(:[0-9]{1,5})?$" $label $label) $hostPort) -}}
+{{- fail (printf "%s must contain a valid host name: DNS labels without empty or hyphen-bounded parts, no scheme, path, trailing slash or whitespace (got %q)" $name $hostPort) -}}
+{{- end -}}
+{{- if contains ":" $hostPort -}}
+{{- $port := atoi (last (splitList ":" $hostPort)) -}}
+{{- if or (lt $port 1) (gt $port 65535) -}}
+{{- fail (printf "%s has a port outside 1-65535 (got %q)" $name $hostPort) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{/* The validated public host name, e.g. dev.example.org. */}}
 {{- define "oriso.domainName" -}}
 {{- $domain := toString (.Values.global.domainName | default "") -}}
@@ -30,13 +51,11 @@ another host. These helpers are shared with the subcharts.
 {{- fail "global.domainName is required: set the public host name of this installation (e.g. app.example.org, no scheme, no path). There is no default on purpose." -}}
 {{- end -}}
 {{- include "oriso.rejectUrlPlaceholder" (list "global.domainName" $domain) -}}
-{{- if not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]+)?$" $domain) -}}
-{{- fail (printf "global.domainName must be a bare host name without scheme, path, trailing slash or whitespace (got %q)" $domain) -}}
-{{- end -}}
+{{- include "oriso.validateHost" (list "global.domainName" $domain) -}}
 {{- $domain -}}
 {{- end -}}
 
-{{/* The public origin, scheme from global.enableTls: https://<domainName>. */}}
+{{/* The public origin <scheme>://<domainName>; scheme is https, or http when global.enableTls is false. */}}
 {{- define "oriso.publicOrigin" -}}
 {{- if .Values.global.enableTls }}https{{ else }}http{{ end }}://{{ include "oriso.domainName" . -}}
 {{- end -}}
@@ -54,9 +73,10 @@ Usage: include "oriso.publicUrl" (list "userService.x" .Values.userService.x $de
 {{- $derived -}}
 {{- else -}}
 {{- include "oriso.rejectUrlPlaceholder" (list $name $value) -}}
-{{- if not (regexMatch "^https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[^\\s]*[^/\\s])?$" $value) -}}
+{{- if not (regexMatch "^https?://[^/\\s]+(/[^\\s]*[^/\\s])?$" $value) -}}
 {{- fail (printf "%s must be an absolute http(s) URL without trailing slash (got %q). Leave it empty to derive it from global.domainName." $name $value) -}}
 {{- end -}}
+{{- include "oriso.validateHost" (list $name (regexReplaceAll "^https?://([^/]+).*$" $value "${1}")) -}}
 {{- $value -}}
 {{- end -}}
 {{- end -}}
@@ -111,6 +131,7 @@ the bundled SigNoz chart is enabled, use its in-cluster collector service.
 
 {{- define "oriso.signozExternalUrl" -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
+{{- /* The SigNoz ingress is TLS-only, so this fallback stays https regardless of global.enableTls. */ -}}
 {{- $explicit := get $signoz "externalUrl" | default "" -}}
 {{- if $explicit -}}
 {{- $explicit -}}
