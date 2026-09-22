@@ -120,6 +120,8 @@ def render(chart: str, server_public_ip: str) -> str:
             "postgresDB": "matrix-render-canary",
         },
         "global": {
+            # The chart requires a real public host (ORISO-Helm#366).
+            "domainName": "render.example.org",
             "secrets": {
                 "redisdefaultPass": "test-redis-pass",
                 "matrixRegistrationSharedSecret": "test-shared-secret",

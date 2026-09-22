@@ -83,13 +83,25 @@ jobs:
           # render gate requires non-empty SMTP credentials with it, so the
           # validation render supplies placeholders the same way real deploys
           # supply the credentials from persistent secret values.
+          # global.domainName has no default on purpose (ORISO-Helm#366), so
+          # the validation render names a reserved example host.
           helm lint . -f values.yaml.default -f secrets.yaml.default \
+            --set-string global.domainName=release-validation.example.org \
             --set-string userService.smtpUser=smtp-validation-user \
             --set-string userService.smtpPassword=smtp-validation-password
           helm template oriso . -f values.yaml.default -f secrets.yaml.default \
+            --set-string global.domainName=release-validation.example.org \
             --set-string userService.smtpUser=smtp-validation-user \
             --set-string userService.smtpPassword=smtp-validation-password \
             >/tmp/oriso-rendered.yaml
+          # Without a domain the chart must refuse to render.
+          if helm template oriso . -f values.yaml.default -f secrets.yaml.default \
+            --set-string userService.smtpUser=smtp-validation-user \
+            --set-string userService.smtpPassword=smtp-validation-password \
+            >/dev/null 2>/tmp/oriso-no-domain.err; then
+            echo "helm template rendered without global.domainName"; exit 1
+          fi
+          grep -q "global.domainName" /tmp/oriso-no-domain.err
 
       - name: Package Helm chart
         shell: bash

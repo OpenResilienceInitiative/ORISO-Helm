@@ -26,6 +26,8 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 PRE_DEV_APP_URL = "https://app.oriso-dev.site"
 PRE_DEV_ADMIN_URL = "https://admin.oriso-dev.site"
+# global.domainName from tests/fixtures/values-render-domain.yaml.
+RENDER_DOMAIN = "render.example.org"
 
 LINK_ENV_KEYS = (
     "ACCOUNT_INVITE_APP_FRONTEND_BASE_URL",
@@ -59,6 +61,8 @@ def render(extra_set_strings: dict[str, str] | None = None) -> list[dict]:
         CHART_DIR,
         "-f",
         os.path.join(CHART_DIR, "values.yaml.default"),
+        "-f",
+        os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
         "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
     ]
@@ -174,31 +178,29 @@ def assert_upstream_clients_stay_wired() -> None:
     print("PASS: TS/AS/CTS client base URLs stay wired ConfigMap -> Deployment")
 
 
-def assert_omitted_when_unset() -> None:
-    """No half-wiring: unset invite URLs must not render keys or env imports.
+def assert_derived_when_unset() -> None:
+    """Unset invite URLs derive from global.domainName (ORISO-Helm#366).
 
-    A configMapKeyRef pointing at a key the ConfigMap does not carry makes the
-    pod fail to start, so the env import must be guarded exactly like the key.
+    They used to be omitted so the service fell back to its own default; the
+    service fallbacks are being removed, so the chart must always render the
+    keys and import them into the Deployment.
     """
     docs = render()
     data = userservice_configmap(docs)["data"]
     env_names = userservice_deployment_env_names(docs)
     for key in LINK_ENV_KEYS:
-        assert key not in data, (
-            f"{key} must be omitted when the environment leaves it unset so "
-            "the app-side fallback (system notification base URL) applies"
+        assert data.get(key) == f"https://{RENDER_DOMAIN}", (
+            f"{key} must derive from global.domainName when unset, got {data.get(key)!r}"
         )
-        assert (
-            key not in env_names
-        ), f"Deployment must not reference {key} when the ConfigMap omits it"
-    print("PASS: invite URL keys and env imports are omitted when unset")
+        assert key in env_names, f"Deployment must import {key}"
+    print("PASS: unset invite URLs derive from global.domainName and are imported")
 
 
 def main() -> None:
     assert_pre_dev_invite_urls()
     assert_reset_links_are_imported()
     assert_upstream_clients_stay_wired()
-    assert_omitted_when_unset()
+    assert_derived_when_unset()
 
 
 if __name__ == "__main__":

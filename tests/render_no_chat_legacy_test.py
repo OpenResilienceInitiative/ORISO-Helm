@@ -60,6 +60,8 @@ def main() -> None:
             "-f",
             os.path.join(CHART_DIR, "values.yaml.default"),
             "-f",
+            os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
+            "-f",
             os.path.join(CHART_DIR, "secrets.yaml.default"),
             "--set-string",
             "userService.smtpUser=smtp-test-user",

@@ -94,6 +94,11 @@ spec:
                 configMapKeyRef:
                   key: KEYCLOAK_HOSTNAME
                   name: keycloak-configmap-env
+            - name: ORISO_APP_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: ORISO_APP_BASE_URL
+                  name: keycloak-configmap-env
             {{- if not .Values.global.enableTls }}
             - name: KC_HOSTNAME_STRICT_HTTPS
               value: "false"

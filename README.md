@@ -18,7 +18,8 @@ cp values.yaml.default values.yaml
 
 Open `values.yaml` and update:
 
-- `global.domainName` — your public domain (and the derived `domains.*` / URL fields)
+- `global.domainName` — **required**, your public host (no scheme, no path). Every
+  public URL and mail link derives from it; empty or a placeholder fails the install
 - `global.keycloak.realm` — your Keycloak realm name (appears in several URL fields)
 - `matrix.synapseServerName` / `matrixServerName` — your Matrix server name
 

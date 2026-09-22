@@ -15,6 +15,11 @@
 #   frontend-ingress  app.oriso-dev.site    -> oriso-platform-frontend
 #   admin-ingress     admin.oriso-dev.site  -> oriso-platform-admin
 
+global:
+  # Public App host. The mail-link values below override the derived URLs
+  # because Pre-Dev serves the Admin panel on its own host.
+  domainName: "app.oriso-dev.site"
+
 userService:
   # Magic Link + self-service password reset. UserService appends
   # "/password-reset/confirm?token=…", so the admin value carries the /admin

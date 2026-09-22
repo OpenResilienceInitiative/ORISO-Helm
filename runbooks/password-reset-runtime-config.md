@@ -1,8 +1,11 @@
 # Password reset & account-invite links: runtime configuration and how to verify it
 
-Self-service password reset fails **closed**. If either base URL is unset,
-UserService sends no mail at all and logs a warning at startup. This runbook
-lists the keys per environment and the checks that prove the feature is live.
+The chart always renders these keys (ORISO-Helm#366). An explicit
+`userService.*BaseUrl` value wins and is validated; an empty one derives from
+`global.domainName` (`https://<domainName>`, admin reset
+`https://<domainName>/admin`). An empty or placeholder `global.domainName`
+fails `helm template`/`helm install`. This runbook lists the keys per
+environment and the checks that prove the feature is live.
 
 ## Required keys
 
@@ -28,10 +31,10 @@ origins and the admin one must **not** end in `/admin`:
 | `ACCOUNT_INVITE_APP_FRONTEND_BASE_URL` | `https://app.oriso-dev.site` |
 | `ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL` | `https://admin.oriso-dev.site` |
 
-When unset, both fall back to the system-notification base URL (default
-`https://app.oriso.org`). On Pre-Dev the Admin panel lives on its own host,
-so the admin value is **required** — otherwise every tenant-admin invite
-links to the App host, which does not serve the onboarding route.
+When unset, both derive from `global.domainName` (`https://<domainName>`).
+On Pre-Dev the Admin panel lives on its own host, so the admin value must be
+set explicitly — otherwise every tenant-admin invite links to the App host,
+which does not serve the onboarding route.
 
 ## Applying it per environment
 

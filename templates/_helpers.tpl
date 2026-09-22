@@ -8,6 +8,60 @@ digest-only gate while local development keeps accepting mutable tags.
 {{- end -}}
 
 {{/*
+Public URLs (ORISO-Helm#366): every public URL is derived from
+global.domainName or given explicitly, and both are validated here, so a
+missing or placeholder value fails the install instead of shipping links to
+another host. These helpers are shared with the subcharts.
+*/}}
+{{- define "oriso.rejectUrlPlaceholder" -}}
+{{- $name := index . 0 -}}
+{{- $value := index . 1 -}}
+{{- range $marker := list "your-domain" "example.com" "changeme" "todo-set" -}}
+{{- if contains $marker (lower $value) -}}
+{{- fail (printf "%s is still a placeholder (%q contains %q). Set the real public value for this environment." $name $value $marker) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The validated public host name, e.g. dev.example.org. */}}
+{{- define "oriso.domainName" -}}
+{{- $domain := toString (.Values.global.domainName | default "") -}}
+{{- if eq (trim $domain) "" -}}
+{{- fail "global.domainName is required: set the public host name of this installation (e.g. app.example.org, no scheme, no path). There is no default on purpose." -}}
+{{- end -}}
+{{- include "oriso.rejectUrlPlaceholder" (list "global.domainName" $domain) -}}
+{{- if not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]+)?$" $domain) -}}
+{{- fail (printf "global.domainName must be a bare host name without scheme, path, trailing slash or whitespace (got %q)" $domain) -}}
+{{- end -}}
+{{- $domain -}}
+{{- end -}}
+
+{{/* The public origin, scheme from global.enableTls: https://<domainName>. */}}
+{{- define "oriso.publicOrigin" -}}
+{{- if .Values.global.enableTls }}https{{ else }}http{{ end }}://{{ include "oriso.domainName" . -}}
+{{- end -}}
+
+{{/*
+An explicitly set public URL wins but must be absolute http(s), without
+trailing slash or placeholder; empty falls back to the derived URL.
+Usage: include "oriso.publicUrl" (list "userService.x" .Values.userService.x $derived)
+*/}}
+{{- define "oriso.publicUrl" -}}
+{{- $name := index . 0 -}}
+{{- $value := toString (index . 1 | default "") -}}
+{{- $derived := index . 2 -}}
+{{- if eq (trim $value) "" -}}
+{{- $derived -}}
+{{- else -}}
+{{- include "oriso.rejectUrlPlaceholder" (list $name $value) -}}
+{{- if not (regexMatch "^https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[^\\s]*[^/\\s])?$" $value) -}}
+{{- fail (printf "%s must be an absolute http(s) URL without trailing slash (got %q). Leave it empty to derive it from global.domainName." $name $value) -}}
+{{- end -}}
+{{- $value -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Default image pull policy for chart-managed workloads. Keep this value
 environment-overridable from values.yaml/secrets.yaml instead of hardcoding it
 in templates.
@@ -57,7 +111,12 @@ the bundled SigNoz chart is enabled, use its in-cluster collector service.
 
 {{- define "oriso.signozExternalUrl" -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
-{{- default (printf "https://%s/signoz" .Values.global.domainName) (get $signoz "externalUrl" | default "") -}}
+{{- $explicit := get $signoz "externalUrl" | default "" -}}
+{{- if $explicit -}}
+{{- $explicit -}}
+{{- else -}}
+{{- printf "https://%s/signoz" (include "oriso.domainName" .) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

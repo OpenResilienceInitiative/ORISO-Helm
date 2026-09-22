@@ -267,6 +267,10 @@ def verify_render(chart_dir: pathlib.Path, values: dict) -> None:
                 overlay.name,
                 "--set-string",
                 "global.secrets.redisdefaultPass=test-redis-password",
+                # Image-only dry render: the chart requires a real public host
+                # (ORISO-Helm#366), which this check does not inspect.
+                "--set-string",
+                "global.domainName=cutover-preflight.example.org",
             ],
             capture_output=True,
             text=True,
