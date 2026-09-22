@@ -19,6 +19,7 @@ def render(*overrides, check=True):
             "-f", str(ROOT / "values.yaml.default"),
             "-f", str(ROOT / "tests" / "fixtures" / "values-render-domain.yaml"),
             "-f", str(ROOT / "secrets.yaml.default"),
+            "-f", str(ROOT / "tests" / "fixtures" / "render-required-secrets.yaml"),
             "--set", "userService.smtpHost=",
             *overrides,
         ],
@@ -153,13 +154,14 @@ def test_missing_values_fail_the_render():
 
 
 TECHNICAL_ID = "8294c392-e1e0-405b-ac2f-ba3043cbad3e"
+FIXTURE_SUBJECT = "00000000-0000-4000-8000-000000000000"  # tests/fixtures/render-required-secrets.yaml
 
 
 def test_tenantservice_receives_the_technical_subject():
     docs = render()
     data = next(doc for doc in docs if doc.get("kind") == "ConfigMap"
                 and doc["metadata"]["name"] == "tenantservice-configmap-env")["data"]
-    assert data["TECHNICAL_SERVICE_SUBJECT"] == TECHNICAL_ID
+    assert data["TECHNICAL_SERVICE_SUBJECT"] == FIXTURE_SUBJECT
     env = env_of(resource(docs, "Deployment", "tenantservice"))
     assert env["TECHNICAL_SERVICE_SUBJECT"]["valueFrom"]["configMapKeyRef"] == {
         "key": "TECHNICAL_SERVICE_SUBJECT", "name": "tenantservice-configmap-env"}
@@ -174,6 +176,44 @@ def test_the_technical_subject_must_be_a_keycloak_user_id():
         result = render("--set-string", f"global.keycloak.serviceTechUserId={bad}", check=False)
         assert result.returncode != 0, bad
         assert "serviceTechUserId" in result.stderr, bad
+
+
+def test_the_technical_subject_has_no_default():
+    # An existing realm keeps its own id; a shipped default would be wrong there.
+    values = yaml.safe_load((ROOT / "values.yaml.default").read_text())
+    assert not values["global"]["keycloak"].get("serviceTechUserId")
+    secrets = yaml.safe_load((ROOT / "secrets.yaml.default").read_text())
+    assert not secrets["global"].get("keycloak", {}).get("serviceTechUserId")
+    result = subprocess.run(
+        ["helm", "template", "no-subject", str(ROOT),
+         "-f", str(ROOT / "values.yaml.default"),
+         "-f", str(ROOT / "tests" / "fixtures" / "values-render-domain.yaml"),
+         "-f", str(ROOT / "secrets.yaml.default"),
+         "--set-string", "global.secrets.keycloakServiceAdminPassword=a-real-one",
+         "--set", "userService.smtpHost="],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "serviceTechUserId" in result.stderr
+
+
+def test_placeholder_admin_passwords_fail_the_render():
+    for bad in ("", "changeme"):
+        result = render("--set-string", f"global.secrets.keycloakServiceAdminPassword={bad}", check=False)
+        assert result.returncode != 0, bad
+        assert "keycloakServiceAdminPassword" in result.stderr, bad
+
+
+def test_the_reconcile_job_renders_even_without_the_bootstrap_job():
+    docs = render("--set", "global.keycloak.bootstrapUsers.enabled=false")
+    assert not [d for d in docs if d.get("kind") == "Job" and d["metadata"]["name"] == "keycloak-bootstrap-users"]
+    resource(docs, "Job", JOB)
+
+
+def test_the_reconcile_job_knows_the_bootstrap_admin_username():
+    env = env_of(resource(render(), "Job", JOB))
+    assert env["BOOTSTRAP_ADMIN_USERNAME"]["valueFrom"]["secretKeyRef"] == {
+        "name": "keycloak-secret-env", "key": "KEYCLOAK_ADMIN"}
 
 
 def test_fresh_realms_seed_technical_with_the_default_subject():

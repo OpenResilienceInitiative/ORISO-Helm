@@ -89,11 +89,13 @@ jobs:
           helm lint . -f values.yaml.default -f secrets.yaml.default \
             --set-string global.domainName=release-validation.oriso.internal \
             --set-string userService.smtpUser=smtp-validation-user \
-            --set-string userService.smtpPassword=smtp-validation-password
+            --set-string userService.smtpPassword=smtp-validation-password \
+            -f tests/fixtures/render-required-secrets.yaml
           helm template oriso . -f values.yaml.default -f secrets.yaml.default \
             --set-string global.domainName=release-validation.oriso.internal \
             --set-string userService.smtpUser=smtp-validation-user \
             --set-string userService.smtpPassword=smtp-validation-password \
+            -f tests/fixtures/render-required-secrets.yaml \
             >/tmp/oriso-rendered.yaml
           # Without a domain the chart must refuse to render.
           if helm template oriso . -f values.yaml.default -f secrets.yaml.default \

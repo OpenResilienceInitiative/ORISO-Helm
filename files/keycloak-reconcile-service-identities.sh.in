@@ -12,8 +12,10 @@
 #   SERVICE_ADMIN_PASSWORD    its password (from the deployment's secret values)
 #   TECHNICAL_USERNAME        the UserService's service identity (password is
 #                             owned by keycloak-bootstrap-users, not set here)
-#   TECHNICAL_SERVICE_SUBJECT optional: expected Keycloak id of that identity;
-#                             a mismatch fails (TenantService would reject it)
+#   TECHNICAL_SERVICE_SUBJECT expected Keycloak id of that identity; checked
+#                             BEFORE any change, a mismatch fails the job
+#   BOOTSTRAP_ADMIN_USERNAME  the deployment-time admin (realmadmin); the backend
+#                             admin identity must never be that account
 #   KCADM                     kcadm path (default /opt/keycloak/bin/kcadm.sh)
 set -eu
 
@@ -22,6 +24,20 @@ KCADM="${KCADM:-/opt/keycloak/bin/kcadm.sh}"
 : "${SERVICE_ADMIN_USERNAME:?SERVICE_ADMIN_USERNAME is required}"
 : "${SERVICE_ADMIN_PASSWORD:?SERVICE_ADMIN_PASSWORD is required}"
 : "${TECHNICAL_USERNAME:?TECHNICAL_USERNAME is required}"
+: "${TECHNICAL_SERVICE_SUBJECT:?TECHNICAL_SERVICE_SUBJECT is required}"
+: "${BOOTSTRAP_ADMIN_USERNAME:?BOOTSTRAP_ADMIN_USERNAME is required}"
+
+# One wrong value must not strip realm-admin from the bootstrap admin or merge
+# the admin identity into the service identity. Keycloak usernames are
+# case-insensitive, so compare lower-cased.
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+for reserved in "$TECHNICAL_USERNAME" "$BOOTSTRAP_ADMIN_USERNAME" technical realmadmin; do
+  if [ "$(lower "$SERVICE_ADMIN_USERNAME")" = "$(lower "$reserved")" ]; then
+    echo "ERROR: SERVICE_ADMIN_USERNAME (global.secrets.keycloakServiceAdminUsername) is '${SERVICE_ADMIN_USERNAME}'," >&2
+    echo "which is the service identity or the bootstrap admin. Use a dedicated user, e.g. svc-keycloak-admin." >&2
+    exit 4
+  fi
+done
 
 OTP_CONFIG_ADMIN_ROLE="otp-config-admin"
 SERVICE_ADMIN_REALM_ROLES="default-roles-${KEYCLOAK_REALM} ${OTP_CONFIG_ADMIN_ROLE}"
@@ -69,6 +85,18 @@ ensure_user() {
   "$KCADM" set-password -r "$KEYCLOAK_REALM" --username "$username" --new-password "$password" --temporary=false
 }
 
+# list_roles <username> [--cclientid realm-management]: fails loudly; `for x in $(...)`
+# would swallow a kcadm error under set -e and silently remove nothing.
+list_roles() {
+  list_user="$1"
+  shift
+  if ! listed="$("$KCADM" get-roles -r "$KEYCLOAK_REALM" --uusername "$list_user" "$@" --fields name --format csv --noquotes)"; then
+    echo "ERROR: could not list roles of ${list_user} $*" >&2
+    exit 5
+  fi
+  printf '%s\n' "$listed"
+}
+
 # reconcile_roles <username> "<wanted realm roles>" "<wanted realm-management roles>"
 reconcile_roles() {
   username="$1"
@@ -82,13 +110,15 @@ reconcile_roles() {
     "$KCADM" add-roles -r "$KEYCLOAK_REALM" --uusername "$username" --cclientid realm-management --rolename "$role"
   done
 
-  for role in $("$KCADM" get-roles -r "$KEYCLOAK_REALM" --uusername "$username" --fields name --format csv --noquotes); do
+  current_realm="$(list_roles "$username")" || exit 5
+  for role in $current_realm; do
     if ! contains "$wanted_realm" "$role"; then
       "$KCADM" remove-roles -r "$KEYCLOAK_REALM" --uusername "$username" --rolename "$role"
       echo "removed realm role ${role} from ${username}"
     fi
   done
-  for role in $("$KCADM" get-roles -r "$KEYCLOAK_REALM" --uusername "$username" --cclientid realm-management --fields name --format csv --noquotes); do
+  current_management="$(list_roles "$username" --cclientid realm-management)" || exit 5
+  for role in $current_management; do
     if ! contains "$wanted_management" "$role"; then
       "$KCADM" remove-roles -r "$KEYCLOAK_REALM" --uusername "$username" --cclientid realm-management --rolename "$role"
       echo "removed realm-management role ${role} from ${username}"
@@ -97,6 +127,19 @@ reconcile_roles() {
   echo "reconciled roles of ${username}"
 }
 
+# Checked before any change: a wrong value must not leave a half-reconciled realm.
+if ! actual_subject="$(user_id "$TECHNICAL_USERNAME")"; then
+  echo "ERROR: could not look up ${TECHNICAL_USERNAME}" >&2
+  exit 5
+fi
+if [ "$actual_subject" != "$TECHNICAL_SERVICE_SUBJECT" ]; then
+  echo "ERROR: ${TECHNICAL_USERNAME} has Keycloak id '${actual_subject}', but" >&2
+  echo "global.keycloak.serviceTechUserId (TECHNICAL_SERVICE_SUBJECT) is ${TECHNICAL_SERVICE_SUBJECT}." >&2
+  echo "TenantService would not recognise the technical user. Set the value to the live id. Nothing was changed." >&2
+  exit 3
+fi
+echo "technical subject matches ${TECHNICAL_USERNAME}"
+
 ensure_realm_role "$OTP_CONFIG_ADMIN_ROLE" \
   "May call the otp-config endpoints of the ORISO Keycloak SPI (backend Keycloak admin identity only)"
 
@@ -104,17 +147,6 @@ ensure_user "$SERVICE_ADMIN_USERNAME" "$SERVICE_ADMIN_PASSWORD"
 reconcile_roles "$SERVICE_ADMIN_USERNAME" "$SERVICE_ADMIN_REALM_ROLES" "$SERVICE_ADMIN_MANAGEMENT_ROLES"
 
 reconcile_roles "$TECHNICAL_USERNAME" "$TECHNICAL_REALM_ROLES" "$TECHNICAL_MANAGEMENT_ROLES"
-
-if [ -n "${TECHNICAL_SERVICE_SUBJECT:-}" ]; then
-  actual_subject="$(user_id "$TECHNICAL_USERNAME")"
-  if [ "$actual_subject" != "$TECHNICAL_SERVICE_SUBJECT" ]; then
-    echo "ERROR: ${TECHNICAL_USERNAME} has Keycloak id ${actual_subject}, but" >&2
-    echo "global.keycloak.serviceTechUserId (TECHNICAL_SERVICE_SUBJECT) is ${TECHNICAL_SERVICE_SUBJECT}." >&2
-    echo "TenantService will not recognise the technical user. Set the value to the live id." >&2
-    exit 3
-  fi
-  echo "technical subject matches ${TECHNICAL_USERNAME}"
-fi
 
 for role in $RETIRED_REALM_ROLES; do
   if "$KCADM" get "roles/${role}" -r "$KEYCLOAK_REALM" >/dev/null 2>&1; then

@@ -46,6 +46,9 @@ elif cmd in ("add-roles", "remove-roles", "get-roles"):
     bucket = "management" if arg("--cclientid") == "realm-management" else "realm"
     role = arg("--rolename")
     if cmd == "get-roles":
+        if os.environ.get("FAKE_FAIL_GET_ROLES"):
+            sys.stderr.write("simulated get-roles failure\n")
+            sys.exit(1)
         print("\n".join(user[bucket]))
     elif cmd == "add-roles" and role not in user[bucket]:
         user[bucket].append(role)
@@ -89,7 +92,23 @@ class ReconcileServiceIdentitiesTest(unittest.TestCase):
         return [json.loads(line) for line in self.log.read_text().splitlines()]
 
     ADMIN = {"SERVICE_ADMIN_USERNAME": "svc-keycloak-admin", "SERVICE_ADMIN_PASSWORD": "from-secret",
-             "TECHNICAL_USERNAME": "technical"}
+             "TECHNICAL_USERNAME": "technical", "TECHNICAL_SERVICE_SUBJECT": "t",
+             "BOOTSTRAP_ADMIN_USERNAME": "realmadmin"}
+
+    def run_failing(self, state, **env):
+        self.state.write_text(json.dumps(state))
+        result = subprocess.run(
+            ["sh", str(SCRIPT)], capture_output=True, text=True,
+            env={"PATH": os.environ["PATH"], "KCADM": str(self.kcadm),
+                 "FAKE_STATE": str(self.state), "FAKE_LOG": str(self.log),
+                 "KEYCLOAK_REALM": "online-beratung", **env},
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        return result
+
+    def mutating_calls(self):
+        return [call for call in self.calls()
+                if call[0] in ("add-roles", "remove-roles", "set-password", "create", "update", "delete")]
 
     @staticmethod
     def dev_like_realm():
@@ -155,7 +174,8 @@ class ReconcileServiceIdentitiesTest(unittest.TestCase):
         self.assertEqual(first, second)
 
     def test_a_missing_identity_fails_instead_of_skipping(self):
-        for missing in ("SERVICE_ADMIN_USERNAME", "SERVICE_ADMIN_PASSWORD", "TECHNICAL_USERNAME"):
+        for missing in ("SERVICE_ADMIN_USERNAME", "SERVICE_ADMIN_PASSWORD", "TECHNICAL_USERNAME",
+                        "TECHNICAL_SERVICE_SUBJECT", "BOOTSTRAP_ADMIN_USERNAME"):
             env = {key: value for key, value in self.ADMIN.items() if key != missing}
             self.state.write_text(json.dumps(self.dev_like_realm()))
             result = subprocess.run(
@@ -168,20 +188,37 @@ class ReconcileServiceIdentitiesTest(unittest.TestCase):
             self.assertIn(missing, result.stderr)
 
     def test_a_matching_technical_subject_passes(self):
-        state, out = self.run_script(self.dev_like_realm(), TECHNICAL_SERVICE_SUBJECT="t", **self.ADMIN)
+        state, out = self.run_script(self.dev_like_realm(), **self.ADMIN)
         self.assertIn("technical subject matches", out)
 
-    def test_a_wrong_technical_subject_fails_loudly(self):
-        self.state.write_text(json.dumps(self.dev_like_realm()))
-        result = subprocess.run(
-            ["sh", str(SCRIPT)], capture_output=True, text=True,
-            env={"PATH": os.environ["PATH"], "KCADM": str(self.kcadm),
-                 "FAKE_STATE": str(self.state), "FAKE_LOG": str(self.log),
-                 "KEYCLOAK_REALM": "online-beratung", "TECHNICAL_SERVICE_SUBJECT": "not-the-id",
-                 **self.ADMIN},
-        )
-        self.assertNotEqual(result.returncode, 0)
+    def test_a_wrong_subject_fails_before_any_change(self):
+        env = {**self.ADMIN, "TECHNICAL_SERVICE_SUBJECT": "not-the-id"}
+        result = self.run_failing(self.dev_like_realm(), **env)
         self.assertIn("serviceTechUserId", result.stderr)
+        self.assertEqual(self.mutating_calls(), [])
+        self.assertEqual(json.loads(self.state.read_text()), self.dev_like_realm())
+
+    def test_the_admin_identity_may_not_be_the_service_identity(self):
+        for name in ("technical", "TECHNICAL"):
+            self.log.write_text("")
+            result = self.run_failing(self.dev_like_realm(), **{**self.ADMIN, "SERVICE_ADMIN_USERNAME": name})
+            self.assertIn("SERVICE_ADMIN_USERNAME", result.stderr)
+            self.assertEqual(self.mutating_calls(), [], name)
+
+    def test_the_admin_identity_may_not_be_the_bootstrap_admin(self):
+        for env in ({"SERVICE_ADMIN_USERNAME": "realmadmin"},
+                    {"SERVICE_ADMIN_USERNAME": "ops-admin", "BOOTSTRAP_ADMIN_USERNAME": "ops-admin"}):
+            self.log.write_text("")
+            result = self.run_failing(self.dev_like_realm(), **{**self.ADMIN, **env})
+            self.assertIn("SERVICE_ADMIN_USERNAME", result.stderr)
+            self.assertEqual(self.mutating_calls(), [], env)
+
+    def test_a_failing_role_listing_fails_the_job(self):
+        realm = self.dev_like_realm()
+        result = self.run_failing(realm, FAKE_FAIL_GET_ROLES="1", **self.ADMIN)
+        self.assertIn("could not list", result.stderr)
+        # technical kept its roles: nothing was removed on a blind listing
+        self.assertNotIn("remove-roles", [call[0] for call in self.calls()])
 
     def test_the_password_never_reaches_stdout(self):
         _, out = self.run_script(self.dev_like_realm(), **self.ADMIN)

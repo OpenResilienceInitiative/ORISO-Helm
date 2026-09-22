@@ -199,6 +199,8 @@ class CutoverReleasePreflightTest(unittest.TestCase):
                 str(CHART_DIR / "tests" / "fixtures" / "values-render-domain.yaml"),
                 "-f",
                 str(CHART_DIR / "secrets.yaml.default"),
+                "-f",
+                str(CHART_DIR / "tests" / "fixtures" / "render-required-secrets.yaml"),
                 "--set-string",
                 "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
                 "--set-string",
