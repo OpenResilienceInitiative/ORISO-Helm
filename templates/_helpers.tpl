@@ -67,6 +67,9 @@ Usage: include "oriso.validateHost" (list "global.domainName" $hostPort)
 {{- end -}}
 {{- include "oriso.rejectUrlPlaceholder" (list "global.domainName" $domain $domain) -}}
 {{- include "oriso.validateHost" (list "global.domainName" $domain) -}}
+{{- if contains ":" $domain -}}
+{{- fail (printf "global.domainName must not contain a port (got %q): it is used as Ingress host and TLS host. Use the explicit userService.*BaseUrl overrides for non-default ports." $domain) -}}
+{{- end -}}
 {{- $domain -}}
 {{- end -}}
 

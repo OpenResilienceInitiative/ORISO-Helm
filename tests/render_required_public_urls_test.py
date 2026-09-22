@@ -173,6 +173,8 @@ def test_placeholder_or_malformed_domains_fail() -> None:
         ".oriso.internal",
         "dev.oriso.internal:0",
         "dev.oriso.internal:65536",
+        # Ingress host/TLS fields take no port; ports belong in explicit URLs.
+        "render.oriso.internal:8443",
     ):
         proc = helm_template("--set-string", f"global.domainName={bad}")
         assert_fails_naming(proc, "global.domainName", f"global.domainName={bad!r}")
@@ -203,12 +205,12 @@ def test_explicit_mail_url_placeholders_fail() -> None:
 def test_valid_hosts_with_port_and_path_render() -> None:
     proc = helm_template(
         "--set-string",
-        "global.domainName=app-1.render.oriso.internal:8443",
+        "global.domainName=app-1.render.oriso.internal",
         "--set-string",
         "userService.passwordResetAdminFrontendBaseUrl=https://admin.render.oriso.internal:443/admin",
     )
     rendered(proc, "valid host with port")
-    print("PASS: valid hyphenated host, port 1-65535 and URL path render")
+    print("PASS: valid hyphenated host, explicit URL with port 1-65535 and path render")
 
 
 def assert_public_urls_match(docs: list[dict], domain: str, explicit: dict, label: str) -> None:
