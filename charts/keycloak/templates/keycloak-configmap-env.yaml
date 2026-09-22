@@ -11,6 +11,10 @@ data:
     # Public app origin for the links in Keycloak mails (OTP, password reset).
     # The email theme reads it as ORISO_APP_BASE_URL (ORISO-Helm#366).
     ORISO_APP_BASE_URL: {{ include "oriso.publicOrigin" . | quote }}
+    # Platform logo in Keycloak mails for users without a Träger (a Träger's own
+    # logo comes from TenantService by the user's tenantId). Host-resolved: the
+    # logo of the tenant this domain belongs to, else the platform tenant's.
+    ORISO_LOGO_URL: {{ printf "%s/service/tenant/public/branding/logo" (include "oriso.publicOrigin" .) | quote }}
     # Logging
     # Supported log levels are ALL, DEBUG, ERROR, FATAL, INFO, OFF, TRACE and WARN.
     KEYCLOAK_LOGLEVEL: {{ .Values.keycloakLogLevel | quote }}
