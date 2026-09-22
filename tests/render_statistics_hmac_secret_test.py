@@ -85,6 +85,8 @@ BASE_OVERLAY = {
             "userServiceDbPassword": "test-db-pass",
             "keycloakAdminUsername": "test-kc-user",
             "keycloakAdminPassword": "test-kc-pass",
+            "keycloakServiceAdminUsername": "test-kc-service-admin",
+            "keycloakServiceAdminPassword": "test-kc-service-admin-pass",
             "matrixRegistrationSharedSecret": "test-shared-secret",
         },
         "matrix": {
@@ -94,8 +96,6 @@ BASE_OVERLAY = {
     },
     "userService": {
         "serviceEncryptionAppkey": "test-appkey",
-        "keycloakTechnicalUsername": "test-technical-user",
-        "keycloakTechnicalPassword": "test-technical-pass",
         "identityTechnicalUserUsername": "test-identity-user",
         "identityTechnicalUserPassword": "test-identity-pass",
         "matrixRtcCallPolicyHmacSecret": "test-matrixrtc-hmac",

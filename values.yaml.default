@@ -84,6 +84,12 @@ global:
     principalAttribute: "preferred_username"
     serviceAppClientId: "app"
     serviceAdminClientId: "admin-cli"
+    # Keycloak user id (`sub`) of the `technical` user; TenantService recognises
+    # the UserService by it (TECHNICAL_SERVICE_SUBJECT). Not a secret. This is the
+    # fixed id realm.json seeds on a fresh import. An existing realm keeps its own
+    # id: look it up once (admin console, Users > technical > ID) and set it in
+    # the environment's values. The reconcile hook fails the release on a mismatch.
+    serviceTechUserId: "8294c392-e1e0-405b-ac2f-ba3043cbad3e"
     bootstrapUsers:
       enabled: true
     # Checks after every install and upgrade that the live realm still carries

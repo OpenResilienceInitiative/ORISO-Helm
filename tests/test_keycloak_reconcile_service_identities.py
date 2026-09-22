@@ -30,7 +30,9 @@ def arg(flag):
 cmd = args[0]
 if cmd == "get" and args[1].startswith("roles/"):
     sys.exit(0 if args[1][len("roles/"):] in state["realm_roles"] else 1)
-if cmd == "create" and args[1] == "roles":
+if cmd == "delete" and args[1].startswith("roles/"):
+    state["realm_roles"].remove(args[1][len("roles/"):])
+elif cmd == "create" and args[1] == "roles":
     state["realm_roles"].append(next(a[5:] for a in args if a.startswith("name=")))
 elif cmd == "get" and args[1] == "users":
     wanted = next(a[len("username="):] for a in args if a.startswith("username="))
@@ -86,12 +88,23 @@ class ReconcileServiceIdentitiesTest(unittest.TestCase):
     def calls(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()]
 
+    ADMIN = {"SERVICE_ADMIN_USERNAME": "svc-keycloak-admin", "SERVICE_ADMIN_PASSWORD": "from-secret",
+             "TECHNICAL_USERNAME": "technical"}
+
+    @staticmethod
+    def dev_like_realm():
+        # What an existing environment looks like before stage 2.
+        return {
+            "realm_roles": ["technical", "tenant-admin", "TECHNICAL_DEFAULT"],
+            "users": {"technical": {
+                "id": "t",
+                "realm": ["default-roles-online-beratung", "technical", "tenant-admin", "TECHNICAL_DEFAULT"],
+                "management": ["manage-users", "view-users", "query-users"],
+            }},
+        }
+
     def test_creates_the_role_and_the_service_admin_with_exact_roles(self):
-        state, _ = self.run_script(
-            {"realm_roles": ["technical"], "users": {}},
-            SERVICE_ADMIN_USERNAME="svc-keycloak-admin",
-            SERVICE_ADMIN_PASSWORD="from-secret",
-        )
+        state, _ = self.run_script(self.dev_like_realm(), **self.ADMIN)
         self.assertIn("otp-config-admin", state["realm_roles"])
         admin = state["users"]["svc-keycloak-admin"]
         self.assertEqual(
@@ -107,21 +120,28 @@ class ReconcileServiceIdentitiesTest(unittest.TestCase):
             self.calls(),
         )
 
+    def test_reduces_technical_to_a_pure_service_identity(self):
+        state, _ = self.run_script(self.dev_like_realm(), **self.ADMIN)
+        technical = state["users"]["technical"]
+        self.assertEqual(sorted(technical["realm"]), ["default-roles-online-beratung", "technical"])
+        self.assertEqual(technical["management"], [])
+        # Its password is not touched here; keycloak-bootstrap-users owns it.
+        self.assertNotIn("technical", [call[4] for call in self.calls() if call[0] == "set-password"])
+
+    def test_removes_the_unused_technical_default_role(self):
+        state, _ = self.run_script(self.dev_like_realm(), **self.ADMIN)
+        self.assertNotIn("TECHNICAL_DEFAULT", state["realm_roles"])
+        self.assertIn("tenant-admin", state["realm_roles"], "other realm roles stay")
+
     def test_strips_roles_that_were_added_by_hand(self):
-        state, _ = self.run_script(
-            {
-                "realm_roles": ["otp-config-admin", "technical", "tenant-admin"],
-                "users": {
-                    "svc-keycloak-admin": {
-                        "id": "abc",
-                        "realm": ["tenant-admin", "technical", "otp-config-admin"],
-                        "management": ["realm-admin", "manage-users"],
-                    }
-                },
-            },
-            SERVICE_ADMIN_USERNAME="svc-keycloak-admin",
-            SERVICE_ADMIN_PASSWORD="from-secret",
-        )
+        realm = self.dev_like_realm()
+        realm["realm_roles"].append("otp-config-admin")
+        realm["users"]["svc-keycloak-admin"] = {
+            "id": "abc",
+            "realm": ["tenant-admin", "technical", "otp-config-admin"],
+            "management": ["realm-admin", "manage-users"],
+        }
+        state, _ = self.run_script(realm, **self.ADMIN)
         admin = state["users"]["svc-keycloak-admin"]
         self.assertNotIn("tenant-admin", admin["realm"])
         self.assertNotIn("technical", admin["realm"])
@@ -130,33 +150,41 @@ class ReconcileServiceIdentitiesTest(unittest.TestCase):
         self.assertNotIn(["create", "roles"], [call[:2] for call in self.calls()])
 
     def test_is_idempotent(self):
-        first, _ = self.run_script(
-            {"realm_roles": [], "users": {}},
-            SERVICE_ADMIN_USERNAME="svc-keycloak-admin",
-            SERVICE_ADMIN_PASSWORD="from-secret",
-        )
-        second, _ = self.run_script(
-            first,
-            SERVICE_ADMIN_USERNAME="svc-keycloak-admin",
-            SERVICE_ADMIN_PASSWORD="from-secret",
-        )
+        first, _ = self.run_script(self.dev_like_realm(), **self.ADMIN)
+        second, _ = self.run_script(first, **self.ADMIN)
         self.assertEqual(first, second)
 
-    def test_without_a_configured_identity_only_the_role_is_ensured(self):
-        state, out = self.run_script({"realm_roles": [], "users": {"technical": {
-            "id": "t", "realm": ["technical", "tenant-admin"], "management": ["manage-users"]}}})
-        self.assertIn("SKIPPED", out)
-        self.assertEqual(state["realm_roles"], ["otp-config-admin"])
-        # Additive stage: the technical user is left exactly as it was.
-        self.assertEqual(state["users"]["technical"]["realm"], ["technical", "tenant-admin"])
-        self.assertEqual(state["users"]["technical"]["management"], ["manage-users"])
+    def test_a_missing_identity_fails_instead_of_skipping(self):
+        for missing in ("SERVICE_ADMIN_USERNAME", "SERVICE_ADMIN_PASSWORD", "TECHNICAL_USERNAME"):
+            env = {key: value for key, value in self.ADMIN.items() if key != missing}
+            self.state.write_text(json.dumps(self.dev_like_realm()))
+            result = subprocess.run(
+                ["sh", str(SCRIPT)], capture_output=True, text=True,
+                env={"PATH": os.environ["PATH"], "KCADM": str(self.kcadm),
+                     "FAKE_STATE": str(self.state), "FAKE_LOG": str(self.log),
+                     "KEYCLOAK_REALM": "online-beratung", **env},
+            )
+            self.assertNotEqual(result.returncode, 0, missing)
+            self.assertIn(missing, result.stderr)
+
+    def test_a_matching_technical_subject_passes(self):
+        state, out = self.run_script(self.dev_like_realm(), TECHNICAL_SERVICE_SUBJECT="t", **self.ADMIN)
+        self.assertIn("technical subject matches", out)
+
+    def test_a_wrong_technical_subject_fails_loudly(self):
+        self.state.write_text(json.dumps(self.dev_like_realm()))
+        result = subprocess.run(
+            ["sh", str(SCRIPT)], capture_output=True, text=True,
+            env={"PATH": os.environ["PATH"], "KCADM": str(self.kcadm),
+                 "FAKE_STATE": str(self.state), "FAKE_LOG": str(self.log),
+                 "KEYCLOAK_REALM": "online-beratung", "TECHNICAL_SERVICE_SUBJECT": "not-the-id",
+                 **self.ADMIN},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("serviceTechUserId", result.stderr)
 
     def test_the_password_never_reaches_stdout(self):
-        _, out = self.run_script(
-            {"realm_roles": [], "users": {}},
-            SERVICE_ADMIN_USERNAME="svc-keycloak-admin",
-            SERVICE_ADMIN_PASSWORD="from-secret",
-        )
+        _, out = self.run_script(self.dev_like_realm(), **self.ADMIN)
         self.assertNotIn("from-secret", out)
 
 

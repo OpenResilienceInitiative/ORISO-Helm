@@ -36,7 +36,7 @@ Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fi
 - `global.secrets.*Password` / `*Pass` — database and service passwords
 - `global.secrets.matrixRegistrationSharedSecret` — Matrix shared secret
 - `global.keycloak.technicalUser.password` — Keycloak technical user password
-- `global.keycloak.serviceTechUserId` — Keycloak technical user ID
+- `global.keycloak.serviceTechUserId` (now in `values.yaml.default`, not a secret) — Keycloak user id (`sub`) of the `technical` user, rendered as TenantService `TECHNICAL_SERVICE_SUBJECT`. **Required, a UUID.** Fresh imports use the fixed id from `realm.json` (`8294c392-e1e0-405b-ac2f-ba3043cbad3e`); on an existing realm look up the live id once. The reconcile hook fails the release when it does not match the realm.
 - `postgres.postgresPassword` — PostgreSQL root password
 - `global.matrix.matrixAdminUsername` / `matrixAdminPassword` — Matrix admin credentials (must live under `global:` so subcharts can read them)
 - `online-counseling-mongodb.*Password` / `*Pass` — MongoDB passwords
@@ -45,7 +45,8 @@ Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fi
 - `livekit.api.key` / `livekit.api.secret` — LiveKit API credentials
 - `tenantService.springDatasourcePassword` / `springRabbitmqPassword`
 - `agencyService.serviceEncryptionAppkey` — AgencyService encryption key (Matrix service-account passwords). **Required** — the chart refuses to render if it is blank, because an empty key silently breaks agency creation. Rotating it invalidates already-stored credentials.
-- `userService.keycloakTechnicalPassword` / `serviceEncryptionAppkey` / `identityTechnicalUser*`
+- `userService.serviceEncryptionAppkey` / `identityTechnicalUser*` — `identityTechnicalUser*` is the UserService's service identity (realm user `technical`, realm role `technical` only). **Required.** The former duplicate pair `userService.keycloakTechnical*` is no longer read.
+- `global.secrets.keycloakServiceAdminUsername` / `keycloakServiceAdminPassword` — backend Keycloak admin identity (`svc-keycloak-admin`: `manage-users`, `view-users`, `query-users`, `view-realm`, `otp-config-admin`). **Required.** Mounted into the UserService as `KEYCLOAK_CONFIG_ADMIN_*`; the `realmadmin` credentials (`keycloakAdmin*`) stay deployment-time only (Keycloak pod and bootstrap hooks). The hook `keycloak-reconcile-service-identities` converges both identities to these exact role sets on every install and upgrade (ORISO-Helm#367).
 
 ### 3. Install / Upgrade
 

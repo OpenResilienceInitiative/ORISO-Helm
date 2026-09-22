@@ -8,18 +8,30 @@
 #
 # Expects an authenticated kcadm session (kcadm config credentials) and:
 #   KEYCLOAK_REALM            target realm
-#   SERVICE_ADMIN_USERNAME    backend Keycloak admin identity (empty = skip it)
+#   SERVICE_ADMIN_USERNAME    backend Keycloak admin identity
 #   SERVICE_ADMIN_PASSWORD    its password (from the deployment's secret values)
+#   TECHNICAL_USERNAME        the UserService's service identity (password is
+#                             owned by keycloak-bootstrap-users, not set here)
+#   TECHNICAL_SERVICE_SUBJECT optional: expected Keycloak id of that identity;
+#                             a mismatch fails (TenantService would reject it)
 #   KCADM                     kcadm path (default /opt/keycloak/bin/kcadm.sh)
 set -eu
 
 KCADM="${KCADM:-/opt/keycloak/bin/kcadm.sh}"
 : "${KEYCLOAK_REALM:?KEYCLOAK_REALM is required}"
+: "${SERVICE_ADMIN_USERNAME:?SERVICE_ADMIN_USERNAME is required}"
+: "${SERVICE_ADMIN_PASSWORD:?SERVICE_ADMIN_PASSWORD is required}"
+: "${TECHNICAL_USERNAME:?TECHNICAL_USERNAME is required}"
 
 OTP_CONFIG_ADMIN_ROLE="otp-config-admin"
 SERVICE_ADMIN_REALM_ROLES="default-roles-${KEYCLOAK_REALM} ${OTP_CONFIG_ADMIN_ROLE}"
 # view-realm: the UserService reads realm roles by name before mapping them.
 SERVICE_ADMIN_MANAGEMENT_ROLES="manage-users view-users query-users view-realm"
+# Pure service identity: the services map `technical` to narrow authorities.
+TECHNICAL_REALM_ROLES="default-roles-${KEYCLOAK_REALM} technical"
+TECHNICAL_MANAGEMENT_ROLES=""
+# No service reads this realm role; they derive their authority from `technical`.
+RETIRED_REALM_ROLES="TECHNICAL_DEFAULT"
 
 contains() {
   # contains "<space separated list>" <word>
@@ -88,10 +100,25 @@ reconcile_roles() {
 ensure_realm_role "$OTP_CONFIG_ADMIN_ROLE" \
   "May call the otp-config endpoints of the ORISO Keycloak SPI (backend Keycloak admin identity only)"
 
-if [ -z "${SERVICE_ADMIN_USERNAME:-}" ]; then
-  echo "SKIPPED: no backend Keycloak admin identity configured (global.secrets.keycloakServiceAdminUsername)."
-else
-  : "${SERVICE_ADMIN_PASSWORD:?SERVICE_ADMIN_PASSWORD is required with SERVICE_ADMIN_USERNAME}"
-  ensure_user "$SERVICE_ADMIN_USERNAME" "$SERVICE_ADMIN_PASSWORD"
-  reconcile_roles "$SERVICE_ADMIN_USERNAME" "$SERVICE_ADMIN_REALM_ROLES" "$SERVICE_ADMIN_MANAGEMENT_ROLES"
+ensure_user "$SERVICE_ADMIN_USERNAME" "$SERVICE_ADMIN_PASSWORD"
+reconcile_roles "$SERVICE_ADMIN_USERNAME" "$SERVICE_ADMIN_REALM_ROLES" "$SERVICE_ADMIN_MANAGEMENT_ROLES"
+
+reconcile_roles "$TECHNICAL_USERNAME" "$TECHNICAL_REALM_ROLES" "$TECHNICAL_MANAGEMENT_ROLES"
+
+if [ -n "${TECHNICAL_SERVICE_SUBJECT:-}" ]; then
+  actual_subject="$(user_id "$TECHNICAL_USERNAME")"
+  if [ "$actual_subject" != "$TECHNICAL_SERVICE_SUBJECT" ]; then
+    echo "ERROR: ${TECHNICAL_USERNAME} has Keycloak id ${actual_subject}, but" >&2
+    echo "global.keycloak.serviceTechUserId (TECHNICAL_SERVICE_SUBJECT) is ${TECHNICAL_SERVICE_SUBJECT}." >&2
+    echo "TenantService will not recognise the technical user. Set the value to the live id." >&2
+    exit 3
+  fi
+  echo "technical subject matches ${TECHNICAL_USERNAME}"
 fi
+
+for role in $RETIRED_REALM_ROLES; do
+  if "$KCADM" get "roles/${role}" -r "$KEYCLOAK_REALM" >/dev/null 2>&1; then
+    "$KCADM" delete "roles/${role}" -r "$KEYCLOAK_REALM"
+    echo "deleted retired realm role ${role}"
+  fi
+done
