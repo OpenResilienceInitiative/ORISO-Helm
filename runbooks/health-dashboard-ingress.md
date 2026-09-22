@@ -59,7 +59,7 @@ helm lint . -f values.yaml.default -f secrets.yaml.default -f values-dev.yaml \
   --set-string userService.smtpPassword=smtp-validation-password
 helm template health-auth-test . --namespace render-test \
   -f values.yaml.default -f secrets.yaml.default -f values-dev.yaml \
-  --set-string global.domainName=health.example.test \
+  --set-string global.domainName=health.oriso.internal \
   --set-string userService.smtpUser=smtp-validation-user \
   --set-string userService.smtpPassword=smtp-validation-password \
   > /tmp/health-auth-rendered.yaml

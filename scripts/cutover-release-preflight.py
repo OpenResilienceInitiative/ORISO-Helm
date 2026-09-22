@@ -270,7 +270,7 @@ def verify_render(chart_dir: pathlib.Path, values: dict) -> None:
                 # Image-only dry render: the chart requires a real public host
                 # (ORISO-Helm#366), which this check does not inspect.
                 "--set-string",
-                "global.domainName=cutover-preflight.example.org",
+                "global.domainName=cutover-preflight.oriso.internal",
             ],
             capture_output=True,
             text=True,

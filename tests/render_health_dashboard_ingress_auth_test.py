@@ -25,7 +25,7 @@ def render(*overlays: str, health_dashboard: dict | None = None,
         "-f", str(CHART_DIR / "values.yaml.default"),
         "-f", str(CHART_DIR / "tests" / "fixtures" / "values-render-domain.yaml"),
         "-f", str(CHART_DIR / "secrets.yaml.default"),
-        "--set-string", "global.domainName=health.example.test",
+        "--set-string", "global.domainName=health.oriso.internal",
         "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
         "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
         "--set-string", "userService.smtpUser=smtp-canary-user",
@@ -96,8 +96,8 @@ class HealthDashboardIngressAuthTest(unittest.TestCase):
         self.assertEqual(annotations["cert-manager.io/cluster-issuer"], "letsencrypt-prod")
         self.assertEqual(ingress["spec"], {
             "ingressClassName": "nginx",
-            "tls": [{"hosts": ["health.example.test"], "secretName": "health-example-test-tls"}],
-            "rules": [{"host": "health.example.test", "http": {"paths": [{
+            "tls": [{"hosts": ["health.oriso.internal"], "secretName": "health-oriso-internal-tls"}],
+            "rules": [{"host": "health.oriso.internal", "http": {"paths": [{
                 "path": "/health(/|$)(.*)", "pathType": "ImplementationSpecific",
                 "backend": {"service": {"name": resources["Service"]["metadata"]["name"],
                                          "port": {"number": 9100}}},

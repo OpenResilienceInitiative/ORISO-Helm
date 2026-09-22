@@ -1,5 +1,7 @@
 # Render-test base layer: a valid public host so render contracts that do not
 # test the domain itself pass the global.domainName gate (ORISO-Helm#366).
 # Layer it directly after values.yaml.default; later overlays and --set win.
+# Reserved example domains (example.com/.org/.net/.test) and .invalid are
+# rejected as placeholders, so render tests use the private .internal TLD.
 global:
-  domainName: "render.example.org"
+  domainName: "render.oriso.internal"

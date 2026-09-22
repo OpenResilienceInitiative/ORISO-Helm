@@ -12,8 +12,8 @@ environment and the checks that prove the feature is live.
 
 | Key | Dev | Pre-Dev |
 |---|---|---|
-| `PASSWORD_RESET_FRONTEND_BASE_URL` | `https://dev.oriso.org` | `https://app.oriso-dev.site` |
-| `PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL` | `https://dev.oriso.org/admin` | `https://admin.oriso-dev.site/admin` |
+| `PASSWORD_RESET_FRONTEND_BASE_URL` | `https://dev.oriso.org` | `https://predev.oriso.org` |
+| `PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL` | `https://dev.oriso.org/admin` | `https://predev.oriso.org/admin` |
 
 UserService appends `/password-reset/confirm?token=…` to each base URL, so the
 Admin value must already include the `/admin` prefix the Admin panel is served
@@ -29,14 +29,13 @@ origins and the admin one must **not** end in `/admin`:
 
 | Key | Pre-Dev |
 |---|---|
-| `ACCOUNT_INVITE_APP_FRONTEND_BASE_URL` | `https://app.oriso-dev.site` |
-| `ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL` | `https://admin.oriso-dev.site` |
+| `ACCOUNT_INVITE_APP_FRONTEND_BASE_URL` | `https://predev.oriso.org` |
+| `ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL` | `https://predev.oriso.org` |
 
 When unset, both derive from `global.domainName` (`<scheme>://<domainName>`,
-scheme per `global.enableTls`).
-On Pre-Dev the Admin panel lives on its own host, so the admin value must be
-set explicitly — otherwise every tenant-admin invite links to the App host,
-which does not serve the onboarding route.
+scheme per `global.enableTls`). Dev and Pre-Dev serve the Admin panel under
+`/admin` on the App host, so the derived values are correct there. Set the
+admin value explicitly only where the Admin panel has its own host.
 
 ## Applying it per environment
 
@@ -47,7 +46,7 @@ against Pre-Dev is not allowed — so until that migration lands the live
 rollout is a scoped ConfigMap patch (mirroring ORISO-Admin#392):
 
 ```bash
-kubectl -n caritas patch configmap userservice-configmap-env --type merge -p '{"data":{"PASSWORD_RESET_FRONTEND_BASE_URL":"https://app.oriso-dev.site","PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL":"https://admin.oriso-dev.site/admin","ACCOUNT_INVITE_APP_FRONTEND_BASE_URL":"https://app.oriso-dev.site","ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL":"https://admin.oriso-dev.site"}}'
+kubectl -n caritas patch configmap userservice-configmap-env --type merge -p '{"data":{"PASSWORD_RESET_FRONTEND_BASE_URL":"https://predev.oriso.org","PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL":"https://predev.oriso.org/admin","ACCOUNT_INVITE_APP_FRONTEND_BASE_URL":"https://predev.oriso.org","ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL":"https://predev.oriso.org"}}'
 kubectl -n caritas rollout restart deployment/oriso-platform-userservice
 kubectl -n caritas rollout status  deployment/oriso-platform-userservice
 ```
@@ -119,7 +118,7 @@ a readable test mailbox, then read the mail through the Test Access Hub.
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' -X POST \
-  https://api.oriso-dev.site/service/users/password-reset/request \
+  https://predev.oriso.org/service/users/password-reset/request \
   -H 'Content-Type: application/json' \
   -d '{"username":"<account>","locale":"de"}'
 # expected: 204 for both known and unknown accounts (no account enumeration)

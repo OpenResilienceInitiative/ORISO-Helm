@@ -17,8 +17,8 @@ SMTP_FROM = "ORISO Platform <monty.burns@oriso.org>"
 ENVIRONMENTS = {
     "dev": ("https://dev.oriso.org", "https://dev.oriso.org/admin"),
     "pre-dev": (
-        "https://app.oriso-dev.site",
-        "https://admin.oriso-dev.site/admin",
+        "https://predev.oriso.org",
+        "https://predev.oriso.org/admin",
     ),
 }
 
@@ -254,7 +254,7 @@ def main() -> None:
     # instead of being omitted, so UserService needs no fallback (ORISO-Helm#366).
     assert (
         user_service_without_admin["data"]["PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL"]
-        == "https://render.example.org/admin"
+        == "https://render.oriso.internal/admin"
     )
     print(
         "PASS: admin password-reset URL derives from global.domainName when unset"

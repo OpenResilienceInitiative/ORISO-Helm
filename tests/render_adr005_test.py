@@ -121,7 +121,7 @@ def render(chart: str, server_public_ip: str) -> str:
         },
         "global": {
             # The chart requires a real public host (ORISO-Helm#366).
-            "domainName": "render.example.org",
+            "domainName": "render.oriso.internal",
             "secrets": {
                 "redisdefaultPass": "test-redis-pass",
                 "matrixRegistrationSharedSecret": "test-shared-secret",

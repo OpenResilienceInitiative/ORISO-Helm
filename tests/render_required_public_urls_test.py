@@ -75,11 +75,8 @@ OVERLAYS = {
         },
     },
     "values-pre-dev.yaml": {
-        "domain": "app.oriso-dev.site",
-        "explicit": {
-            "PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL": "https://admin.oriso-dev.site/admin",
-            "ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL": "https://admin.oriso-dev.site",
-        },
+        "domain": "predev.oriso.org",
+        "explicit": {},
     },
     "values-prod.yaml": {
         "domain": "app.oriso.org",
@@ -87,7 +84,9 @@ OVERLAYS = {
     },
 }
 
-VALID_TEST_DOMAIN = "render.example.org"
+# Render-test host. Reserved example domains (example.com/.org/.net/.test) and
+# .invalid are rejected as placeholders, so tests use the private .internal TLD.
+VALID_TEST_DOMAIN = "render.oriso.internal"
 
 
 def helm_template(*args: str) -> subprocess.CompletedProcess:
@@ -159,16 +158,21 @@ def test_placeholder_or_malformed_domains_fail() -> None:
     for bad in (
         "your-domain.example.com",
         "app.example.com",
-        "https://dev.example.org",
-        "dev.example.org/app",
-        "dev.example.org/",
-        "dev example.org",
-        "example..org",
-        "example.-org.test",
-        "example-.org.test",
-        ".example.org",
-        "dev.example.org:0",
-        "dev.example.org:65536",
+        "example.org",
+        "render.example.org",
+        "app.example.net",
+        "app.example.test",
+        "oriso.invalid",
+        "https://dev.oriso.internal",
+        "dev.oriso.internal/app",
+        "dev.oriso.internal/",
+        "dev oriso.internal",
+        "oriso..internal",
+        "oriso.-dev.internal",
+        "oriso-.dev.internal",
+        ".oriso.internal",
+        "dev.oriso.internal:0",
+        "dev.oriso.internal:65536",
     ):
         proc = helm_template("--set-string", f"global.domainName={bad}")
         assert_fails_naming(proc, "global.domainName", f"global.domainName={bad!r}")
@@ -178,11 +182,13 @@ def test_placeholder_or_malformed_domains_fail() -> None:
 def test_explicit_mail_url_placeholders_fail() -> None:
     for key, bad in (
         ("accountInviteAdminFrontendBaseUrl", "https://your-domain.example.com"),
-        ("magicLinkFrontendBaseUrl", "app.example.org"),
-        ("passwordResetFrontendBaseUrl", "https://app.example.org/"),
-        ("accountInviteAppFrontendBaseUrl", "https://app..example.org"),
-        ("accountInviteAppFrontendBaseUrl", "https://app-.example.org"),
-        ("magicLinkFrontendBaseUrl", "https://app.example.org:70000"),
+        ("magicLinkFrontendBaseUrl", "app.oriso.internal"),
+        ("passwordResetFrontendBaseUrl", "https://app.oriso.internal/"),
+        ("accountInviteAppFrontendBaseUrl", "https://app..oriso.internal"),
+        ("accountInviteAppFrontendBaseUrl", "https://app-.oriso.internal"),
+        ("magicLinkFrontendBaseUrl", "https://app.oriso.internal:70000"),
+        ("magicLinkFrontendBaseUrl", "https://app.example.org"),
+        ("accountInviteAdminFrontendBaseUrl", "https://admin.oriso.invalid"),
     ):
         proc = helm_template(
             "--set-string",
@@ -197,9 +203,9 @@ def test_explicit_mail_url_placeholders_fail() -> None:
 def test_valid_hosts_with_port_and_path_render() -> None:
     proc = helm_template(
         "--set-string",
-        "global.domainName=app-1.render.example.org:8443",
+        "global.domainName=app-1.render.oriso.internal:8443",
         "--set-string",
-        "userService.passwordResetAdminFrontendBaseUrl=https://admin.render.example.org:443/admin",
+        "userService.passwordResetAdminFrontendBaseUrl=https://admin.render.oriso.internal:443/admin",
     )
     rendered(proc, "valid host with port")
     print("PASS: valid hyphenated host, port 1-65535 and URL path render")

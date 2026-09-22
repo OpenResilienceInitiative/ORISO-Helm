@@ -21,7 +21,7 @@ import sys
 import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOMAIN = "predev.example.org"
+DOMAIN = "predev.oriso.internal"
 
 
 def render(*extra_args: str) -> list[dict]:

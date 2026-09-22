@@ -38,7 +38,7 @@ def render(signoz_enabled: bool, namespace: str = "caritas") -> list[dict]:
             "--set-string",
             "global.observability.deploymentEnvironment=predev",
             "--set-string",
-            "signoz.signoz.env.signoz_global_external__url=https://render.example.org/signoz",
+            "signoz.signoz.env.signoz_global_external__url=https://render.oriso.internal/signoz",
             "--set",
             f"signoz.enabled={'true' if signoz_enabled else 'false'}",
         ],

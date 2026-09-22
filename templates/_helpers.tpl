@@ -13,13 +13,28 @@ global.domainName or given explicitly, and both are validated here, so a
 missing or placeholder value fails the install instead of shipping links to
 another host. These helpers are shared with the subcharts.
 */}}
+{{/*
+Placeholder check, aligned with the UserService startup validator: template
+markers anywhere in the value, and reserved example hosts (RFC 2606/6761:
+example.com/.org/.net/.test and their subdomains, any *.invalid) as host.
+Usage: include "oriso.rejectUrlPlaceholder" (list "name" $value $host)
+*/}}
 {{- define "oriso.rejectUrlPlaceholder" -}}
 {{- $name := index . 0 -}}
 {{- $value := index . 1 -}}
-{{- range $marker := list "your-domain" "example.com" "changeme" "todo-set" -}}
+{{- $host := lower (regexReplaceAll ":[0-9]*$" (index . 2) "") -}}
+{{- range $marker := list "your-domain" "changeme" "todo-set" -}}
 {{- if contains $marker (lower $value) -}}
 {{- fail (printf "%s is still a placeholder (%q contains %q). Set the real public value for this environment." $name $value $marker) -}}
 {{- end -}}
+{{- end -}}
+{{- range $reserved := list "example.com" "example.org" "example.net" "example.test" -}}
+{{- if or (eq $host $reserved) (hasSuffix (printf ".%s" $reserved) $host) -}}
+{{- fail (printf "%s points at the reserved example host %q, which is a placeholder. Set the real public value for this environment." $name $host) -}}
+{{- end -}}
+{{- end -}}
+{{- if or (eq $host "invalid") (hasSuffix ".invalid" $host) -}}
+{{- fail (printf "%s points at the reserved .invalid host %q, which is a placeholder. Set the real public value for this environment." $name $host) -}}
 {{- end -}}
 {{- end -}}
 
@@ -50,7 +65,7 @@ Usage: include "oriso.validateHost" (list "global.domainName" $hostPort)
 {{- if eq (trim $domain) "" -}}
 {{- fail "global.domainName is required: set the public host name of this installation (e.g. app.example.org, no scheme, no path). There is no default on purpose." -}}
 {{- end -}}
-{{- include "oriso.rejectUrlPlaceholder" (list "global.domainName" $domain) -}}
+{{- include "oriso.rejectUrlPlaceholder" (list "global.domainName" $domain $domain) -}}
 {{- include "oriso.validateHost" (list "global.domainName" $domain) -}}
 {{- $domain -}}
 {{- end -}}
@@ -72,7 +87,7 @@ Usage: include "oriso.publicUrl" (list "userService.x" .Values.userService.x $de
 {{- if eq (trim $value) "" -}}
 {{- $derived -}}
 {{- else -}}
-{{- include "oriso.rejectUrlPlaceholder" (list $name $value) -}}
+{{- include "oriso.rejectUrlPlaceholder" (list $name $value (regexReplaceAll "^[a-zA-Z]+://([^/]*).*$" $value "${1}")) -}}
 {{- if not (regexMatch "^https?://[^/\\s]+(/[^\\s]*[^/\\s])?$" $value) -}}
 {{- fail (printf "%s must be an absolute http(s) URL without trailing slash (got %q). Leave it empty to derive it from global.domainName." $name $value) -}}
 {{- end -}}
