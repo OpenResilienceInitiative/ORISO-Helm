@@ -133,7 +133,7 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call:2.0.4"
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.8"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Storybook is a development surface and stays absent unless an environment
@@ -205,7 +205,7 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.7"
+  imageVersion: "2.0.8"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -267,7 +267,7 @@ online-counseling-redis:
 # Keycloak
 online-counseling-keycloak:
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
-  imageVersion: "2.0.4"
+  imageVersion: "2.0.8"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
@@ -284,7 +284,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.7"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.8"
 
   keycloakResource: "agency-service"
 
@@ -301,7 +301,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "2.0.7"
+  imageVersion: "2.0.8"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -317,7 +317,7 @@ consultingTypeService:
 tenantService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.7"
+  imageVersion: "2.0.8"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -343,7 +343,7 @@ userService:
     requestsPerSecond: 5
     burstMultiplier: 2
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.7"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.8"
   serviceURL: "http://userservice:8080"
 
   keycloakResource: "user-service"
@@ -427,7 +427,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.7"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.8"
 
 nginxController:
   enabled: true
