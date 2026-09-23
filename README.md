@@ -18,8 +18,7 @@ cp values.yaml.default values.yaml
 
 Open `values.yaml` and update:
 
-- `global.domainName` — **required**, your public host (no scheme, no path). Every
-  public URL and mail link derives from it; empty or a placeholder fails the install
+- `global.domainName` — your public domain (and the derived `domains.*` / URL fields)
 - `global.keycloak.realm` — your Keycloak realm name (appears in several URL fields)
 - `matrix.synapseServerName` / `matrixServerName` — your Matrix server name
 
@@ -79,12 +78,8 @@ helm upgrade --install caritas ./ --namespace caritas --create-namespace \
 ```
 
 ```bash
-helm upgrade --install caritas ./ --namespace caritas --create-namespace --wait-for-jobs --timeout 15m \
-  -f values.yaml -f values-<env>.yaml -f secrets.yaml
+helm upgrade --install caritas ./ --namespace caritas --create-namespace --wait-for-jobs --timeout 15m -f secrets.yaml
 ```
-
-`values.yaml` (or the environment overlay `values-<env>.yaml`) must set
-`global.domainName`; without it the install fails on purpose.
 
 The first `caritas` is the Helm release name, the second is the Kubernetes namespace. Both can be changed to suit your environment.
 

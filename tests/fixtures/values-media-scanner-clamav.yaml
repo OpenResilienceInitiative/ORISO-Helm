@@ -1,7 +1,7 @@
 # ClamAV-only scanner overlay used by tests/render_media_scanner_test.py.
 # Mirrors the intended Pre-Dev enablement: virus scan on, AI check off.
 global:
-  domainName: "pre-dev.oriso.internal"
+  domainName: "pre-dev.example.org"
 
 mediaScanner:
   enabled: true

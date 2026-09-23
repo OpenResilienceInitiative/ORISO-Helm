@@ -2,7 +2,7 @@
 # check only renders once the zero-retention sub-processor agreement is on
 # record (ORISO-Admin#734) and the API key exists as a referenced secret.
 global:
-  domainName: "pre-dev.oriso.internal"
+  domainName: "pre-dev.example.org"
 
 mediaScanner:
   enabled: true

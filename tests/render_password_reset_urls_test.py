@@ -17,8 +17,8 @@ SMTP_FROM = "ORISO Platform <monty.burns@oriso.org>"
 ENVIRONMENTS = {
     "dev": ("https://dev.oriso.org", "https://dev.oriso.org/admin"),
     "pre-dev": (
-        "https://predev.oriso.org",
-        "https://predev.oriso.org/admin",
+        "https://app.oriso-dev.site",
+        "https://admin.oriso-dev.site/admin",
     ),
 }
 
@@ -33,8 +33,6 @@ def render(admin_url: str = ADMIN_URL) -> list[dict]:
             CHART_DIR,
             "-f",
             os.path.join(CHART_DIR, "values.yaml.default"),
-            "-f",
-            os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
             "-f",
             os.path.join(CHART_DIR, "secrets.yaml.default"),
             "--set-string",
@@ -73,8 +71,6 @@ def render_environment(
         CHART_DIR,
         "-f",
         os.path.join(CHART_DIR, "values.yaml.default"),
-        "-f",
-        os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
         "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
         "--set-string",
@@ -250,14 +246,12 @@ def main() -> None:
         for doc in without_admin_url
         if "PASSWORD_RESET_FRONTEND_BASE_URL" in (doc.get("data") or {})
     )
-    # Unset now derives from global.domainName (tests/fixtures/values-render-domain.yaml)
-    # instead of being omitted, so UserService needs no fallback (ORISO-Helm#366).
     assert (
-        user_service_without_admin["data"]["PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL"]
-        == "https://render.oriso.internal/admin"
+        "PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL"
+        not in user_service_without_admin["data"]
     )
     print(
-        "PASS: admin password-reset URL derives from global.domainName when unset"
+        "PASS: admin password-reset URL is omitted when the environment leaves it unset"
     )
 
     for label, (app_url, admin_url) in ENVIRONMENTS.items():
