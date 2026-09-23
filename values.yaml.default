@@ -85,8 +85,9 @@ global:
     bootstrapUsers:
       enabled: true
     # Fails the deploy hook when the live realm loses the ORISO 2FA contract.
+    # Off until the check script in ORISO-Keycloak filters top-level executions.
     verifyTwoFactorContract:
-      enabled: true
+      enabled: false
       # Admin API from inside the cluster, not the public ingress URL.
       adminUrl: "http://keycloak.{{ .Release.Namespace }}:8080/auth"
       # Tries at 5s intervals before giving up on the admin API.
