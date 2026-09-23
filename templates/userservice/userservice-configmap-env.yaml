@@ -11,12 +11,22 @@ data:
   # APP_BASE_URL, so it derives from global.domainName rather than taking a
   # separate value — otherwise the app's @Value default (https://app.oriso.org)
   # applies and non-production environments link to production.
+  # SYSTEM_NOTIFICATION_FRONTEND_BASE_URL (supervisor/system notification mails,
+  # SMTP test mail) carries the same https://app.oriso.org fallback, so it
+  # derives from global.domainName for the same reason.
   {{- if .Values.global.enableTls }}
   APP_BASE_URL: "https://{{ .Values.global.domainName }}"
   DPA_SIGN_FRONTEND_BASE_URL: "https://{{ .Values.global.domainName }}"
+  SYSTEM_NOTIFICATION_FRONTEND_BASE_URL: "https://{{ .Values.global.domainName }}"
   {{- else }}
   APP_BASE_URL: "http://{{ .Values.global.domainName }}"
   DPA_SIGN_FRONTEND_BASE_URL: "http://{{ .Values.global.domainName }}"
+  SYSTEM_NOTIFICATION_FRONTEND_BASE_URL: "http://{{ .Values.global.domainName }}"
+  {{- end }}
+  # Platform-level email branding (used when a mail has no tenant context).
+  EMAIL_BRANDING_NAME: {{ .Values.userService.emailBrandingName | quote }}
+  {{- if .Values.userService.emailBrandingLogoUrl }}
+  EMAIL_BRANDING_LOGO_URL: {{ .Values.userService.emailBrandingLogoUrl | quote }}
   {{- end }}
   STATISTICS_ENABLED: {{ .Values.global.statisticsEnabled | quote }}
   SPRING_LIQUIBASE_ENABLED: {{ .Values.global.enableLiquibase | quote }}
