@@ -4,9 +4,7 @@ cert-manager:
 
 global:
 
-  # REQUIRED: public host name of this installation (e.g. app.example.org; no
-  # scheme, no path). Every public URL, mail link and ingress host derives from
-  # it. Empty or a placeholder fails `helm install` on purpose.
+  # REQUIRED: public host, no scheme or path; every public URL derives from it.
   domainName: ""
   # Empty = cluster default StorageClass.
   storageClass: ""
@@ -86,36 +84,15 @@ global:
     serviceAdminClientId: "admin-cli"
     bootstrapUsers:
       enabled: true
-    # Checks after every install and upgrade that the live realm still carries
-    # the ORISO 2FA contract, and fails the hook when it does not. It never
-    # writes to the realm: reconciling stays a deliberate operator action,
-    # because the apply script rebinds to the stock flow and recreates the
-    # custom one, which would break 2FA logins for the duration of every
-    # deploy. Set to false only to silence it temporarily.
+    # Fails the deploy hook when the live realm loses the ORISO 2FA contract.
     verifyTwoFactorContract:
       enabled: true
-      # Admin API as reached from INSIDE the cluster. Deliberately not
-      # authServerUrl above: that is the public ingress URL, and a hook that
-      # leaves the cluster to come back in fails whenever the ingress is not up
-      # yet — which during a deploy is exactly when this job runs.
-      # The whole endpoint is here rather than defaulted in the template, so an
-      # environment that answers elsewhere changes one line and sees what it is
-      # changing. {{ .Release.Namespace }} is resolved at render time; the rest
-      # is literal. Empty fails the render rather than guessing an address.
+      # Admin API from inside the cluster, not the public ingress URL.
       adminUrl: "http://keycloak.{{ .Release.Namespace }}:8080/auth"
-      # Tries at 5s intervals before giving up on the admin API. Helm's
-      # --timeout only stops helm waiting, it never stops this pod, so the
-      # bound has to live here.
+      # Tries at 5s intervals before giving up on the admin API.
       waitAttempts: 60
-      # Kubernetes-side deadline for the whole job, covering a hang anywhere
-      # the retry bound does not reach.
       deadlineSeconds: 600
-      # The check script ships inside the oriso-keycloak image. Images built
-      # before it existed make the job skip and exit 0, which is honest while
-      # that is the rolled-out image and misleading forever after: a job that
-      # can only ever succeed reads like a passing check. Set to true once an
-      # image carrying /opt/keycloak/bin/oriso-verify-2fa-flow.sh is deployed,
-      # and a missing script fails the release instead of being waved through.
+      # Set true once an image carrying the check script is deployed.
       requireCheckScript: false
 
 matrix:
@@ -330,15 +307,12 @@ tenantService:
 
 # User service
 userService:
-  # Provision/rotate this existing Secret outside anonymous requests before enabling
-  # the new identity suggestions UI. Without it, suggestions fail closed with 503.
-  # The Synapse credential has admin privileges; the lookup code uses only GET.
+  # Existing Secret with a Synapse admin token; unset makes suggestions fail closed.
   identitySuggestions:
     matrixAdminTokenSecret:
       name: ""
       key: "access-token"
-  # Per client IP and ingress-controller replica, shared by the two public entry paths.
-  # Other UserService routes retain their existing policy.
+  # Per client IP and ingress-controller replica, for the public entry paths only.
   publicEntryRateLimit:
     requestsPerSecond: 5
     burstMultiplier: 2
@@ -382,10 +356,7 @@ userService:
   otpAllowedForTenantSuperAdmins: "true"
   otpAllowedForRestrictedAgencyAdmins: "true"
 
-  # Mail-link base URLs. Empty = derived from global.domainName
-  # (<scheme>://<domainName>, admin reset <scheme>://<domainName>/admin; scheme
-  # https, or http when global.enableTls is false). Set them only
-  # when App or Admin live on another host; explicit values are validated.
+  # Empty = derived from global.domainName; set only for a separate App/Admin host.
   magicLinkFrontendBaseUrl: ""
   passwordResetFrontendBaseUrl: ""
   passwordResetAdminFrontendBaseUrl: ""
@@ -396,9 +367,7 @@ userService:
   smtpSecure: false
   smtpFrom: ""
 
-  # Bare origins for account-invite links (admin must NOT end in /admin).
-  # Empty = <scheme>://<domainName> (http when global.enableTls is false); set
-  # only when the Admin panel has its own host.
+  # Bare origins for invite links (admin must NOT end in /admin); empty = derived.
   accountInviteAppFrontendBaseUrl: ""
   accountInviteAdminFrontendBaseUrl: ""
 
@@ -454,8 +423,7 @@ healthDashboard:
   ingress:
     # Public access is opt-in; every enabled ingress requires Basic Auth.
     enabled: false
-    # Existing Secret with an nginx-compatible `auth` htpasswd entry, provisioned
-    # in healthDashboard.namespace (or the release namespace when unset).
+    # Existing Secret with an nginx-compatible `auth` htpasswd entry.
     authSecret: ""
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
