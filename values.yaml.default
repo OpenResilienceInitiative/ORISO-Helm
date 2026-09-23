@@ -402,6 +402,13 @@ nginxController:
   enabled: true
   replicas: 1
 
+# IP anonymization proxy — replaces X-Real-IP/X-Forwarded-For with a
+# session-scoped UUID so no ORISO backend ever sees a real client IP.
+ipAnonymizer:
+  enabled: false
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:latest"
+
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
 

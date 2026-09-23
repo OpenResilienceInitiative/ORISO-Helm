@@ -1,0 +1,43 @@
+{{- if .Values.ipAnonymizer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ip-anonymizer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: ip-anonymizer
+spec:
+  replicas: {{ .Values.ipAnonymizer.replicas }}
+  selector:
+    matchLabels:
+      app: ip-anonymizer
+  template:
+    metadata:
+      labels:
+        app: ip-anonymizer
+    spec:
+      containers:
+        - name: ip-anonymizer
+          image: {{ .Values.ipAnonymizer.image | quote }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          ports:
+            - containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop: ["ALL"]
+{{- end }}
