@@ -5,3 +5,12 @@
 # rejected as placeholders, so render tests use the private .internal TLD.
 global:
   domainName: "render.oriso.internal"
+  matrix:
+    matrixServerName: "matrix.render.oriso.internal"
+# The Matrix identity is required too; values.yaml.default ships only the
+# "your-server.local" placeholder, which fails the install.
+matrix:
+  matrixServerName: "matrix.render.oriso.internal"
+  synapseServerName: "matrix.render.oriso.internal"
+matrixrtcAuth:
+  membershipReaderUserId: "@matrixrtc-auth:matrix.render.oriso.internal"
