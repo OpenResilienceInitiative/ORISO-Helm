@@ -7,7 +7,10 @@ data:
     DB_ADDR: "{{ .Values.dbServer }}.{{ .Release.Namespace }}"
     DB_DATABASE: "{{ .Values.dbDatabase }}"
     PROXY_ADDRESS_FORWARDING: "true"
-    KEYCLOAK_HOSTNAME: "{{ if .Values.global.enableTls }}https{{ else }}http{{ end }}://{{ .Values.global.domainName }}/auth"
+    KEYCLOAK_HOSTNAME: {{ printf "%s/auth" (include "oriso.publicOrigin" .) | quote }}
+    # Public app origin for the links in Keycloak mails (OTP, password reset).
+    # The email theme reads it as ORISO_APP_BASE_URL (ORISO-Helm#366).
+    ORISO_APP_BASE_URL: {{ include "oriso.publicOrigin" . | quote }}
     # Logging
     # Supported log levels are ALL, DEBUG, ERROR, FATAL, INFO, OFF, TRACE and WARN.
     KEYCLOAK_LOGLEVEL: {{ .Values.keycloakLogLevel | quote }}

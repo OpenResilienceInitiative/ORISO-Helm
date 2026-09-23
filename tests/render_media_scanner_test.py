@@ -193,7 +193,7 @@ def assert_clamav_only(chart: str) -> None:
     frontend = get(documents, "ConfigMap", "frontend-configmap")
     assert (
         frontend["data"]["VITE_MEDIA_SCANNER_URL"]
-        == "https://pre-dev.example.org/_matrix/media_proxy/unstable"
+        == "https://pre-dev.oriso.internal/_matrix/media_proxy/unstable"
     )
 
 

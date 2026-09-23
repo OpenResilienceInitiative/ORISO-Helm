@@ -153,7 +153,10 @@ data:
     report_stats: false
     enable_registration: true
     enable_registration_without_verification: true
-    public_baseurl: {{ .Values.matrix.matrixApiUrl }}   
+    # Public client URL (login well-known, generated links). Synapse is served
+    # on the main host under /_matrix (matrix-client-ingress); matrixApiUrl is
+    # the in-cluster address for services and must not be advertised.
+    public_baseurl: {{ printf "%s/" (include "oriso.publicOrigin" .) | quote }}
 
     suppress_key_validation_warnings: true
     trusted_key_servers:
