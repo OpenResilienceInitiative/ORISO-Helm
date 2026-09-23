@@ -30,6 +30,19 @@ SMTP_CREDENTIALS = (
     "userService.smtpPassword=smtp-canary-password",
 )
 
+# A valid Matrix identity; values.yaml.default only ships placeholders, which
+# fail the install. Later --set-string arguments override these.
+MATRIX_IDENTITY = (
+    "--set-string",
+    "matrix.matrixServerName=matrix.render.oriso.internal",
+    "--set-string",
+    "matrix.synapseServerName=matrix.render.oriso.internal",
+    "--set-string",
+    "global.matrix.matrixServerName=matrix.render.oriso.internal",
+    "--set-string",
+    "matrixrtcAuth.membershipReaderUserId=@matrixrtc-auth:matrix.render.oriso.internal",
+)
+
 # Every mail-link / public origin env the UserService reads (application.properties
 # on ORISO-UserService dev). All of them must be rendered unconditionally, so the
 # service can drop its localhost / app.base.url fallbacks.
@@ -78,11 +91,11 @@ OVERLAYS = {
         "domain": "predev.oriso.org",
         "explicit": {},
     },
-    "values-prod.yaml": {
-        "domain": "app.oriso.org",
-        "explicit": {},
-    },
 }
+
+# The production overlay names no host at all: the operator supplies
+# global.domainName at install time, and the install fails without it.
+PROD_OVERLAY = "values-prod.yaml"
 
 # Render-test host. Reserved example domains (example.com/.org/.net/.test) and
 # .invalid are rejected as placeholders, so tests use the private .internal TLD.
@@ -101,6 +114,7 @@ def helm_template(*args: str) -> subprocess.CompletedProcess:
             "-f",
             os.path.join(CHART_DIR, "secrets.yaml.default"),
             *SMTP_CREDENTIALS,
+            *MATRIX_IDENTITY,
             *args,
         ],
         capture_output=True,
@@ -209,7 +223,15 @@ def test_valid_hosts_with_port_and_path_render() -> None:
         "--set-string",
         "userService.passwordResetAdminFrontendBaseUrl=https://admin.render.oriso.internal:443/admin",
     )
-    rendered(proc, "valid host with port")
+    docs = rendered(proc, "valid host with port")
+    data = configmap_data(docs, "userservice-configmap-env")
+    # The port and the /admin path must survive into the rendered env, not just
+    # pass validation.
+    assert (
+        data["PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL"]
+        == "https://admin.render.oriso.internal:443/admin"
+    ), data["PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL"]
+    assert data["APP_BASE_URL"] == "https://app-1.render.oriso.internal", data["APP_BASE_URL"]
     print("PASS: valid hyphenated host, explicit URL with port 1-65535 and path render")
 
 
@@ -254,6 +276,43 @@ def test_committed_overlays_render_with_their_domain() -> None:
             f"{overlay}: Keycloak Deployment must import ORISO_APP_BASE_URL"
         )
         print(f"PASS: {overlay} renders every public URL on {expected['domain']}")
+
+
+def test_prod_overlay_requires_domain_at_install() -> None:
+    prod = os.path.join(CHART_DIR, PROD_OVERLAY)
+    assert_fails_naming(helm_template("-f", prod), "global.domainName", PROD_OVERLAY)
+
+    docs = rendered(
+        helm_template("-f", prod, "--set-string", f"global.domainName={VALID_TEST_DOMAIN}"),
+        f"{PROD_OVERLAY} + global.domainName",
+    )
+    assert_public_urls_match(docs, VALID_TEST_DOMAIN, {}, PROD_OVERLAY)
+    print(f"PASS: {PROD_OVERLAY} fails without global.domainName and renders with it")
+
+
+def test_matrix_identity_placeholders_fail() -> None:
+    base = ("--set-string", f"global.domainName={VALID_TEST_DOMAIN}")
+    for key, bad in (
+        ("matrix.matrixServerName", ""),
+        ("matrix.matrixServerName", "your-server.local"),
+        ("matrix.synapseServerName", "your-server.local"),
+        ("global.matrix.matrixServerName", "your-server.local"),
+        ("matrixrtcAuth.membershipReaderUserId", "@matrixrtc-auth:your-server.local"),
+    ):
+        proc = helm_template(*base, "--set-string", f"{key}={bad}")
+        assert_fails_naming(proc, key, f"{key}={bad!r}")
+    print("PASS: empty or placeholder Matrix identity fails and names the value")
+
+
+def test_prod_overlay_names_no_oriso_host() -> None:
+    with open(os.path.join(CHART_DIR, PROD_OVERLAY), encoding="utf-8") as handle:
+        hits = [
+            f"{number}: {line.strip()}"
+            for number, line in enumerate(handle, 1)
+            if "oriso.org" in line.lower()
+        ]
+    assert not hits, f"{PROD_OVERLAY} must not name an oriso.org host:\n" + "\n".join(hits)
+    print(f"PASS: {PROD_OVERLAY} names no oriso.org host")
 
 
 def test_dev_mail_links_derive_from_domain() -> None:
@@ -301,6 +360,9 @@ def main() -> None:
     test_explicit_mail_url_placeholders_fail()
     test_valid_hosts_with_port_and_path_render()
     test_committed_overlays_render_with_their_domain()
+    test_prod_overlay_requires_domain_at_install()
+    test_prod_overlay_names_no_oriso_host()
+    test_matrix_identity_placeholders_fail()
     test_dev_mail_links_derive_from_domain()
     test_derived_admin_reset_url_carries_admin_prefix()
     test_non_tls_flips_the_scheme()

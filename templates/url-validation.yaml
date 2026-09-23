@@ -1,7 +1,16 @@
 {{- /*
-Central fail-fast gate for global.domainName (ORISO-Helm#366). About 90
-template lines build public URLs, ingress hosts and mail links from it, so an
-empty or placeholder value must stop `helm install` before any pod starts.
-This template renders no manifest; it only runs the validation once.
+Central fail-fast gate for global.domainName and the Matrix identity
+(ORISO-Helm#366). About 90 template lines build public URLs, ingress hosts and
+mail links from the domain, and the Matrix server name is baked into every user
+ID, so an empty or placeholder value must stop `helm install` before any pod
+starts. This template renders no manifest; it only runs the validation once.
 */ -}}
 {{- $_ := include "oriso.domainName" . -}}
+{{- $_ := include "oriso.matrixServerName" (list "matrix.matrixServerName" .Values.matrix.matrixServerName) -}}
+{{- $_ := include "oriso.matrixServerName" (list "matrix.synapseServerName" .Values.matrix.synapseServerName) -}}
+{{- $_ := include "oriso.matrixServerName" (list "global.matrix.matrixServerName" ((.Values.global.matrix).matrixServerName)) -}}
+{{- $reader := toString (.Values.matrixrtcAuth.membershipReaderUserId | default "") -}}
+{{- if not (regexMatch "^@[a-z0-9._=/+-]+:.+$" $reader) -}}
+{{- fail (printf "matrixrtcAuth.membershipReaderUserId must be a Matrix user ID @<name>:<matrix host> (got %q)" $reader) -}}
+{{- end -}}
+{{- $_ := include "oriso.matrixServerName" (list "matrixrtcAuth.membershipReaderUserId" (regexReplaceAll "^@[^:]*:" $reader "")) -}}

@@ -208,3 +208,22 @@ operator Deployment and will fail if an upstream chart update changes it.
 {{- $clickhouse := get $signoz "clickhouse" | default dict -}}
 {{- get $clickhouse "namespace" | default .Release.Namespace -}}
 {{- end -}}
+
+{{/*
+Matrix identity (ADR-005, ORISO-Helm#366): the server_name is baked into every
+user and room ID, so an empty or placeholder value must stop the install
+instead of creating users under "your-server.local".
+Usage: include "oriso.matrixServerName" (list "matrix.matrixServerName" $value)
+*/}}
+{{- define "oriso.matrixServerName" -}}
+{{- $name := index . 0 -}}
+{{- $value := toString (index . 1 | default "") -}}
+{{- if eq (trim $value) "" -}}
+{{- fail (printf "%s is required: set the Matrix server name of this installation (a host name, fixed for its lifetime). There is no default on purpose." $name) -}}
+{{- end -}}
+{{- if contains "your-server" (lower $value) -}}
+{{- fail (printf "%s is still a placeholder (got %q). Set the real Matrix server name for this environment." $name $value) -}}
+{{- end -}}
+{{- include "oriso.rejectUrlPlaceholder" (list $name $value $value) -}}
+{{- include "oriso.validateHost" (list $name $value) -}}
+{{- end -}}
