@@ -209,7 +209,15 @@ def test_valid_hosts_with_port_and_path_render() -> None:
         "--set-string",
         "userService.passwordResetAdminFrontendBaseUrl=https://admin.render.oriso.internal:443/admin",
     )
-    rendered(proc, "valid host with port")
+    docs = rendered(proc, "valid host with port")
+    data = configmap_data(docs, "userservice-configmap-env")
+    # The port and the /admin path must survive into the rendered env, not just
+    # pass validation.
+    assert (
+        data["PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL"]
+        == "https://admin.render.oriso.internal:443/admin"
+    ), data["PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL"]
+    assert data["APP_BASE_URL"] == "https://app-1.render.oriso.internal", data["APP_BASE_URL"]
     print("PASS: valid hyphenated host, explicit URL with port 1-65535 and path render")
 
 
