@@ -38,12 +38,8 @@ data:
   MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}    
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI:  {{ .Values.global.springSecurityOAuth2ResourceserverJWTIssuerURI }}
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: {{ .Values.global.springSecurityOAuth2ResourceserverJWTJWKSETURI }}   
-  SPRING_DATA_MONGODB_URI: {{ .Values.global.ServiceURL }} 
-  {{- if .Values.global.enableTls }}
-  APP_BASE_URL: "https://{{ .Values.global.domainName }}"
-  {{- else }}
-  APP_BASE_URL: "http://{{ .Values.global.domainName }}"
-  {{- end }}
+  SPRING_DATA_MONGODB_URI: {{ .Values.global.ServiceURL }}
+  APP_BASE_URL: {{ include "oriso.publicOrigin" . | quote }}
   # OBS-P2: OTLP traces/metrics to the SigNoz gateway collector. Property
   # names + full /v1/{traces,metrics} paths verified against Spring Boot
   # 4.0.1 source directly (management.otlp.tracing.endpoint does NOT exist

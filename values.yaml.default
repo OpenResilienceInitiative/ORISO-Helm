@@ -4,7 +4,10 @@ cert-manager:
 
 global:
 
-  domainName: "your-domain.example.com"
+  # REQUIRED: public host name of this installation (e.g. app.example.org; no
+  # scheme, no path). Every public URL, mail link and ingress host derives from
+  # it. Empty or a placeholder fails `helm install` on purpose.
+  domainName: ""
   # Empty = cluster default StorageClass.
   storageClass: ""
   # Override per environment only for immutable tags/digests.
@@ -380,10 +383,13 @@ userService:
   otpAllowedForTenantSuperAdmins: "true"
   otpAllowedForRestrictedAgencyAdmins: "true"
 
-  # Must be overridden per environment; password reset fails closed if unset.
-  magicLinkFrontendBaseUrl: "https://your-domain.example.com"
-  passwordResetFrontendBaseUrl: "https://your-domain.example.com"
-  passwordResetAdminFrontendBaseUrl: "https://admin.your-domain.example.com/admin"
+  # Mail-link base URLs. Empty = derived from global.domainName
+  # (<scheme>://<domainName>, admin reset <scheme>://<domainName>/admin; scheme
+  # https, or http when global.enableTls is false). Set them only
+  # when App or Admin live on another host; explicit values are validated.
+  magicLinkFrontendBaseUrl: ""
+  passwordResetFrontendBaseUrl: ""
+  passwordResetAdminFrontendBaseUrl: ""
 
   # SMTP is environment-owned; setting a host requires credentials in secrets.
   smtpHost: ""
@@ -391,9 +397,11 @@ userService:
   smtpSecure: false
   smtpFrom: ""
 
-  # Bare origins for account-invite links (admin must NOT end in /admin); override per environment.
-  accountInviteAppFrontendBaseUrl: "https://your-domain.example.com"
-  accountInviteAdminFrontendBaseUrl: "https://your-domain.example.com"
+  # Bare origins for account-invite links (admin must NOT end in /admin).
+  # Empty = <scheme>://<domainName> (http when global.enableTls is false); set
+  # only when the Admin panel has its own host.
+  accountInviteAppFrontendBaseUrl: ""
+  accountInviteAdminFrontendBaseUrl: ""
 
   # Platform-level email branding for mails without a tenant context.
   emailBrandingName: "ORISO"

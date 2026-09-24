@@ -31,11 +31,7 @@ data:
   # link, so five failures throttled the onboarding for 14 days.
   # Same FQDN and same derivation as consultingtypeservice, deliberately, so
   # the two cannot drift apart.
-{{- if .Values.global.enableTls }}
-  APP_BASE_URL: "https://{{ .Values.global.domainName }}"
-{{- else }}
-  APP_BASE_URL: "http://{{ .Values.global.domainName }}"
-{{- end }}
+  APP_BASE_URL: {{ include "oriso.publicOrigin" . | quote }}
   MATRIX_API_URL: {{ .Values.matrix.matrixApiUrl }}
   MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}
   FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED: {{ .Values.global.multitenancyWithSingleDomainEnabled | quote }}

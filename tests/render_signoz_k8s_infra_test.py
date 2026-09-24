@@ -23,6 +23,12 @@ def assert_vendored_chart_defaults() -> None:
     assert values["otelAgent"]["serviceAccount"]["create"] is True
 
 
+def domain_of(values_file: str) -> str | None:
+    """global.domainName of a values file; SigNoz validation ties its URL to it."""
+    values = yaml.safe_load(Path(CHART_DIR, values_file).read_text(encoding="utf-8"))
+    return ((values or {}).get("global") or {}).get("domainName")
+
+
 def render(
     *,
     signoz_enabled: bool,
@@ -41,10 +47,14 @@ def render(
         "-f",
         os.path.join(CHART_DIR, "values.yaml.default"),
         "-f",
+        os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
+        "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
     ]
+    domain = domain_of("tests/fixtures/values-render-domain.yaml")
     if overlay:
         command.extend(["-f", os.path.join(CHART_DIR, overlay)])
+        domain = domain_of(overlay) or domain
     command.extend(
         [
             "--set-string",
@@ -54,7 +64,7 @@ def render(
             "--set-string",
             "userService.smtpPassword=smtp-test-password",
             "--set-string",
-            "signoz.signoz.env.signoz_global_external__url=https://your-domain.example.com/signoz",
+            f"signoz.signoz.env.signoz_global_external__url=https://{domain}/signoz",
             "--set",
             f"signoz.enabled={'true' if signoz_enabled else 'false'}",
             "--set",

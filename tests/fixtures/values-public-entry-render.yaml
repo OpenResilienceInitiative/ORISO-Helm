@@ -31,7 +31,7 @@ global:
   matrix:
     matrixAdminUsername: render-only-not-a-real-secret
     matrixAdminPassword: render-only-not-a-real-secret
-  domainName: public-entry.example.invalid
+  domainName: public-entry.oriso.internal
 postgres:
   postgresDB: render-only-not-a-real-secret
   postgresPassword: render-only-not-a-real-secret

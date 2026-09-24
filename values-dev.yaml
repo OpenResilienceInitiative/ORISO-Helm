@@ -9,6 +9,9 @@
 # this generic dev overlay does not opt in. See docs/infrastructure-report-2026-07.md §7.
 
 global:
+  # Public host of the Dev environment (main-ingress serves App, /admin, /auth
+  # and /_matrix on it). Every public URL and mail link derives from it.
+  domainName: "dev.oriso.org"
   # Seed dummy tenants/users so the app is immediately explorable in dev.
   initializeDummyData: true
   matrix:
