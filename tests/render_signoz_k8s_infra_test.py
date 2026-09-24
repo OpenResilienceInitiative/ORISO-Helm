@@ -34,8 +34,10 @@ def render(
     signoz_enabled: bool,
     infra_enabled: bool,
     environment: str = "pre-dev",
+    infra_environment: str | None = None,
     cluster_name: str = "oriso-predev",
     overlay: str | None = None,
+    extra: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     command = [
         "helm",
@@ -72,9 +74,11 @@ def render(
             "--set-string",
             f"global.observability.deploymentEnvironment={environment}",
             "--set-string",
-            f"k8s-infra.global.deploymentEnvironment={environment}",
+            "k8s-infra.global.deploymentEnvironment="
+            + (environment if infra_environment is None else infra_environment),
             "--set-string",
             f"k8s-infra.global.clusterName={cluster_name}",
+            *extra,
         ]
     )
     return subprocess.run(command, capture_output=True, text=True, check=False)
@@ -138,8 +142,9 @@ def main() -> None:
 
     for workload in (agent, cluster_collector):
         env = env_by_name(workload)
+        # otlphttp needs a URL; a bare host:port fails before export.
         assert env["OTEL_EXPORTER_OTLP_ENDPOINT"]["value"] == (
-            "caritas-signoz-otel-collector:4318"
+            "http://caritas-signoz-otel-collector:4318"
         )
         assert env["K8S_CLUSTER_NAME"]["value"] == "oriso-predev"
         assert env["DEPLOYMENT_ENVIRONMENT"]["value"] == "pre-dev"
@@ -150,6 +155,40 @@ def main() -> None:
 
     agent_ports = container(agent).get("ports", [])
     assert not {4317, 4318} & {port["containerPort"] for port in agent_ports}
+    # Probes use the pod IP; no port may bind on the node.
+    assert not [port for port in agent_ports if port.get("hostPort")], agent_ports
+
+    # Least privilege without UID 0: group root reads the 0640 root:root pod logs.
+    agent_pod = agent["spec"]["template"]["spec"]
+    agent_security = {**agent_pod.get("securityContext", {}), **container(agent)["securityContext"]}
+    assert agent_security["runAsNonRoot"] is True
+    assert agent_security["runAsUser"] == 10001
+    assert agent_security["runAsGroup"] == 0
+    assert not agent_security["capabilities"].get("add")
+    assert agent_security["seccompProfile"] == {"type": "RuntimeDefault"}
+    log_volumes = {
+        volume["name"]: volume["hostPath"]["path"]
+        for volume in agent_pod["volumes"]
+        if "hostPath" in volume
+    }
+    log_mounts = {mount["name"]: mount for mount in container(agent)["volumeMounts"]}
+    assert log_volumes["varlog"] == "/var/log/pods"
+    assert log_mounts["varlog"]["mountPath"] == "/var/log/pods"
+    assert log_mounts["varlog"]["readOnly"] is True
+
+    grpc = documents(
+        render(
+            signoz_enabled=True,
+            infra_enabled=True,
+            extra=(
+                "--set", "k8s-infra.presets.otlphttpExporter.enabled=false",
+                "--set", "k8s-infra.presets.otlpExporter.enabled=true",
+            ),
+        )
+    )
+    assert env_by_name(find(grpc, "DaemonSet", "caritas-k8s-infra-otel-agent"))[
+        "OTEL_EXPORTER_OTLP_ENDPOINT"
+    ]["value"] == "caritas-signoz-otel-collector:4317"
 
     agent_config = parse_config(
         find(enabled, "ConfigMap", "caritas-k8s-infra-otel-agent"),
@@ -263,6 +302,24 @@ def main() -> None:
     invalid = render(signoz_enabled=False, infra_enabled=True)
     assert invalid.returncode != 0
     assert "k8s-infra.enabled=true requires signoz.enabled=true" in invalid.stderr
+
+    identity_failures = (
+        ({"cluster_name": ""}, "k8s-infra.global.clusterName is required"),
+        (
+            {"environment": "", "infra_environment": "pre-dev"},
+            "global.observability.deploymentEnvironment is required",
+        ),
+        ({"infra_environment": ""}, "k8s-infra.global.deploymentEnvironment is required"),
+        (
+            {"infra_environment": "dev"},
+            'k8s-infra.global.deploymentEnvironment must match'
+            ' global.observability.deploymentEnvironment (got "dev", expected "pre-dev")',
+        ),
+    )
+    for overrides, message in identity_failures:
+        failed = render(signoz_enabled=True, infra_enabled=True, **overrides)
+        assert failed.returncode != 0, overrides
+        assert message in failed.stderr, (overrides, failed.stderr)
 
     predev = documents(
         render(

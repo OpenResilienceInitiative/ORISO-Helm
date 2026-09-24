@@ -459,8 +459,8 @@ k8s-infra:
     clusterName: ""
     deploymentEnvironment: ""
     cloud: other
-  # Empty is intentional. As a dependency the upstream chart derives the
-  # sibling service `<release>-signoz-otel-collector:4318`.
+  # Empty is intentional. As a dependency the chart derives the sibling
+  # service `http://<release>-signoz-otel-collector:4318` (otlphttp).
   otelCollectorEndpoint: null
   otelInsecure: true
   presets:
@@ -545,6 +545,7 @@ k8s-infra:
             - nodes/proxy
           verbs:
             - get
+    # No hostPorts: probes and self-telemetry use the pod IP, nothing binds on the node.
     ports:
       otlp:
         enabled: false
@@ -555,6 +556,14 @@ k8s-infra:
       zipkin:
         enabled: false
         hostPort: ""
+      metrics:
+        hostPort: ""
+      health-check:
+        hostPort: ""
+      zpages:
+        hostPort: ""
+      pprof:
+        hostPort: ""
     resources:
       requests:
         cpu: 100m
@@ -562,9 +571,23 @@ k8s-infra:
       limits:
         cpu: 500m
         memory: 512Mi
+    # Pod logs are 0640 root:root. Group 0 reads them without UID 0 or any
+    # capability (a capability added for a non-root UID is not effective in
+    # Kubernetes without ambient caps). Proven only on a live node (Pre-Dev).
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 10001
+      runAsGroup: 0
+      seccompProfile:
+        type: RuntimeDefault
     securityContext:
+      runAsNonRoot: true
+      runAsUser: 10001
+      runAsGroup: 0
       allowPrivilegeEscalation: false
       readOnlyRootFilesystem: true
+      seccompProfile:
+        type: RuntimeDefault
       capabilities:
         drop:
           - ALL

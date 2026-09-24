@@ -50,9 +50,10 @@ spec:
         - name: otel-agent-config-vol
           configMap:
             name: {{ include "otelAgent.fullname" . }}
+        # ORISO: only the pod logs filelog/k8s reads, not all of /var/log.
         - name: varlog
           hostPath:
-            path: /var/log
+            path: /var/log/pods
         {{- if ne .Values.global.cloud "gcp/autogke" }}
         - name: varlibdockercontainers
           hostPath:
@@ -121,7 +122,7 @@ spec:
             - name: otel-agent-config-vol
               mountPath: /conf
             - name: varlog
-              mountPath: /var/log
+              mountPath: /var/log/pods
               readOnly: true
             {{- if ne .Values.global.cloud "gcp/autogke" }}
             - name: varlibdockercontainers

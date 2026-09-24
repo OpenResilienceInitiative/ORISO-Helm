@@ -278,7 +278,12 @@ Return endpoint of OtelCollector.
 {{- if .Values.otelCollectorEndpoint }}
 {{- .Values.otelCollectorEndpoint }}
 {{- else if not .Chart.IsRoot }}
-{{- printf "%s:%s" (include "otel.servicename" .) "4318" }}
+{{- /* ORISO: otlphttp needs an http:// URL; the gRPC exporter takes host:4317. */}}
+{{- if .Values.presets.otlphttpExporter.enabled }}
+{{- printf "http://%s:%s" (include "otel.servicename" .) "4318" }}
+{{- else }}
+{{- printf "%s:%s" (include "otel.servicename" .) "4317" }}
+{{- end }}
 {{- end }}
 {{- end }}
 

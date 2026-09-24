@@ -257,6 +257,7 @@ class RunnerContractTest(unittest.TestCase):
 
         MODULE.Runner().run(["kubectl", "version"])
 
+        run.assert_called_once()
         positional, keyword = run.call_args
         self.assertEqual(positional, (["kubectl", "version"],))
         self.assertTrue(keyword["check"])
