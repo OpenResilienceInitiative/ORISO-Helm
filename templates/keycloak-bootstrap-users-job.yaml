@@ -12,7 +12,7 @@
 {{- $realmAdminRemoveRealmRoles := default (list "consultant") $realmAdmin.removeRealmRoles -}}
 {{- $realmAdminClientRoles := default (dict "realm-management" (list "manage-identity-providers" "realm-admin" "query-groups" "view-users" "view-events" "query-realms" "manage-authorization" "manage-events" "view-identity-providers" "manage-users" "view-realm" "impersonation" "query-users" "manage-clients" "manage-realm" "create-client" "view-authorization" "query-clients" "view-clients") "broker" (list "read-token") "account" (list "view-groups" "manage-account" "delete-account" "view-profile" "view-consent" "manage-account-links" "manage-consent" "view-applications")) $realmAdmin.clientRoles -}}
 {{- $technicalAttributes := default (dict "userId" (list "technical")) $technical.attributes -}}
-{{- $technicalRealmRoles := default (list "default-roles-online-beratung" "technical" "TECHNICAL_DEFAULT") $technical.realmRoles -}}
+{{- $technicalRealmRoles := default (list "default-roles-online-beratung" "technical" "TECHNICAL_DEFAULT" "tenant-admin") $technical.realmRoles -}}
 {{- $technicalClientRoles := default (dict "realm-management" (list "manage-users" "view-users" "query-users")) $technical.clientRoles -}}
 apiVersion: batch/v1
 kind: Job
