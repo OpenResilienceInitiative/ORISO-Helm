@@ -20,4 +20,13 @@ data:
   log-format-upstream: '[$time_local] "$request_method $uri $server_protocol"
     $status $body_bytes_sent $request_time [$proxy_upstream_name] $upstream_status
     $req_id'
+{{- if .Values.ipAnonymizer.enabled }}
+  # IP anonymization: every request is checked by ip-anonymizer, which returns
+  # X-Anon-Id (a session-scoped UUID). The proxy-headers ConfigMap then replaces
+  # X-Real-IP and X-Forwarded-For with that UUID before the request reaches any
+  # backend service, so no ORISO component ever sees a real client IP.
+  global-auth-url: "http://ip-anonymizer.{{ .Release.Namespace }}.svc.cluster.local:8080/auth"
+  global-auth-response-headers: "X-Anon-Id"
+  proxy-set-headers: "{{ .Release.Namespace }}/nginx-ip-anonymizer-headers"
+{{- end }}
 {{- end }}
