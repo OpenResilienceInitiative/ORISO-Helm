@@ -245,7 +245,7 @@ online-counseling-redis:
 # Keycloak
 online-counseling-keycloak:
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
-  imageVersion: "2.0.8"
+  imageVersion: "2.0.9"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
