@@ -20,7 +20,7 @@ data:
   log-format-upstream: '[$time_local] "$request_method $uri $server_protocol"
     $status $body_bytes_sent $request_time [$proxy_upstream_name] $upstream_status
     $req_id'
-{{- if .Values.ipAnonymizer.enabled }}
+{{- if (.Values.ipAnonymizer).enabled }}
   # IP anonymization: every request is checked by ip-anonymizer, which returns
   # X-Anon-Id (a session-scoped UUID). The proxy-headers ConfigMap then replaces
   # X-Real-IP and X-Forwarded-For with that UUID before the request reaches any
