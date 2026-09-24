@@ -183,7 +183,7 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.8"
+  imageVersion: "2.0.9"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -295,7 +295,7 @@ consultingTypeService:
 tenantService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.8"
+  imageVersion: "2.0.9"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -318,7 +318,7 @@ userService:
     requestsPerSecond: 5
     burstMultiplier: 2
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.8"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.9"
   serviceURL: "http://userservice:8080"
 
   keycloakResource: "user-service"
@@ -397,7 +397,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.8"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.9"
 
 nginxController:
   enabled: true
