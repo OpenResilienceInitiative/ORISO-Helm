@@ -19,8 +19,6 @@ class OtpEmailThemeTest(unittest.TestCase):
                 "-f",
                 str(CHART_ROOT / "values.yaml.default"),
                 "-f",
-                str(CHART_ROOT / "tests" / "fixtures" / "values-render-domain.yaml"),
-                "-f",
                 str(CHART_ROOT / "secrets.yaml.default"),
                 "--set-string",
                 "tenantService.smtpPasswordEncryptionSecret=render-test-secret",

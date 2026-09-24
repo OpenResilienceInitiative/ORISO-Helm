@@ -41,9 +41,6 @@ def render(chart: str, enabled: bool) -> list[dict]:
             "template",
             "tenant-single-domain-test",
             chart,
-            # The chart requires a real public host (ORISO-Helm#366).
-            "--set-string",
-            "global.domainName=render.oriso.internal",
             "--set-string",
             f"global.multitenancyWithSingleDomainEnabled={str(enabled).lower()}",
         ],
