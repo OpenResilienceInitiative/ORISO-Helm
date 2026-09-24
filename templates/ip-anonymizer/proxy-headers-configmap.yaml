@@ -1,4 +1,4 @@
-{{- if .Values.ipAnonymizer.enabled }}
+{{- if (.Values.ipAnonymizer).enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
