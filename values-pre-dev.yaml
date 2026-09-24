@@ -10,25 +10,19 @@
 # rollout happens through a scoped ConfigMap/Secret patch by the deployment
 # contact (see runbooks/password-reset-runtime-config.md).
 #
-# Host ground truth (live Pre-Dev ingresses, mirrored in
-# ORISO-Kubernetes/ingress/13-frontend-ingress.yaml and 14-admin-ingress.yaml):
-#   frontend-ingress  app.oriso-dev.site    -> oriso-platform-frontend
-#   admin-ingress     admin.oriso-dev.site  -> oriso-platform-admin
+# Host ground truth (measured live 2026-09-22): Pre-Dev serves the App at
+# https://predev.oriso.org/, the Admin panel under /admin and Keycloak under
+# /auth on the same host. The older app./admin.oriso-dev.site hosts in the
+# archived ORISO-Kubernetes ingresses belong to another server (404).
+
+global:
+  domainName: "predev.oriso.org"
 
 userService:
-  # Magic Link + self-service password reset. UserService appends
-  # "/password-reset/confirm?token=…", so the admin value carries the /admin
-  # prefix the Admin panel routes under.
-  magicLinkFrontendBaseUrl: "https://app.oriso-dev.site"
-  passwordResetFrontendBaseUrl: "https://app.oriso-dev.site"
-  passwordResetAdminFrontendBaseUrl: "https://admin.oriso-dev.site/admin"
-
-  # Account-invite accept links (TEN-INV-U6/U7). InviteAcceptUrlBuilder
-  # appends the full route itself — /admin/tenant-onboarding/{token} for
-  # tenant-admin invites, /account-invite/{token} for everyone else — so both
-  # values are bare origins. The admin value must NOT end in /admin.
-  accountInviteAppFrontendBaseUrl: "https://app.oriso-dev.site"
-  accountInviteAdminFrontendBaseUrl: "https://admin.oriso-dev.site"
+  # Magic Link, password reset and account-invite links derive from
+  # global.domainName: https://predev.oriso.org (admin reset
+  # https://predev.oriso.org/admin; admin invite base is the bare origin,
+  # InviteAcceptUrlBuilder appends /admin/tenant-onboarding/{token}).
 
   # Operator SMTP transport for the mails above. Credentials (smtpUser/
   # smtpPassword) live in the persistent secret values, never here. Identity

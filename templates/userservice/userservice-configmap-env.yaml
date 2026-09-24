@@ -6,23 +6,15 @@ metadata:
   name: userservice-configmap-env
 data:
   # General
-  # DPA_SIGN_FRONTEND_BASE_URL is the app frontend base URL embedded in the
-  # DPA-signing email (DpaForwardEmailService). It is the same FQDN as
-  # APP_BASE_URL, so it derives from global.domainName rather than taking a
-  # separate value — otherwise the app's @Value default (https://app.oriso.org)
-  # applies and non-production environments link to production.
-  # SYSTEM_NOTIFICATION_FRONTEND_BASE_URL (supervisor/system notification mails,
-  # SMTP test mail) carries the same https://app.oriso.org fallback, so it
-  # derives from global.domainName for the same reason.
-  {{- if .Values.global.enableTls }}
-  APP_BASE_URL: "https://{{ .Values.global.domainName }}"
-  DPA_SIGN_FRONTEND_BASE_URL: "https://{{ .Values.global.domainName }}"
-  SYSTEM_NOTIFICATION_FRONTEND_BASE_URL: "https://{{ .Values.global.domainName }}"
-  {{- else }}
-  APP_BASE_URL: "http://{{ .Values.global.domainName }}"
-  DPA_SIGN_FRONTEND_BASE_URL: "http://{{ .Values.global.domainName }}"
-  SYSTEM_NOTIFICATION_FRONTEND_BASE_URL: "http://{{ .Values.global.domainName }}"
-  {{- end }}
+  # Public origins embedded in outgoing mails (DPA signing, system/supervisor
+  # notifications, inactivity notices) and the app base URL. All derive from the
+  # validated global.domainName so the service never needs a URL fallback of its
+  # own (ORISO-Helm#366).
+  {{- $origin := include "oriso.publicOrigin" . }}
+  APP_BASE_URL: {{ $origin | quote }}
+  DPA_SIGN_FRONTEND_BASE_URL: {{ $origin | quote }}
+  SYSTEM_NOTIFICATION_FRONTEND_BASE_URL: {{ $origin | quote }}
+  INACTIVE_ACCOUNT_NOTIFICATION_APP_BASE_URL: {{ $origin | quote }}
   # Platform-level email branding (used when a mail has no tenant context).
   EMAIL_BRANDING_NAME: {{ .Values.userService.emailBrandingName | quote }}
   {{- if .Values.userService.emailBrandingLogoUrl }}
@@ -62,30 +54,17 @@ data:
   MAIL_SERVICE_API_URL: "http://mailservice.{{ .Release.Namespace }}:8080"
   CONSULTING_TYPE_SERVICE_API_URL: "http://consultingtypeservice.{{ .Release.Namespace }}:8080"
   APPOINTMENT_SERVICE_API_URL: "http://appointmentservice.{{ .Release.Namespace }}:8080"
-  # Frontend base URL for the one-time links in the Magic Link login email
-  # and the self-service password-reset email. Omitted entirely (rather than
-  # rendered empty) when an environment hasn't set it, so the app's own
-  # @Value fallback behaviour applies instead of an empty string overriding it.
-  {{- if .Values.userService.magicLinkFrontendBaseUrl }}
-  MAGIC_LINK_FRONTEND_BASE_URL: {{ .Values.userService.magicLinkFrontendBaseUrl | quote }}
-  {{- end }}
-  {{- if .Values.userService.passwordResetFrontendBaseUrl }}
-  PASSWORD_RESET_FRONTEND_BASE_URL: {{ .Values.userService.passwordResetFrontendBaseUrl | quote }}
-  {{- end }}
-  {{- if .Values.userService.passwordResetAdminFrontendBaseUrl }}
-  PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL: {{ .Values.userService.passwordResetAdminFrontendBaseUrl | quote }}
-  {{- end }}
-  # Account-invite accept links (TEN-INV-U6/U7). InviteAcceptUrlBuilder appends
-  # the route itself (/admin/tenant-onboarding/{token} for tenant-admin,
-  # /account-invite/{token} otherwise), so both values are bare origins — the
-  # admin one must NOT end in /admin. Omitted (not rendered empty) when unset
-  # so the app's fallback (system notification base URL) applies.
-  {{- if .Values.userService.accountInviteAppFrontendBaseUrl }}
-  ACCOUNT_INVITE_APP_FRONTEND_BASE_URL: {{ .Values.userService.accountInviteAppFrontendBaseUrl | quote }}
-  {{- end }}
-  {{- if .Values.userService.accountInviteAdminFrontendBaseUrl }}
-  ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL: {{ .Values.userService.accountInviteAdminFrontendBaseUrl | quote }}
-  {{- end }}
+  # Mail-link base URLs (Magic Link, password reset, account invite). Always
+  # rendered: an explicit userService.* value wins and is validated, an empty
+  # one derives from global.domainName. UserService appends the route itself
+  # ("/password-reset/confirm?token=…", "/admin/tenant-onboarding/{token}",
+  # "/account-invite/{token}"), so the admin reset base carries the /admin
+  # prefix while the admin invite base is a bare origin.
+  MAGIC_LINK_FRONTEND_BASE_URL: {{ include "oriso.publicUrl" (list "userService.magicLinkFrontendBaseUrl" .Values.userService.magicLinkFrontendBaseUrl $origin) | quote }}
+  PASSWORD_RESET_FRONTEND_BASE_URL: {{ include "oriso.publicUrl" (list "userService.passwordResetFrontendBaseUrl" .Values.userService.passwordResetFrontendBaseUrl $origin) | quote }}
+  PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL: {{ include "oriso.publicUrl" (list "userService.passwordResetAdminFrontendBaseUrl" .Values.userService.passwordResetAdminFrontendBaseUrl (printf "%s/admin" $origin)) | quote }}
+  ACCOUNT_INVITE_APP_FRONTEND_BASE_URL: {{ include "oriso.publicUrl" (list "userService.accountInviteAppFrontendBaseUrl" .Values.userService.accountInviteAppFrontendBaseUrl $origin) | quote }}
+  ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL: {{ include "oriso.publicUrl" (list "userService.accountInviteAdminFrontendBaseUrl" .Values.userService.accountInviteAdminFrontendBaseUrl $origin) | quote }}
   # SMTP transport for the Magic Link and password-reset mails. UserService
   # sends these itself over SMTP; the credentials live in userservice-secret
   # because the platform-settings copy is only readable with a super-admin
@@ -131,6 +110,7 @@ data:
   IDENTITY_OTP_ALLOWED_FOR_CONSULTANTS: {{ .Values.userService.otpAllowedForConsultants | default "false" | quote }}
   IDENTITY_OTP_ALLOWED_FOR_SINGLE_TENANT_ADMINS: {{ .Values.userService.otpAllowedForSingleTenantAdmins | default "false" | quote }}
   IDENTITY_OTP_ALLOWED_FOR_TENANT_SUPER_ADMINS: {{ .Values.userService.otpAllowedForTenantSuperAdmins | default "false" | quote }}
+  IDENTITY_OTP_ALLOWED_FOR_RESTRICTED_AGENCY_ADMINS: {{ .Values.userService.otpAllowedForRestrictedAgencyAdmins | default "false" | quote }}
   # logstash
   LOGSTASH_HOST: {{ .Values.global.logstashHost }}
   FEATURE_APPOINTMENT_ENABLED: "false"

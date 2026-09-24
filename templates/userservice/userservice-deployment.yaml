@@ -71,45 +71,40 @@ spec:
                 secretKeyRef:
                   key: SMTP_PASSWORD
                   name: userservice-secret
-            # One-time-link base URLs. Guarded exactly like their ConfigMap
-            # keys: a configMapKeyRef to a key the ConfigMap omits prevents the
-            # pod from starting, and an unreferenced ConfigMap key silently
-            # does nothing (ORISO-Helm#128 drift class).
-            {{- if .Values.userService.magicLinkFrontendBaseUrl }}
+            # Mail-link base URLs. The ConfigMap always renders them (explicit or
+            # derived from global.domainName), so they are imported
+            # unconditionally; an unreferenced key would silently do nothing
+            # (ORISO-Helm#128 drift class).
             - name: MAGIC_LINK_FRONTEND_BASE_URL
               valueFrom:
                 configMapKeyRef:
                   key: MAGIC_LINK_FRONTEND_BASE_URL
                   name: userservice-configmap-env
-            {{- end }}
-            {{- if .Values.userService.passwordResetFrontendBaseUrl }}
             - name: PASSWORD_RESET_FRONTEND_BASE_URL
               valueFrom:
                 configMapKeyRef:
                   key: PASSWORD_RESET_FRONTEND_BASE_URL
                   name: userservice-configmap-env
-            {{- end }}
-            {{- if .Values.userService.passwordResetAdminFrontendBaseUrl }}
             - name: PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL
               valueFrom:
                 configMapKeyRef:
                   key: PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL
                   name: userservice-configmap-env
-            {{- end }}
-            {{- if .Values.userService.accountInviteAppFrontendBaseUrl }}
             - name: ACCOUNT_INVITE_APP_FRONTEND_BASE_URL
               valueFrom:
                 configMapKeyRef:
                   key: ACCOUNT_INVITE_APP_FRONTEND_BASE_URL
                   name: userservice-configmap-env
-            {{- end }}
-            {{- if .Values.userService.accountInviteAdminFrontendBaseUrl }}
             - name: ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL
               valueFrom:
                 configMapKeyRef:
                   key: ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL
                   name: userservice-configmap-env
-            {{- end }}
+            - name: INACTIVE_ACCOUNT_NOTIFICATION_APP_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: INACTIVE_ACCOUNT_NOTIFICATION_APP_BASE_URL
+                  name: userservice-configmap-env
             - name: IDENTITY_OTP_URL
               valueFrom:
                 configMapKeyRef:
@@ -451,6 +446,11 @@ spec:
                 configMapKeyRef:
                   key: IDENTITY_OTP_ALLOWED_FOR_TENANT_SUPER_ADMINS
                   name: userservice-configmap-env
+            - name: IDENTITY_OTP_ALLOWED_FOR_RESTRICTED_AGENCY_ADMINS
+              valueFrom:
+                configMapKeyRef:
+                  key: IDENTITY_OTP_ALLOWED_FOR_RESTRICTED_AGENCY_ADMINS
+                  name: userservice-configmap-env
             - name: STATISTICS_ENABLED
               valueFrom:
                 configMapKeyRef:
@@ -629,6 +629,15 @@ spec:
                 secretKeyRef:
                   key: MATRIX_ADMIN_PASSWORD
                   name: userservice-secret
+            {{- $suggestions := .Values.userService.identitySuggestions | default dict }}
+            {{- $lookupSecret := $suggestions.matrixAdminTokenSecret | default dict }}
+            {{- if $lookupSecret.name }}
+            - name: MATRIX_AVAILABILITY_ADMIN_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $lookupSecret.name | quote }}
+                  key: {{ $lookupSecret.key | default "access-token" | quote }}
+            {{- end }}
 
           ports:
             - containerPort: 8080

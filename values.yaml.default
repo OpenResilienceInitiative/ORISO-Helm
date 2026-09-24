@@ -4,7 +4,8 @@ cert-manager:
 
 global:
 
-  domainName: "your-domain.example.com"
+  # REQUIRED: public host, no scheme or path; every public URL derives from it.
+  domainName: ""
   # Empty = cluster default StorageClass.
   storageClass: ""
   # Override per environment only for immutable tags/digests.
@@ -83,6 +84,17 @@ global:
     serviceAdminClientId: "admin-cli"
     bootstrapUsers:
       enabled: true
+    # Fails the deploy hook when the live realm loses the ORISO 2FA contract.
+    # Off until the check script in ORISO-Keycloak filters top-level executions.
+    verifyTwoFactorContract:
+      enabled: false
+      # Admin API from inside the cluster, not the public ingress URL.
+      adminUrl: "http://keycloak.{{ .Release.Namespace }}:8080/auth"
+      # Tries at 5s intervals before giving up on the admin API.
+      waitAttempts: 60
+      deadlineSeconds: 600
+      # Set true once an image carrying the check script is deployed.
+      requireCheckScript: false
 
 matrix:
   image: "matrixdotorg/synapse:v1.158.0"
@@ -99,7 +111,7 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call:2.0.4"
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.8"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Storybook is a development surface and stays absent unless an environment
@@ -171,7 +183,7 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.7"
+  imageVersion: "2.0.8"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -233,7 +245,7 @@ online-counseling-redis:
 # Keycloak
 online-counseling-keycloak:
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
-  imageVersion: "2.0.4"
+  imageVersion: "2.0.8"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
@@ -250,7 +262,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.7"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.8"
 
   keycloakResource: "agency-service"
 
@@ -267,7 +279,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "2.0.7"
+  imageVersion: "2.0.8"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -283,7 +295,7 @@ consultingTypeService:
 tenantService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.7"
+  imageVersion: "2.0.8"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -296,8 +308,17 @@ tenantService:
 
 # User service
 userService:
+  # Existing Secret with a Synapse admin token; unset makes suggestions fail closed.
+  identitySuggestions:
+    matrixAdminTokenSecret:
+      name: ""
+      key: "access-token"
+  # Per client IP and ingress-controller replica, for the public entry paths only.
+  publicEntryRateLimit:
+    requestsPerSecond: 5
+    burstMultiplier: 2
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.7"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.8"
   serviceURL: "http://userservice:8080"
 
   keycloakResource: "user-service"
@@ -334,11 +355,12 @@ userService:
   otpAllowedForConsultants: "true"
   otpAllowedForSingleTenantAdmins: "true"
   otpAllowedForTenantSuperAdmins: "true"
+  otpAllowedForRestrictedAgencyAdmins: "true"
 
-  # Must be overridden per environment; password reset fails closed if unset.
-  magicLinkFrontendBaseUrl: "https://your-domain.example.com"
-  passwordResetFrontendBaseUrl: "https://your-domain.example.com"
-  passwordResetAdminFrontendBaseUrl: "https://admin.your-domain.example.com/admin"
+  # Empty = derived from global.domainName; set only for a separate App/Admin host.
+  magicLinkFrontendBaseUrl: ""
+  passwordResetFrontendBaseUrl: ""
+  passwordResetAdminFrontendBaseUrl: ""
 
   # SMTP is environment-owned; setting a host requires credentials in secrets.
   smtpHost: ""
@@ -346,9 +368,9 @@ userService:
   smtpSecure: false
   smtpFrom: ""
 
-  # Bare origins for account-invite links (admin must NOT end in /admin); override per environment.
-  accountInviteAppFrontendBaseUrl: "https://your-domain.example.com"
-  accountInviteAdminFrontendBaseUrl: "https://your-domain.example.com"
+  # Bare origins for invite links (admin must NOT end in /admin); empty = derived.
+  accountInviteAppFrontendBaseUrl: ""
+  accountInviteAdminFrontendBaseUrl: ""
 
   # Platform-level email branding for mails without a tenant context.
   emailBrandingName: "ORISO"
@@ -375,7 +397,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.7"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.8"
 
 nginxController:
   enabled: true
@@ -399,6 +421,11 @@ signoz:
 
 # Health Dashboard
 healthDashboard:
+  ingress:
+    # Public access is opt-in; every enabled ingress requires Basic Auth.
+    enabled: false
+    # Existing Secret with an nginx-compatible `auth` htpasswd entry.
+    authSecret: ""
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
     tag: "2.0.4"
