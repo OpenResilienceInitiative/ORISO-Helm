@@ -1,0 +1,79 @@
+# Synthetic render-only values. Never deploy this fixture.
+# Complements values.yaml.default; no environment secrets are loaded by the test.
+global:
+  keycloak:
+    serviceTechUserId: render-only-not-a-real-secret
+  secrets:
+    liquibaseUser: render-only-not-a-real-secret
+    liquibasePassword: render-only-not-a-real-secret
+    rabbitmqUsername: render-only-not-a-real-secret
+    rabbitmqPassword: render-only-not-a-real-secret
+    caritasDbUsername: render-only-not-a-real-secret
+    caritasDbPassword: render-only-not-a-real-secret
+    keycloakDbUsername: render-only-not-a-real-secret
+    keycloakDbPassword: render-only-not-a-real-secret
+    agencyServiceDbUsername: render-only-not-a-real-secret
+    agencyServiceDbPassword: render-only-not-a-real-secret
+    consultingTypeServiceDbUsername: render-only-not-a-real-secret
+    consultingTypeServiceDbPassword: render-only-not-a-real-secret
+    consultingTypeMongoUser: render-only-not-a-real-secret
+    consultingTypeMongoPass: render-only-not-a-real-secret
+    userServiceDbUsername: render-only-not-a-real-secret
+    userServiceDbPassword: render-only-not-a-real-secret
+    uploadServiceDbUsername: render-only-not-a-real-secret
+    uploadServiceDbPassword: render-only-not-a-real-secret
+    tenantServiceDbUsername: render-only-not-a-real-secret
+    tenantServiceDbPassword: render-only-not-a-real-secret
+    redisdefaultPass: render-only-not-a-real-secret
+    matrixRegistrationSharedSecret: render-only-not-a-real-secret
+    keycloakAdminUsername: render-only-not-a-real-secret
+    keycloakAdminPassword: render-only-not-a-real-secret
+  matrix:
+    matrixAdminUsername: render-only-not-a-real-secret
+    matrixAdminPassword: render-only-not-a-real-secret
+  domainName: public-entry.oriso.internal
+postgres:
+  postgresDB: render-only-not-a-real-secret
+  postgresPassword: render-only-not-a-real-secret
+  postgresUser: render-only-not-a-real-secret
+online-counseling-mongodb:
+  mongoSharedKey: render-only-not-a-real-secret
+  mongoInitDbRootUsername: render-only-not-a-real-secret
+  mongoInitDbRootPassword: render-only-not-a-real-secret
+  noSqlClientMongoUsername: render-only-not-a-real-secret
+  noSqlClientMongoPassword: render-only-not-a-real-secret
+  oplogMongoUsername: render-only-not-a-real-secret
+  oplogMongoPassword: render-only-not-a-real-secret
+  statisticsMongoUser: render-only-not-a-real-secret
+  statisticsMongoPass: render-only-not-a-real-secret
+online-counseling-mariadb:
+  dbRootPassword: render-only-not-a-real-secret
+tenantService:
+  springDatasourceUsername: render-only-not-a-real-secret
+  springDatasourcePassword: render-only-not-a-real-secret
+  springRabbitmqUsername: render-only-not-a-real-secret
+  springRabbitmqPassword: render-only-not-a-real-secret
+  smtpPasswordEncryptionSecret: render-only-tenant-smtp-key
+consultingTypeService:
+  smtpPasswordEncryptionSecret: render-only-global-smtp-key
+agencyService:
+  serviceEncryptionAppkey: render-only-not-a-real-secret
+userService:
+  keycloakTechnicalUsername: render-only-not-a-real-secret
+  keycloakTechnicalPassword: render-only-not-a-real-secret
+  serviceEncryptionAppkey: render-only-not-a-real-secret
+  statisticsMessageCountHmacSecret: render-only-not-a-real-secret
+  matrixRtcCallPolicyHmacSecret: render-only-not-a-real-secret
+  identityTechnicalUserUsername: render-only-not-a-real-secret
+  identityTechnicalUserPassword: render-only-not-a-real-secret
+  smtpUser: ''
+  smtpPassword: ''
+matrixrtcAuth:
+  membershipReaderPassword: render-only-not-a-real-secret
+  membershipToken: ''
+  callPolicyToken: render-only-not-a-real-secret
+  redisUrl: ''
+livekit:
+  api:
+    key: render-only-not-a-real-secret
+    secret: render-only-not-a-real-secret

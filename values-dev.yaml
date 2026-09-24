@@ -9,10 +9,20 @@
 # this generic dev overlay does not opt in. See docs/infrastructure-report-2026-07.md §7.
 
 global:
+  # Public host of the Dev environment (main-ingress serves App, /admin, /auth
+  # and /_matrix on it). Every public URL and mail link derives from it.
+  domainName: "dev.oriso.org"
   # Seed dummy tenants/users so the app is immediately explorable in dev.
   initializeDummyData: true
   matrix:
     matrixServerName: "matrix.oriso.org"
+
+healthDashboard:
+  ingress:
+    enabled: true
+    # Provision before rollout in healthDashboard.namespace, or the release
+    # namespace when unset. This name does not provision or verify the Secret.
+    authSecret: "health-dashboard-basic-auth"
 
 storybook:
   enabled: true
@@ -47,6 +57,7 @@ userService:
   otpAllowedForConsultants: "true"
   otpAllowedForSingleTenantAdmins: "true"
   otpAllowedForTenantSuperAdmins: "true"
+  otpAllowedForRestrictedAgencyAdmins: "true"
 
   # Confirmed against the live dev ingress: this environment serves the App at
   # the host root and the Admin panel under /admin on the same host

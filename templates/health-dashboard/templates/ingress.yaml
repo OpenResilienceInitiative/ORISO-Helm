@@ -1,3 +1,12 @@
+{{- $ingress := .Values.healthDashboard.ingress | default dict }}
+{{- if $ingress.enabled }}
+{{- $authSecret := required "healthDashboard.ingress.authSecret must name an existing basic-auth Secret when HealthDashboard ingress is enabled" ($ingress.authSecret | default "" | trim) }}
+{{- if contains "/" $authSecret }}
+{{- fail "healthDashboard.ingress.authSecret must be a local Secret name without '/' in the effective HealthDashboard namespace" }}
+{{- end }}
+{{- if or (gt (len $authSecret) 253) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" $authSecret)) }}
+{{- fail "healthDashboard.ingress.authSecret must be a valid Kubernetes Secret name (DNS subdomain, at most 253 characters)" }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -6,6 +15,9 @@ metadata:
   labels:
     {{- include "health-dashboard.labels" . | nindent 4 }}
   annotations:
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: {{ $authSecret | quote }}
+    nginx.ingress.kubernetes.io/auth-realm: "HealthDashboard Authentication"
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/rewrite-target: /$2
@@ -26,3 +38,4 @@ spec:
             name: {{ include "health-dashboard.fullname" . }}
             port:
               number: {{ .Values.healthDashboard.service.port }}
+{{- end }}

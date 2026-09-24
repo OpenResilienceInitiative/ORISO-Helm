@@ -168,6 +168,8 @@ def render_full_chart(*extra_set_strings: str) -> list[dict]:
         "-f",
         os.path.join(CHART_DIR, "values.yaml.default"),
         "-f",
+        os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
+        "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
     ]
     for setting in extra_set_strings:

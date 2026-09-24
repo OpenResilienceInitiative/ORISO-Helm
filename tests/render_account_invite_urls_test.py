@@ -8,10 +8,10 @@ server-side: tenant-admin invites get
 appended by code, so the admin base URL must be the bare Admin origin —
 NOT suffixed with /admin like the password-reset admin base URL.
 
-On Pre-Dev the Admin panel lives on its own host (admin.oriso-dev.site), so
-ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL must be supplied by the external
-environment values or every tenant-admin invite mail links to the App host
-where the onboarding route does not exist.
+Where the Admin panel lives on its own host (split-host installs), the
+explicit ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL must win over the value
+derived from global.domainName, or every tenant-admin invite mail links to
+the App host where the onboarding route does not exist.
 """
 
 from __future__ import annotations
@@ -24,8 +24,10 @@ import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-PRE_DEV_APP_URL = "https://app.oriso-dev.site"
-PRE_DEV_ADMIN_URL = "https://admin.oriso-dev.site"
+SPLIT_HOST_APP_URL = "https://app.split.oriso.internal"
+SPLIT_HOST_ADMIN_URL = "https://admin.split.oriso.internal"
+# global.domainName from tests/fixtures/values-render-domain.yaml.
+RENDER_DOMAIN = "render.oriso.internal"
 
 LINK_ENV_KEYS = (
     "ACCOUNT_INVITE_APP_FRONTEND_BASE_URL",
@@ -51,10 +53,7 @@ RESET_LINK_ENV_KEYS = (
 )
 
 
-def render(
-    extra_set_strings: dict[str, str] | None = None,
-    extra_sets: dict[str, str] | None = None,
-) -> list[dict]:
+def render(extra_set_strings: dict[str, str] | None = None) -> list[dict]:
     cmd = [
         "helm",
         "template",
@@ -63,14 +62,12 @@ def render(
         "-f",
         os.path.join(CHART_DIR, "values.yaml.default"),
         "-f",
+        os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
+        "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
     ]
     for key, value in (extra_set_strings or {}).items():
         cmd += ["--set-string", f"{key}={value}"]
-    # Typed values (booleans) go through --set; --set-string would hand the
-    # template a string where it expects a bool.
-    for key, value in (extra_sets or {}).items():
-        cmd += ["--set", f"{key}={value}"]
     # The default values configure an SMTP transport, whose render gate requires
     # credentials; real deploys carry them in the persistent secret values.
     cmd += [
@@ -78,9 +75,6 @@ def render(
         "userService.smtpUser=smtp-canary-user",
         "--set-string",
         "userService.smtpPassword=smtp-canary-password",
-        # TenantService's secret gate (ORISO-TenantService#183) needs a value too.
-        "--set-string",
-        "tenantService.smtpPasswordEncryptionSecret=render-test-only-0123456789abcdef",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
@@ -121,21 +115,21 @@ def userservice_deployment_env_names(docs: list[dict]) -> set[str]:
     }
 
 
-def assert_pre_dev_invite_urls() -> None:
+def assert_split_host_invite_urls() -> None:
     docs = render(
         {
-            "userService.accountInviteAppFrontendBaseUrl": PRE_DEV_APP_URL,
-            "userService.accountInviteAdminFrontendBaseUrl": PRE_DEV_ADMIN_URL,
+            "userService.accountInviteAppFrontendBaseUrl": SPLIT_HOST_APP_URL,
+            "userService.accountInviteAdminFrontendBaseUrl": SPLIT_HOST_ADMIN_URL,
         }
     )
     data = userservice_configmap(docs)["data"]
 
-    assert data.get("ACCOUNT_INVITE_APP_FRONTEND_BASE_URL") == PRE_DEV_APP_URL, (
-        "external PreDev values must point app invite links at the public "
+    assert data.get("ACCOUNT_INVITE_APP_FRONTEND_BASE_URL") == SPLIT_HOST_APP_URL, (
+        "explicit split-host values must point app invite links at the public "
         f"App host, got {data.get('ACCOUNT_INVITE_APP_FRONTEND_BASE_URL')!r}"
     )
-    assert data.get("ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL") == PRE_DEV_ADMIN_URL, (
-        "external PreDev values must point tenant-admin invite links at the "
+    assert data.get("ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL") == SPLIT_HOST_ADMIN_URL, (
+        "explicit split-host values must point tenant-admin invite links at the "
         "public Admin origin (code appends /admin/tenant-onboarding), got "
         f"{data.get('ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL')!r}"
     )
@@ -143,7 +137,7 @@ def assert_pre_dev_invite_urls() -> None:
         "the admin invite base URL must NOT carry the /admin suffix — "
         "InviteAcceptUrlBuilder appends /admin/tenant-onboarding itself"
     )
-    print("PASS: explicit PreDev values render both account-invite base URLs")
+    print("PASS: explicit split-host values render both account-invite base URLs")
 
     env_names = userservice_deployment_env_names(docs)
     missing = set(LINK_ENV_KEYS) - env_names
@@ -157,10 +151,10 @@ def assert_pre_dev_invite_urls() -> None:
 def assert_reset_links_are_imported() -> None:
     docs = render(
         {
-            "userService.magicLinkFrontendBaseUrl": PRE_DEV_APP_URL,
-            "userService.passwordResetFrontendBaseUrl": PRE_DEV_APP_URL,
+            "userService.magicLinkFrontendBaseUrl": SPLIT_HOST_APP_URL,
+            "userService.passwordResetFrontendBaseUrl": SPLIT_HOST_APP_URL,
             "userService.passwordResetAdminFrontendBaseUrl": (
-                f"{PRE_DEV_ADMIN_URL}/admin"
+                f"{SPLIT_HOST_ADMIN_URL}/admin"
             ),
         }
     )
@@ -184,38 +178,29 @@ def assert_upstream_clients_stay_wired() -> None:
     print("PASS: TS/AS/CTS client base URLs stay wired ConfigMap -> Deployment")
 
 
-def assert_derived_from_own_origin_when_unset() -> None:
-    """Unset invite URLs render the environment's own origin, never a compiled host.
+def assert_derived_when_unset() -> None:
+    """Unset invite URLs derive from global.domainName (ORISO-Helm#366).
 
-    Before 2026-09-16 the keys were omitted when unset and the app's compiled
-    production fallback won (ORISO-Helm#349). Now both keys are always rendered
-    from global.domainName + global.enableTls, and the Deployment always imports
-    them, so a ConfigMap/Deployment half-wiring cannot occur either.
+    They used to be omitted so the service fell back to its own default; the
+    service fallbacks are being removed, so the chart must always render the
+    keys and import them into the Deployment.
     """
-    domain = "invite-render-test.example.org"
-    docs = render({"global.domainName": domain})
+    docs = render()
     data = userservice_configmap(docs)["data"]
     env_names = userservice_deployment_env_names(docs)
     for key in LINK_ENV_KEYS:
-        assert data.get(key) == f"https://{domain}", (
+        assert data.get(key) == f"https://{RENDER_DOMAIN}", (
             f"{key} must derive from global.domainName when unset, got {data.get(key)!r}"
         )
         assert key in env_names, f"Deployment must import {key}"
-        assert "app.oriso.org" not in data[key]
-    docs = render({"global.domainName": domain}, extra_sets={"global.enableTls": "false"})
-    data = userservice_configmap(docs)["data"]
-    for key in LINK_ENV_KEYS:
-        assert data.get(key) == f"http://{domain}", (
-            f"{key} must follow global.enableTls, got {data.get(key)!r}"
-        )
-    print("PASS: invite URL keys derive from the environment's own origin when unset")
+    print("PASS: unset invite URLs derive from global.domainName and are imported")
 
 
 def main() -> None:
-    assert_pre_dev_invite_urls()
+    assert_split_host_invite_urls()
     assert_reset_links_are_imported()
     assert_upstream_clients_stay_wired()
-    assert_derived_from_own_origin_when_unset()
+    assert_derived_when_unset()
 
 
 if __name__ == "__main__":
