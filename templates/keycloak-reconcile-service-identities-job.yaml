@@ -1,0 +1,87 @@
+{{- $bootstrapUsers := default (dict) .Values.global.keycloak.bootstrapUsers -}}
+{{- $bootstrapEnabled := true -}}
+{{- if hasKey $bootstrapUsers "enabled" -}}
+{{- $bootstrapEnabled = $bootstrapUsers.enabled -}}
+{{- end -}}
+{{- if $bootstrapEnabled }}
+{{- $kc := index .Values "online-counseling-keycloak" -}}
+{{- $serviceAdminConfigured := or .Values.global.secrets.keycloakServiceAdminUsername .Values.global.secrets.keycloakServiceAdminPassword -}}
+{{- /* Service identities (ORISO-Helm#367) are reconciled on EVERY install and
+     upgrade: `--import-realm` skips existing realms, so a role change in
+     realm.json alone never reaches an existing environment. Unlike
+     keycloak-bootstrap-users this job never touches realmadmin, and it only
+     converges the identities listed in the script to their exact role sets. */ -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-reconcile-service-identities
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "15"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: keycloak-reconcile-service-identities
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: reconcile-service-identities
+          image: "{{ $kc.imageName }}:{{ $kc.imageVersion }}"
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          env:
+            - name: KEYCLOAK_URL
+              value: {{ include "oriso.keycloakAdminUrl" . | quote }}
+            - name: KEYCLOAK_REALM
+              value: {{ .Values.global.keycloak.realm | quote }}
+            - name: KEYCLOAK_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN_PASSWORD
+            {{- if $serviceAdminConfigured }}
+            - name: SERVICE_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: userservice-secret
+                  key: KEYCLOAK_SERVICE_ADMIN_USERNAME
+            - name: SERVICE_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: userservice-secret
+                  key: KEYCLOAK_SERVICE_ADMIN_PASSWORD
+            {{- end }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              KCADM=/opt/keycloak/bin/kcadm.sh
+              ATTEMPTS=0
+              MAX_ATTEMPTS=60
+              until "$KCADM" config credentials \
+                  --server "$KEYCLOAK_URL" \
+                  --realm master \
+                  --user "$KEYCLOAK_ADMIN_USERNAME" \
+                  --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null 2>&1; do
+                ATTEMPTS=$((ATTEMPTS + 1))
+                if [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ]; then
+                  echo "ERROR: no Keycloak admin session after $MAX_ATTEMPTS attempts" >&2
+                  exit 2
+                fi
+                echo "waiting for Keycloak admin API ($ATTEMPTS/$MAX_ATTEMPTS)"
+                sleep 5
+              done
+              unset KEYCLOAK_ADMIN_PASSWORD
+              export KCADM
+
+              {{- .Files.Get "files/keycloak-reconcile-service-identities.sh.in" | nindent 14 }}
+{{- end }}

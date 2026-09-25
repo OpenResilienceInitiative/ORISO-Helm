@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "templates" / "keycloak-verify-2fa-job.yaml"
+HELPERS = ROOT / "templates" / "_helpers.tpl"
 VALUES = ROOT / "values.yaml.default"
 
 
@@ -21,6 +22,7 @@ class VerifyTwoFactorJobContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.source = TEMPLATE.read_text()
+        cls.helpers = HELPERS.read_text()
         cls.values = VALUES.read_text()
 
     def test_the_keycloak_address_is_not_hardcoded(self):
@@ -60,7 +62,9 @@ class VerifyTwoFactorJobContractTest(unittest.TestCase):
     def test_an_empty_admin_url_fails_the_render_instead_of_guessing(self):
         # Falling back to a built-in address would put the literal back and would
         # point the check at an endpoint nobody chose.
-        self.assertIn("required", self.source)
+        self.assertIn('include "oriso.keycloakAdminUrl"', self.source)
+        self.assertIn("required", self.helpers)
+        self.assertIn("global.keycloak.verifyTwoFactorContract.adminUrl", self.helpers)
 
     def test_the_wait_for_keycloak_is_bounded(self):
         # `until ... sleep 5` with no limit outlives the release: helm's timeout is

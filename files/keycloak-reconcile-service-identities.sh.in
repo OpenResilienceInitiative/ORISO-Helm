@@ -1,0 +1,97 @@
+#!/bin/sh
+# Reconciles the Keycloak service identities of ORISO (ORISO-Helm#367) on every
+# install AND upgrade. `--import-realm` skips existing realms, so without this a
+# role change in realm.json never reaches Dev, Staging or Prod.
+#
+# Idempotent: re-running converges to the same state. Role sets are EXACT for
+# realm roles and realm-management client roles: anything not listed is removed.
+#
+# Expects an authenticated kcadm session (kcadm config credentials) and:
+#   KEYCLOAK_REALM            target realm
+#   SERVICE_ADMIN_USERNAME    backend Keycloak admin identity (empty = skip it)
+#   SERVICE_ADMIN_PASSWORD    its password (from the deployment's secret values)
+#   KCADM                     kcadm path (default /opt/keycloak/bin/kcadm.sh)
+set -eu
+
+KCADM="${KCADM:-/opt/keycloak/bin/kcadm.sh}"
+: "${KEYCLOAK_REALM:?KEYCLOAK_REALM is required}"
+
+OTP_CONFIG_ADMIN_ROLE="otp-config-admin"
+SERVICE_ADMIN_REALM_ROLES="default-roles-${KEYCLOAK_REALM} ${OTP_CONFIG_ADMIN_ROLE}"
+# view-realm: the UserService reads realm roles by name before mapping them.
+SERVICE_ADMIN_MANAGEMENT_ROLES="manage-users view-users query-users view-realm"
+
+contains() {
+  # contains "<space separated list>" <word>
+  for candidate in $1; do
+    [ "$candidate" = "$2" ] && return 0
+  done
+  return 1
+}
+
+ensure_realm_role() {
+  name="$1"
+  description="$2"
+  if "$KCADM" get "roles/${name}" -r "$KEYCLOAK_REALM" >/dev/null 2>&1; then
+    return 0
+  fi
+  "$KCADM" create roles -r "$KEYCLOAK_REALM" -s "name=${name}" -s "description=${description}"
+  echo "created realm role ${name}"
+}
+
+user_id() {
+  "$KCADM" get users -r "$KEYCLOAK_REALM" -q exact=true -q "username=$1" --fields id --format csv --noquotes \
+    | head -n1
+}
+
+ensure_user() {
+  username="$1"
+  password="$2"
+  uid="$(user_id "$username" || true)"
+  if [ -z "$uid" ]; then
+    "$KCADM" create users -r "$KEYCLOAK_REALM" -s "username=${username}" -s enabled=true
+    echo "created user ${username}"
+  else
+    "$KCADM" update "users/${uid}" -r "$KEYCLOAK_REALM" -s enabled=true -s 'requiredActions=[]'
+  fi
+  "$KCADM" set-password -r "$KEYCLOAK_REALM" --username "$username" --new-password "$password" --temporary=false
+}
+
+# reconcile_roles <username> "<wanted realm roles>" "<wanted realm-management roles>"
+reconcile_roles() {
+  username="$1"
+  wanted_realm="$2"
+  wanted_management="$3"
+
+  for role in $wanted_realm; do
+    "$KCADM" add-roles -r "$KEYCLOAK_REALM" --uusername "$username" --rolename "$role"
+  done
+  for role in $wanted_management; do
+    "$KCADM" add-roles -r "$KEYCLOAK_REALM" --uusername "$username" --cclientid realm-management --rolename "$role"
+  done
+
+  for role in $("$KCADM" get-roles -r "$KEYCLOAK_REALM" --uusername "$username" --fields name --format csv --noquotes); do
+    if ! contains "$wanted_realm" "$role"; then
+      "$KCADM" remove-roles -r "$KEYCLOAK_REALM" --uusername "$username" --rolename "$role"
+      echo "removed realm role ${role} from ${username}"
+    fi
+  done
+  for role in $("$KCADM" get-roles -r "$KEYCLOAK_REALM" --uusername "$username" --cclientid realm-management --fields name --format csv --noquotes); do
+    if ! contains "$wanted_management" "$role"; then
+      "$KCADM" remove-roles -r "$KEYCLOAK_REALM" --uusername "$username" --cclientid realm-management --rolename "$role"
+      echo "removed realm-management role ${role} from ${username}"
+    fi
+  done
+  echo "reconciled roles of ${username}"
+}
+
+ensure_realm_role "$OTP_CONFIG_ADMIN_ROLE" \
+  "May call the otp-config endpoints of the ORISO Keycloak SPI (backend Keycloak admin identity only)"
+
+if [ -z "${SERVICE_ADMIN_USERNAME:-}" ]; then
+  echo "SKIPPED: no backend Keycloak admin identity configured (global.secrets.keycloakServiceAdminUsername)."
+else
+  : "${SERVICE_ADMIN_PASSWORD:?SERVICE_ADMIN_PASSWORD is required with SERVICE_ADMIN_USERNAME}"
+  ensure_user "$SERVICE_ADMIN_USERNAME" "$SERVICE_ADMIN_PASSWORD"
+  reconcile_roles "$SERVICE_ADMIN_USERNAME" "$SERVICE_ADMIN_REALM_ROLES" "$SERVICE_ADMIN_MANAGEMENT_ROLES"
+fi
