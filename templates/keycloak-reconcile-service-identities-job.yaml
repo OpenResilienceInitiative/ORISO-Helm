@@ -35,7 +35,7 @@ spec:
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             - name: KEYCLOAK_URL
-              value: "http://keycloak.{{ .Release.Namespace }}:8080/auth"
+              value: {{ include "oriso.keycloakAdminUrl" . | quote }}
             - name: KEYCLOAK_REALM
               value: {{ .Values.global.keycloak.realm | quote }}
             - name: KEYCLOAK_ADMIN_USERNAME

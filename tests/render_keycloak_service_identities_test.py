@@ -17,6 +17,7 @@ def render(*overrides, check=True):
         [
             "helm", "template", "identities", str(ROOT),
             "-f", str(ROOT / "values.yaml.default"),
+            "-f", str(ROOT / "tests" / "fixtures" / "values-render-domain.yaml"),
             "-f", str(ROOT / "secrets.yaml.default"),
             "--set", "userService.smtpHost=",
             *overrides,
@@ -54,6 +55,21 @@ def test_reconcile_job_runs_on_install_and_upgrade():
     # After keycloak-bootstrap-users (10), before keycloak-verify-2fa-contract (20).
     assert int(annotations["helm.sh/hook-weight"]) == 15
     assert job["spec"]["activeDeadlineSeconds"] > 0
+
+
+def test_reconcile_job_uses_the_configured_admin_url():
+    docs = render(
+        "--set", "global.keycloak.verifyTwoFactorContract.adminUrl=http://kc-admin.{{ .Release.Namespace }}:9090/auth",
+        "--namespace", "identities-ns",
+    )
+    env = env_of(resource(docs, "Job", JOB))
+    assert env["KEYCLOAK_URL"]["value"] == "http://kc-admin.identities-ns:9090/auth"
+
+
+def test_reconcile_job_without_an_admin_url_fails_the_render():
+    result = render("--set", "global.keycloak.verifyTwoFactorContract.adminUrl=", check=False)
+    assert result.returncode != 0
+    assert "adminUrl" in result.stderr
 
 
 def test_reconcile_job_embeds_the_tested_script():

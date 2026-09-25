@@ -227,3 +227,14 @@ Usage: include "oriso.matrixServerName" (list "matrix.matrixServerName" $value)
 {{- include "oriso.rejectUrlPlaceholder" (list $name $value $value) -}}
 {{- include "oriso.validateHost" (list $name $value) -}}
 {{- end -}}
+
+{{/*
+In-cluster Keycloak admin endpoint for the post-install Jobs. It lives entirely
+in values: a default host here would be the address that actually ships, while
+an operator looks for it in values. tpl resolves the namespace, which only the
+release knows.
+*/}}
+{{- define "oriso.keycloakAdminUrl" -}}
+{{- $verify := default (dict) .Values.global.keycloak.verifyTwoFactorContract -}}
+{{- required "global.keycloak.verifyTwoFactorContract.adminUrl must be set - see values.yaml.default" (tpl ($verify.adminUrl | default "") .) -}}
+{{- end -}}
