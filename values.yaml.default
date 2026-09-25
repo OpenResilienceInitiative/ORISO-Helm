@@ -429,10 +429,11 @@ signoz:
 # Health Dashboard
 healthDashboard:
   ingress:
-    # Public access is opt-in; every enabled ingress requires Basic Auth.
-    enabled: false
-    # Existing Secret with an nginx-compatible `auth` htpasswd entry.
-    authSecret: ""
+    # Public at /health by default; every enabled ingress requires Basic Auth.
+    enabled: true
+    # Secret with an nginx-compatible `auth` htpasswd entry. Pre-provision it, or set
+    # healthDashboard.ingress.htpasswd in secrets.yaml and the chart renders it.
+    authSecret: "health-dashboard-basic-auth"
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
     tag: "2.0.4"
