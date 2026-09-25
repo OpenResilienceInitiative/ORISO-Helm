@@ -34,8 +34,15 @@ class KeycloakMailLocalesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             calls = Path(directory) / "calls"
             fake_kcadm = Path(directory) / "kcadm"
+            theme = Path(directory) / "email"
+            (theme / "messages").mkdir(parents=True)
+            for locale in ("de", "en", "fr", "ru", "ti", "tr"):
+                (theme / "messages" / f"messages_{locale}.properties").write_text("mail=test\n")
+            (theme / "theme.properties").write_text("locales=de,en,fr,ru,ti,tr\n")
             fake_kcadm.write_text(
-                '#!/bin/sh\nprintf "%s\\n" "$@" >> "$CALLS"\n'
+                '#!/bin/sh\npython3 -c '
+                "'import json,sys; open(sys.argv[1], \"a\").write(json.dumps(sys.argv[2:]) + \"\\n\")' "
+                '"$CALLS" "$@"\n'
             )
             fake_kcadm.chmod(0o755)
             result = subprocess.run(
@@ -44,22 +51,47 @@ class KeycloakMailLocalesTest(unittest.TestCase):
                     **os.environ,
                     "KCADM": str(fake_kcadm),
                     "KEYCLOAK_REALM": "online-beratung",
+                    "KEYCLOAK_EMAIL_THEME_DIR": str(theme),
                     "CALLS": str(calls),
                 },
                 capture_output=True,
                 text=True,
             )
             self.assertEqual(0, result.returncode, result.stderr)
-            args = calls.read_text()
-            self.assertIn("realms/online-beratung", args)
-            self.assertIn('supportedLocales=["de","en","fr","ru","ti","tr"]', args)
-            for field in (
-                "internationalizationEnabled=true",
-                "defaultLocale=de",
-                "emailTheme=oriso",
-            ):
-                self.assertIn(field, args)
-            self.assertNotIn("smtpServer", args)
+            self.assertEqual(
+                [
+                    [
+                        "update", "realms/online-beratung",
+                        "-s", "internationalizationEnabled=true",
+                        "-s", 'supportedLocales=["de","en","fr","ru","ti","tr"]',
+                        "-s", "defaultLocale=de",
+                        "-s", "emailTheme=oriso",
+                    ],
+                    [
+                        "get", "realms/online-beratung", "--fields",
+                        "internationalizationEnabled,supportedLocales,defaultLocale,emailTheme",
+                    ],
+                ],
+                [json.loads(line) for line in calls.read_text().splitlines()],
+            )
+
+            (theme / "messages/messages_ti.properties").unlink()
+            calls.unlink()
+            missing = subprocess.run(
+                ["sh", str(SCRIPT_PATH)],
+                env={
+                    **os.environ,
+                    "KCADM": str(fake_kcadm),
+                    "KEYCLOAK_REALM": "online-beratung",
+                    "KEYCLOAK_EMAIL_THEME_DIR": str(theme),
+                    "CALLS": str(calls),
+                },
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(0, missing.returncode)
+            self.assertIn("lacks oriso mail bundle for ti", missing.stderr)
+            self.assertFalse(calls.exists(), "an incomplete image must not update the realm")
 
     def test_helm_job_reconciles_existing_realms_on_install_and_upgrade(self):
         result = subprocess.run(
@@ -82,8 +114,10 @@ class KeycloakMailLocalesTest(unittest.TestCase):
         self.assertEqual(
             "post-install,post-upgrade", job["metadata"]["annotations"]["helm.sh/hook"]
         )
+        self.assertEqual(240, job["spec"]["activeDeadlineSeconds"])
         container = job["spec"]["template"]["spec"]["containers"][0]
         self.assertIn(SCRIPT_PATH.read_text().strip(), container["command"][-1])
+        self.assertIn('"$ATTEMPTS" -ge 36', container["command"][-1])
         env = {item["name"]: item for item in container["env"]}
         self.assertEqual(
             {"name": "keycloak-secret-env", "key": "KEYCLOAK_ADMIN_PASSWORD"},

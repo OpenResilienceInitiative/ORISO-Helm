@@ -10,7 +10,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 3
-  activeDeadlineSeconds: 600
+  activeDeadlineSeconds: 240
   template:
     metadata:
       labels:
@@ -47,7 +47,7 @@ spec:
                   --user "$KEYCLOAK_ADMIN_USERNAME" \
                   --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null 2>&1; do
                 ATTEMPTS=$((ATTEMPTS + 1))
-                if [ "$ATTEMPTS" -ge 60 ]; then
+                if [ "$ATTEMPTS" -ge 36 ]; then
                   echo 'ERROR: no Keycloak admin session for mail locale reconciliation' >&2
                   exit 2
                 fi
