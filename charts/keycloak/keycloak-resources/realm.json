@@ -1688,8 +1688,9 @@
       }
     ]
   },
-  "internationalizationEnabled": false,
-  "supportedLocales": [],
+  "internationalizationEnabled": true,
+  "supportedLocales": ["de", "en", "fr", "ru", "ti", "tr"],
+  "defaultLocale": "de",
   "authenticationFlows": [
     {
       "id": "97b43798-4a42-4bd3-a538-680094a90ffb",

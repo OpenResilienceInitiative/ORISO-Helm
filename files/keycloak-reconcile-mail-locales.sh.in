@@ -1,0 +1,28 @@
+set -eu
+
+: "${KCADM:?Keycloak admin command is required}"
+: "${KEYCLOAK_REALM:?Keycloak realm is required}"
+: "${KEYCLOAK_EMAIL_THEME_DIR:=/opt/keycloak/themes/oriso/email}"
+
+# Fail the release before enabling languages that the selected image cannot send.
+for locale in de en fr ru ti tr; do
+  if [ ! -s "$KEYCLOAK_EMAIL_THEME_DIR/messages/messages_$locale.properties" ]; then
+    echo "ERROR: Keycloak image lacks oriso mail bundle for $locale" >&2
+    exit 3
+  fi
+done
+if ! grep -qx 'locales=de,en,fr,ru,ti,tr' "$KEYCLOAK_EMAIL_THEME_DIR/theme.properties"; then
+  echo 'ERROR: Keycloak image lacks the complete oriso mail locale declaration' >&2
+  exit 3
+fi
+
+# kcadm update merges these fields into the live realm. Importing realm.json
+# only seeds a new realm and cannot change an existing Dev or Stage realm.
+"$KCADM" update "realms/$KEYCLOAK_REALM" \
+  -s internationalizationEnabled=true \
+  -s 'supportedLocales=["de","en","fr","ru","ti","tr"]' \
+  -s defaultLocale=de \
+  -s emailTheme=oriso
+
+"$KCADM" get "realms/$KEYCLOAK_REALM" \
+  --fields internationalizationEnabled,supportedLocales,defaultLocale,emailTheme
