@@ -93,6 +93,8 @@ BASE_OVERLAY = {
         },
     },
     "userService": {
+        "smtpUser": "render-only-smtp-user",
+        "smtpPassword": "render-only-smtp-password",
         "serviceEncryptionAppkey": "test-appkey",
         "keycloakTechnicalUsername": "test-technical-user",
         "keycloakTechnicalPassword": "test-technical-pass",

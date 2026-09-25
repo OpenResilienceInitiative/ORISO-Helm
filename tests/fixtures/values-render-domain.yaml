@@ -14,3 +14,8 @@ matrix:
   synapseServerName: "matrix.render.oriso.internal"
 matrixrtcAuth:
   membershipReaderUserId: "@matrixrtc-auth:matrix.render.oriso.internal"
+# Non-secret deployment SMTP values for unrelated chart render tests. Tests
+# intentionally checking missing settings override these with empty values.
+userService:
+  smtpHost: "smtp.render.oriso.internal"
+  smtpFrom: "ORISO Render <sender@render.oriso.internal>"

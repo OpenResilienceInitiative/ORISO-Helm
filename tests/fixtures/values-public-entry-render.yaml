@@ -66,8 +66,8 @@ userService:
   matrixRtcCallPolicyHmacSecret: render-only-not-a-real-secret
   identityTechnicalUserUsername: render-only-not-a-real-secret
   identityTechnicalUserPassword: render-only-not-a-real-secret
-  smtpUser: ''
-  smtpPassword: ''
+  smtpUser: 'render-only-smtp-user'
+  smtpPassword: 'render-only-smtp-password'
 matrixrtcAuth:
   membershipReaderPassword: render-only-not-a-real-secret
   membershipToken: ''
