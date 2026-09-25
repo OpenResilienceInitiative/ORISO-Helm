@@ -83,6 +83,16 @@ password reset and sign-in link mail are migrated to that provider, verify the
 separate ConsultingTypeService settings they still read; a successful chart
 render alone does not prove those mails can be sent.
 
+Keycloak sends one-time-code mail from the same platform SMTP identity. The
+`keycloak-reconcile-smtp` post-install/post-upgrade hook reads the four public
+transport fields from `userservice-configmap-env` and the credentials from
+`userservice-secret`, then updates the realm mail settings. This hook is needed
+on upgrades because Keycloak skips `realm.json` import for existing realms.
+The Helm release must wait for a successful hook; if it fails, inspect the Job
+logs and keep the release unaccepted. Check the realm's email settings and send
+a test OTP after deployment. Do not copy SMTP credentials into `realm.json` or
+the Keycloak ConfigMap.
+
 Pre-Dev is not rendered from this chart; its ConfigMap and
 `oriso-platform-userservice-secrets` were wired to the same identity by hand on
 2026-07-28.
