@@ -75,10 +75,10 @@ could never send one. The chart now renders:
 | `SMTP_PASSWORD` | `userService.smtpPassword` (secret values) | its password |
 
 `smtpUser` and `smtpPassword` belong in the persistent secret values, never in
-a values file in this repository. The render fails when `smtpHost` is set but
-either credential is empty: a deploy with blank credentials would still answer
-every reset request with 204 while silently sending no mail, which is
-indistinguishable from a working environment from the outside.
+a values file in this repository. The render now requires the host, sender,
+port, security mode and both credentials for every installation. It names the
+missing value before deployment, so an unset host or blank credentials cannot
+leave password-reset and sign-in mail silently unavailable.
 
 Pre-Dev is not rendered from this chart; its ConfigMap and
 `oriso-platform-userservice-secrets` were wired to the same identity by hand on

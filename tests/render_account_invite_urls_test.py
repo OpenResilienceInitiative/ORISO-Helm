@@ -75,6 +75,14 @@ def render(extra_set_strings: dict[str, str] | None = None) -> list[dict]:
         "userService.smtpUser=smtp-canary-user",
         "--set-string",
         "userService.smtpPassword=smtp-canary-password",
+        "--set-string",
+        "userService.smtpHost=smtp.canary.example",
+        "--set-string",
+        "userService.smtpPort=587",
+        "--set-string",
+        "userService.smtpSecure=false",
+        "--set-string",
+        "userService.smtpFrom=sender@canary.example",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:

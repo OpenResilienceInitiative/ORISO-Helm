@@ -391,7 +391,8 @@ userService:
   passwordResetFrontendBaseUrl: ""
   passwordResetAdminFrontendBaseUrl: ""
 
-  # SMTP is environment-owned; setting a host requires credentials in secrets.
+  # Platform SMTP is environment-owned and required for account mail. Supply
+  # host/from here or in the environment overlay, and credentials in secrets.
   smtpHost: ""
   smtpPort: 587
   smtpSecure: false
