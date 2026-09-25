@@ -316,6 +316,11 @@ consultingTypeService:
 
 # Tenant Service
 tenantService:
+  # Pins for TenantService's constrained OWN-server system-mail endpoint.
+  # Blank values deny every call. Operators set the actual Keycloak user `sub`
+  # and token `azp` from the environment before enabling OWN-server delivery.
+  systemEmailDeliveryServiceSubject: ""
+  systemEmailDeliveryServiceClient: ""
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
   imageVersion: "dev"
