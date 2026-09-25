@@ -160,6 +160,7 @@ def assert_smtp_wiring_renders(
             key in data
         ), f"{label} values must render {key} into the UserService ConfigMap"
     assert data["SMTP_FROM"] == expected_from
+    assert data["SMTP_REQUIRED"] == "true", "platform mail must fail startup if SMTP is incomplete"
 
     secret = next(
         (
@@ -194,6 +195,7 @@ def assert_smtp_wiring_renders(
         "SMTP_PORT",
         "SMTP_SECURE",
         "SMTP_FROM",
+        "SMTP_REQUIRED",
         "SMTP_USER",
         "SMTP_PASSWORD",
     } - env_entries.keys()

@@ -75,6 +75,8 @@ data:
   {{- end }}
   SMTP_SECURE: {{ .Values.userService.smtpSecure | quote }}
   SMTP_FROM: {{ required "userService.smtpFrom is required for platform mail" .Values.userService.smtpFrom | quote }}
+  # UserService validates the complete deployment transport before serving requests.
+  SMTP_REQUIRED: "true"
   # CSRF
   CSRF_HEADER_PROPERTY: {{ .Values.global.csrfHeaderProperty}}
   CSRF_WHITELIST_HEADER_PROPERTY: {{ .Values.global.csrfWhitelistHeaderProperty}}
