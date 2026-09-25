@@ -1,0 +1,15 @@
+set -eu
+
+: "${KCADM:?Keycloak admin command is required}"
+: "${KEYCLOAK_REALM:?Keycloak realm is required}"
+
+# kcadm update merges these fields into the live realm. Importing realm.json
+# only seeds a new realm and cannot change an existing Dev or Stage realm.
+"$KCADM" update "realms/$KEYCLOAK_REALM" \
+  -s internationalizationEnabled=true \
+  -s 'supportedLocales=["de","en","fr","ru","ti","tr"]' \
+  -s defaultLocale=de \
+  -s emailTheme=oriso
+
+"$KCADM" get "realms/$KEYCLOAK_REALM" \
+  --fields internationalizationEnabled,supportedLocales,defaultLocale,emailTheme

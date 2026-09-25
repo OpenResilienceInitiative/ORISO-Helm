@@ -1,0 +1,58 @@
+{{- $kc := index .Values "online-counseling-keycloak" -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-reconcile-mail-locales
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "17"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: keycloak-reconcile-mail-locales
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: reconcile-mail-locales
+          image: "{{ $kc.imageName }}:{{ $kc.imageVersion }}"
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          env:
+            - name: KEYCLOAK_URL
+              value: {{ include "oriso.keycloakAdminUrl" . | quote }}
+            - name: KEYCLOAK_REALM
+              value: {{ .Values.global.keycloak.realm | quote }}
+            - name: KEYCLOAK_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN_PASSWORD
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              KCADM=/opt/keycloak/bin/kcadm.sh
+              ATTEMPTS=0
+              until "$KCADM" config credentials \
+                  --server "$KEYCLOAK_URL" --realm master \
+                  --user "$KEYCLOAK_ADMIN_USERNAME" \
+                  --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null 2>&1; do
+                ATTEMPTS=$((ATTEMPTS + 1))
+                if [ "$ATTEMPTS" -ge 60 ]; then
+                  echo 'ERROR: no Keycloak admin session for mail locale reconciliation' >&2
+                  exit 2
+                fi
+                sleep 5
+              done
+              unset KEYCLOAK_ADMIN_PASSWORD
+              export KCADM
+              {{- .Files.Get "files/keycloak-reconcile-mail-locales.sh.in" | nindent 14 }}
