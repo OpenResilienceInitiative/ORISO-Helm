@@ -12,6 +12,7 @@ BASE = [
     "-f", os.path.join(ROOT, "values.yaml.default"),
     "-f", os.path.join(ROOT, "tests", "fixtures", "values-render-domain.yaml"),
     "-f", os.path.join(ROOT, "secrets.yaml.default"),
+    "-f", os.path.join(ROOT, "tests", "fixtures", "render-required-secrets.yaml"),
     "--set-string", "global.secrets.redisdefaultPass=test-redis-password",
     "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
     "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
