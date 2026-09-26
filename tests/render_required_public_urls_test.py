@@ -182,6 +182,10 @@ def test_placeholder_or_malformed_domains_fail() -> None:
         "app.example.net",
         "app.example.test",
         "oriso.invalid",
+        "localhost",
+        "app.localhost",
+        "127.0.0.1",
+        "0.0.0.0",
         "https://dev.oriso.internal",
         "dev.oriso.internal/app",
         "dev.oriso.internal/",
@@ -210,6 +214,8 @@ def test_explicit_mail_url_placeholders_fail() -> None:
         ("magicLinkFrontendBaseUrl", "https://app.oriso.internal:70000"),
         ("magicLinkFrontendBaseUrl", "https://app.example.org"),
         ("accountInviteAdminFrontendBaseUrl", "https://admin.oriso.invalid"),
+        ("magicLinkFrontendBaseUrl", "https://localhost"),
+        ("passwordResetFrontendBaseUrl", "https://127.0.0.1"),
     ):
         proc = helm_template(
             "--set-string",

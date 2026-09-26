@@ -36,6 +36,9 @@ Usage: include "oriso.rejectUrlPlaceholder" (list "name" $value $host)
 {{- if or (eq $host "invalid") (hasSuffix ".invalid" $host) -}}
 {{- fail (printf "%s points at the reserved .invalid host %q, which is a placeholder. Set the real public value for this environment." $name $host) -}}
 {{- end -}}
+{{- if or (eq $host "localhost") (hasSuffix ".localhost" $host) (eq $host "0.0.0.0") (regexMatch "^127\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$" $host) -}}
+{{- fail (printf "%s points at the loopback host %q. Set a publicly reachable host for emailed links." $name $host) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
