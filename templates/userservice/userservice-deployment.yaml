@@ -599,6 +599,11 @@ spec:
                 configMapKeyRef:
                   key: TEAM_DISCUSSION_ARCHIVE_RETENTION_DAYS
                   name: userservice-configmap-env
+            - name: GROUP_APPOINTMENT_MAIL_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: GROUP_APPOINTMENT_MAIL_ENABLED
+                  name: userservice-configmap-env
             - name: SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI
               valueFrom:
                 configMapKeyRef:
