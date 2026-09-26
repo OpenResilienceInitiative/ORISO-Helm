@@ -25,6 +25,10 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SMTP_CREDENTIALS = (
     "--set-string",
+    "userService.smtpHost=smtp.render.oriso.internal",
+    "--set-string",
+    "userService.smtpFrom=ORISO Render <sender@render.oriso.internal>",
+    "--set-string",
     "userService.smtpUser=smtp-canary-user",
     "--set-string",
     "userService.smtpPassword=smtp-canary-password",
@@ -178,6 +182,17 @@ def test_placeholder_or_malformed_domains_fail() -> None:
         "app.example.net",
         "app.example.test",
         "oriso.invalid",
+        "localhost",
+        "localhost.",
+        "app.localhost",
+        "127.0.0.1",
+        "127.1",
+        "127.0.1",
+        "2130706433",
+        "0x7f.1",
+        "0x7f000001",
+        "0177.1",
+        "0.0.0.0",
         "https://dev.oriso.internal",
         "dev.oriso.internal/app",
         "dev.oriso.internal/",
@@ -196,6 +211,13 @@ def test_placeholder_or_malformed_domains_fail() -> None:
     print("PASS: placeholder, scheme, path and whitespace domains fail")
 
 
+def test_canonical_public_ipv4_remains_accepted() -> None:
+    rendered(
+        helm_template("--set-string", "global.domainName=8.8.8.8"),
+        "canonical public IPv4 host",
+    )
+
+
 def test_explicit_mail_url_placeholders_fail() -> None:
     for key, bad in (
         ("accountInviteAdminFrontendBaseUrl", "https://your-domain.example.com"),
@@ -206,6 +228,12 @@ def test_explicit_mail_url_placeholders_fail() -> None:
         ("magicLinkFrontendBaseUrl", "https://app.oriso.internal:70000"),
         ("magicLinkFrontendBaseUrl", "https://app.example.org"),
         ("accountInviteAdminFrontendBaseUrl", "https://admin.oriso.invalid"),
+        ("magicLinkFrontendBaseUrl", "https://localhost"),
+        ("magicLinkFrontendBaseUrl", "https://localhost."),
+        ("passwordResetFrontendBaseUrl", "https://127.0.0.1"),
+        ("passwordResetFrontendBaseUrl", "https://127.1"),
+        ("passwordResetFrontendBaseUrl", "https://2130706433"),
+        ("passwordResetFrontendBaseUrl", "https://0x7f000001"),
     ):
         proc = helm_template(
             "--set-string",

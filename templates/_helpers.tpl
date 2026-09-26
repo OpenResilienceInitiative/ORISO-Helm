@@ -36,6 +36,26 @@ Usage: include "oriso.rejectUrlPlaceholder" (list "name" $value $host)
 {{- if or (eq $host "invalid") (hasSuffix ".invalid" $host) -}}
 {{- fail (printf "%s points at the reserved .invalid host %q, which is a placeholder. Set the real public value for this environment." $name $host) -}}
 {{- end -}}
+{{/* Browsers normalize shortened, octal, hex and integer IPv4 forms. Accept only
+     canonical dotted decimal here so aliases such as 127.1 cannot bypass the
+     loopback check while ordinary public IPv4 addresses remain valid. */}}
+{{- if regexMatch "(?i)^(0x[0-9a-f]+|[0-9]+)(\\.(0x[0-9a-f]+|[0-9]+))*$" $host -}}
+{{- $parts := splitList "." $host -}}
+{{- if ne (len $parts) 4 -}}
+{{- fail (printf "%s has an ambiguous numeric host %q. Use a DNS name or canonical dotted-decimal IPv4 address." $name $host) -}}
+{{- end -}}
+{{- range $part := $parts -}}
+{{- if or (not (regexMatch "^(0|[1-9][0-9]{0,2})$" $part)) (gt (atoi $part) 255) -}}
+{{- fail (printf "%s has an ambiguous numeric host %q. Use a DNS name or canonical dotted-decimal IPv4 address." $name $host) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq (index $parts 0) "127" -}}
+{{- fail (printf "%s points at the loopback host %q. Set a publicly reachable host for emailed links." $name $host) -}}
+{{- end -}}
+{{- end -}}
+{{- if or (eq $host "localhost") (hasSuffix ".localhost" $host) (eq $host "0.0.0.0") -}}
+{{- fail (printf "%s points at the loopback host %q. Set a publicly reachable host for emailed links." $name $host) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

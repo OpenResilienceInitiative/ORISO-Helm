@@ -20,7 +20,8 @@ def render(*overrides, check=True):
             "-f", str(ROOT / "tests" / "fixtures" / "values-render-domain.yaml"),
             "-f", str(ROOT / "secrets.yaml.default"),
             "-f", str(ROOT / "tests" / "fixtures" / "render-required-secrets.yaml"),
-            "--set", "userService.smtpHost=",
+            "--set-string", "userService.smtpUser=smtp-canary-user",
+            "--set-string", "userService.smtpPassword=smtp-canary-password",
             *overrides,
         ],
         capture_output=True, text=True, check=False,
@@ -190,7 +191,8 @@ def test_the_technical_subject_has_no_default():
          "-f", str(ROOT / "tests" / "fixtures" / "values-render-domain.yaml"),
          "-f", str(ROOT / "secrets.yaml.default"),
          "--set-string", "global.secrets.keycloakServiceAdminPassword=a-real-one",
-         "--set", "userService.smtpHost="],
+         "--set-string", "userService.smtpUser=smtp-canary-user",
+         "--set-string", "userService.smtpPassword=smtp-canary-password"],
         capture_output=True, text=True, check=False,
     )
     assert result.returncode != 0

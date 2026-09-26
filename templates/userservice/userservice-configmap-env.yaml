@@ -65,14 +65,18 @@ data:
   PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL: {{ include "oriso.publicUrl" (list "userService.passwordResetAdminFrontendBaseUrl" .Values.userService.passwordResetAdminFrontendBaseUrl (printf "%s/admin" $origin)) | quote }}
   ACCOUNT_INVITE_APP_FRONTEND_BASE_URL: {{ include "oriso.publicUrl" (list "userService.accountInviteAppFrontendBaseUrl" .Values.userService.accountInviteAppFrontendBaseUrl $origin) | quote }}
   ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL: {{ include "oriso.publicUrl" (list "userService.accountInviteAdminFrontendBaseUrl" .Values.userService.accountInviteAdminFrontendBaseUrl $origin) | quote }}
-  # SMTP transport for the Magic Link and password-reset mails. UserService
-  # sends these itself over SMTP; the credentials live in userservice-secret
-  # because the platform-settings copy is only readable with a super-admin
-  # token, which the unauthenticated reset flow never has.
-  SMTP_HOST: {{ .Values.userService.smtpHost | default "" | quote }}
-  SMTP_PORT: {{ .Values.userService.smtpPort | default 587 | quote }}
-  SMTP_SECURE: {{ .Values.userService.smtpSecure | default false | quote }}
-  SMTP_FROM: {{ .Values.userService.smtpFrom | default "" | quote }}
+  # Required deployment-owned transport for UserService platform mail. The
+  # credentials live in userservice-secret. UserService#1253 tracks removal
+  # of the legacy Admin-stored transport source from the runtime.
+  SMTP_HOST: {{ required "userService.smtpHost is required for platform mail" .Values.userService.smtpHost | quote }}
+  SMTP_PORT: {{ required "userService.smtpPort is required for platform mail" .Values.userService.smtpPort | quote }}
+  {{- if not (hasKey .Values.userService "smtpSecure") }}
+  {{- fail "userService.smtpSecure is required for platform mail (false means mandatory STARTTLS; true means implicit TLS)" }}
+  {{- end }}
+  SMTP_SECURE: {{ .Values.userService.smtpSecure | quote }}
+  SMTP_FROM: {{ required "userService.smtpFrom is required for platform mail" .Values.userService.smtpFrom | quote }}
+  # UserService validates the complete deployment transport before serving requests.
+  SMTP_REQUIRED: "true"
   # CSRF
   CSRF_HEADER_PROPERTY: {{ .Values.global.csrfHeaderProperty}}
   CSRF_WHITELIST_HEADER_PROPERTY: {{ .Values.global.csrfWhitelistHeaderProperty}}

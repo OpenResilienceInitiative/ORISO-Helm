@@ -203,6 +203,8 @@ class CutoverReleasePreflightTest(unittest.TestCase):
                 str(CHART_DIR / "tests" / "fixtures" / "render-required-secrets.yaml"),
                 "--set-string",
                 "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
+                "--set-string", "userService.smtpUser=smtp-canary-user",
+                "--set-string", "userService.smtpPassword=smtp-canary-password",
                 "--set-string",
                 "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
                 "--set-string",

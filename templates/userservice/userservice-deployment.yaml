@@ -61,6 +61,11 @@ spec:
                 configMapKeyRef:
                   name: userservice-configmap-env
                   key: SMTP_FROM
+            - name: SMTP_REQUIRED
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: SMTP_REQUIRED
             - name: SMTP_USER
               valueFrom:
                 secretKeyRef:
