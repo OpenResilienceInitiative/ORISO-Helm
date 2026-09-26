@@ -149,12 +149,6 @@ spec:
               name: keycloak-theme-templates-styles
             - mountPath: /opt/keycloak/themes/custom-theme/login/resources/fonts/Nunito
               name: keycloak-theme-templates-fonts
-            - mountPath: /opt/keycloak/themes/custom-theme/email/messages
-              name: keycloak-theme-email-messages
-            - mountPath: /opt/keycloak/themes/custom-theme/email/html
-              name: keycloak-theme-email-html
-            - mountPath: /opt/keycloak/themes/custom-theme/email/text
-              name: keycloak-theme-email-text
             - mountPath: /opt/keycloak/data/import
               name: keycloak-full-dump
       volumes:
@@ -170,15 +164,6 @@ spec:
         - name: keycloak-theme-templates-fonts
           configMap:
             name: keycloak-configmap-theme-templates-fonts
-        - name: keycloak-theme-email-html
-          configMap:
-            name: keycloak-configmap-theme-email-html
-        - name: keycloak-theme-email-text
-          configMap:
-            name: keycloak-configmap-theme-email-text
-        - name: keycloak-theme-email-messages
-          configMap:
-            name: keycloak-configmap-theme-email-messages
         - name: keycloak-full-dump
           configMap:
             name: keycloak-configmap-data

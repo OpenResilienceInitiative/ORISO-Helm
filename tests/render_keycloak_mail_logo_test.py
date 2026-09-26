@@ -27,6 +27,7 @@ def render(*extra_args: str) -> list[dict]:
             "-f", os.path.join(CHART_DIR, "values.yaml.default"),
             "-f", os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
             "-f", os.path.join(CHART_DIR, "secrets.yaml.default"),
+            "-f", os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
             "--set-string", "global.secrets.redisdefaultPass=test-redis-password",
             "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
             "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
