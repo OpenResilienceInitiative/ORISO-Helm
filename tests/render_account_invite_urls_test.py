@@ -65,6 +65,8 @@ def render(extra_set_strings: dict[str, str] | None = None) -> list[dict]:
         os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
         "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
+        "-f",
+        os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
     ]
     for key, value in (extra_set_strings or {}).items():
         cmd += ["--set-string", f"{key}={value}"]

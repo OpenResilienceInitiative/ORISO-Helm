@@ -32,6 +32,8 @@ def run_helm(*extra_args: str) -> subprocess.CompletedProcess[str]:
             os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
             "-f",
             os.path.join(CHART_DIR, "secrets.yaml.default"),
+            "-f",
+            os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
             "--set-string",
             "global.secrets.redisdefaultPass=test-redis-password",
             "--set-string",
