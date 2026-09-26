@@ -2,7 +2,7 @@
 # Complements values.yaml.default; no environment secrets are loaded by the test.
 global:
   keycloak:
-    serviceTechUserId: render-only-not-a-real-secret
+    serviceTechUserId: 00000000-0000-4000-8000-000000000000
   secrets:
     liquibaseUser: render-only-not-a-real-secret
     liquibasePassword: render-only-not-a-real-secret
@@ -28,6 +28,8 @@ global:
     matrixRegistrationSharedSecret: render-only-not-a-real-secret
     keycloakAdminUsername: render-only-not-a-real-secret
     keycloakAdminPassword: render-only-not-a-real-secret
+    keycloakServiceAdminUsername: render-only-not-a-real-secret
+    keycloakServiceAdminPassword: render-only-not-a-real-secret
   matrix:
     matrixAdminUsername: render-only-not-a-real-secret
     matrixAdminPassword: render-only-not-a-real-secret
@@ -59,8 +61,6 @@ consultingTypeService:
 agencyService:
   serviceEncryptionAppkey: render-only-not-a-real-secret
 userService:
-  keycloakTechnicalUsername: render-only-not-a-real-secret
-  keycloakTechnicalPassword: render-only-not-a-real-secret
   serviceEncryptionAppkey: render-only-not-a-real-secret
   statisticsMessageCountHmacSecret: render-only-not-a-real-secret
   matrixRtcCallPolicyHmacSecret: render-only-not-a-real-secret

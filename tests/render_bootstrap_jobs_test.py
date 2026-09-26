@@ -20,6 +20,8 @@ def render_chart():
             str(ROOT / "tests" / "fixtures" / "values-render-domain.yaml"),
             "-f",
             str(ROOT / "secrets.yaml.default"),
+            "-f",
+            str(ROOT / "tests" / "fixtures" / "render-required-secrets.yaml"),
             "--set",
             "userService.smtpHost=",
         ],
