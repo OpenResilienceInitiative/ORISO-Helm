@@ -67,7 +67,6 @@ PUBLIC_URL_KEYS_BY_CONFIGMAP = {
     "userservice-configmap-env": USERSERVICE_PUBLIC_URL_KEYS,
     "consultingtypeservice-configmap-env": ("APP_BASE_URL", "DPA_SIGN_FRONTEND_BASE_URL"),
     "tenantservice-configmap-env": ("APP_BASE_URL",),
-    "agencyservice-configmap-env": ("APP_BASE_URL",),
     "keycloak-configmap-env": ("KEYCLOAK_HOSTNAME", "ORISO_APP_BASE_URL"),
     "frontend-configmap": (
         "REACT_APP_API_URL",
@@ -117,6 +116,8 @@ def helm_template(*args: str) -> subprocess.CompletedProcess:
             os.path.join(CHART_DIR, "values.yaml.default"),
             "-f",
             os.path.join(CHART_DIR, "secrets.yaml.default"),
+            "-f",
+            os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
             *SMTP_CREDENTIALS,
             *MATRIX_IDENTITY,
             *args,

@@ -33,6 +33,8 @@ def render_chart(extra_args=()):
             str(ROOT / "tests" / "fixtures" / "values-render-domain.yaml"),
             "-f",
             str(ROOT / "secrets.yaml.default"),
+            "-f",
+            str(ROOT / "tests" / "fixtures" / "render-required-secrets.yaml"),
             "--set-string",
             "global.secrets.redisdefaultPass=test-redis-password",
             "--set-string",

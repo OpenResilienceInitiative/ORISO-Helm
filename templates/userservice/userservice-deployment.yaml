@@ -252,16 +252,6 @@ spec:
                 secretKeyRef:
                   key: KEYCLOAK_CONFIG_ADMIN_USERNAME
                   name: userservice-secret
-            - name: KEYCLOAKSERVICE_TECHNICAL_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  key: KEYCLOAKSERVICE_TECHNICAL_PASSWORD
-                  name: userservice-secret
-            - name: KEYCLOAKSERVICE_TECHNICAL_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  key: KEYCLOAKSERVICE_TECHNICAL_USERNAME
-                  name: userservice-secret
             - name: IDENTITY_TECHNICAL_USER_USERNAME
               valueFrom:
                 secretKeyRef:
