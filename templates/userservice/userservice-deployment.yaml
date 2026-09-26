@@ -571,6 +571,17 @@ spec:
                 configMapKeyRef:
                   key: MATRIX_MIGRATION_ENABLED
                   name: userservice-configmap-env
+            # ADR-020 P2 feed-update signal.
+            - name: MATRIX_FEED_SIGNAL_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: MATRIX_FEED_SIGNAL_ENABLED
+                  name: userservice-configmap-env
+            - name: MATRIX_FEED_SIGNAL_COALESCE_MILLIS
+              valueFrom:
+                configMapKeyRef:
+                  key: MATRIX_FEED_SIGNAL_COALESCE_MILLIS
+                  name: userservice-configmap-env
             # ADR-018 Global Support Access. Only the policy-bearing settings are wired here; the
             # worker tuning knobs stay on their code defaults so this list keeps stating decisions
             # rather than implementation detail.
