@@ -101,6 +101,7 @@ jobs:
           if helm template oriso . -f values.yaml.default -f secrets.yaml.default \
             --set-string userService.smtpUser=smtp-validation-user \
             --set-string userService.smtpPassword=smtp-validation-password \
+            -f tests/fixtures/render-required-secrets.yaml \
             >/dev/null 2>/tmp/oriso-no-domain.err; then
             echo "helm template rendered without global.domainName"; exit 1
           fi
