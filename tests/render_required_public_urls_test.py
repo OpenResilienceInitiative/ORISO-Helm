@@ -25,6 +25,10 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SMTP_CREDENTIALS = (
     "--set-string",
+    "userService.smtpHost=smtp.render.oriso.internal",
+    "--set-string",
+    "userService.smtpFrom=ORISO Render <sender@render.oriso.internal>",
+    "--set-string",
     "userService.smtpUser=smtp-canary-user",
     "--set-string",
     "userService.smtpPassword=smtp-canary-password",

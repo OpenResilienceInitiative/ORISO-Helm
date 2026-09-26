@@ -1,0 +1,45 @@
+#!/bin/sh
+# Keycloak imports realm.json only for new realms. Reconcile SMTP on every
+# install/upgrade so OTP mail uses the same deployment-owned source as UserService.
+set -eu
+
+KCADM="${KCADM:-/opt/keycloak/bin/kcadm.sh}"
+: "${KEYCLOAK_REALM:?KEYCLOAK_REALM is required}"
+: "${SMTP_HOST:?SMTP_HOST is required for Keycloak mail}"
+: "${SMTP_PORT:?SMTP_PORT is required for Keycloak mail}"
+: "${SMTP_SECURE:?SMTP_SECURE is required for Keycloak mail}"
+: "${SMTP_FROM:?SMTP_FROM is required for Keycloak mail}"
+: "${SMTP_USER:?SMTP_USER is required for Keycloak mail}"
+: "${SMTP_PASSWORD:?SMTP_PASSWORD is required for Keycloak mail}"
+
+case "$SMTP_SECURE" in
+  true) smtp_ssl=true; smtp_starttls=false ;;
+  false) smtp_ssl=false; smtp_starttls=true ;;
+  *) echo 'ERROR: SMTP_SECURE must be true or false' >&2; exit 2 ;;
+esac
+
+case "$SMTP_FROM" in
+  *'<'*'>' )
+    smtp_from=${SMTP_FROM##*<}
+    smtp_from=${smtp_from%>}
+    smtp_from_name=${SMTP_FROM%%<*}
+    smtp_from_name=$(printf '%s' "$smtp_from_name" | sed 's/[[:space:]]*$//')
+    ;;
+  *) smtp_from=$SMTP_FROM; smtp_from_name='' ;;
+esac
+case "$smtp_from" in
+  *@*.*) ;;
+  *) echo 'ERROR: SMTP_FROM must contain an email address' >&2; exit 2 ;;
+esac
+
+"$KCADM" update "realms/${KEYCLOAK_REALM}" \
+  -s "smtpServer.host=${SMTP_HOST}" \
+  -s "smtpServer.port=${SMTP_PORT}" \
+  -s "smtpServer.ssl=${smtp_ssl}" \
+  -s "smtpServer.starttls=${smtp_starttls}" \
+  -s 'smtpServer.auth=true' \
+  -s "smtpServer.from=${smtp_from}" \
+  -s "smtpServer.fromDisplayName=${smtp_from_name}" \
+  -s "smtpServer.user=${SMTP_USER}" \
+  -s "smtpServer.password=${SMTP_PASSWORD}" >/dev/null
+echo 'reconciled Keycloak SMTP from deployment settings'
