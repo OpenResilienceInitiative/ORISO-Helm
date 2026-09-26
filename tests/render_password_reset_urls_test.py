@@ -227,19 +227,19 @@ def assert_smtp_credentials_gate(label: str, app_url: str, admin_url: str) -> No
     credential is omitted independently so a regression from ``or`` to ``and``
     in the template condition cannot slip through.
     """
-    cases = {
-        "without either SMTP credential": {"smtp_user": None, "smtp_password": None},
-        "with only smtpUser missing": {"smtp_user": None},
-        "with only smtpPassword missing": {"smtp_password": None},
-    }
-    for case_label, overrides in cases.items():
+    cases = (
+        ("without either SMTP credential", {"smtp_user": None, "smtp_password": None}, "userService.smtpUser"),
+        ("with only smtpUser missing", {"smtp_user": None}, "userService.smtpUser"),
+        ("with only smtpPassword missing", {"smtp_password": None}, "userService.smtpPassword"),
+    )
+    for case_label, overrides, missing_field in cases:
         proc = render_environment(app_url, admin_url, **overrides)
         assert (
             proc.returncode != 0
         ), f"{label} values rendered {case_label} — the gate must fail this render"
-        assert "smtpUser/smtpPassword" in proc.stderr, (
-            f"render failure for {label} {case_label} did not mention the "
-            f"missing SMTP credentials:\n{proc.stderr}"
+        assert missing_field in proc.stderr, (
+            f"render failure for {label} {case_label} did not identify "
+            f"{missing_field}:\n{proc.stderr}"
         )
         print(f"PASS: explicit {label} values {case_label} fail the render gate")
 
