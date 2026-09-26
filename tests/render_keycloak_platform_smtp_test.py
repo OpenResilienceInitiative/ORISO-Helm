@@ -45,7 +45,7 @@ def main():
 
     for name in ("smtpHost", "smtpFrom", "smtpUser", "smtpPassword"):
         result, _ = render("--set-string", f"userService.{name}=")
-        expected = "smtpUser/smtpPassword" if name == "smtpPassword" else f"userService.{name}"
+        expected = f"userService.{name}"
         assert result.returncode != 0 and expected in result.stderr, (name, result.stderr)
     print("PASS: Keycloak SMTP hook uses platform config and refuses missing fields")
 
