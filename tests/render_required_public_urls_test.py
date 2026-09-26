@@ -185,6 +185,11 @@ def test_placeholder_or_malformed_domains_fail() -> None:
         "localhost",
         "app.localhost",
         "127.0.0.1",
+        "127.1",
+        "127.0.1",
+        "2130706433",
+        "0x7f.1",
+        "0177.1",
         "0.0.0.0",
         "https://dev.oriso.internal",
         "dev.oriso.internal/app",
@@ -204,6 +209,13 @@ def test_placeholder_or_malformed_domains_fail() -> None:
     print("PASS: placeholder, scheme, path and whitespace domains fail")
 
 
+def test_canonical_public_ipv4_remains_accepted() -> None:
+    rendered(
+        helm_template("--set-string", "global.domainName=8.8.8.8"),
+        "canonical public IPv4 host",
+    )
+
+
 def test_explicit_mail_url_placeholders_fail() -> None:
     for key, bad in (
         ("accountInviteAdminFrontendBaseUrl", "https://your-domain.example.com"),
@@ -216,6 +228,8 @@ def test_explicit_mail_url_placeholders_fail() -> None:
         ("accountInviteAdminFrontendBaseUrl", "https://admin.oriso.invalid"),
         ("magicLinkFrontendBaseUrl", "https://localhost"),
         ("passwordResetFrontendBaseUrl", "https://127.0.0.1"),
+        ("passwordResetFrontendBaseUrl", "https://127.1"),
+        ("passwordResetFrontendBaseUrl", "https://2130706433"),
     ):
         proc = helm_template(
             "--set-string",
