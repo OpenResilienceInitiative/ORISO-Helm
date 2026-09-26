@@ -27,6 +27,8 @@ def render() -> list[dict]:
             os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
             "-f",
             os.path.join(CHART_DIR, "secrets.yaml.default"),
+            "-f",
+            os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
             "--set-string",
             "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
             "--set-string",

@@ -168,11 +168,6 @@ spec:
                 configMapKeyRef:
                   key: JAVA_OPTS
                   name: agencyservice-configmap-env
-            - name: APP_BASE_URL
-              valueFrom:
-                configMapKeyRef:
-                  key: APP_BASE_URL
-                  name: agencyservice-configmap-env
             - name: USER_ADMIN_SERVICE_API_URL
               valueFrom:
                 configMapKeyRef:

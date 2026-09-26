@@ -1,16 +1,11 @@
-{{- $bootstrapUsers := default (dict) .Values.global.keycloak.bootstrapUsers -}}
-{{- $bootstrapEnabled := true -}}
-{{- if hasKey $bootstrapUsers "enabled" -}}
-{{- $bootstrapEnabled = $bootstrapUsers.enabled -}}
-{{- end -}}
-{{- if $bootstrapEnabled }}
 {{- $kc := index .Values "online-counseling-keycloak" -}}
-{{- $serviceAdminConfigured := or .Values.global.secrets.keycloakServiceAdminUsername .Values.global.secrets.keycloakServiceAdminPassword -}}
 {{- /* Service identities (ORISO-Helm#367) are reconciled on EVERY install and
      upgrade: `--import-realm` skips existing realms, so a role change in
-     realm.json alone never reaches an existing environment. Unlike
-     keycloak-bootstrap-users this job never touches realmadmin, and it only
-     converges the identities listed in the script to their exact role sets. */ -}}
+     realm.json alone never reaches an existing environment. Rendered
+     regardless of bootstrapUsers.enabled: the UserService always calls as the
+     backend admin identity, so that identity must exist with its roles. This
+     job never touches realmadmin and only converges the identities in the
+     script to their exact role sets. */ -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -48,18 +43,31 @@ spec:
                 secretKeyRef:
                   name: keycloak-secret-env
                   key: KEYCLOAK_ADMIN_PASSWORD
-            {{- if $serviceAdminConfigured }}
+            - name: BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN
             - name: SERVICE_ADMIN_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: userservice-secret
-                  key: KEYCLOAK_SERVICE_ADMIN_USERNAME
+                  key: KEYCLOAK_CONFIG_ADMIN_USERNAME
             - name: SERVICE_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: userservice-secret
-                  key: KEYCLOAK_SERVICE_ADMIN_PASSWORD
-            {{- end }}
+                  key: KEYCLOAK_CONFIG_ADMIN_PASSWORD
+            - name: TECHNICAL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: userservice-secret
+                  key: IDENTITY_TECHNICAL_USER_USERNAME
+            - name: TECHNICAL_SERVICE_SUBJECT
+              valueFrom:
+                configMapKeyRef:
+                  name: tenantservice-configmap-env
+                  key: TECHNICAL_SERVICE_SUBJECT
           command:
             - /bin/sh
             - -ec
@@ -84,4 +92,3 @@ spec:
               export KCADM
 
               {{- .Files.Get "files/keycloak-reconcile-service-identities.sh.in" | nindent 14 }}
-{{- end }}

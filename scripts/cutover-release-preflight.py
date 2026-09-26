@@ -262,11 +262,17 @@ def verify_render(chart_dir: pathlib.Path, values: dict) -> None:
                 "-f",
                 str(chart_dir / "values.yaml.default"),
                 "-f",
+                str(chart_dir / "tests" / "fixtures" / "values-render-domain.yaml"),
+                "-f",
                 str(chart_dir / "secrets.yaml.default"),
+                "-f",
+                str(chart_dir / "tests" / "fixtures" / "render-required-secrets.yaml"),
                 "-f",
                 overlay.name,
                 "--set-string",
                 "global.secrets.redisdefaultPass=test-redis-password",
+                "--set-string", "userService.smtpUser=smtp-canary-user",
+                "--set-string", "userService.smtpPassword=smtp-canary-password",
                 # Image-only dry render: the chart requires a real public host
                 # (ORISO-Helm#366), which this check does not inspect.
                 "--set-string",
