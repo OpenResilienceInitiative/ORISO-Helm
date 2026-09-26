@@ -47,6 +47,14 @@ def render(admin_url: str = ADMIN_URL) -> list[dict]:
             "userService.smtpUser=smtp-canary-user",
             "--set-string",
             "userService.smtpPassword=smtp-canary-password",
+            "--set-string",
+            "userService.smtpHost=smtp.canary.example",
+            "--set-string",
+            "userService.smtpPort=587",
+            "--set-string",
+            "userService.smtpSecure=false",
+            "--set-string",
+            "userService.smtpFrom=sender@canary.example",
         ],
         capture_output=True,
         text=True,
@@ -62,6 +70,8 @@ def render_environment(
     *,
     smtp_user: str | None = "smtp-canary-user",
     smtp_password: str | None = "smtp-canary-password",
+    smtp_host: str = "mail.dreambau.com",
+    smtp_from: str = SMTP_FROM,
 ) -> subprocess.CompletedProcess:
     """Render explicit environment values; pass ``None`` to omit a credential.
 
@@ -86,9 +96,13 @@ def render_environment(
         "--set-string",
         f"userService.passwordResetAdminFrontendBaseUrl={admin_url}",
         "--set-string",
-        "userService.smtpHost=mail.dreambau.com",
+        f"userService.smtpHost={smtp_host}",
         "--set-string",
-        f"userService.smtpFrom={SMTP_FROM}",
+        f"userService.smtpFrom={smtp_from}",
+        "--set-string",
+        "userService.smtpPort=587",
+        "--set-string",
+        "userService.smtpSecure=false",
     ]
     if smtp_user is not None:
         args += ["--set-string", f"userService.smtpUser={smtp_user}"]
@@ -150,6 +164,7 @@ def assert_smtp_wiring_renders(
             key in data
         ), f"{label} values must render {key} into the UserService ConfigMap"
     assert data["SMTP_FROM"] == expected_from
+    assert data["SMTP_REQUIRED"] == "true", "platform mail must fail startup if SMTP is incomplete"
 
     secret = next(
         (
@@ -184,6 +199,7 @@ def assert_smtp_wiring_renders(
         "SMTP_PORT",
         "SMTP_SECURE",
         "SMTP_FROM",
+        "SMTP_REQUIRED",
         "SMTP_USER",
         "SMTP_PASSWORD",
     } - env_entries.keys()
@@ -211,21 +227,32 @@ def assert_smtp_credentials_gate(label: str, app_url: str, admin_url: str) -> No
     credential is omitted independently so a regression from ``or`` to ``and``
     in the template condition cannot slip through.
     """
-    cases = {
-        "without either SMTP credential": {"smtp_user": None, "smtp_password": None},
-        "with only smtpUser missing": {"smtp_user": None},
-        "with only smtpPassword missing": {"smtp_password": None},
-    }
-    for case_label, overrides in cases.items():
+    cases = (
+        ("without either SMTP credential", {"smtp_user": None, "smtp_password": None}, "userService.smtpUser"),
+        ("with only smtpUser missing", {"smtp_user": None}, "userService.smtpUser"),
+        ("with only smtpPassword missing", {"smtp_password": None}, "userService.smtpPassword"),
+    )
+    for case_label, overrides, missing_field in cases:
         proc = render_environment(app_url, admin_url, **overrides)
         assert (
             proc.returncode != 0
         ), f"{label} values rendered {case_label} — the gate must fail this render"
-        assert "smtpUser/smtpPassword" in proc.stderr, (
-            f"render failure for {label} {case_label} did not mention the "
-            f"missing SMTP credentials:\n{proc.stderr}"
+        assert missing_field in proc.stderr, (
+            f"render failure for {label} {case_label} did not identify "
+            f"{missing_field}:\n{proc.stderr}"
         )
         print(f"PASS: explicit {label} values {case_label} fail the render gate")
+
+
+def assert_smtp_transport_gate(label: str, app_url: str, admin_url: str) -> None:
+    for field, override in (
+        ("smtpHost", {"smtp_host": ""}),
+        ("smtpFrom", {"smtp_from": ""}),
+    ):
+        proc = render_environment(app_url, admin_url, **override)
+        assert proc.returncode != 0, f"{label} values rendered without userService.{field}"
+        assert f"userService.{field}" in proc.stderr, proc.stderr
+        print(f"PASS: explicit {label} values without {field} fail the render gate")
 
 
 def main() -> None:
@@ -268,6 +295,7 @@ def main() -> None:
         assert_environment_configures_reset_urls(label, app_url, admin_url)
         assert_smtp_wiring_renders(label, app_url, admin_url, SMTP_FROM)
         assert_smtp_credentials_gate(label, app_url, admin_url)
+        assert_smtp_transport_gate(label, app_url, admin_url)
 
 
 if __name__ == "__main__":

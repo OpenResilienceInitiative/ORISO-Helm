@@ -324,6 +324,11 @@ consultingTypeService:
 
 # Tenant Service
 tenantService:
+  # Pins for TenantService's constrained OWN-server system-mail endpoint.
+  # Blank values deny every call. Operators set the actual Keycloak user `sub`
+  # and token `azp` from the environment before enabling OWN-server delivery.
+  systemEmailDeliveryServiceSubject: ""
+  systemEmailDeliveryServiceClient: ""
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
   imageVersion: "dev"
@@ -399,7 +404,8 @@ userService:
   passwordResetFrontendBaseUrl: ""
   passwordResetAdminFrontendBaseUrl: ""
 
-  # SMTP is environment-owned; setting a host requires credentials in secrets.
+  # Platform SMTP is environment-owned and required for account mail. Supply
+  # host/from here or in the environment overlay, and credentials in secrets.
   smtpHost: ""
   smtpPort: 587
   smtpSecure: false

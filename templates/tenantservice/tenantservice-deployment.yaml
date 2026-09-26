@@ -55,6 +55,16 @@ spec:
               secretKeyRef:
                 key: SETTINGS_SMTP_PASSWORD_ENCRYPTION_SECRET
                 name: tenantservice-secret
+          - name: SYSTEM_EMAIL_DELIVERY_SERVICE_SUBJECT
+            valueFrom:
+              configMapKeyRef:
+                key: SYSTEM_EMAIL_DELIVERY_SERVICE_SUBJECT
+                name: tenantservice-configmap-env
+          - name: SYSTEM_EMAIL_DELIVERY_SERVICE_CLIENT
+            valueFrom:
+              configMapKeyRef:
+                key: SYSTEM_EMAIL_DELIVERY_SERVICE_CLIENT
+                name: tenantservice-configmap-env
           - name: KEYCLOAK_AUTH_SERVER_URL
             valueFrom:
               configMapKeyRef:
