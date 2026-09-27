@@ -64,11 +64,11 @@ spec:
             - -ec
             - |
               KCADM=/opt/keycloak/bin/kcadm.sh
+              export KC_CLI_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD"
               ATTEMPTS=0
               until "$KCADM" config credentials \
                   --server "$KEYCLOAK_URL" --realm master \
-                  --user "$KEYCLOAK_ADMIN_USERNAME" \
-                  --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null 2>&1; do
+                  --user "$KEYCLOAK_ADMIN_USERNAME" >/dev/null 2>&1; do
                 ATTEMPTS=$((ATTEMPTS + 1))
                 if [ "$ATTEMPTS" -ge 60 ]; then
                   echo 'ERROR: no Keycloak admin session for SMTP reconciliation' >&2
@@ -77,5 +77,6 @@ spec:
                 sleep 5
               done
               unset KEYCLOAK_ADMIN_PASSWORD
+              unset KC_CLI_PASSWORD
               export KCADM
               {{- .Files.Get "files/keycloak-reconcile-smtp.sh.in" | nindent 14 }}

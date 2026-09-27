@@ -32,14 +32,34 @@ case "$smtp_from" in
   *) echo 'ERROR: SMTP_FROM must contain an email address' >&2; exit 2 ;;
 esac
 
-"$KCADM" update "realms/${KEYCLOAK_REALM}" \
-  -s "smtpServer.host=${SMTP_HOST}" \
-  -s "smtpServer.port=${SMTP_PORT}" \
-  -s "smtpServer.ssl=${smtp_ssl}" \
-  -s "smtpServer.starttls=${smtp_starttls}" \
-  -s 'smtpServer.auth=true' \
-  -s "smtpServer.from=${smtp_from}" \
-  -s "smtpServer.fromDisplayName=${smtp_from_name}" \
-  -s "smtpServer.user=${SMTP_USER}" \
-  -s "smtpServer.password=${SMTP_PASSWORD}" >/dev/null
+# Environment values may contain quotes or backslashes. Refuse control bytes
+# and encode the remaining values as JSON without putting either secret in argv.
+for value in "$SMTP_HOST" "$SMTP_PORT" "$smtp_from" "$smtp_from_name" "$SMTP_USER" "$SMTP_PASSWORD"; do
+  case "$value" in
+    *'
+'*) echo 'ERROR: SMTP configuration contains a newline' >&2; exit 2 ;;
+  esac
+  if [ -n "$(printf '%s' "$value" | LC_ALL=C sed -n '/[[:cntrl:]]/p')" ]; then
+    echo 'ERROR: SMTP configuration contains a control character' >&2
+    exit 2
+  fi
+done
+
+json_string() {
+  printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+}
+
+{
+  printf '{"smtpServer":{'
+  printf '"host":'; json_string "$SMTP_HOST"; printf ','
+  printf '"port":'; json_string "$SMTP_PORT"; printf ','
+  printf '"ssl":'; json_string "$smtp_ssl"; printf ','
+  printf '"starttls":'; json_string "$smtp_starttls"; printf ','
+  printf '"auth":"true",'
+  printf '"from":'; json_string "$smtp_from"; printf ','
+  printf '"fromDisplayName":'; json_string "$smtp_from_name"; printf ','
+  printf '"user":'; json_string "$SMTP_USER"; printf ','
+  printf '"password":'; json_string "$SMTP_PASSWORD"
+  printf '}}'
+} | "$KCADM" update "realms/${KEYCLOAK_REALM}" -f - >/dev/null
 echo 'reconciled Keycloak SMTP from deployment settings'

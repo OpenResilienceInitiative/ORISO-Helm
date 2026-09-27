@@ -392,6 +392,7 @@ def main() -> None:
     test_prod_overlay_requires_domain_at_install()
     test_prod_overlay_names_no_oriso_host()
     test_matrix_identity_placeholders_fail()
+    test_canonical_public_ipv4_remains_accepted()
     test_dev_mail_links_derive_from_domain()
     test_derived_admin_reset_url_carries_admin_prefix()
     test_non_tls_flips_the_scheme()
