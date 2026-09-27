@@ -42,6 +42,10 @@ def main():
     for name in ("SMTP_USER", "SMTP_PASSWORD"):
         assert env[name]["secretKeyRef"] == {"name": "userservice-secret", "key": name}
     assert "canary-password" not in result.stdout
+    command = job["spec"]["template"]["spec"]["containers"][0]["command"][-1]
+    assert 'export KC_CLI_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD"' in command
+    assert '--password "$KEYCLOAK_ADMIN_PASSWORD"' not in command
+    assert 'update "realms/${KEYCLOAK_REALM}" -f -' in command
 
     for name in ("smtpHost", "smtpFrom", "smtpUser", "smtpPassword"):
         result, _ = render("--set-string", f"userService.{name}=")

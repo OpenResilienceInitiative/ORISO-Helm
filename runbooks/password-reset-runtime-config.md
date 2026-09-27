@@ -61,9 +61,20 @@ missing.
 
 ## SMTP transport
 
-UserService sends the reset mail itself over SMTP. Until now the maintained
-chart rendered no SMTP configuration at all, so a Helm-deployed environment
-could never send one. The chart now renders:
+The chart renders the deployment-owned platform SMTP transport for Keycloak
+one-time codes and UserService mail after its provider migration. The current
+Dev password-reset and sign-in-link paths still read separate
+ConsultingTypeService settings until UserService PR #1279 merges and deploys.
+Check the source used by each mail flow, not only whether the chart renders.
+
+| Mail flow | SMTP source to verify |
+|---|---|
+| Keycloak one-time code | Platform settings below, reconciled into the realm by this chart |
+| UserService invitations and DPA notices after PR #1273 | Platform settings below |
+| Password reset and sign-in links on current Dev | ConsultingTypeService settings under **Global SMTP settings** below |
+| Password reset and sign-in links after PR #1279 deploys | Platform settings below |
+
+The chart renders these platform transport keys:
 
 | Key | Source | Value |
 |---|---|---|
