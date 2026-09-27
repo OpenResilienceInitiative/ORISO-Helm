@@ -1,0 +1,81 @@
+{{- $kc := index .Values "online-counseling-keycloak" -}}
+{{- $smtp := .Values.userService -}}
+{{- $_ := required "userService.smtpHost is required for Keycloak mail" $smtp.smtpHost -}}
+{{- $_ := required "userService.smtpPort is required for Keycloak mail" $smtp.smtpPort -}}
+{{- if not (hasKey $smtp "smtpSecure") -}}
+{{- fail "userService.smtpSecure is required for Keycloak mail" -}}
+{{- end -}}
+{{- $_ := required "userService.smtpFrom is required for Keycloak mail" $smtp.smtpFrom -}}
+{{- $_ := required "userService.smtpUser is required for Keycloak mail" $smtp.smtpUser -}}
+{{- $_ := required "userService.smtpPassword is required for Keycloak mail" $smtp.smtpPassword -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-reconcile-smtp
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "16"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: keycloak-reconcile-smtp
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: reconcile-smtp
+          image: "{{ $kc.imageName }}:{{ $kc.imageVersion }}"
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          env:
+            - name: KEYCLOAK_URL
+              value: {{ include "oriso.keycloakAdminUrl" . | quote }}
+            - name: KEYCLOAK_REALM
+              value: {{ .Values.global.keycloak.realm | quote }}
+            - name: KEYCLOAK_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN_PASSWORD
+            {{- range $name := list "SMTP_HOST" "SMTP_PORT" "SMTP_SECURE" "SMTP_FROM" }}
+            - name: {{ $name }}
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: {{ $name }}
+            {{- end }}
+            {{- range $name := list "SMTP_USER" "SMTP_PASSWORD" }}
+            - name: {{ $name }}
+              valueFrom:
+                secretKeyRef:
+                  name: userservice-secret
+                  key: {{ $name }}
+            {{- end }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              KCADM=/opt/keycloak/bin/kcadm.sh
+              ATTEMPTS=0
+              until "$KCADM" config credentials \
+                  --server "$KEYCLOAK_URL" --realm master \
+                  --user "$KEYCLOAK_ADMIN_USERNAME" \
+                  --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null 2>&1; do
+                ATTEMPTS=$((ATTEMPTS + 1))
+                if [ "$ATTEMPTS" -ge 60 ]; then
+                  echo 'ERROR: no Keycloak admin session for SMTP reconciliation' >&2
+                  exit 2
+                fi
+                sleep 5
+              done
+              unset KEYCLOAK_ADMIN_PASSWORD
+              export KCADM
+              {{- .Files.Get "files/keycloak-reconcile-smtp.sh.in" | nindent 14 }}

@@ -72,6 +72,8 @@ def render_environment(
     smtp_password: str | None = "smtp-canary-password",
     smtp_host: str = "mail.dreambau.com",
     smtp_from: str = SMTP_FROM,
+    smtp_port: str = "587",
+    smtp_secure: str = "false",
 ) -> subprocess.CompletedProcess:
     """Render explicit environment values; pass ``None`` to omit a credential.
 
@@ -100,9 +102,9 @@ def render_environment(
         "--set-string",
         f"userService.smtpFrom={smtp_from}",
         "--set-string",
-        "userService.smtpPort=587",
+        f"userService.smtpPort={smtp_port}",
         "--set-string",
-        "userService.smtpSecure=false",
+        f"userService.smtpSecure={smtp_secure}",
     ]
     if smtp_user is not None:
         args += ["--set-string", f"userService.smtpUser={smtp_user}"]
@@ -245,14 +247,22 @@ def assert_smtp_credentials_gate(label: str, app_url: str, admin_url: str) -> No
 
 
 def assert_smtp_transport_gate(label: str, app_url: str, admin_url: str) -> None:
+    implicit_tls = render_environment(
+        app_url, admin_url, smtp_port="465", smtp_secure="true"
+    )
+    assert implicit_tls.returncode == 0, implicit_tls.stderr
     for field, override in (
         ("smtpHost", {"smtp_host": ""}),
         ("smtpFrom", {"smtp_from": ""}),
+        ("smtpPort", {"smtp_port": "0"}),
+        ("smtpPort", {"smtp_port": "65536"}),
+        ("smtpPort", {"smtp_port": "not-a-port"}),
+        ("smtpSecure", {"smtp_secure": "maybe"}),
     ):
         proc = render_environment(app_url, admin_url, **override)
-        assert proc.returncode != 0, f"{label} values rendered without userService.{field}"
+        assert proc.returncode != 0, f"{label} values rendered invalid userService.{field}"
         assert f"userService.{field}" in proc.stderr, proc.stderr
-        print(f"PASS: explicit {label} values without {field} fail the render gate")
+        print(f"PASS: explicit {label} values with invalid {field} fail the render gate")
 
 
 def main() -> None:
