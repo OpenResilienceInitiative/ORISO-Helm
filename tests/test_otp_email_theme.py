@@ -1,3 +1,4 @@
+import json
 import subprocess
 import unittest
 from pathlib import Path
@@ -9,7 +10,7 @@ CHART_ROOT = Path(__file__).resolve().parents[1]
 
 
 class OtpEmailThemeTest(unittest.TestCase):
-    def test_rendered_keycloak_email_theme_keeps_otp_readable_and_selectable(self):
+    def test_rendered_keycloak_uses_only_the_image_email_theme(self):
         rendered = subprocess.run(
             [
                 "helm",
@@ -38,33 +39,39 @@ class OtpEmailThemeTest(unittest.TestCase):
             for document in yaml.safe_load_all(rendered.stdout)
             if isinstance(document, dict)
         ]
-        email_theme = next(
+        realm_config = next(
             document
             for document in manifests
             if document.get("kind") == "ConfigMap"
             and document.get("metadata", {}).get("name")
-            == "keycloak-configmap-theme-email-html"
+            == "keycloak-configmap-data"
         )
-        template = email_theme["data"]["otp-email.ftl"]
+        realm = json.loads(realm_config["data"]["realm.json"])
+        self.assertEqual(realm["emailTheme"], "oriso")
 
-        self.assertIn("<html lang=\"${locale.language}\">", template)
-        self.assertIn(">ORISO</td>", template)
-        self.assertIn("aria-label=\"${kcSanitize(msg(\"emailCodeAriaLabel\", otp))?no_esc}\"", template)
-        self.assertIn("user-select:all", template)
-        self.assertIn("${kcSanitize(msg(\"emailCopyHint\"))?no_esc}", template)
-        self.assertNotIn("data:image", template)
-        self.assertNotIn("<script", template)
-        self.assertNotIn("onclick=", template)
-
-        messages = next(
+        deployment = next(
             document
             for document in manifests
-            if document.get("kind") == "ConfigMap"
+            if document.get("kind") == "Deployment"
             and document.get("metadata", {}).get("name")
-            == "keycloak-configmap-theme-email-messages"
+            == "keycloak"
         )
-        self.assertIn("emailHeading=Ihr 2FA-Code", messages["data"]["messages_de.properties"])
-        self.assertIn("emailHeading=Your 2FA code", messages["data"]["messages_en.properties"])
+        container = deployment["spec"]["template"]["spec"]["containers"][0]
+        mount_paths = {mount["mountPath"] for mount in container["volumeMounts"]}
+        self.assertIn("/opt/keycloak/themes/custom-theme/login", mount_paths)
+        self.assertFalse(
+            any(path.startswith("/opt/keycloak/themes/custom-theme/email") for path in mount_paths)
+        )
+        volume_names = {
+            volume["name"] for volume in deployment["spec"]["template"]["spec"]["volumes"]
+        }
+        self.assertFalse(any(name.startswith("keycloak-theme-email-") for name in volume_names))
+        configmap_names = {
+            document.get("metadata", {}).get("name", "")
+            for document in manifests
+            if document.get("kind") == "ConfigMap"
+        }
+        self.assertFalse(any(name.startswith("keycloak-configmap-theme-email-") for name in configmap_names))
 
 
 if __name__ == "__main__":
