@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Render guard for immutable Matrix/Element Call images and secret-safe backups."""
+"""Render guard for Matrix/Element Call image pinning and secret-safe backups."""
 
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 
@@ -67,7 +66,6 @@ def main() -> None:
     frontend = find(documents, "Deployment", "frontend")
     userservice = find(documents, "Deployment", "userservice")
     agencyservice = find(documents, "Deployment", "agencyservice")
-    livekit = find(documents, "Deployment", "livekit")
 
     synapse_spec = synapse["spec"]["template"]["spec"]
     images = [
@@ -78,22 +76,25 @@ def main() -> None:
         userservice["spec"]["template"]["spec"]["containers"][0]["image"],
         agencyservice["spec"]["template"]["spec"]["containers"][0]["image"],
     ]
+    # No image may be :latest. A blanket "every image is a digest" assertion
+    # used to sit here, but dev pins Synapse, busybox and Element Call by
+    # release tag (ORISO-Helm#300) — the digest-only rule belongs to the
+    # deferred MatrixRTC cutover contract and is asserted on pre-dev, which
+    # carries it.
     for image in images:
-        assert re.fullmatch(r"[^@\s]+@sha256:[a-f0-9]{64}", image)
-        assert not image.endswith(":latest")
+        assert not image.endswith(":latest"), image
 
+    # A digest passed in as a value must reach the rendered container unchanged.
     expected_cutover_images = {
         f"ghcr.io/openresilienceinitiative/oriso-frontend@sha256:{TEST_DIGEST}",
         f"ghcr.io/openresilienceinitiative/oriso-userservice@sha256:{TEST_DIGEST}",
         f"ghcr.io/openresilienceinitiative/oriso-agencyservice@sha256:{TEST_DIGEST}",
     }
     assert expected_cutover_images.issubset(set(images))
-    assert livekit["spec"]["replicas"] == 2
-    assert livekit["spec"]["strategy"] == {
-        "type": "RollingUpdate",
-        "rollingUpdate": {"maxUnavailable": 1, "maxSurge": 0},
-    }
-    assert livekit["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] == 18000
+
+    # LiveKit's cutover topology (2 replicas, RollingUpdate, 18000s grace) is
+    # also part of that contract. dev runs the single-node rollout, which
+    # render_livekit_rollout_test.py asserts.
 
     rendered = yaml.safe_dump_all(documents)
     assert "matrix-backup-cronjob-github" not in rendered
@@ -101,7 +102,7 @@ def main() -> None:
     assert "YOUR_GITHUB_TOKEN" not in rendered
     assert "caritas-matrix-backups" not in rendered
 
-    print("PASS: all chat cutover images are immutable; no unsafe backup job renders")
+    print("PASS: no image is :latest, value-pinned digests pass through, no unsafe backup job renders")
 
 
 def test_matrix_call_cutover_security() -> None:

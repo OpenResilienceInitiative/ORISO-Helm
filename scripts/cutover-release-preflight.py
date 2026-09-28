@@ -272,9 +272,19 @@ def verify_render(chart_dir: pathlib.Path, values: dict) -> None:
                 "--set-string",
                 "global.secrets.redisdefaultPass=test-redis-password",
                 # Image-only dry render: the chart requires a real public host
-                # (ORISO-Helm#366), which this check does not inspect.
+                # and a real Matrix server name (ORISO-Helm#366), neither of
+                # which this check inspects — values.yaml.default ships only
+                # placeholders, which the install gate rejects.
                 "--set-string",
                 "global.domainName=cutover-preflight.oriso.internal",
+                "--set-string",
+                "matrix.matrixServerName=matrix.cutover-preflight.oriso.internal",
+                "--set-string",
+                "matrix.synapseServerName=matrix.cutover-preflight.oriso.internal",
+                "--set-string",
+                "global.matrix.matrixServerName=matrix.cutover-preflight.oriso.internal",
+                "--set-string",
+                "matrixrtcAuth.membershipReaderUserId=@matrixrtc-auth:matrix.cutover-preflight.oriso.internal",
             ],
             capture_output=True,
             text=True,
