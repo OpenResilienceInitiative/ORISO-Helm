@@ -32,6 +32,16 @@ data:
   # Same FQDN and same derivation as consultingtypeservice, deliberately, so
   # the two cannot drift apart.
   APP_BASE_URL: {{ include "oriso.publicOrigin" . | quote }}
+  # Keycloak `sub` of the UserService's technical service identity; TenantService
+  # recognises that caller by this claim plus the realm role `technical`
+  # (ORISO-TenantService#272, ORISO-Helm#367). realm.json seeds `technical` with a
+  # fixed id; an existing realm keeps its own id, so look it up once. The
+  # keycloak-reconcile-service-identities hook fails the release on a mismatch.
+  {{- $technicalSubject := required "global.keycloak.serviceTechUserId must be the Keycloak user id (sub) of the technical user" .Values.global.keycloak.serviceTechUserId }}
+  {{- if not (regexMatch "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" $technicalSubject) }}
+  {{- fail (printf "global.keycloak.serviceTechUserId must be the Keycloak user id (a UUID) of the technical user, got %q" $technicalSubject) }}
+  {{- end }}
+  TECHNICAL_SERVICE_SUBJECT: {{ $technicalSubject | quote }}
   MATRIX_API_URL: {{ .Values.matrix.matrixApiUrl }}
   MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}
   FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED: {{ .Values.global.multitenancyWithSingleDomainEnabled | quote }}

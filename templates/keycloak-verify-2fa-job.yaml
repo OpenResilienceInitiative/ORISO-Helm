@@ -5,12 +5,7 @@
 {{- end -}}
 {{- if $verifyEnabled }}
 {{- $kc := index .Values "online-counseling-keycloak" -}}
-{{/* The endpoint lives entirely in values: a default host here would be the
-     address that actually ships, while an operator looks for it in values. tpl
-     resolves the namespace, which only the release knows. */}}
-{{- $adminUrl := required
-      "verifyTwoFactorContract.adminUrl must be set - see values.yaml.default"
-      (tpl ($verify.adminUrl | default "") .) -}}
+{{- $adminUrl := include "oriso.keycloakAdminUrl" . -}}
 {{- $waitAttempts := $verify.waitAttempts | default 60 -}}
 {{- $deadlineSeconds := $verify.deadlineSeconds | default 600 -}}
 {{- $requireCheckScript := $verify.requireCheckScript | default false -}}

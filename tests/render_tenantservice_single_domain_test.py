@@ -41,6 +41,8 @@ def render(chart: str, enabled: bool) -> list[dict]:
             "template",
             "tenant-single-domain-test",
             chart,
+            "-f",
+            os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
             # The chart requires a real public host (ORISO-Helm#366).
             "--set-string",
             "global.domainName=render.oriso.internal",
