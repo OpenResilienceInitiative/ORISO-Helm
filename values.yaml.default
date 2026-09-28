@@ -339,6 +339,10 @@ tenantService:
 
 # User service
 userService:
+  # Enable only after the #874 sender, templates, relay purposes and login return
+  # have been deployed together and the operator has verified tenant origins.
+  groupAppointmentMail:
+    enabled: "false"
   # Provision/rotate this existing Secret outside anonymous requests before enabling
   # the new identity suggestions UI. Without it, suggestions fail closed with 503.
   # The Synapse credential has admin privileges; the lookup code uses only GET.
