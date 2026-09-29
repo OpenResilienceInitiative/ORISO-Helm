@@ -160,6 +160,11 @@ spec:
                 configMapKeyRef:
                   key: EMAIL_BRANDING_NAME
                   name: userservice-configmap-env
+            - name: EMAIL_ALLOW_UNREVIEWED_LOCALES
+              valueFrom:
+                configMapKeyRef:
+                  key: EMAIL_ALLOW_UNREVIEWED_LOCALES
+                  name: userservice-configmap-env
             {{- if .Values.userService.emailBrandingLogoUrl }}
             - name: EMAIL_BRANDING_LOGO_URL
               valueFrom:

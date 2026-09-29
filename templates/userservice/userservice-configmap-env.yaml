@@ -17,6 +17,7 @@ data:
   INACTIVE_ACCOUNT_NOTIFICATION_APP_BASE_URL: {{ $origin | quote }}
   # Platform-level email branding (used when a mail has no tenant context).
   EMAIL_BRANDING_NAME: {{ .Values.userService.emailBrandingName | quote }}
+  EMAIL_ALLOW_UNREVIEWED_LOCALES: {{ .Values.userService.emailAllowUnreviewedLocales | quote }}
   {{- if .Values.userService.emailBrandingLogoUrl }}
   EMAIL_BRANDING_LOGO_URL: {{ .Values.userService.emailBrandingLogoUrl | quote }}
   {{- end }}
