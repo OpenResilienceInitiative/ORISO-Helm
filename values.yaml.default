@@ -339,6 +339,9 @@ tenantService:
 
 # User service
 userService:
+  # Pending human-review mail translations are never sent by default. The Dev
+  # overlay opts in for mailbox testing; production remains on reviewed copy.
+  emailAllowUnreviewedLocales: false
   # Enable only after the #874 sender, templates, relay purposes and login return
   # have been deployed together and the operator has verified tenant origins.
   groupAppointmentMail:
