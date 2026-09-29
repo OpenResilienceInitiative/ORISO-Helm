@@ -36,6 +36,12 @@ def test_blank_pins_stay_blank():
     data = resource(documents, "ConfigMap", "tenantservice-configmap-env")["data"]
     assert data["SYSTEM_EMAIL_DELIVERY_SERVICE_SUBJECT"] == ""
     assert data["SYSTEM_EMAIL_DELIVERY_SERVICE_CLIENT"] == ""
+    deployment = resource(documents, "Deployment", "tenantservice")
+    env = {entry["name"]: entry for entry in deployment["spec"]["template"]["spec"]["containers"][0]["env"]}
+    for name in ("SYSTEM_EMAIL_DELIVERY_SERVICE_SUBJECT", "SYSTEM_EMAIL_DELIVERY_SERVICE_CLIENT"):
+        assert env[name]["valueFrom"]["configMapKeyRef"] == {
+            "name": "tenantservice-configmap-env", "key": name
+        }
 
 
 def test_exact_pins_reach_tenantservice_only():
@@ -52,7 +58,10 @@ def test_exact_pins_reach_tenantservice_only():
         assert env[name]["valueFrom"]["configMapKeyRef"] == {
             "name": "tenantservice-configmap-env", "key": name
         }
-    assert "realm-user-uuid" not in str(resource(documents, "ConfigMap", "userservice-configmap-env"))
+    for document in documents:
+        if document.get("kind") == "ConfigMap" and document["metadata"]["name"] == "tenantservice-configmap-env":
+            continue
+        assert "realm-user-uuid" not in str(document), document["metadata"]["name"]
 
 
 if __name__ == "__main__":
