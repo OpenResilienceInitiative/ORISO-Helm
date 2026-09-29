@@ -30,7 +30,7 @@ def render(*extra_args: str) -> list[dict]:
             "-f", os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
             "--set-string", "global.secrets.redisdefaultPass=test-redis-password",
             "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
-            "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
+            "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
             "--set", f"global.domainName={DOMAIN}",
             "--set-string", "userService.smtpUser=smtp-canary-user",
             "--set-string", "userService.smtpPassword=smtp-canary-password",

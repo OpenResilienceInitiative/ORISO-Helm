@@ -28,7 +28,7 @@ def render(*overlays: str, health_dashboard: dict | None = None,
         "-f", str(CHART_DIR / "tests" / "fixtures" / "render-required-secrets.yaml"),
         "--set-string", "global.domainName=health.oriso.internal",
         "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
-        "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
+        "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
         "--set-string", "userService.smtpUser=smtp-canary-user",
         "--set-string", "userService.smtpPassword=smtp-canary-password",
     ]
