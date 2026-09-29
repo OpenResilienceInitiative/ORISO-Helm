@@ -86,19 +86,27 @@ jobs:
           # global.domainName has no default on purpose (ORISO-Helm#366), so
           # the validation render names a private .internal host (reserved example
           # hosts are rejected as placeholders).
-          helm lint . -f values.yaml.default -f secrets.yaml.default \
+          # Generic installs also require their own email brand name. Use a
+          # render-only value here, not a product default in chart values.
+          # The render fixture also supplies a test-only Matrix identity;
+          # values.yaml.default intentionally ships an invalid placeholder.
+          helm lint . -f values.yaml.default -f tests/fixtures/values-render-domain.yaml -f secrets.yaml.default \
             --set-string global.domainName=release-validation.oriso.internal \
+            --set-string userService.emailBrandingName='Render Test Platform' \
             --set-string userService.smtpUser=smtp-validation-user \
             --set-string userService.smtpPassword=smtp-validation-password \
             -f tests/fixtures/render-required-secrets.yaml
-          helm template oriso . -f values.yaml.default -f secrets.yaml.default \
+          helm template oriso . -f values.yaml.default -f tests/fixtures/values-render-domain.yaml -f secrets.yaml.default \
             --set-string global.domainName=release-validation.oriso.internal \
+            --set-string userService.emailBrandingName='Render Test Platform' \
             --set-string userService.smtpUser=smtp-validation-user \
             --set-string userService.smtpPassword=smtp-validation-password \
             -f tests/fixtures/render-required-secrets.yaml \
             >/tmp/oriso-rendered.yaml
           # Without a domain the chart must refuse to render.
-          if helm template oriso . -f values.yaml.default -f secrets.yaml.default \
+          if helm template oriso . -f values.yaml.default -f tests/fixtures/values-render-domain.yaml -f secrets.yaml.default \
+            --set-string global.domainName= \
+            --set-string userService.emailBrandingName='Render Test Platform' \
             --set-string userService.smtpUser=smtp-validation-user \
             --set-string userService.smtpPassword=smtp-validation-password \
             -f tests/fixtures/render-required-secrets.yaml \
