@@ -1,3 +1,11 @@
+# /service/error-reports is routed on its own rather than inside
+# userservice-rewrite-ingress' alternation: ingress-nginx orders regex locations
+# by descending path-string length, and adding the prefix there made that route
+# longer than userservice-public-entry-ingress, which silently disabled the
+# public entry rate limit (tests/render_public_entry_rate_limit_test.py).
+#
+# This pattern can only ever match /service/error-reports URIs, so its own
+# position in that ordering cannot take traffic from another route.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -10,7 +18,7 @@ metadata:
     nginx.ingress.kubernetes.io/enable-cors: "true"
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
     nginx.ingress.kubernetes.io/use-regex: 'true'
-  name: userservice-rewrite-ingress
+  name: userservice-error-reports-ingress
 spec:
   ingressClassName: nginx
   rules:
@@ -22,10 +30,5 @@ spec:
             name: userservice
             port:
               number: 8080
-        # Do NOT extend this alternation: ingress-nginx orders regex locations by
-        # descending path-string length, and userservice-public-entry-ingress must stay
-        # longer than this route or its rate limit is bypassed. Adding "error-reports"
-        # here took this pattern to 83 characters against the public entry's 70 and did
-        # exactly that. A new prefix gets its own ingress instead.
-        path: /service/(users|conversations|useradmin|appointments|matrix)(/|$)(.*)
+        path: /service/(error-reports)(/|$)(.*)
         pathType: ImplementationSpecific
