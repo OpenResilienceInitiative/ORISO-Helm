@@ -14,6 +14,7 @@ KEY = "EMAIL_ALLOW_UNREVIEWED_LOCALES"
 
 
 def render(overlay: str | None) -> tuple[dict, dict]:
+    """Render the base chart with one optional environment overlay."""
     args = [
         "helm", "template", "mail-locale-gate-test", CHART_DIR,
         "-f", os.path.join(CHART_DIR, "values.yaml.default"),
@@ -38,6 +39,7 @@ def render(overlay: str | None) -> tuple[dict, dict]:
 
 
 def test_pending_mail_locales_are_dev_only() -> None:
+    """Only Dev opts in, and the Pod template records each value for rollout."""
     for overlay, expected in ((None, "false"), ("dev", "true"),
                               ("pre-dev", "false"), ("prod", "false")):
         configmap, deployment = render(overlay)
@@ -48,6 +50,9 @@ def test_pending_mail_locales_are_dev_only() -> None:
         assert flag["valueFrom"]["configMapKeyRef"] == {
             "name": "userservice-configmap-env", "key": KEY,
         }, overlay
+        assert deployment["spec"]["template"]["metadata"]["annotations"][
+            "oriso.org/email-allow-unreviewed-locales"
+        ] == expected, overlay
 
 
 if __name__ == "__main__":
