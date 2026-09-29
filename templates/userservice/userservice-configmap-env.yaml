@@ -16,7 +16,7 @@ data:
   SYSTEM_NOTIFICATION_FRONTEND_BASE_URL: {{ $origin | quote }}
   INACTIVE_ACCOUNT_NOTIFICATION_APP_BASE_URL: {{ $origin | quote }}
   # Platform-level email branding (used when a mail has no tenant context).
-  EMAIL_BRANDING_NAME: {{ .Values.userService.emailBrandingName | quote }}
+  EMAIL_BRANDING_NAME: {{ .Values.userService.emailBrandingName | default "" | trim | required "userService.emailBrandingName is required: set the platform name for email on this installation; there is no product-name default" | quote }}
   {{- if .Values.userService.emailBrandingLogoUrl }}
   EMAIL_BRANDING_LOGO_URL: {{ .Values.userService.emailBrandingLogoUrl | quote }}
   {{- end }}

@@ -4,6 +4,7 @@
 #   helm upgrade --install caritas ./ -n caritas --create-namespace \
 #     -f values.yaml -f values-prod.yaml -f secrets.yaml \
 #     --set global.domainName=<public host> \
+#     --set-string userService.emailBrandingName='<your platform name>' \
 #     --set matrix.matrixServerName=<matrix host> ...
 #
 # This overlay names no host on purpose (ORISO-Helm#366). The operator
@@ -39,6 +40,8 @@ consultingTypeService:
   liquibaseContexts: "prod"
 userService:
   springProfilesActive: "prod"
+  # Set emailBrandingName in the operator's installation values. This generic
+  # production overlay deliberately does not assume an ORISO-branded product.
 
   # ADR-018 Global Support Access is off in production. Enabling it is a deliberate policy decision
   # that presupposes real Global Support Admin accounts with enrolled second factors and an agreed

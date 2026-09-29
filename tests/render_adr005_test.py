@@ -135,6 +135,7 @@ def render(chart: str, server_public_ip: str) -> str:
                 "keycloakServiceAdminPassword": "render-only-not-a-real-secret",
             }
         },
+        "userService": {"emailBrandingName": "Render Test Platform"},
         # postgres.* live in secrets.yaml.default, which this minimal chart does
         # not copy, so they are seeded here like the other secrets above.
         # matrix-configmaps.yaml references all three.

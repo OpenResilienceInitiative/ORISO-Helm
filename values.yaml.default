@@ -415,8 +415,10 @@ userService:
   accountInviteAppFrontendBaseUrl: ""
   accountInviteAdminFrontendBaseUrl: ""
 
-  # Platform-level email branding for mails without a tenant context.
-  emailBrandingName: "ORISO"
+  # REQUIRED: the platform's own name for mails without a tenant context.
+  # No product name is assumed for a fresh installation. Set this in the
+  # installation's values; Dev and Pre-Dev do so in their own overlays.
+  emailBrandingName: ""
   # Absolute https URL of the platform logo; empty = mails render without a logo.
   emailBrandingLogoUrl: ""
 

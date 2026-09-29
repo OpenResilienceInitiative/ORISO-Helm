@@ -46,6 +46,8 @@ consultingTypeService:
   liquibaseContexts: "seed"
 userService:
   springProfilesActive: "dev"
+  # Existing ORISO Dev identity; fresh installations must set their own name.
+  emailBrandingName: "ORISO"
 
   # ADR-018 Global Support Access stays off here. Release 1 is exercised on Pre-Dev only; dev is
   # the stable QA environment and must not gain a new privileged access path ahead of it.
