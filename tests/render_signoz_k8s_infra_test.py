@@ -52,6 +52,11 @@ def render(
         os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
         "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
+        # secrets.yaml.default ships placeholders the chart rejects since the
+        # Keycloak service-identity split (ORISO-Helm#367), so every render of
+        # the example files has to supply these on top.
+        "-f",
+        os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
     ]
     domain = domain_of("tests/fixtures/values-render-domain.yaml")
     if overlay:
