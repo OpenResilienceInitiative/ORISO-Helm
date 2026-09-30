@@ -6,10 +6,12 @@ file, deployment SMTP fallback or raw upstream error is used by this helper.
 """
 
 import base64
+import errno
 import json
 import math
 import os
 import signal
+import socket
 import socketserver
 import sys
 import threading
@@ -22,6 +24,8 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 
 MAX_RESPONSE_BYTES = 65536
 HTTP_TIMEOUT_SECONDS = 10
+TRIGGER_READY_SECONDS = 120  # Bounded below the Helm Job's 600-second active deadline.
+TRIGGER_RETRY_SECONDS = 5
 
 
 class ReconcileError(Exception):
@@ -30,6 +34,21 @@ class ReconcileError(Exception):
     def __init__(self, message, status=502):
         super().__init__(message)
         self.status = status
+
+
+class TriggerNotReady(ReconcileError):
+    """Only a transient helper startup failure; never carries an upstream payload."""
+
+    def __init__(self):
+        super().__init__("SMTP_RECONCILE_TRIGGER_NOT_READY", 503)
+
+
+def transient_connection(error):
+    reason = error.reason if isinstance(error, URLError) else error
+    return (isinstance(reason, (ConnectionError, TimeoutError))
+            or isinstance(reason, socket.gaierror) and reason.errno == socket.EAI_AGAIN
+            or isinstance(reason, OSError) and reason.errno in
+            (errno.ENETUNREACH, errno.EHOSTUNREACH))
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -72,7 +91,8 @@ class HttpClient:
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
 
     def request(self, method, url, body=None, headers=None, failure="SOURCE_UNAVAILABLE",
-                revision=False, authenticate_source=False, timeout=HTTP_TIMEOUT_SECONDS):
+                revision=False, authenticate_source=False, timeout=HTTP_TIMEOUT_SECONDS,
+                trigger_request=False):
         try:
             request = Request(url, data=body, method=method, headers=headers or {})
             with self.opener.open(request, timeout=timeout) as response:
@@ -80,10 +100,18 @@ class HttpClient:
                 data = response.read(MAX_RESPONSE_BYTES + 1)
                 source_revision = response.headers.get("X-Smtp-Revision")
         except HTTPError as error:
+            error.close()
             if authenticate_source and error.code in (401, 403):
                 raise ReconcileError("SMTP_RECONCILE_UNAUTHORIZED", 403) from None
+            if trigger_request and error.code == 503:
+                raise TriggerNotReady() from None
             raise ReconcileError("SMTP_RECONCILE_" + failure) from None
-        except (URLError, OSError, ValueError):
+        except (URLError, OSError) as error:
+            if trigger_request and transient_connection(error):
+                raise TriggerNotReady() from None
+            # Exception strings and response bodies may contain tokens/passwords.
+            raise ReconcileError("SMTP_RECONCILE_" + failure) from None
+        except ValueError:
             # Exception strings and response bodies may contain tokens/passwords.
             raise ReconcileError("SMTP_RECONCILE_" + failure) from None
         if len(data) > MAX_RESPONSE_BYTES:
@@ -224,13 +252,26 @@ def saved_revision(value):
     return int(value)
 
 
-def trigger(env):
+def trigger(env, ready_seconds=TRIGGER_READY_SECONDS, retry_seconds=TRIGGER_RETRY_SECONDS):
     config = configuration(env, "trigger")
     url = base_url(required(env, "SMTP_RECONCILE_URL"), "keycloak-reconcile-smtp", config["POD_NAMESPACE"])
     http = HttpClient()
-    result = http.request("POST", url, b'{"revision":0}',
-                          {"Authorization": "Bearer " + technical_login(http, config),
-                           "Content-Type": "application/json"}, "TRIGGER_FAILED", timeout=40)
+    headers = {"Authorization": "Bearer " + technical_login(http, config),
+               "Content-Type": "application/json"}
+    deadline = time.monotonic() + ready_seconds
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TriggerNotReady()
+        try:
+            result = http.request("POST", url, b'{"revision":0}', headers, "TRIGGER_FAILED",
+                                  timeout=min(40, remaining), trigger_request=True)
+            break
+        except TriggerNotReady:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(retry_seconds, remaining))
     if (not result or not isinstance(result.get("appliedRevision"), int)
             or isinstance(result["appliedRevision"], bool) or not 0 <= result["appliedRevision"] <= 2**63 - 1
             or result.get("status") not in ("APPLIED", "DISABLED_OR_INCOMPLETE")):

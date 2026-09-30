@@ -1,6 +1,7 @@
 """Exercise the actual reconciler process against local authenticated HTTP APIs."""
 
 import base64
+import importlib.util
 import json
 import os
 import subprocess
@@ -8,6 +9,7 @@ import sys
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -16,6 +18,10 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "files" / "keycloak-reconcile-smtp.py"
+
+spec = importlib.util.spec_from_file_location("keycloak_reconcile_smtp", SCRIPT)
+reconciler = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(reconciler)
 
 
 def jwt(claims):
@@ -391,6 +397,123 @@ class TriggerSmtpTest(SmtpFixture):
         self.assertEqual(len(self.updates), 1)
         self.assertTrue(any(r[1] == "/auth/realms/example/protocol/openid-connect/token" for r in self.requests))
         self.assertNotIn("password-canary", result.stdout + result.stderr)
+
+    def test_install_trigger_recovers_from_busy_bridge_without_reapplying(self):
+        self.update_release.clear()
+        first = []
+        first_thread = threading.Thread(target=lambda: first.append(self.trigger()))
+        first_thread.start()
+        self.assertTrue(self.update_started.wait(3))
+        self.assertEqual(self.trigger()[0], 503)
+        hook = subprocess.Popen(
+            [sys.executable, "-B", str(SCRIPT), "--trigger"],
+            env={**self.env, "SMTP_RECONCILE_URL": self.bridge_url + "/smtp/reconcile"},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        try:
+            time.sleep(0.4)  # The first POST observes the busy helper before it is released.
+        finally:
+            self.update_release.set()
+        stdout, stderr = hook.communicate(timeout=12)
+        first_thread.join(3)
+        self.assertEqual(first, [(200, {"appliedRevision": 1, "status": "APPLIED"})])
+        self.assertEqual(hook.returncode, 0, stderr)
+        self.assertIn("SMTP_RECONCILE_APPLIED", stdout)
+        self.assertNotIn("password-canary", stdout + stderr)
+        self.assertEqual(len(self.updates), 1)
+
+    def test_install_trigger_retries_connection_refusal_then_acknowledges(self):
+        unused = ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
+        port = unused.server_port
+        unused.server_close()
+        calls = []
+
+        class LateBridge(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_POST(self):
+                calls.append((self.path, self.headers.get("Authorization")))
+                body = self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200 if body == b'{"revision":0}' else 400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"appliedRevision":1,"status":"APPLIED"}')
+
+        bridge = {}
+        def start_bridge():
+            time.sleep(0.25)
+            bridge["server"] = ThreadingHTTPServer(("127.0.0.1", port), LateBridge)
+            bridge["server"].serve_forever()
+
+        thread = threading.Thread(target=start_bridge, daemon=True)
+        thread.start()
+        transient_failures = []
+        original_request = reconciler.HttpClient.request
+
+        def record_request(client, *args, **kwargs):
+            try:
+                return original_request(client, *args, **kwargs)
+            except reconciler.TriggerNotReady:
+                transient_failures.append(1)
+                raise
+
+        try:
+            with patch.object(reconciler.HttpClient, "request", record_request):
+                reconciler.trigger({**self.env, "SMTP_RECONCILE_URL": f"http://127.0.0.1:{port}/smtp/reconcile"},
+                                   ready_seconds=2, retry_seconds=0.05)
+            self.assertGreaterEqual(len(transient_failures), 1)
+            self.assertGreaterEqual(len(calls), 1)
+            self.assertEqual(calls[0][0], "/smtp/reconcile")
+            self.assertTrue(calls[0][1].startswith("Bearer "))
+        finally:
+            if "server" in bridge:
+                bridge["server"].shutdown()
+                bridge["server"].server_close()
+            thread.join(2)
+
+    def test_install_trigger_exhausts_connection_budget_safely(self):
+        unused = ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
+        port = unused.server_port
+        unused.server_close()
+        with self.assertRaisesRegex(reconciler.ReconcileError, "SMTP_RECONCILE_TRIGGER_NOT_READY"):
+            reconciler.trigger({**self.env, "SMTP_RECONCILE_URL": f"http://127.0.0.1:{port}/smtp/reconcile"},
+                               ready_seconds=0.1, retry_seconds=0.02)
+        self.assertEqual(self.updates, [])
+
+    def test_install_trigger_does_not_retry_auth_or_permanent_helper_failure(self):
+        failures = []
+
+        class RefusingBridge(BaseHTTPRequestHandler):
+            status = 403
+
+            def log_message(self, *_):
+                pass
+
+            def do_POST(self):
+                failures.append(self.status)
+                self.send_response(self.status)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"code":"fixed-error"}')
+
+        bridge = ThreadingHTTPServer(("127.0.0.1", 0), RefusingBridge)
+        thread = threading.Thread(target=bridge.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for status in (401, 403, 500):
+                with self.subTest(status=status):
+                    RefusingBridge.status = status
+                    failures.clear()
+                    with self.assertRaises(reconciler.ReconcileError):
+                        reconciler.trigger({**self.env, "SMTP_RECONCILE_URL":
+                                            f"http://127.0.0.1:{bridge.server_port}/smtp/reconcile"},
+                                           ready_seconds=0.5, retry_seconds=0.02)
+                    self.assertEqual(failures, [status])
+        finally:
+            bridge.shutdown()
+            bridge.server_close()
+            thread.join(2)
 
     def test_absent_saved_snapshot_acknowledges_zero_and_clears_stale_transport(self):
         self.source_status = 204
