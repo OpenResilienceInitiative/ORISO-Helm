@@ -1,0 +1,100 @@
+{{- /*
+Node agent for SigNoz collection (ORISO-Helm#392): tails pod logs and scrapes
+host and kubelet metrics on every node.
+
+Pod logs are 0640 root:root. Group 0 reads them without UID 0 and without any
+capability (a capability added for a non-root UID is not effective in
+Kubernetes without ambient caps), which is why runAsGroup is 0 while runAsUser
+is not. Proven on a live node on Pre-Dev.
+
+No hostPorts and no hostNetwork: the probes and self-telemetry use the pod IP,
+so nothing binds on the node.
+*/ -}}
+{{- if eq (include "oriso.signozCollector.enabled" .) "true" -}}
+{{- $c := get .Values "signozCollector" | default dict -}}
+{{- $name := include "oriso.signozCollector.agentFullname" . -}}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oriso.signozCollector.labels" (dict "root" $ "component" "otel-agent") | nindent 4 }}
+spec:
+  minReadySeconds: 5
+  selector:
+    matchLabels:
+      {{- include "oriso.signozCollector.selectorLabels" (dict "root" $ "component" "otel-agent") | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ tpl (.Files.Get "files/signoz/otel-agent-config.yaml") . | sha256sum }}
+      labels:
+        {{- include "oriso.signozCollector.selectorLabels" (dict "root" $ "component" "otel-agent") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      hostNetwork: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      tolerations:
+        - operator: Exists
+      volumes:
+        - name: otel-agent-config-vol
+          configMap:
+            name: {{ $name }}
+        - name: varlog
+          hostPath:
+            path: /var/log/pods
+        - name: varlibdockercontainers
+          hostPath:
+            path: /var/lib/docker/containers
+        - name: hostfs
+          hostPath:
+            path: /
+      containers:
+        - name: {{ $name }}
+          image: {{ include "oriso.signozCollector.image" . }}
+          imagePullPolicy: {{ include "oriso.signozCollector.imagePullPolicy" . }}
+          command: ["/otelcol-contrib"]
+          args: ["--config=/conf/otel-agent-config.yaml"]
+          ports:
+            - name: health-check
+              containerPort: 13133
+              protocol: TCP
+            - name: metrics
+              containerPort: 8888
+              protocol: TCP
+          env:
+            {{- include "oriso.signozCollector.env" (dict "root" $ "component" "otel-agent" "attrs" "signoz.component=$(SIGNOZ_COMPONENT),k8s.cluster.name=$(K8S_CLUSTER_NAME),k8s.node.name=$(K8S_NODE_NAME),host.name=$(K8S_NODE_NAME)") | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: otel-agent-config-vol
+              mountPath: /conf
+            - name: varlog
+              mountPath: /var/log/pods
+              readOnly: true
+            - name: varlibdockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+            - name: hostfs
+              mountPath: /hostfs
+              readOnly: true
+              mountPropagation: HostToContainer
+          {{- include "oriso.signozCollector.probes" . | nindent 10 }}
+          resources:
+            {{- toYaml (get $c "resources" | default dict) | nindent 12 }}
+{{- end -}}
