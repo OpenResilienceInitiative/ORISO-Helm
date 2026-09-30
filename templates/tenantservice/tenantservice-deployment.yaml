@@ -139,6 +139,11 @@ spec:
               configMapKeyRef:
                 key: APP_BASE_URL
                 name: tenantservice-configmap-env
+          - name: TECHNICAL_SERVICE_SUBJECT
+            valueFrom:
+              configMapKeyRef:
+                key: TECHNICAL_SERVICE_SUBJECT
+                name: tenantservice-configmap-env
           - name: FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED
             valueFrom:
               configMapKeyRef:

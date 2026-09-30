@@ -25,6 +25,7 @@ def render(*overlays: str, health_dashboard: dict | None = None,
         "-f", str(CHART_DIR / "values.yaml.default"),
         "-f", str(CHART_DIR / "tests" / "fixtures" / "values-render-domain.yaml"),
         "-f", str(CHART_DIR / "secrets.yaml.default"),
+        "-f", str(CHART_DIR / "tests" / "fixtures" / "render-required-secrets.yaml"),
         "--set-string", "global.domainName=health.oriso.internal",
         # Pre-Dev enables SigNoz, whose validation ties this URL to domainName.
         "--set-string", "signoz.signoz.env.signoz_global_external__url=https://health.oriso.internal/signoz",
