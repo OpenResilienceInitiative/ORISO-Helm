@@ -134,13 +134,14 @@ Enabling the bundled SigNoz dependency turns this on automatically unless
 global.observability.autoEnableWithSignoz is explicitly false.
 */}}
 {{- define "oriso.observabilityEnabled" -}}
+{{- $observability := get .Values.global "observability" | default dict -}}
 {{- $autoEnableWithSignoz := true -}}
-{{- if hasKey .Values.global.observability "autoEnableWithSignoz" -}}
-{{- $autoEnableWithSignoz = .Values.global.observability.autoEnableWithSignoz -}}
+{{- if hasKey $observability "autoEnableWithSignoz" -}}
+{{- $autoEnableWithSignoz = get $observability "autoEnableWithSignoz" -}}
 {{- end -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
 {{- $signozEnabled := get $signoz "enabled" | default false -}}
-{{- if or .Values.global.observability.otlpEnabled (and $signozEnabled $autoEnableWithSignoz) -}}true{{- else -}}false{{- end -}}
+{{- if or (get $observability "otlpEnabled") (and $signozEnabled $autoEnableWithSignoz) -}}true{{- else -}}false{{- end -}}
 {{- end -}}
 
 {{/*
@@ -148,10 +149,11 @@ Resolve the OTLP HTTP collector host. A manually supplied collector wins; when
 the bundled SigNoz chart is enabled, use its in-cluster collector service.
 */}}
 {{- define "oriso.otlpCollectorHost" -}}
+{{- $observability := get .Values.global "observability" | default dict -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
 {{- $signozEnabled := get $signoz "enabled" | default false -}}
-{{- if .Values.global.observability.otlpCollectorHost -}}
-{{- .Values.global.observability.otlpCollectorHost -}}
+{{- if get $observability "otlpCollectorHost" -}}
+{{- get $observability "otlpCollectorHost" -}}
 {{- else if $signozEnabled -}}
 {{- printf "%s.%s:%v" (include "oriso.signozOtelCollectorServiceName" .) .Release.Namespace (get $signoz "orisoOtelCollectorHttpPort" | default 4318) -}}
 {{- end -}}
@@ -257,4 +259,129 @@ release knows.
 {{- define "oriso.keycloakAdminUrl" -}}
 {{- $verify := default (dict) .Values.global.keycloak.verifyTwoFactorContract -}}
 {{- required "global.keycloak.verifyTwoFactorContract.adminUrl must be set - see values.yaml.default" (tpl ($verify.adminUrl | default "") .) -}}
+{{- end -}}
+
+{{/*
+SigNoz collection agents (ORISO-Helm#392). Names and selector labels are kept
+byte-identical to what the vendored k8s-infra subchart produced, so Pre-Dev
+upgrades in place: app.kubernetes.io/name is part of the DaemonSet selector,
+which is immutable.
+*/}}
+{{- define "oriso.signozCollector.name" -}}
+k8s-infra
+{{- end -}}
+
+{{- define "oriso.signozCollector.agentFullname" -}}
+{{ printf "%s-k8s-infra-otel-agent" .Release.Name }}
+{{- end -}}
+
+{{- define "oriso.signozCollector.clusterFullname" -}}
+{{ printf "%s-k8s-infra-otel-deployment" .Release.Name }}
+{{- end -}}
+
+{{/* Selector labels. Argument: (dict "root" $ "component" "otel-agent") */}}
+{{- define "oriso.signozCollector.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "oriso.signozCollector.name" .root }}
+app.kubernetes.io/instance: {{ .root.Release.Name }}
+app.kubernetes.io/component: {{ .component }}
+{{- end -}}
+
+{{- define "oriso.signozCollector.labels" -}}
+helm.sh/chart: {{ printf "%s-%s" .root.Chart.Name .root.Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+app.kubernetes.io/version: {{ include "oriso.signozCollector.imageTag" .root | quote }}
+app.kubernetes.io/managed-by: {{ .root.Release.Service }}
+{{ include "oriso.signozCollector.selectorLabels" . }}
+{{- end -}}
+
+{{- define "oriso.signozCollector.imageTag" -}}
+{{- $c := get .Values "signozCollector" | default dict -}}
+{{- $image := get $c "image" | default dict -}}
+{{- required "signozCollector.image.tag must be set" (get $image "tag" | default "") -}}
+{{- end -}}
+
+{{/*
+The collector image is pinned to an exact upstream version, so it defaults to
+IfNotPresent rather than the Always that ORISO services use for mutable dev
+tags: on a DaemonSet, Always re-pulls on every node on every pod restart.
+*/}}
+{{- define "oriso.signozCollector.imagePullPolicy" -}}
+{{- $c := get .Values "signozCollector" | default dict -}}
+{{- $image := get $c "image" | default dict -}}
+{{- get $image "pullPolicy" | default "IfNotPresent" -}}
+{{- end -}}
+
+{{- define "oriso.signozCollector.image" -}}
+{{- $c := get .Values "signozCollector" | default dict -}}
+{{- $image := get $c "image" | default dict -}}
+{{- $repo := required "signozCollector.image.repository must be set" (get $image "repository" | default "") -}}
+{{- printf "%s:%s" $repo (include "oriso.signozCollector.imageTag" .) -}}
+{{- end -}}
+
+{{/* Shared pod env. Argument: (dict "root" $ "component" "otel-agent" "attrs" "...") */}}
+{{- define "oriso.signozCollector.env" -}}
+{{- $c := get .root.Values "signozCollector" | default dict -}}
+- name: OTEL_EXPORTER_OTLP_ENDPOINT
+  value: http://{{ include "oriso.signozOtelCollectorServiceName" .root }}:4318
+- name: OTEL_SECRETS_PATH
+  value: /secrets
+- name: K8S_CLUSTER_NAME
+  value: {{ get $c "clusterName" | default "" | quote }}
+- name: DEPLOYMENT_ENVIRONMENT
+  value: {{ get (get .root.Values.global "observability" | default dict) "deploymentEnvironment" | default "" | quote }}
+- name: K8S_NODE_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: spec.nodeName
+- name: K8S_POD_IP
+  valueFrom:
+    fieldRef:
+      apiVersion: v1
+      fieldPath: status.podIP
+- name: K8S_HOST_IP
+  valueFrom:
+    fieldRef:
+      fieldPath: status.hostIP
+- name: K8S_POD_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.name
+- name: K8S_POD_UID
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.uid
+- name: K8S_NAMESPACE
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.namespace
+- name: SIGNOZ_COMPONENT
+  value: {{ .component }}
+- name: OTEL_RESOURCE_ATTRIBUTES
+  value: {{ .attrs }}
+{{- end -}}
+
+{{/* Liveness/readiness on the health_check extension. */}}
+{{- define "oriso.signozCollector.probes" -}}
+livenessProbe:
+  httpGet:
+    port: 13133
+    path: /
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 6
+readinessProbe:
+  httpGet:
+    port: 13133
+    path: /
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 6
+{{- end -}}
+
+{{- define "oriso.signozCollector.enabled" -}}
+{{- $c := get .Values "signozCollector" | default dict -}}
+{{- get $c "enabled" | default false -}}
 {{- end -}}

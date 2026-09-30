@@ -1,0 +1,44 @@
+{{- /*
+ClusterIP services for the collectors' health-check and self-telemetry ports
+(ORISO-Helm#392). No hostPorts and no NodePorts: nothing binds on the node.
+*/ -}}
+{{- if eq (include "oriso.signozCollector.enabled" .) "true" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oriso.signozCollector.agentFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oriso.signozCollector.labels" (dict "root" $ "component" "otel-agent") | nindent 4 }}
+spec:
+  type: ClusterIP
+  internalTrafficPolicy: Local
+  selector:
+    {{- include "oriso.signozCollector.selectorLabels" (dict "root" $ "component" "otel-agent") | nindent 4 }}
+  ports:
+    - name: health-check
+      port: 13133
+      targetPort: health-check
+      protocol: TCP
+    - name: metrics
+      port: 8888
+      targetPort: metrics
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oriso.signozCollector.clusterFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oriso.signozCollector.labels" (dict "root" $ "component" "otel-deployment") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oriso.signozCollector.selectorLabels" (dict "root" $ "component" "otel-deployment") | nindent 4 }}
+  ports:
+    - name: health-check
+      port: 13133
+      targetPort: health-check
+      protocol: TCP
+{{- end -}}

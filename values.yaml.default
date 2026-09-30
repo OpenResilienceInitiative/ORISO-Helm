@@ -16,7 +16,7 @@ global:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
-  # OTLP export to SigNoz — auto-enabled when signoz.enabled=true.
+  # OTLP export to SigNoz — auto-enabled when signoz.enabled=true; backend and agents below.
   observability:
     otlpEnabled: false
     autoEnableWithSignoz: true
@@ -442,6 +442,10 @@ nginxController:
 
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
+# SigNoz ships as two upstream charts and this chart mirrors that split:
+#   signoz:    backend — ClickHouse, query service, UI
+#   signozCollector: agents — node DaemonSet + cluster collector
+# Per-service OTLP export is global.observability near the top of this file.
 
 # SigNoz — set signoz.enabled=true to deploy it and auto-enable OTLP export.
 signoz:
@@ -455,6 +459,26 @@ signoz:
   clickhouse:
     persistence:
       size: 20Gi
+
+# SigNoz collection agents — node DaemonSet (pod logs, host/kubelet metrics)
+# plus one cluster collector (workload objects, k8s events). Requires
+# signoz.enabled=true; observability-validation.yaml enforces that.
+# Pipelines, RBAC and hardening live in templates/signoz/ and files/signoz/.
+signozCollector:
+  enabled: false
+  # Cluster identity tagged onto every exported signal; required when enabled.
+  clusterName: ""
+  image:
+    repository: docker.io/otel/opentelemetry-collector-contrib
+    tag: "0.139.0"
+    pullPolicy: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 # Health Dashboard
 healthDashboard:
