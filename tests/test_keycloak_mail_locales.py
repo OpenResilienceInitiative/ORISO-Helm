@@ -25,6 +25,64 @@ HTTP_HELPER = ROOT / "files" / "keycloak-reconcile-smtp.py"
 
 
 class KeycloakMailLocalesTest(unittest.TestCase):
+    def test_realm_readback_rejects_missing_extra_duplicate_or_mistyped_locales(self):
+        expected = ["de", "en", "fr", "ru", "ti", "tr"]
+        readback = {}
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"access_token":"token-canary"}')
+
+            def do_PUT(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(204)
+                self.end_headers()
+
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(json.dumps(readback).encode())
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                (Path(directory) / "keycloak_reconcile_smtp.py").write_bytes(HTTP_HELPER.read_bytes())
+                (Path(directory) / PYTHON_SCRIPT.name).write_bytes(PYTHON_SCRIPT.read_bytes())
+                command = [sys.executable, str(Path(directory) / PYTHON_SCRIPT.name)]
+                env = {**os.environ,
+                    "KEYCLOAK_URL": f"http://127.0.0.1:{server.server_port}/auth",
+                    "KEYCLOAK_REALM": "example", "POD_NAMESPACE": "test",
+                    "KEYCLOAK_ADMIN_USERNAME": "admin-canary",
+                    "KEYCLOAK_ADMIN_PASSWORD": "secret-canary"}
+                cases = (
+                    ("missing", expected[:-1], True),
+                    ("extra", expected + ["es"], True),
+                    ("duplicate", expected[:-1] + ["ti"], True),
+                    ("wrong type", ",".join(expected), True),
+                    ("non-boolean enabled", expected, 1),
+                )
+                for name, locales, enabled in cases:
+                    with self.subTest(name=name):
+                        readback = {"internationalizationEnabled": enabled,
+                            "supportedLocales": locales, "defaultLocale": "de",
+                            "emailTheme": "oriso"}
+                        result = subprocess.run(command, env=env, capture_output=True, text=True)
+                        self.assertEqual(2, result.returncode)
+                        self.assertEqual("MAIL_LOCALE_REALM_READBACK_MISMATCH",
+                                         result.stderr.strip())
+                        self.assertNotIn("secret-canary", result.stdout + result.stderr)
+        finally:
+            server.shutdown()
+            server.server_close()
+
     def test_transient_keycloak_startup_recovers_without_credential_logging(self):
         requests = []
 
@@ -200,7 +258,10 @@ class KeycloakMailLocalesTest(unittest.TestCase):
                 requests.append(("GET", self.path, None, dict(self.headers)))
                 if self.headers.get("Authorization") != "Bearer token-canary":
                     return self.respond(403)
-                self.respond(200, realm)
+                # Keycloak stores supportedLocales as a Set, so readback order
+                # is not a contract even when all configured locales persisted.
+                self.respond(200, {**realm,
+                    "supportedLocales": list(reversed(realm["supportedLocales"]))})
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         thread = Thread(target=server.serve_forever, daemon=True)

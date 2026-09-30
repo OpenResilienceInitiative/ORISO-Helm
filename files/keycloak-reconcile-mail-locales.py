@@ -77,7 +77,14 @@ def reconcile(env):
                                 max_response_bytes=MAX_REALM_RESPONSE_BYTES)
     except ReconcileError:
         raise LocaleError("MAIL_LOCALE_REALM_READBACK_FAILED") from None
-    if any(actual.get(key) != value for key, value in EXPECTED.items()):
+    locales = actual.get("supportedLocales")
+    if (actual.get("internationalizationEnabled") is not True
+            or not isinstance(locales, list)
+            or len(locales) != len(EXPECTED["supportedLocales"])
+            or not all(isinstance(locale, str) for locale in locales)
+            or set(locales) != set(EXPECTED["supportedLocales"])
+            or actual.get("defaultLocale") != EXPECTED["defaultLocale"]
+            or actual.get("emailTheme") != EXPECTED["emailTheme"]):
         raise LocaleError("MAIL_LOCALE_REALM_READBACK_MISMATCH")
 
 
