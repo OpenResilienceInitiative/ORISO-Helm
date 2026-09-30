@@ -1,9 +1,14 @@
 {{- define "oriso.keycloakSmtpReconcilePod" -}}
+{{- $mode := .mode -}}
+{{- with .root -}}
 {{- $image := required "keycloakSmtpReconcile.image is required and must use an immutable digest" .Values.keycloakSmtpReconcile.image -}}
 {{- if not (regexMatch "^[^[:space:]]+@sha256:[a-f0-9]{64}$" $image) -}}
 {{- fail "keycloakSmtpReconcile.image must use an immutable sha256 digest" -}}
 {{- end -}}
-restartPolicy: Never
+restartPolicy: {{ if eq $mode "serve" }}Always{{ else }}Never{{ end }}
+{{- if eq $mode "serve" }}
+terminationGracePeriodSeconds: 60
+{{- end }}
 automountServiceAccountToken: false
 securityContext:
   runAsNonRoot: true
@@ -51,6 +56,9 @@ containers:
           configMapKeyRef:
             name: tenantservice-configmap-env
             key: TECHNICAL_SERVICE_SUBJECT
+      {{- if eq $mode "trigger" }}
+      - name: SMTP_RECONCILE_URL
+        value: {{ printf "http://keycloak-reconcile-smtp.%s:8080/smtp/reconcile" .Release.Namespace | quote }}
       {{- range $pair := list (list "TECHNICAL_USERNAME" "IDENTITY_TECHNICAL_USER_USERNAME") (list "TECHNICAL_PASSWORD" "IDENTITY_TECHNICAL_USER_PASSWORD") }}
       - name: {{ index $pair 0 }}
         valueFrom:
@@ -58,6 +66,8 @@ containers:
             name: userservice-secret
             key: {{ index $pair 1 }}
       {{- end }}
+      {{- end }}
+      {{- if eq $mode "serve" }}
       {{- range $pair := list (list "KEYCLOAK_ADMIN_USERNAME" "KEYCLOAK_ADMIN") (list "KEYCLOAK_ADMIN_PASSWORD" "KEYCLOAK_ADMIN_PASSWORD") }}
       - name: {{ index $pair 0 }}
         valueFrom:
@@ -65,7 +75,25 @@ containers:
             name: keycloak-secret-env
             key: {{ index $pair 1 }}
       {{- end }}
-    command: ["python3", "-B", "/scripts/keycloak-reconcile-smtp.py"]
+      {{- end }}
+    command: ["python3", "-B", "/scripts/keycloak-reconcile-smtp.py", {{ printf "--%s" $mode | quote }}]
+    {{- if eq $mode "serve" }}
+    ports:
+      - name: http
+        containerPort: 8080
+    readinessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 5
+      timeoutSeconds: 2
+    livenessProbe:
+      httpGet:
+        path: /health
+        port: http
+      periodSeconds: 10
+      timeoutSeconds: 2
+    {{- end }}
     volumeMounts:
       - name: reconcile-script
         mountPath: /scripts
@@ -75,4 +103,5 @@ volumes:
     configMap:
       name: keycloak-reconcile-smtp-script
       defaultMode: 0444
+{{- end -}}
 {{- end -}}

@@ -28,6 +28,32 @@ spec:
           image:  {{ .Values.consultingTypeService.imageName }}:{{ .Values.consultingTypeService.imageVersion }}          
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            # Same existing technical identity; no realm-admin credentials in CTS.
+            - name: SMTP_RECONCILE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: consultingtypeservice-configmap-env
+                  key: SMTP_RECONCILE_URL
+            - name: IDENTITY_TECHNICAL_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: KEYCLOAK_CONFIG_APP_CLIENTID
+            - name: TECHNICAL_SERVICE_SUBJECT
+              valueFrom:
+                configMapKeyRef:
+                  name: tenantservice-configmap-env
+                  key: TECHNICAL_SERVICE_SUBJECT
+            - name: IDENTITY_TECHNICAL_USER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: userservice-secret
+                  key: IDENTITY_TECHNICAL_USER_USERNAME
+            - name: IDENTITY_TECHNICAL_USER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: userservice-secret
+                  key: IDENTITY_TECHNICAL_USER_PASSWORD
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
