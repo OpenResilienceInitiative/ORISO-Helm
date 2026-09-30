@@ -403,13 +403,6 @@ userService:
   passwordResetFrontendBaseUrl: ""
   passwordResetAdminFrontendBaseUrl: ""
 
-  # Platform SMTP is environment-owned and required for account mail. Supply
-  # host/from here or in the environment overlay, and credentials in secrets.
-  smtpHost: ""
-  smtpPort: 587
-  smtpSecure: false
-  smtpFrom: ""
-
   # Bare origins for account-invite links (admin must NOT end in /admin).
   # Empty = <scheme>://<domainName> (http when global.enableTls is false); set
   # only when the Admin panel has its own host.
