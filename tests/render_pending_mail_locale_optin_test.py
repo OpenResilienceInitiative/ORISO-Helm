@@ -13,7 +13,7 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KEY = "EMAIL_ALLOW_UNREVIEWED_LOCALES"
 
 
-def render(overlay: str | None, opt_in: bool | None = None) -> tuple[dict, dict]:
+def render(overlay: str | None, opt_in: bool | str | None = None) -> tuple[dict, dict]:
     """Render the base chart with one optional environment overlay."""
     args = [
         "helm", "template", "mail-locale-gate-test", CHART_DIR,
@@ -25,7 +25,8 @@ def render(overlay: str | None, opt_in: bool | None = None) -> tuple[dict, dict]
     if overlay:
         args += ["-f", os.path.join(CHART_DIR, f"values-{overlay}.yaml")]
     if opt_in is not None:
-        args += ["--set", f"userService.emailAllowUnreviewedLocales={str(opt_in).lower()}"]
+        value = opt_in if isinstance(opt_in, str) else str(opt_in).lower()
+        args += ["--set", f"userService.emailAllowUnreviewedLocales={value}"]
     args += [
         "--set-string", "userService.smtpUser=render-only-smtp-user",
         "--set-string", "userService.smtpPassword=render-only-smtp-password",
@@ -70,10 +71,20 @@ def test_dev_opt_out_updates_the_pod_template() -> None:
     assert disabled_annotations["oriso.org/email-allow-unreviewed-locales"] == "false"
 
 
+def test_missing_value_defaults_to_false() -> None:
+    """Installation values without the key must render false, not an empty value."""
+    configmap, deployment = render(None, opt_in="null")
+    assert configmap["data"][KEY] == "false"
+    assert deployment["spec"]["template"]["metadata"]["annotations"][
+        "oriso.org/email-allow-unreviewed-locales"
+    ] == "false"
+
+
 if __name__ == "__main__":
     try:
         test_pending_mail_locales_are_dev_only()
         test_dev_opt_out_updates_the_pod_template()
+        test_missing_value_defaults_to_false()
     except AssertionError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         sys.exit(1)
