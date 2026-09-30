@@ -25,6 +25,8 @@ def render(*values_files: str) -> list[dict]:
         os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
         "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
+        "-f",
+        os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
         "--set-string",
         "global.domainName=dev.oriso.org",
         "--set-string",

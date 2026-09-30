@@ -59,58 +59,128 @@ keys); on the archived Pre-Dev release, verify the pod environment after the
 patch (see Verification below) and add the `env` entries if any key is
 missing.
 
-## SMTP transport
+## Platform SMTP setup
 
-UserService sends the reset mail itself over SMTP. Until now the maintained
-chart rendered no SMTP configuration at all, so a Helm-deployed environment
-could never send one. The chart now renders:
+The chart validates public link origins before installation but does not
+configure an SMTP provider. Its install notes tell a new operator to sign in
+as the first platform admin and enter the platform mail settings in Admin
+Settings. UserService reads one coherent settings snapshot through its
+technical identity; Helm neither exports `SMTP_*` values to UserService nor
+supplies a fallback server. The first-admin password and authenticator path
+appears mail-independent in source inspection. A fresh-install walkthrough is
+still required before ruling out a one-time bootstrap definitively.
 
-| Key | Source | Value |
-|---|---|---|
-| `SMTP_HOST` | `userService.smtpHost` | `mail.dreambau.com` |
-| `SMTP_PORT` | `userService.smtpPort` | `587` |
-| `SMTP_SECURE` | `userService.smtpSecure` | `false` (STARTTLS) |
-| `SMTP_FROM` | `userService.smtpFrom` | `ORISO Platform <monty.burns@oriso.org>` |
-| `SMTP_USER` | `userService.smtpUser` (secret values) | the platform-admin mailbox |
-| `SMTP_PASSWORD` | `userService.smtpPassword` (secret values) | its password |
-
-`smtpUser` and `smtpPassword` belong in the persistent secret values, never in
-a values file in this repository. The render fails when `smtpHost` is set but
-either credential is empty: a deploy with blank credentials would still answer
-every reset request with 204 while silently sending no mail, which is
-indistinguishable from a working environment from the outside.
-
-Pre-Dev is not rendered from this chart; its ConfigMap and
-`oriso-platform-userservice-secrets` were wired to the same identity by hand on
-2026-07-28.
-
-## Global SMTP settings
-
-The reset mail is sent directly over SMTP, not through MailService. UserService
-reads host/port/secure/from from the **public** ConsultingTypeService
-`/settings` and the username/password from the **authenticated**
-`/settingsadmin` endpoint, because the public payload deliberately omits
-credentials since the CTS-C01 credential-leak fix
-(ORISO-ConsultingTypeService#7). All of the following must be set in the
-platform settings, otherwise no mail is sent:
+The following Admin Settings values are needed before mail-dependent actions
+can deliver:
 
 - `globalFeatureSystemNotificationEmailsEnabled` = true
 - `globalSmtpEnabled` = true
 - `globalSmtpHost`, `globalSmtpPort`, `globalSmtpFrom`
 - `globalSmtpUsername`, `globalSmtpPassword`
 
+Missing or incomplete saved settings produce a named configuration result in
+the Admin SMTP diagnostic and mail send paths; an unavailable Admin Settings
+service or technical identity is reported separately. Password-reset request
+HTTP 204 protects account existence and is not proof of mail delivery. Check a
+received test mail before treating setup as complete. The provider-specific
+host, sender and credentials are entered only in Admin Settings.
+
+The existing Dev and Pre-Dev overlay `userService.smtp*` fields record an
+earlier incident workaround. This chart no longer reads or exports those
+fields. Deploy the Admin-managed UserService source before applying this chart
+change to an environment still running the deployment-owned SMTP provider.
+
+## Keycloak SMTP reconciliation
+
+Keycloak reads the same saved Admin Settings snapshot as UserService. The
+post-install/post-upgrade `keycloak-reconcile-smtp` hook authenticates with the
+existing technical identity and calls the same internal helper as a saved
+SMTP change. There is no scheduled SMTP job. CTS saves the SMTP revision and
+pending signal atomically, then requests reconciliation directly. Failed
+callbacks remain pending for a bounded, targeted retry; unchanged SMTP and
+unrelated settings do not cause realm writes. Deploy the CTS #165 companion
+before relying on this saved-change path.
+
+The helper accepts only a revision and a technical bearer token. Matching
+decoded subject/app-client/realm-role/expiry claims are only a preliminary
+gate: CTS independently verifies the bearer signature and authority when the
+helper reads `/settingsadmin/smtp-credentials`. One raw snapshot supplies the
+unchanged credential JSON and nonsecret `X-Smtp-Revision` header. The helper
+updates only `smtpServer` and acknowledges the actual saved revision only
+after successful Keycloak update. CTS clears pending only if that revision
+still matches; a newer save stays pending. Replayed triggers read the latest
+snapshot, and an already acknowledged current revision needs no repeated PUT.
+
+The separate existing Keycloak admin secret is mounted only on the helper;
+CTS and the catch-up hook receive no realm-management credential or new role.
+One replica, `Recreate`, serialized writes and a 60-second graceful drain
+prevent concurrent old/new helper updates. Each upstream call has a 10-second
+timeout; a busy helper returns a safe failure for the durable CTS retry.
+The install/upgrade trigger waits at most 120 seconds for helper connection
+startup or HTTP 503, below the Job's 600-second deadline. Authentication and
+other permanent errors fail immediately. This is one bounded hook run, not a
+periodic reconciliation loop. Other realm settings
+are never read-modify-written. Actual cluster shutdown and initial installation
+remain deployment checks, beyond the local process-drain regression.
+
+A successfully read disabled, incomplete or absent snapshot clears the old
+realm SMTP settings and emits `SMTP_DISABLED_OR_INCOMPLETE`. An unavailable
+source, rejected technical login, mismatched identity, invalid response or TLS
+failure leaves existing realm SMTP unchanged and fails with a safe named error.
+This preserves the previous realm state during an outage, without reading a
+chart fallback. Diagnose the failed job instead of treating an outage as an
+empty saved setting. Retry reconciliation after restoring the source.
+
+Credentials, access tokens and HTTP bodies stay in memory. They do not enter
+process arguments, helper logs, temporary credential files, ConfigMaps or
+Helm SMTP values. The helper image is the official Python image pinned by
+immutable multi-architecture digest and uses stdlib HTTP/TLS/JSON; no runtime
+package installation is needed. Public service URLs require verified HTTPS;
+existing cluster-internal service HTTP is retained. Redirects are refused.
+
+Keycloak still persists its active SMTP password in the realm database. This
+reconciliation does not claim to encrypt or remove that separate credential
+copy; access controls and the existing database/encryption finding remain.
+
+After approved deployment, change each saved SMTP field and rotate the password
+in Admin Settings, verify successful synchronization of that saved revision,
+then request a new OTP and verify receipt. If synchronization fails, check the
+named pending state and its targeted retry. Inspect only safe result codes and field names;
+do not dump the realm SMTP object, pod environment or token payload. Test an
+incomplete saved configuration (old Keycloak SMTP must be cleared) and a source
+outage (the helper must fail without mutating the realm). A green chart render,
+local API test or Job completion is not a received Dev OTP.
+
 ## Verification
 
-Startup log — both warnings must be **absent**:
+Before install, verify that the chart renders the expected public URLs and
+that the install notes explain the Admin Settings SMTP step. Use only a
+non-secret environment values file and synthetic render credentials for this
+terminal check. Helm's `--hide-secret` hides `Secret` objects, but it does not
+redact values repeated in other rendered manifests; **never pass the real
+environment secrets file to a dry run whose output is displayed or shared**.
+The Redis example of this existing chart limitation is tracked in
+[ORISO-Helm #192](https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/192).
+A successful render does not establish that SMTP is configured:
 
 ```bash
-kubectl -n caritas logs deploy/<userservice-deployment> | grep -i "password reset is DISABLED"
+helm install oriso . --dry-run=client --hide-secret \
+  -f values.yaml.default -f <environment-values.yaml> \
+  -f secrets.yaml.default -f tests/fixtures/render-required-secrets.yaml \
+  --set-string global.secrets.redisdefaultPass=render-only-canary \
+  --set-string tenantService.smtpPasswordEncryptionSecret=render-only-canary \
+  --set-string consultingTypeService.smtpPasswordEncryptionSecret=render-only-canary
 ```
 
-Effective pod environment — all link keys must be present:
+After rollout, inspect only the UserService Deployment's declared environment
+variable names. All public link keys must be present, and there must be no
+deployment-owned `SMTP_*` transport keys. Do not print environment values or
+Secret data while checking this:
 
 ```bash
-kubectl -n caritas exec deploy/<userservice-deployment> -- env | grep -E 'PASSWORD_RESET|ACCOUNT_INVITE'
+kubectl -n caritas get deployment <userservice-deployment> \
+  -o jsonpath='{range .spec.template.spec.containers[*].env[*]}{.name}{"\n"}{end}' \
+  | grep -E 'PASSWORD_RESET|ACCOUNT_INVITE|SMTP_'
 ```
 
 End-to-end, without any browser: request a reset for an account whose email is

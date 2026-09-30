@@ -122,11 +122,20 @@ def render(chart: str, server_public_ip: str) -> str:
         "global": {
             # The chart requires a real public host (ORISO-Helm#366).
             "domainName": "render.oriso.internal",
+            # secrets.yaml.default ships placeholders the chart rejects
+            # (ORISO-Helm#367); this minimal chart does not copy that file, so
+            # the same render-only values as tests/fixtures/
+            # render-required-secrets.yaml are seeded here.
+            "keycloak": {
+                "serviceTechUserId": "00000000-0000-4000-8000-000000000000",
+            },
             "secrets": {
                 "redisdefaultPass": "test-redis-pass",
                 "matrixRegistrationSharedSecret": "test-shared-secret",
+                "keycloakServiceAdminPassword": "render-only-not-a-real-secret",
             }
         },
+        "userService": {"emailBrandingName": "Render Test Platform"},
         # postgres.* live in secrets.yaml.default, which this minimal chart does
         # not copy, so they are seeded here like the other secrets above.
         # matrix-configmaps.yaml references all three.

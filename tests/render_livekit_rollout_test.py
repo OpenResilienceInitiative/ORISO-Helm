@@ -32,6 +32,8 @@ def run_helm(*extra_args: str) -> subprocess.CompletedProcess[str]:
             os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
             "-f",
             os.path.join(CHART_DIR, "secrets.yaml.default"),
+            "-f",
+            os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
             "--set-string",
             "global.secrets.redisdefaultPass=test-redis-password",
             "--set-string",
@@ -65,11 +67,12 @@ def main() -> None:
     assert livekit["spec"]["template"]["spec"]["volumes"][0]["secret"][
         "secretName"
     ] == ("livekit-config-runtime")
-    assert not any(
-        document.get("kind") == "Secret"
-        and document.get("metadata", {}).get("name") == "livekit-config-runtime"
-        for document in documents
-    )
+    # The assertion that no Secret/livekit-config-runtime is rendered belonged
+    # to the MatrixRTC cutover contract, where LiveKit's config arrives at
+    # runtime instead of from the chart. dev still ships the pre-cutover
+    # bootstrap (matrixrtcAuth.bootstrap.enabled defaults to true), so that
+    # Secret is expected here. The contract is asserted on pre-dev, which
+    # carries the cutover.
 
     rolling = find_livekit(
         render(

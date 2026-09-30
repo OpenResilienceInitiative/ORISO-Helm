@@ -85,6 +85,8 @@ BASE_OVERLAY = {
             "userServiceDbPassword": "test-db-pass",
             "keycloakAdminUsername": "test-kc-user",
             "keycloakAdminPassword": "test-kc-pass",
+            "keycloakServiceAdminUsername": "test-kc-service-admin",
+            "keycloakServiceAdminPassword": "test-kc-service-admin-pass",
             "matrixRegistrationSharedSecret": "test-shared-secret",
         },
         "matrix": {
@@ -94,8 +96,6 @@ BASE_OVERLAY = {
     },
     "userService": {
         "serviceEncryptionAppkey": "test-appkey",
-        "keycloakTechnicalUsername": "test-technical-user",
-        "keycloakTechnicalPassword": "test-technical-pass",
         "identityTechnicalUserUsername": "test-identity-user",
         "identityTechnicalUserPassword": "test-identity-pass",
         "matrixRtcCallPolicyHmacSecret": "test-matrixrtc-hmac",
@@ -171,6 +171,8 @@ def render_full_chart(*extra_set_strings: str) -> list[dict]:
         os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
         "-f",
         os.path.join(CHART_DIR, "secrets.yaml.default"),
+        "-f",
+        os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
     ]
     for setting in extra_set_strings:
         cmd += ["--set-string", setting]

@@ -10,8 +10,27 @@ URL. Fail fast when the env var is missing or still points at another domain
 (e.g. the values.yaml.default placeholder).
 */ -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
+{{- $collector := get .Values "signozCollector" | default dict -}}
+{{- $collectorEnabled := get $collector "enabled" | default false -}}
+{{- $signozEnabled := get $signoz "enabled" | default false -}}
+{{- if and $collectorEnabled (not $signozEnabled) -}}
+{{- fail "signozCollector.enabled=true requires signoz.enabled=true" -}}
+{{- end -}}
+{{- if $collectorEnabled -}}
+{{- $globalObservability := get .Values.global "observability" | default dict -}}
+{{- if eq (get $collector "clusterName" | default "") "" -}}
+{{- fail "signozCollector.clusterName is required when signozCollector is enabled" -}}
+{{- end -}}
+{{- if eq (get $globalObservability "deploymentEnvironment" | default "") "" -}}
+{{- fail "global.observability.deploymentEnvironment is required when signozCollector is enabled" -}}
+{{- end -}}
+{{- end -}}
 {{- $orisoIngress := get $signoz "orisoIngress" | default dict -}}
-{{- if and (get $signoz "enabled" | default false) (get $orisoIngress "enabled" | default true) -}}
+{{- $orisoIngressEnabled := true -}}
+{{- if hasKey $orisoIngress "enabled" -}}
+{{- $orisoIngressEnabled = get $orisoIngress "enabled" -}}
+{{- end -}}
+{{- if and $signozEnabled $orisoIngressEnabled -}}
 {{- $signozApp := get $signoz "signoz" | default dict -}}
 {{- $signozEnv := get $signozApp "env" | default dict -}}
 {{- $externalUrl := get $signozEnv "signoz_global_external__url" | default "" -}}
