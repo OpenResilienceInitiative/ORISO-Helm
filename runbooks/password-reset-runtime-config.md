@@ -116,7 +116,10 @@ CTS and the catch-up hook receive no realm-management credential or new role.
 One replica, `Recreate`, serialized writes and a 60-second graceful drain
 prevent concurrent old/new helper updates. Each upstream call has a 10-second
 timeout; a busy helper returns a safe failure for the durable CTS retry.
-Install/upgrade hooks retain their bounded retry window. Other realm settings
+The install/upgrade trigger waits at most 120 seconds for helper connection
+startup or HTTP 503, below the Job's 600-second deadline. Authentication and
+other permanent errors fail immediately. This is one bounded hook run, not a
+periodic reconciliation loop. Other realm settings
 are never read-modify-written. Actual cluster shutdown and initial installation
 remain deployment checks, beyond the local process-drain regression.
 
@@ -151,12 +154,22 @@ local API test or Job completion is not a received Dev OTP.
 ## Verification
 
 Before install, verify that the chart renders the expected public URLs and
-that the install notes explain the Admin Settings SMTP step. A successful
-render does not establish that SMTP is configured:
+that the install notes explain the Admin Settings SMTP step. Use only a
+non-secret environment values file and synthetic render credentials for this
+terminal check. Helm's `--hide-secret` hides `Secret` objects, but it does not
+redact values repeated in other rendered manifests; **never pass the real
+environment secrets file to a dry run whose output is displayed or shared**.
+The Redis example of this existing chart limitation is tracked in
+[ORISO-Helm #192](https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/192).
+A successful render does not establish that SMTP is configured:
 
 ```bash
-helm install oriso . --dry-run=client --debug \
-  -f values.yaml.default -f <environment-values.yaml> -f <environment-secrets.yaml>
+helm install oriso . --dry-run=client --hide-secret \
+  -f values.yaml.default -f <environment-values.yaml> \
+  -f secrets.yaml.default -f tests/fixtures/render-required-secrets.yaml \
+  --set-string global.secrets.redisdefaultPass=render-only-canary \
+  --set-string tenantService.smtpPasswordEncryptionSecret=render-only-canary \
+  --set-string consultingTypeService.smtpPasswordEncryptionSecret=render-only-canary
 ```
 
 After rollout, inspect only the UserService Deployment's declared environment
