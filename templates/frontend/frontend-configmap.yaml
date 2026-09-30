@@ -15,8 +15,8 @@ data:
   REACT_APP_KEYCLOAK_URL: "{{ .Values.global.external.keycloakURL }}"
   REACT_APP_MATRIX_HOMESERVER_URL:  "https://{{ .Values.global.domainName }}"
   REACT_APP_KEYCLOAK_REALM: "{{ .Values.global.keycloak.realm }}"
-  REACT_APP_PLATFORM_VERSION: {{ printf "v%s" (trimPrefix "v" .Chart.AppVersion) | quote }}
-  VITE_PLATFORM_VERSION: {{ printf "v%s" (trimPrefix "v" .Chart.AppVersion) | quote }}
+  REACT_APP_PLATFORM_VERSION: {{ include "oriso.platformVersion" . | quote }}
+  VITE_PLATFORM_VERSION: {{ include "oriso.platformVersion" . | quote }}
   # Media downloads route through the content scanner only where one is
   # deployed. Empty means "no scanner": the client keeps the pre-scanner
   # behaviour instead of pointing at an endpoint that answers 404.

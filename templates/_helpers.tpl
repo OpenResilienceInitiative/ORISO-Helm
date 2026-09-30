@@ -2,6 +2,20 @@
 Render one complete OCI image reference. Release overlays can enable the strict
 digest-only gate while local development keeps accepting mutable tags.
 */}}
+{{/*
+Platform version shown in the Admin and Frontend UIs. A numeric appVersion is
+displayed as a release (v2.0.1); a channel name such as "dev" is shown as-is,
+because "vdev" reads like a version that does not exist.
+*/}}
+{{- define "oriso.platformVersion" -}}
+{{- $version := .Chart.AppVersion | toString -}}
+{{- if regexMatch "^v?[0-9]" $version -}}
+{{- printf "v%s" (trimPrefix "v" $version) -}}
+{{- else -}}
+{{- $version -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "oriso.immutableImage" -}}
 {{- $valueName := index . 0 -}}
 {{- required (printf "%s must be set" $valueName) (index . 1) -}}
