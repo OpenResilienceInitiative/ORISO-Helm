@@ -16,7 +16,7 @@ global:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
-  # OTLP export to SigNoz — auto-enabled when signoz.enabled=true.
+  # OTLP export to SigNoz — auto-enabled when signoz.enabled=true; backend and agents below.
   observability:
     otlpEnabled: false
     autoEnableWithSignoz: true
@@ -448,6 +448,10 @@ nginxController:
 
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
+# SigNoz ships as two upstream charts and this chart mirrors that split:
+#   signoz:    backend — ClickHouse, query service, UI
+#   k8s-infra: agents  — node DaemonSet + cluster collector
+# Per-service OTLP export is global.observability near the top of this file.
 
 # SigNoz — set signoz.enabled=true to deploy it and auto-enable OTLP export.
 signoz:
