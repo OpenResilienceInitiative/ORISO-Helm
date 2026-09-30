@@ -322,6 +322,11 @@ consultingTypeService:
     enabled: true
 
 
+# Keycloak mail follows Admin Settings, including credential rotation.
+# The helper contains only stdlib HTTP/TLS/JSON; no package install at runtime.
+keycloakSmtpReconcile:
+  image: "docker.io/library/python:3.13-alpine@sha256:79e7a9b9ff1cbceff819f856fb374477792a5967759d94df266de7b7b4120e6f"
+
 # Tenant Service
 tenantService:
   # Pins for TenantService's constrained OWN-server system-mail endpoint.
@@ -407,13 +412,6 @@ userService:
   magicLinkFrontendBaseUrl: ""
   passwordResetFrontendBaseUrl: ""
   passwordResetAdminFrontendBaseUrl: ""
-
-  # Platform SMTP is environment-owned and required for account mail. Supply
-  # host/from here or in the environment overlay, and credentials in secrets.
-  smtpHost: ""
-  smtpPort: 587
-  smtpSecure: false
-  smtpFrom: ""
 
   # Bare origins for account-invite links (admin must NOT end in /admin).
   # Empty = <scheme>://<domainName> (http when global.enableTls is false); set

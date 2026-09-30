@@ -1,0 +1,23 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: keycloak-reconcile-smtp
+  namespace: {{ .Release.Namespace }}
+spec:
+  # SMTP and credential changes in Admin Settings need no Helm upgrade.
+  # This is a reconciliation schedule, not a hard one-minute delivery SLA.
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 30
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 55
+      template:
+        metadata:
+          labels:
+            app: keycloak-reconcile-smtp
+        spec:
+          {{- include "oriso.keycloakSmtpReconcilePod" . | nindent 10 }}

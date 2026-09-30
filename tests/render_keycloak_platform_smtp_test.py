@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keycloak reconciles SMTP from the same deployment values as UserService."""
+"""Keycloak follows the authenticated Admin snapshot and later credential rotation."""
 
 import os
 import subprocess
@@ -17,12 +17,7 @@ BASE = [
     "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
     "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
     "--set", "global.domainName=predev.oriso.internal",
-    "--set-string", "userService.smtpHost=smtp.canary.example",
-    "--set", "userService.smtpPort=587",
-    "--set", "userService.smtpSecure=false",
-    "--set-string", "userService.smtpFrom=ORISO Platform <sender@canary.example>",
-    "--set-string", "userService.smtpUser=canary-user",
-    "--set-string", "userService.smtpPassword=canary-password",
+
 ]
 
 
@@ -36,22 +31,41 @@ def main():
     assert result.returncode == 0, result.stderr
     job = next(doc for doc in docs if doc.get("kind") == "Job" and doc["metadata"]["name"] == "keycloak-reconcile-smtp")
     assert job["metadata"]["annotations"]["helm.sh/hook"] == "post-install,post-upgrade"
-    env = {entry["name"]: entry["valueFrom"] for entry in job["spec"]["template"]["spec"]["containers"][0]["env"] if "valueFrom" in entry}
-    for name in ("SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_FROM"):
-        assert env[name]["configMapKeyRef"] == {"name": "userservice-configmap-env", "key": name}
-    for name in ("SMTP_USER", "SMTP_PASSWORD"):
-        assert env[name]["secretKeyRef"] == {"name": "userservice-secret", "key": name}
-    assert "canary-password" not in result.stdout
-    command = job["spec"]["template"]["spec"]["containers"][0]["command"][-1]
-    assert 'export KC_CLI_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD"' in command
-    assert '--password "$KEYCLOAK_ADMIN_PASSWORD"' not in command
-    assert 'update "realms/${KEYCLOAK_REALM}" -f -' in command
+    cron = next(doc for doc in docs if doc.get("kind") == "CronJob" and doc["metadata"]["name"] == "keycloak-reconcile-smtp")
+    assert cron["spec"]["schedule"] == "* * * * *"
+    assert cron["spec"]["concurrencyPolicy"] == "Forbid"
+    pod = job["spec"]["template"]["spec"]
+    assert pod == cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+    assert pod["automountServiceAccountToken"] is False
+    container = pod["containers"][0]
+    assert "@sha256:" in container["image"]
+    assert container["command"] == ["python3", "-B", "/scripts/keycloak-reconcile-smtp.py"]
+    env = {entry["name"]: entry for entry in container["env"]}
+    assert not any(name.startswith("SMTP_") for name in env)
+    for name, key in (("TECHNICAL_USERNAME", "IDENTITY_TECHNICAL_USER_USERNAME"),
+                      ("TECHNICAL_PASSWORD", "IDENTITY_TECHNICAL_USER_PASSWORD")):
+        assert env[name]["valueFrom"]["secretKeyRef"] == {"name": "userservice-secret", "key": key}
+    assert env["TECHNICAL_SERVICE_SUBJECT"]["valueFrom"]["configMapKeyRef"] == {
+        "name": "tenantservice-configmap-env", "key": "TECHNICAL_SERVICE_SUBJECT"}
+    assert env["TECHNICAL_CLIENT_ID"]["valueFrom"]["configMapKeyRef"] == {
+        "name": "userservice-configmap-env", "key": "KEYCLOAK_RESOURCE"}
+    assert env["CONSULTING_TYPE_SERVICE_URL"]["valueFrom"]["configMapKeyRef"] == {
+        "name": "userservice-configmap-env", "key": "CONSULTING_TYPE_SERVICE_API_URL"}
+    config = next(doc for doc in docs if doc.get("kind") == "ConfigMap" and doc["metadata"]["name"] == "keycloak-reconcile-smtp-script")
+    assert "keycloak-reconcile-smtp.py" in config["data"]
+    result, _ = render(
+        "--set-string", "userService.smtpHost=legacy.invalid",
+        "--set-string", "userService.smtpFrom=legacy@example.invalid",
+        "--set-string", "userService.smtpUser=legacy-user-canary",
+        "--set-string", "userService.smtpPassword=legacy-password-canary",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "legacy-password-canary" not in result.stdout
+    assert "legacy-user-canary" not in result.stdout
+    result, _ = render("--set-string", "keycloakSmtpReconcile.image=python:latest")
+    assert result.returncode != 0 and "keycloakSmtpReconcile.image" in result.stderr
 
-    for name in ("smtpHost", "smtpFrom", "smtpUser", "smtpPassword"):
-        result, _ = render("--set-string", f"userService.{name}=")
-        expected = f"userService.{name}"
-        assert result.returncode != 0 and expected in result.stderr, (name, result.stderr)
-    print("PASS: Keycloak SMTP hook uses platform config and refuses missing fields")
+    print("PASS: Admin-only Keycloak SMTP hook and bounded rotation reconciliation")
 
 
 if __name__ == "__main__":

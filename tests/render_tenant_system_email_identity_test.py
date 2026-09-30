@@ -16,8 +16,6 @@ BASE = [
     "--set-string", "global.secrets.redisdefaultPass=test-redis-password",
     "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
     "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
-    "--set-string", "userService.smtpUser=smtp-canary-user",
-    "--set-string", "userService.smtpPassword=smtp-canary-password",
 ]
 
 

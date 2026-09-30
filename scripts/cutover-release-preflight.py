@@ -271,8 +271,6 @@ def verify_render(chart_dir: pathlib.Path, values: dict) -> None:
                 overlay.name,
                 "--set-string",
                 "global.secrets.redisdefaultPass=test-redis-password",
-                "--set-string", "userService.smtpUser=smtp-canary-user",
-                "--set-string", "userService.smtpPassword=smtp-canary-password",
                 # Image-only dry render: the chart requires a real public host
                 # and a real Matrix server name (ORISO-Helm#366), neither of
                 # which this check inspects — values.yaml.default ships only
