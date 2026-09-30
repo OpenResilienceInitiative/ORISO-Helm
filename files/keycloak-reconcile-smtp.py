@@ -103,7 +103,11 @@ class HttpClient:
             error.close()
             if authenticate_source and error.code in (401, 403):
                 raise ReconcileError("SMTP_RECONCILE_UNAUTHORIZED", 403) from None
-            if trigger_request and error.code == 503:
+            # 502 is the server reporting that Admin Settings/CTS is not
+            # answering yet. A post-upgrade hook routinely runs while that
+            # Deployment is still rolling, so it is as transient as the 503 the
+            # server returns for itself: both wait out TRIGGER_READY_SECONDS.
+            if trigger_request and error.code in (502, 503):
                 raise TriggerNotReady() from None
             raise ReconcileError("SMTP_RECONCILE_" + failure) from None
         except (URLError, OSError) as error:
@@ -295,6 +299,11 @@ def serve(env):
             pass  # Requests and exception text may contain bearer credentials.
 
         def reply(self, status, payload):
+            code = payload.get("code") if isinstance(payload, dict) else None
+            if status >= 400 and code:
+                # Codes only. Request lines, headers and response bodies may
+                # carry bearer tokens or the SMTP password.
+                print("%s %s" % (status, code), file=sys.stderr, flush=True)
             body = json.dumps(payload).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
