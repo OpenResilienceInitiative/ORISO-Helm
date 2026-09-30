@@ -48,9 +48,24 @@ def main():
     assert env["TECHNICAL_SERVICE_SUBJECT"]["valueFrom"]["configMapKeyRef"] == {
         "name": "tenantservice-configmap-env", "key": "TECHNICAL_SERVICE_SUBJECT"}
     assert env["TECHNICAL_CLIENT_ID"]["valueFrom"]["configMapKeyRef"] == {
-        "name": "userservice-configmap-env", "key": "KEYCLOAK_RESOURCE"}
+        "name": "userservice-configmap-env", "key": "KEYCLOAK_CONFIG_APP_CLIENTID"}
     assert env["CONSULTING_TYPE_SERVICE_URL"]["valueFrom"]["configMapKeyRef"] == {
         "name": "userservice-configmap-env", "key": "CONSULTING_TYPE_SERVICE_API_URL"}
+    result, distinct_docs = render(
+        "--set-string", "userService.keycloakResource=resource-only-canary",
+        "--set-string", "global.keycloak.serviceAppClientId=technical-login-client-canary",
+    )
+    assert result.returncode == 0, result.stderr
+    service_config = next(doc for doc in distinct_docs if doc.get("kind") == "ConfigMap"
+                          and doc["metadata"]["name"] == "userservice-configmap-env")
+    distinct_job = next(doc for doc in distinct_docs if doc.get("kind") == "Job"
+                        and doc["metadata"]["name"] == "keycloak-reconcile-smtp")
+    client_ref = next(entry for entry in distinct_job["spec"]["template"]["spec"]["containers"][0]["env"]
+                      if entry["name"] == "TECHNICAL_CLIENT_ID")["valueFrom"]["configMapKeyRef"]
+    assert client_ref["name"] == service_config["metadata"]["name"]
+    resolved_client = service_config["data"][client_ref["key"]]
+    assert resolved_client == "technical-login-client-canary", resolved_client
+    assert resolved_client != service_config["data"]["KEYCLOAK_RESOURCE"]
     config = next(doc for doc in docs if doc.get("kind") == "ConfigMap" and doc["metadata"]["name"] == "keycloak-reconcile-smtp-script")
     assert "keycloak-reconcile-smtp.py" in config["data"]
     result, _ = render(

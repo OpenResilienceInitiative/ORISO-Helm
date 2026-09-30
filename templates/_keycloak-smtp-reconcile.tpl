@@ -45,7 +45,7 @@ containers:
         valueFrom:
           configMapKeyRef:
             name: userservice-configmap-env
-            key: KEYCLOAK_RESOURCE
+            key: KEYCLOAK_CONFIG_APP_CLIENTID
       - name: TECHNICAL_SERVICE_SUBJECT
         valueFrom:
           configMapKeyRef:
