@@ -90,6 +90,67 @@ earlier incident workaround. This chart no longer reads or exports those
 fields. Deploy the Admin-managed UserService source before applying this chart
 change to an environment still running the deployment-owned SMTP provider.
 
+## Keycloak SMTP reconciliation
+
+Keycloak reads the same saved Admin Settings snapshot as UserService. The
+post-install/post-upgrade `keycloak-reconcile-smtp` hook authenticates with the
+existing technical identity and calls the same internal helper as a saved
+SMTP change. There is no scheduled SMTP job. CTS saves the SMTP revision and
+pending signal atomically, then requests reconciliation directly. Failed
+callbacks remain pending for a bounded, targeted retry; unchanged SMTP and
+unrelated settings do not cause realm writes. Deploy the CTS #165 companion
+before relying on this saved-change path.
+
+The helper accepts only a revision and a technical bearer token. Matching
+decoded subject/app-client/realm-role/expiry claims are only a preliminary
+gate: CTS independently verifies the bearer signature and authority when the
+helper reads `/settingsadmin/smtp-credentials`. One raw snapshot supplies the
+unchanged credential JSON and nonsecret `X-Smtp-Revision` header. The helper
+updates only `smtpServer` and acknowledges the actual saved revision only
+after successful Keycloak update. CTS clears pending only if that revision
+still matches; a newer save stays pending. Replayed triggers read the latest
+snapshot, and an already acknowledged current revision needs no repeated PUT.
+
+The separate existing Keycloak admin secret is mounted only on the helper;
+CTS and the catch-up hook receive no realm-management credential or new role.
+One replica, `Recreate`, serialized writes and a 60-second graceful drain
+prevent concurrent old/new helper updates. Each upstream call has a 10-second
+timeout; a busy helper returns a safe failure for the durable CTS retry.
+The install/upgrade trigger waits at most 120 seconds for helper connection
+startup or HTTP 503, below the Job's 600-second deadline. Authentication and
+other permanent errors fail immediately. This is one bounded hook run, not a
+periodic reconciliation loop. Other realm settings
+are never read-modify-written. Actual cluster shutdown and initial installation
+remain deployment checks, beyond the local process-drain regression.
+
+A successfully read disabled, incomplete or absent snapshot clears the old
+realm SMTP settings and emits `SMTP_DISABLED_OR_INCOMPLETE`. An unavailable
+source, rejected technical login, mismatched identity, invalid response or TLS
+failure leaves existing realm SMTP unchanged and fails with a safe named error.
+This preserves the previous realm state during an outage, without reading a
+chart fallback. Diagnose the failed job instead of treating an outage as an
+empty saved setting. Retry reconciliation after restoring the source.
+
+Credentials, access tokens and HTTP bodies stay in memory. They do not enter
+process arguments, helper logs, temporary credential files, ConfigMaps or
+Helm SMTP values. The helper image is the official Python image pinned by
+immutable multi-architecture digest and uses stdlib HTTP/TLS/JSON; no runtime
+package installation is needed. Public service URLs require verified HTTPS;
+existing cluster-internal service HTTP is retained. Redirects are refused.
+
+Keycloak still persists its active SMTP password in the realm database. This
+reconciliation does not claim to encrypt or remove that separate credential
+copy; access controls and the existing database/encryption finding remain.
+
+After approved deployment, change each saved SMTP field and rotate the password
+in Admin Settings, verify successful synchronization of that saved revision,
+then request a new OTP and verify receipt. If synchronization fails, check the
+named pending state and its targeted retry. Inspect only safe result codes and field names;
+do not dump the realm SMTP object, pod environment or token payload. Test an
+incomplete saved configuration (old Keycloak SMTP must be cleared) and a source
+outage (the helper must fail without mutating the realm). A green chart render,
+local API test or Job completion is not a received Dev OTP.
+
 ## Verification
 
 Before install, verify that the chart renders the expected public URLs and
