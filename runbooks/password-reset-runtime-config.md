@@ -101,12 +101,15 @@ helm install oriso . --dry-run=client --debug \
   -f values.yaml.default -f <environment-values.yaml> -f <environment-secrets.yaml>
 ```
 
-After rollout, inspect the effective UserService pod environment. All public
-link keys must be present, and there must be no deployment-owned `SMTP_*`
-transport keys:
+After rollout, inspect only the UserService Deployment's declared environment
+variable names. All public link keys must be present, and there must be no
+deployment-owned `SMTP_*` transport keys. Do not print environment values or
+Secret data while checking this:
 
 ```bash
-kubectl -n caritas exec deploy/<userservice-deployment> -- env | grep -E 'PASSWORD_RESET|ACCOUNT_INVITE|SMTP_'
+kubectl -n caritas get deployment <userservice-deployment> \
+  -o jsonpath='{range .spec.template.spec.containers[*].env[*]}{.name}{"\n"}{end}' \
+  | grep -E 'PASSWORD_RESET|ACCOUNT_INVITE|SMTP_'
 ```
 
 End-to-end, without any browser: request a reset for an account whose email is
