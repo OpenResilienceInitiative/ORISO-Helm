@@ -59,58 +59,67 @@ keys); on the archived Pre-Dev release, verify the pod environment after the
 patch (see Verification below) and add the `env` entries if any key is
 missing.
 
-## SMTP transport
+## Platform SMTP setup
 
-UserService sends the reset mail itself over SMTP. Until now the maintained
-chart rendered no SMTP configuration at all, so a Helm-deployed environment
-could never send one. The chart now renders:
+The chart validates public link origins before installation but does not
+configure an SMTP provider. Its install notes tell a new operator to sign in
+as the first platform admin and enter the platform mail settings in Admin
+Settings. UserService reads one coherent settings snapshot through its
+technical identity; Helm neither exports `SMTP_*` values to UserService nor
+supplies a fallback server. The first-admin password and authenticator path
+appears mail-independent in source inspection. A fresh-install walkthrough is
+still required before ruling out a one-time bootstrap definitively.
 
-| Key | Source | Value |
-|---|---|---|
-| `SMTP_HOST` | `userService.smtpHost` | `mail.dreambau.com` |
-| `SMTP_PORT` | `userService.smtpPort` | `587` |
-| `SMTP_SECURE` | `userService.smtpSecure` | `false` (STARTTLS) |
-| `SMTP_FROM` | `userService.smtpFrom` | `ORISO Platform <monty.burns@oriso.org>` |
-| `SMTP_USER` | `userService.smtpUser` (secret values) | the platform-admin mailbox |
-| `SMTP_PASSWORD` | `userService.smtpPassword` (secret values) | its password |
-
-`smtpUser` and `smtpPassword` belong in the persistent secret values, never in
-a values file in this repository. The render fails when `smtpHost` is set but
-either credential is empty: a deploy with blank credentials would still answer
-every reset request with 204 while silently sending no mail, which is
-indistinguishable from a working environment from the outside.
-
-Pre-Dev is not rendered from this chart; its ConfigMap and
-`oriso-platform-userservice-secrets` were wired to the same identity by hand on
-2026-07-28.
-
-## Global SMTP settings
-
-The reset mail is sent directly over SMTP, not through MailService. UserService
-reads host/port/secure/from from the **public** ConsultingTypeService
-`/settings` and the username/password from the **authenticated**
-`/settingsadmin` endpoint, because the public payload deliberately omits
-credentials since the CTS-C01 credential-leak fix
-(ORISO-ConsultingTypeService#7). All of the following must be set in the
-platform settings, otherwise no mail is sent:
+The following Admin Settings values are needed before mail-dependent actions
+can deliver:
 
 - `globalFeatureSystemNotificationEmailsEnabled` = true
 - `globalSmtpEnabled` = true
 - `globalSmtpHost`, `globalSmtpPort`, `globalSmtpFrom`
 - `globalSmtpUsername`, `globalSmtpPassword`
 
+Missing or incomplete saved settings produce a named configuration result in
+the Admin SMTP diagnostic and mail send paths; an unavailable Admin Settings
+service or technical identity is reported separately. Password-reset request
+HTTP 204 protects account existence and is not proof of mail delivery. Check a
+received test mail before treating setup as complete. The provider-specific
+host, sender and credentials are entered only in Admin Settings.
+
+The existing Dev and Pre-Dev overlay `userService.smtp*` fields record an
+earlier incident workaround. This chart no longer reads or exports those
+fields. Deploy the Admin-managed UserService source before applying this chart
+change to an environment still running the deployment-owned SMTP provider.
+
 ## Verification
 
-Startup log — both warnings must be **absent**:
+Before install, verify that the chart renders the expected public URLs and
+that the install notes explain the Admin Settings SMTP step. Use only a
+non-secret environment values file and synthetic render credentials for this
+terminal check. Helm's `--hide-secret` hides `Secret` objects, but it does not
+redact values repeated in other rendered manifests; **never pass the real
+environment secrets file to a dry run whose output is displayed or shared**.
+The Redis example of this existing chart limitation is tracked in
+[ORISO-Helm #192](https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/192).
+A successful render does not establish that SMTP is configured:
 
 ```bash
-kubectl -n caritas logs deploy/<userservice-deployment> | grep -i "password reset is DISABLED"
+helm install oriso . --dry-run=client --hide-secret \
+  -f values.yaml.default -f <environment-values.yaml> \
+  -f secrets.yaml.default -f tests/fixtures/render-required-secrets.yaml \
+  --set-string global.secrets.redisdefaultPass=render-only-canary \
+  --set-string tenantService.smtpPasswordEncryptionSecret=render-only-canary \
+  --set-string consultingTypeService.smtpPasswordEncryptionSecret=render-only-canary
 ```
 
-Effective pod environment — all link keys must be present:
+After rollout, inspect only the UserService Deployment's declared environment
+variable names. All public link keys must be present, and there must be no
+deployment-owned `SMTP_*` transport keys. Do not print environment values or
+Secret data while checking this:
 
 ```bash
-kubectl -n caritas exec deploy/<userservice-deployment> -- env | grep -E 'PASSWORD_RESET|ACCOUNT_INVITE'
+kubectl -n caritas get deployment <userservice-deployment> \
+  -o jsonpath='{range .spec.template.spec.containers[*].env[*]}{.name}{"\n"}{end}' \
+  | grep -E 'PASSWORD_RESET|ACCOUNT_INVITE|SMTP_'
 ```
 
 End-to-end, without any browser: request a reset for an account whose email is

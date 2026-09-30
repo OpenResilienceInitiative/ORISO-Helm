@@ -1,0 +1,7 @@
+Platform mail setup for a new installation
+------------------------------------------
+The public URL is configured through global.domainName. Platform SMTP is not
+configured in this chart. After the first platform-admin sign-in, enter and
+enable the SMTP server, sender and credentials in Admin Settings. Mail-dependent
+actions report a named configuration error until those settings are complete.
+The chart does not provide a fallback SMTP server or sender.

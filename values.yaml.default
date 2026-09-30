@@ -403,12 +403,6 @@ userService:
   passwordResetFrontendBaseUrl: ""
   passwordResetAdminFrontendBaseUrl: ""
 
-  # SMTP is environment-owned; setting a host requires credentials in secrets.
-  smtpHost: ""
-  smtpPort: 587
-  smtpSecure: false
-  smtpFrom: ""
-
   # Bare origins for account-invite links (admin must NOT end in /admin).
   # Empty = <scheme>://<domainName> (http when global.enableTls is false); set
   # only when the Admin panel has its own host.
