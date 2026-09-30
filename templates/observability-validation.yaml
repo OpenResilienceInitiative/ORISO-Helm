@@ -10,29 +10,19 @@ URL. Fail fast when the env var is missing or still points at another domain
 (e.g. the values.yaml.default placeholder).
 */ -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
-{{- $k8sInfra := get .Values "k8s-infra" | default dict -}}
-{{- $k8sInfraEnabled := get $k8sInfra "enabled" | default false -}}
+{{- $collector := get .Values "signozCollector" | default dict -}}
+{{- $collectorEnabled := get $collector "enabled" | default false -}}
 {{- $signozEnabled := get $signoz "enabled" | default false -}}
-{{- if and $k8sInfraEnabled (not $signozEnabled) -}}
-{{- fail "k8s-infra.enabled=true requires signoz.enabled=true" -}}
+{{- if and $collectorEnabled (not $signozEnabled) -}}
+{{- fail "signozCollector.enabled=true requires signoz.enabled=true" -}}
 {{- end -}}
-{{- if $k8sInfraEnabled -}}
-{{- $infraGlobal := get $k8sInfra "global" | default dict -}}
-{{- $clusterName := get $infraGlobal "clusterName" | default "" -}}
-{{- $infraEnvironment := get $infraGlobal "deploymentEnvironment" | default "" -}}
+{{- if $collectorEnabled -}}
 {{- $globalObservability := get .Values.global "observability" | default dict -}}
-{{- $applicationEnvironment := get $globalObservability "deploymentEnvironment" | default "" -}}
-{{- if eq $clusterName "" -}}
-{{- fail "k8s-infra.global.clusterName is required when k8s-infra is enabled" -}}
+{{- if eq (get $collector "clusterName" | default "") "" -}}
+{{- fail "signozCollector.clusterName is required when signozCollector is enabled" -}}
 {{- end -}}
-{{- if eq $applicationEnvironment "" -}}
-{{- fail "global.observability.deploymentEnvironment is required when k8s-infra is enabled" -}}
-{{- end -}}
-{{- if eq $infraEnvironment "" -}}
-{{- fail "k8s-infra.global.deploymentEnvironment is required when k8s-infra is enabled" -}}
-{{- end -}}
-{{- if ne $infraEnvironment $applicationEnvironment -}}
-{{- fail (printf "k8s-infra.global.deploymentEnvironment must match global.observability.deploymentEnvironment (got %q, expected %q)" $infraEnvironment $applicationEnvironment) -}}
+{{- if eq (get $globalObservability "deploymentEnvironment" | default "") "" -}}
+{{- fail "global.observability.deploymentEnvironment is required when signozCollector is enabled" -}}
 {{- end -}}
 {{- end -}}
 {{- $orisoIngress := get $signoz "orisoIngress" | default dict -}}

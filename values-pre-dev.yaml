@@ -23,11 +23,9 @@ signoz:
       # observability-validation.yaml requires it in sync with global.domainName.
       signoz_global_external__url: "https://predev.oriso.org/signoz"
 
-k8s-infra:
+signozCollector:
   enabled: true
-  global:
-    clusterName: "oriso-predev"
-    deploymentEnvironment: "pre-dev"
+  clusterName: "oriso-predev"
 
 userService:
   # Magic Link, password reset and account-invite links derive from
