@@ -13,6 +13,6 @@ spec:
   template:
     metadata:
       labels:
-        app: keycloak-reconcile-smtp
+        app: keycloak-reconcile-smtp-hook
     spec:
-      {{- include "oriso.keycloakSmtpReconcilePod" . | nindent 6 }}
+      {{- include "oriso.keycloakSmtpReconcilePod" (dict "root" . "mode" "trigger") | nindent 6 }}

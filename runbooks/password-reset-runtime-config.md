@@ -94,20 +94,31 @@ change to an environment still running the deployment-owned SMTP provider.
 
 Keycloak reads the same saved Admin Settings snapshot as UserService. The
 post-install/post-upgrade `keycloak-reconcile-smtp` hook authenticates with the
-existing technical identity, reads `/settingsadmin/smtp-credentials` once and
-updates only the realm's `smtpServer` field. The separate existing Keycloak
-admin credential authorizes that update; the technical identity receives no
-new realm-management roles. The helper checks the exact configured technical
-subject, app client and realm `technical` role before reading the snapshot.
+existing technical identity and calls the same internal helper as a saved
+SMTP change. There is no scheduled SMTP job. CTS saves the SMTP revision and
+pending signal atomically, then requests reconciliation directly. Failed
+callbacks remain pending for a bounded, targeted retry; unchanged SMTP and
+unrelated settings do not cause realm writes. Deploy the CTS #165 companion
+before relying on this saved-change path.
 
-A CronJob runs the identical helper once per minute, so changing any saved
-transport field or rotating the SMTP password needs no Helm upgrade. The next
-successful bounded reconciliation applies the change; one minute is the
-schedule, not a convergence SLA. Each scheduled job has a 55-second deadline,
-10-second HTTP timeouts and `concurrencyPolicy: Forbid`. Install/upgrade hooks
-retain a bounded retry window. A hook and scheduled job can briefly overlap
-at upgrade; both write only `smtpServer`, and the next successful poll converges
-to the current snapshot. Other realm settings are never read-modify-written.
+The helper accepts only a revision and a technical bearer token. Matching
+decoded subject/app-client/realm-role/expiry claims are only a preliminary
+gate: CTS independently verifies the bearer signature and authority when the
+helper reads `/settingsadmin/smtp-credentials`. One raw snapshot supplies the
+unchanged credential JSON and nonsecret `X-Smtp-Revision` header. The helper
+updates only `smtpServer` and acknowledges the actual saved revision only
+after successful Keycloak update. CTS clears pending only if that revision
+still matches; a newer save stays pending. Replayed triggers read the latest
+snapshot, and an already acknowledged current revision needs no repeated PUT.
+
+The separate existing Keycloak admin secret is mounted only on the helper;
+CTS and the catch-up hook receive no realm-management credential or new role.
+One replica, `Recreate`, serialized writes and a 60-second graceful drain
+prevent concurrent old/new helper updates. Each upstream call has a 10-second
+timeout; a busy helper returns a safe failure for the durable CTS retry.
+Install/upgrade hooks retain their bounded retry window. Other realm settings
+are never read-modify-written. Actual cluster shutdown and initial installation
+remain deployment checks, beyond the local process-drain regression.
 
 A successfully read disabled, incomplete or absent snapshot clears the old
 realm SMTP settings and emits `SMTP_DISABLED_OR_INCOMPLETE`. An unavailable
@@ -129,8 +140,9 @@ reconciliation does not claim to encrypt or remove that separate credential
 copy; access controls and the existing database/encryption finding remain.
 
 After approved deployment, change each saved SMTP field and rotate the password
-in Admin Settings, wait for the next successful reconciliation, then request a
-new OTP and verify receipt. Inspect only safe job result codes and field names;
+in Admin Settings, verify successful synchronization of that saved revision,
+then request a new OTP and verify receipt. If synchronization fails, check the
+named pending state and its targeted retry. Inspect only safe result codes and field names;
 do not dump the realm SMTP object, pod environment or token payload. Test an
 incomplete saved configuration (old Keycloak SMTP must be cleared) and a source
 outage (the helper must fail without mutating the realm). A green chart render,
