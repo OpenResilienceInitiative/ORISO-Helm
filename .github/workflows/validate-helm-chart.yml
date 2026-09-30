@@ -24,7 +24,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      ORISO_DOCS_SOURCE_ROOT: ${{ runner.temp }}/oriso-docs-contract
       PYTHONDONTWRITEBYTECODE: "1"
 
     steps:
@@ -42,7 +41,7 @@ jobs:
           persist-credentials: false
 
       - name: Keep the test fixture outside the packaged chart
-        run: mv "$GITHUB_WORKSPACE/_contract_docs" "$ORISO_DOCS_SOURCE_ROOT"
+        run: mv "$GITHUB_WORKSPACE/_contract_docs" "$RUNNER_TEMP/oriso-docs-contract"
 
       - name: Set up Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
@@ -71,6 +70,8 @@ jobs:
         run: helm package . --destination /tmp/oriso-chart-package
 
       - name: Run unit tests
+        env:
+          ORISO_DOCS_SOURCE_ROOT: ${{ runner.temp }}/oriso-docs-contract
         run: python -m unittest discover -s tests -p 'test_*.py'
 
       - name: Run render contracts
