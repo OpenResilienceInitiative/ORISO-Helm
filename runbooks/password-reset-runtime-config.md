@@ -93,12 +93,22 @@ change to an environment still running the deployment-owned SMTP provider.
 ## Verification
 
 Before install, verify that the chart renders the expected public URLs and
-that the install notes explain the Admin Settings SMTP step. A successful
-render does not establish that SMTP is configured:
+that the install notes explain the Admin Settings SMTP step. Use only a
+non-secret environment values file and synthetic render credentials for this
+terminal check. Helm's `--hide-secret` hides `Secret` objects, but it does not
+redact values repeated in other rendered manifests; **never pass the real
+environment secrets file to a dry run whose output is displayed or shared**.
+The Redis example of this existing chart limitation is tracked in
+[ORISO-Helm #192](https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/192).
+A successful render does not establish that SMTP is configured:
 
 ```bash
-helm install oriso . --dry-run=client --debug \
-  -f values.yaml.default -f <environment-values.yaml> -f <environment-secrets.yaml>
+helm install oriso . --dry-run=client --hide-secret \
+  -f values.yaml.default -f <environment-values.yaml> \
+  -f secrets.yaml.default -f tests/fixtures/render-required-secrets.yaml \
+  --set-string global.secrets.redisdefaultPass=render-only-canary \
+  --set-string tenantService.smtpPasswordEncryptionSecret=render-only-canary \
+  --set-string consultingTypeService.smtpPasswordEncryptionSecret=render-only-canary
 ```
 
 After rollout, inspect only the UserService Deployment's declared environment
