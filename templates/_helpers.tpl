@@ -7,6 +7,17 @@ digest-only gate while local development keeps accepting mutable tags.
 {{- required (printf "%s must be set" $valueName) (index . 1) -}}
 {{- end -}}
 
+{{/* Mandatory installation identity shared by UserService and Keycloak. */}}
+{{- define "oriso.emailBrandingName" -}}
+{{- $name := toString (.Values.global.emailBrandingName | default "") | trim -}}
+{{- required "global.emailBrandingName is required: configure this installation's product name; no default exists" $name -}}
+{{- end -}}
+
+{{- define "oriso.emailLegalOrganisationName" -}}
+{{- $name := toString (.Values.global.emailLegalOrganisationName | default "") | trim -}}
+{{- required "global.emailLegalOrganisationName is required: configure this installation's separate legal organisation name; do not use the product name as a fallback" $name -}}
+{{- end -}}
+
 {{/*
 Public URLs (ORISO-Helm#366): every public URL is derived from
 global.domainName or given explicitly, and both are validated here, so a

@@ -4,6 +4,15 @@ cert-manager:
 
 global:
 
+  # REQUIRED: one canonical product name for UserService and Keycloak mail.
+  # Set both names for each installation; neither has a product default.
+  emailBrandingName: ""
+  # REQUIRED: the legal organisation shown in Keycloak mail footers. This is
+  # independent of the product name and must be supplied by the operator.
+  # Keep it consistent with the initial platform tenant (ID 0) legal identity;
+  # UserService continues to resolve its own tenant/platform footer there.
+  emailLegalOrganisationName: ""
+
   # REQUIRED: public host name of this installation (e.g. app.example.org; no
   # scheme, no path). Every public URL, mail link and ingress host derives from
   # it. Empty or a placeholder fails `helm install` on purpose.
@@ -423,10 +432,6 @@ userService:
   accountInviteAppFrontendBaseUrl: ""
   accountInviteAdminFrontendBaseUrl: ""
 
-  # REQUIRED: the platform's own name for mails without a tenant context.
-  # No product name is assumed for a fresh installation. Set this in the
-  # installation's values; Dev and Pre-Dev do so in their own overlays.
-  emailBrandingName: ""
   # Absolute https URL of the platform logo; empty = mails render without a logo.
   emailBrandingLogoUrl: ""
 
