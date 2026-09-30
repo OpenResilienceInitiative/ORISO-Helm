@@ -90,6 +90,52 @@ earlier incident workaround. This chart no longer reads or exports those
 fields. Deploy the Admin-managed UserService source before applying this chart
 change to an environment still running the deployment-owned SMTP provider.
 
+## Keycloak SMTP reconciliation
+
+Keycloak reads the same saved Admin Settings snapshot as UserService. The
+post-install/post-upgrade `keycloak-reconcile-smtp` hook authenticates with the
+existing technical identity, reads `/settingsadmin/smtp-credentials` once and
+updates only the realm's `smtpServer` field. The separate existing Keycloak
+admin credential authorizes that update; the technical identity receives no
+new realm-management roles. The helper checks the exact configured technical
+subject, app client and realm `technical` role before reading the snapshot.
+
+A CronJob runs the identical helper once per minute, so changing any saved
+transport field or rotating the SMTP password needs no Helm upgrade. The next
+successful bounded reconciliation applies the change; one minute is the
+schedule, not a convergence SLA. Each scheduled job has a 55-second deadline,
+10-second HTTP timeouts and `concurrencyPolicy: Forbid`. Install/upgrade hooks
+retain a bounded retry window. A hook and scheduled job can briefly overlap
+at upgrade; both write only `smtpServer`, and the next successful poll converges
+to the current snapshot. Other realm settings are never read-modify-written.
+
+A successfully read disabled, incomplete or absent snapshot clears the old
+realm SMTP settings and emits `SMTP_DISABLED_OR_INCOMPLETE`. An unavailable
+source, rejected technical login, mismatched identity, invalid response or TLS
+failure leaves existing realm SMTP unchanged and fails with a safe named error.
+This preserves the previous realm state during an outage, without reading a
+chart fallback. Diagnose the failed job instead of treating an outage as an
+empty saved setting. Retry reconciliation after restoring the source.
+
+Credentials, access tokens and HTTP bodies stay in memory. They do not enter
+process arguments, helper logs, temporary credential files, ConfigMaps or
+Helm SMTP values. The helper image is the official Python image pinned by
+immutable multi-architecture digest and uses stdlib HTTP/TLS/JSON; no runtime
+package installation is needed. Public service URLs require verified HTTPS;
+existing cluster-internal service HTTP is retained. Redirects are refused.
+
+Keycloak still persists its active SMTP password in the realm database. This
+reconciliation does not claim to encrypt or remove that separate credential
+copy; access controls and the existing database/encryption finding remain.
+
+After approved deployment, change each saved SMTP field and rotate the password
+in Admin Settings, wait for the next successful reconciliation, then request a
+new OTP and verify receipt. Inspect only safe job result codes and field names;
+do not dump the realm SMTP object, pod environment or token payload. Test an
+incomplete saved configuration (old Keycloak SMTP must be cleared) and a source
+outage (the helper must fail without mutating the realm). A green chart render,
+local API test or Job completion is not a received Dev OTP.
+
 ## Verification
 
 Before install, verify that the chart renders the expected public URLs and
