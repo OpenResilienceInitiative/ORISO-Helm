@@ -108,6 +108,7 @@ def helm_template(*args: str) -> subprocess.CompletedProcess:
             "-f",
             os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
             *MATRIX_IDENTITY,
+            "--set-string", "userService.emailBrandingName=Render Test Platform",
             *args,
         ],
         capture_output=True,

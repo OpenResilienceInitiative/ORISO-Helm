@@ -350,6 +350,9 @@ tenantService:
 
 # User service
 userService:
+  # Pending human-review mail translations are never sent by default. The Dev
+  # overlay opts in for mailbox testing; production remains on reviewed copy.
+  emailAllowUnreviewedLocales: false
   # Enable only after the #874 sender, templates, relay purposes and login return
   # have been deployed together and the operator has verified tenant origins.
   groupAppointmentMail:
@@ -420,8 +423,10 @@ userService:
   accountInviteAppFrontendBaseUrl: ""
   accountInviteAdminFrontendBaseUrl: ""
 
-  # Platform-level email branding for mails without a tenant context.
-  emailBrandingName: "ORISO"
+  # REQUIRED: the platform's own name for mails without a tenant context.
+  # No product name is assumed for a fresh installation. Set this in the
+  # installation's values; Dev and Pre-Dev do so in their own overlays.
+  emailBrandingName: ""
   # Absolute https URL of the platform logo; empty = mails render without a logo.
   emailBrandingLogoUrl: ""
 

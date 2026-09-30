@@ -14,3 +14,6 @@ matrix:
   synapseServerName: "matrix.render.oriso.internal"
 matrixrtcAuth:
   membershipReaderUserId: "@matrixrtc-auth:matrix.render.oriso.internal"
+userService:
+  # Render-only name; the generic chart deliberately has no branding default.
+  emailBrandingName: "Render Test Platform"

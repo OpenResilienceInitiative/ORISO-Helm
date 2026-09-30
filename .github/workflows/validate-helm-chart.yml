@@ -48,6 +48,7 @@ jobs:
           helm lint . \
             -f values.yaml.default \
             -f secrets.yaml.default \
+            --set-string userService.emailBrandingName='Render Test Platform' \
             --set-string global.secrets.redisdefaultPass=test-redis-password \
             --set-string userService.smtpUser=smtp-validation-user \
             --set-string userService.smtpPassword=smtp-validation-password
