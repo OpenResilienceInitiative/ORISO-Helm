@@ -23,12 +23,26 @@ jobs:
     name: Render, unit, and guardrail tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      ORISO_DOCS_SOURCE_ROOT: ${{ runner.temp }}/oriso-docs-contract
+      PYTHONDONTWRITEBYTECODE: "1"
 
     steps:
       - name: Check out chart
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+
+      - name: Check out the reviewed receiver contract for offline tests
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: OpenResilienceInitiative/ORISO-Docs
+          ref: 18d7fe0bf52028bb554ec7c3d209a2ae367219ce
+          path: _contract_docs
+          persist-credentials: false
+
+      - name: Keep the test fixture outside the packaged chart
+        run: mv "$GITHUB_WORKSPACE/_contract_docs" "$ORISO_DOCS_SOURCE_ROOT"
 
       - name: Set up Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
