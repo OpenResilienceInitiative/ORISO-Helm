@@ -1,0 +1,31 @@
+{{- /*
+Collector configuration for the SigNoz collection agents (ORISO-Helm#392).
+The pipelines live in files/signoz/ so that the privacy contract is reviewable
+as configuration rather than as a wall of value overrides. The agent pipeline
+carries transform/oriso_log_privacy, which suppresses raw log bodies and keeps
+only the correlation and severity attributes; tests/render_signoz_k8s_infra_test.py
+is the gate on that.
+*/ -}}
+{{- if eq (include "oriso.signozCollector.enabled" .) "true" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oriso.signozCollector.agentFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oriso.signozCollector.labels" (dict "root" $ "component" "otel-agent") | nindent 4 }}
+data:
+  otel-agent-config.yaml: |
+    {{- tpl (.Files.Get "files/signoz/otel-agent-config.yaml") . | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oriso.signozCollector.clusterFullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oriso.signozCollector.labels" (dict "root" $ "component" "otel-deployment") | nindent 4 }}
+data:
+  otel-deployment-config.yaml: |
+    {{- tpl (.Files.Get "files/signoz/otel-cluster-config.yaml") . | nindent 4 }}
+{{- end -}}

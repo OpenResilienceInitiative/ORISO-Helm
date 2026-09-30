@@ -1,7 +1,7 @@
 # SigNoz Kubernetes collection
 
-The ORISO chart uses the official SigNoz `k8s-infra` dependency as two distinct
-collectors:
+The ORISO chart renders its own OpenTelemetry collectors (ORISO-Helm#392), in
+two roles:
 
 - a DaemonSet collects node-local host metrics, kubelet metrics, and scoped pod
   logs;
@@ -12,24 +12,35 @@ Both export over OTLP/HTTP to the bundled SigNoz collector. They attach
 (`pre-dev`, `oriso-predev`) from Dev (`dev`, `oriso-dev`). OTLP host ports are
 disabled because application SDK ingestion remains on the central collector.
 
-## Vendored chart policy
+## Where the configuration lives
 
-`charts/k8s-infra` is a byte-identical copy of the official SigNoz `k8s-infra`
-chart `0.17.0`, including its `tests/` suites, which assert *upstream* defaults
-only. Do not edit anything under `charts/k8s-infra`: report defects upstream and
-re-vendor, so a version bump never silently discards a local patch. Verify with:
+| what | where |
+| --- | --- |
+| operator knobs | `signozCollector` in `values.yaml.default` (about 15 lines) |
+| manifests | `templates/signoz/otel-agent-*.yaml`, `otel-cluster-*.yaml`, `otel-collector-*.yaml` |
+| collector pipelines | `files/signoz/otel-agent-config.yaml`, `files/signoz/otel-cluster-config.yaml` |
+
+These started as the rendered output of the official SigNoz `k8s-infra` chart
+`0.17.0`, which the chart vendored until ORISO-Helm#392. Object names and the
+`app.kubernetes.io/*` labels were kept byte-identical to that output, so the
+switch is an in-place upgrade: `app.kubernetes.io/name` is part of the DaemonSet
+selector and is immutable.
+
+Upstream is no longer tracked automatically. When a Kubernetes release moves a
+kubelet or metrics endpoint, port the change into `files/signoz/` by hand and
+compare against the current upstream chart:
 
 ```bash
 helm repo add signoz https://charts.signoz.io
-helm pull signoz/k8s-infra --version 0.17.0 --untar --untardir /tmp/upstream
-diff -r charts/k8s-infra /tmp/upstream/k8s-infra
+helm pull signoz/k8s-infra --untar --untardir /tmp/upstream
 ```
 
 Every ORISO-specific guarantee — namespace-scoped log tailing, the
 `transform/oriso_log_privacy` processor, the `otlphttp` exporter, least-privilege
-RBAC, and the collector self-telemetry identity — is applied by the parent chart
-and is therefore *not* covered by the vendored suites. `tests/render_signoz_k8s_infra_test.py`
-is the only gate that proves that contract; keep it in the required CI set.
+RBAC, and the collector self-telemetry identity — is proven by
+`tests/render_signoz_k8s_infra_test.py`; keep it in the required CI set.
+
+Bumping the collector: change `signozCollector.image.tag`, then re-run that test.
 
 ## Log privacy contract
 
@@ -59,7 +70,7 @@ Run `scripts/signoz_runtime_acceptance.py` as documented in
 positive signal count is non-zero and `forbiddenLogBody` is zero.
 
 If the infrastructure collectors overload the node or reject configuration,
-set `k8s-infra.enabled=false` in the affected environment overlay and re-apply
+set `signozCollector.enabled=false` in the affected environment overlay and re-apply
 the chart. This disables infrastructure collection without removing the SigNoz
 backend or its retained ClickHouse volume. Capture collector logs and the failed
 acceptance JSON before rollback when safe to do so.
@@ -72,7 +83,7 @@ root of the reviewed revision, with the overlay of the affected environment:
 helm upgrade --install caritas ./ -n caritas --create-namespace \
   --wait-for-jobs --timeout 15m \
   -f values.yaml -f values-pre-dev.yaml -f secrets.yaml \
-  --set k8s-infra.enabled=false
+  --set signozCollector.enabled=false
 ```
 
 To go back to the previously deployed revision instead of re-rendering:

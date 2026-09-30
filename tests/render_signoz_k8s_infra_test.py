@@ -14,13 +14,12 @@ import yaml
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def assert_vendored_chart_defaults() -> None:
-    """A fresh clone must contain the dependency defaults needed to render it."""
-    values_path = Path(CHART_DIR) / "charts" / "k8s-infra" / "values.yaml"
-    assert values_path.is_file(), "vendored k8s-infra values.yaml is missing"
-    values = yaml.safe_load(values_path.read_text(encoding="utf-8"))
-    assert values["otelDeployment"]["serviceAccount"]["create"] is True
-    assert values["otelAgent"]["serviceAccount"]["create"] is True
+def assert_collector_config_files() -> None:
+    """The pipelines live in files/, so a fresh clone must ship them."""
+    for name in ("otel-agent-config.yaml", "otel-cluster-config.yaml"):
+        path = Path(CHART_DIR) / "files" / "signoz" / name
+        assert path.is_file(), f"missing collector config {path}"
+        assert yaml.safe_load(path.read_text(encoding="utf-8").replace("{{", "#{{"))
 
 
 def domain_of(values_file: str) -> str | None:
@@ -34,7 +33,6 @@ def render(
     signoz_enabled: bool,
     infra_enabled: bool,
     environment: str = "pre-dev",
-    infra_environment: str | None = None,
     cluster_name: str = "oriso-predev",
     overlay: str | None = None,
     extra: tuple[str, ...] = (),
@@ -75,14 +73,11 @@ def render(
             "--set",
             f"signoz.enabled={'true' if signoz_enabled else 'false'}",
             "--set",
-            f"k8s-infra.enabled={'true' if infra_enabled else 'false'}",
+            f"signozCollector.enabled={'true' if infra_enabled else 'false'}",
             "--set-string",
             f"global.observability.deploymentEnvironment={environment}",
             "--set-string",
-            "k8s-infra.global.deploymentEnvironment="
-            + (environment if infra_environment is None else infra_environment),
-            "--set-string",
-            f"k8s-infra.global.clusterName={cluster_name}",
+            f"signozCollector.clusterName={cluster_name}",
             *extra,
         ]
     )
@@ -134,7 +129,7 @@ def parse_config(config_map: dict[str, Any], key: str) -> dict[str, Any]:
 
 
 def main() -> None:
-    assert_vendored_chart_defaults()
+    assert_collector_config_files()
     enabled = documents(render(signoz_enabled=True, infra_enabled=True))
     agent = find(enabled, "DaemonSet", "caritas-k8s-infra-otel-agent")
     cluster_collector = find(
@@ -180,20 +175,6 @@ def main() -> None:
     assert log_volumes["varlog"] == "/var/log/pods"
     assert log_mounts["varlog"]["mountPath"] == "/var/log/pods"
     assert log_mounts["varlog"]["readOnly"] is True
-
-    grpc = documents(
-        render(
-            signoz_enabled=True,
-            infra_enabled=True,
-            extra=(
-                "--set", "k8s-infra.presets.otlphttpExporter.enabled=false",
-                "--set", "k8s-infra.presets.otlpExporter.enabled=true",
-            ),
-        )
-    )
-    assert env_by_name(find(grpc, "DaemonSet", "caritas-k8s-infra-otel-agent"))[
-        "OTEL_EXPORTER_OTLP_ENDPOINT"
-    ]["value"] == "caritas-signoz-otel-collector:4317"
 
     agent_config = parse_config(
         find(enabled, "ConfigMap", "caritas-k8s-infra-otel-agent"),
@@ -306,19 +287,13 @@ def main() -> None:
 
     invalid = render(signoz_enabled=False, infra_enabled=True)
     assert invalid.returncode != 0
-    assert "k8s-infra.enabled=true requires signoz.enabled=true" in invalid.stderr
+    assert "signozCollector.enabled=true requires signoz.enabled=true" in invalid.stderr
 
     identity_failures = (
-        ({"cluster_name": ""}, "k8s-infra.global.clusterName is required"),
+        ({"cluster_name": ""}, "signozCollector.clusterName is required"),
         (
-            {"environment": "", "infra_environment": "pre-dev"},
+            {"environment": ""},
             "global.observability.deploymentEnvironment is required",
-        ),
-        ({"infra_environment": ""}, "k8s-infra.global.deploymentEnvironment is required"),
-        (
-            {"infra_environment": "dev"},
-            'k8s-infra.global.deploymentEnvironment must match'
-            ' global.observability.deploymentEnvironment (got "dev", expected "pre-dev")',
         ),
     )
     for overrides, message in identity_failures:
@@ -358,7 +333,7 @@ def main() -> None:
     )
 
     print(
-        "PASS: official SigNoz k8s-infra signals are scoped, identified, and privacy-safe"
+        "PASS: SigNoz collection signals are scoped, identified, and privacy-safe"
     )
 
 

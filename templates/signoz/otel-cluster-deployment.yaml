@@ -1,0 +1,62 @@
+{{- /*
+Cluster collector for SigNoz collection (ORISO-Helm#392): one replica that
+watches workload objects and Kubernetes events for the release namespace.
+Reads no pod logs, so it needs neither host mounts nor group 0.
+*/ -}}
+{{- if eq (include "oriso.signozCollector.enabled" .) "true" -}}
+{{- $c := get .Values "signozCollector" | default dict -}}
+{{- $name := include "oriso.signozCollector.clusterFullname" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oriso.signozCollector.labels" (dict "root" $ "component" "otel-deployment") | nindent 4 }}
+spec:
+  replicas: 1
+  minReadySeconds: 5
+  progressDeadlineSeconds: 120
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "oriso.signozCollector.selectorLabels" (dict "root" $ "component" "otel-deployment") | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ tpl (.Files.Get "files/signoz/otel-cluster-config.yaml") . | sha256sum }}
+      labels:
+        {{- include "oriso.signozCollector.selectorLabels" (dict "root" $ "component" "otel-deployment") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      volumes:
+        - name: otel-deployment-config-vol
+          configMap:
+            name: {{ $name }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "oriso.signozCollector.image" . }}
+          imagePullPolicy: {{ include "oriso.signozCollector.imagePullPolicy" . }}
+          command: ["/otelcol-contrib"]
+          args: ["--config=/conf/otel-deployment-config.yaml"]
+          ports:
+            - name: health-check
+              containerPort: 13133
+              protocol: TCP
+          env:
+            {{- include "oriso.signozCollector.env" (dict "root" $ "component" "otel-deployment" "attrs" "signoz.component=$(SIGNOZ_COMPONENT),k8s.cluster.name=$(K8S_CLUSTER_NAME)") | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: otel-deployment-config-vol
+              mountPath: /conf
+          {{- include "oriso.signozCollector.probes" . | nindent 10 }}
+          resources:
+            {{- toYaml (get $c "resources" | default dict) | nindent 12 }}
+{{- end -}}
