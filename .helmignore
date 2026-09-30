@@ -9,7 +9,9 @@ secrets.yaml.default
 values.yaml.default
 README.md
 *.sh
-*.txt
+helm deploy.txt
+requirements-ci.txt
+charts/keycloak/keycloak-resources/custom-theme/login/resources/fonts/Nunito/*.txt
 *.tgz
 # Font files: mounted via a ConfigMap `data:` field as base64 text, which never
 # produced valid fonts in the pod anyway, and they alone add ~1MB (chart copy +

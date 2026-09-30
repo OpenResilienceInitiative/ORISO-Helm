@@ -23,17 +23,6 @@ import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-SMTP_CREDENTIALS = (
-    "--set-string",
-    "userService.smtpHost=smtp.render.oriso.internal",
-    "--set-string",
-    "userService.smtpFrom=ORISO Render <sender@render.oriso.internal>",
-    "--set-string",
-    "userService.smtpUser=smtp-canary-user",
-    "--set-string",
-    "userService.smtpPassword=smtp-canary-password",
-)
-
 # A valid Matrix identity; values.yaml.default only ships placeholders, which
 # fail the install. Later --set-string arguments override these.
 MATRIX_IDENTITY = (
@@ -118,7 +107,6 @@ def helm_template(*args: str) -> subprocess.CompletedProcess:
             os.path.join(CHART_DIR, "secrets.yaml.default"),
             "-f",
             os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
-            *SMTP_CREDENTIALS,
             *MATRIX_IDENTITY,
             *args,
         ],

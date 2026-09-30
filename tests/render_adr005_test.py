@@ -113,12 +113,6 @@ def build_minimal_chart(dst: str) -> None:
 def render(chart: str, server_public_ip: str) -> str:
     """Render the minimal chart and return helm's raw stdout."""
     overlay = {
-        "userService": {
-            "smtpHost": "smtp.render.oriso.internal",
-            "smtpPort": 587,
-            "smtpSecure": False,
-            "smtpFrom": "sender@render.oriso.internal",
-        },
         "matrix": {"matrixServerName": SENTINEL, "serverPublicIp": server_public_ip},
         "postgres": {
             "postgresUser": "matrix-render-canary",

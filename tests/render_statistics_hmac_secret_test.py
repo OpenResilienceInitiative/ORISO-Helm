@@ -95,8 +95,6 @@ BASE_OVERLAY = {
         },
     },
     "userService": {
-        "smtpUser": "render-only-smtp-user",
-        "smtpPassword": "render-only-smtp-password",
         "serviceEncryptionAppkey": "test-appkey",
         "identityTechnicalUserUsername": "test-identity-user",
         "identityTechnicalUserPassword": "test-identity-pass",
