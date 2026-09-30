@@ -481,6 +481,45 @@ class TriggerSmtpTest(SmtpFixture):
                                ready_seconds=0.1, retry_seconds=0.02)
         self.assertEqual(self.updates, [])
 
+    def test_install_trigger_waits_for_the_source_to_finish_starting(self):
+        # Helm runs this hook without waiting for ConsultingTypeService to become
+        # Ready, so the helper answers 502 SOURCE_UNAVAILABLE while that
+        # Deployment is still rolling. That is as transient as the helper's own
+        # 503 and must be waited out, not reported as a failed release.
+        attempts = []
+
+        class StartingBridge(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_POST(self):
+                attempts.append(1)
+                if len(attempts) < 3:
+                    self.send_response(502)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"code":"SMTP_RECONCILE_SOURCE_UNAVAILABLE"}')
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"appliedRevision":4,"status":"APPLIED"}')
+
+        bridge = ThreadingHTTPServer(("127.0.0.1", 0), StartingBridge)
+        thread = threading.Thread(target=bridge.serve_forever, daemon=True)
+        thread.start()
+        try:
+            reconciler.trigger({**self.env, "SMTP_RECONCILE_URL":
+                                f"http://127.0.0.1:{bridge.server_port}/smtp/reconcile"},
+                               ready_seconds=2, retry_seconds=0.02)
+            # It got past the 502s instead of failing on the first one; the
+            # exact attempt count depends on retry timing.
+            self.assertGreaterEqual(len(attempts), 3)
+        finally:
+            bridge.shutdown()
+            bridge.server_close()
+            thread.join(2)
+
     def test_install_trigger_does_not_retry_auth_or_permanent_helper_failure(self):
         failures = []
 
