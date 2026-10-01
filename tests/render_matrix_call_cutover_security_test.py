@@ -31,7 +31,7 @@ def render() -> list[dict]:
             "--set-string",
             "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
             "--set-string",
-            "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
+            "consultingTypeService.smtpPasswordEncryptionSecret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
             "--set-string",
             "global.secrets.redisdefaultPass=test-redis-password",
             "--set-string",

@@ -32,7 +32,7 @@ def render(*values_files: str) -> list[dict]:
         "--set-string",
         "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
         "--set-string",
-        "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
+        "consultingTypeService.smtpPasswordEncryptionSecret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
         "--set-string",
         "userService.smtpUser=smtp-canary-user",
         "--set-string",

@@ -30,7 +30,7 @@ def render(*overlays: str, health_dashboard: dict | None = None,
         # Pre-Dev enables SigNoz, whose validation ties this URL to domainName.
         "--set-string", "signoz.signoz.env.signoz_global_external__url=https://health.oriso.internal/signoz",
         "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
-        "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
+        "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
         "--set-string", "userService.smtpUser=smtp-canary-user",
         "--set-string", "userService.smtpPassword=smtp-canary-password",
     ]

@@ -28,7 +28,7 @@ class OtpEmailThemeTest(unittest.TestCase):
                 "--set-string",
                 "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
                 "--set-string",
-                "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
+                "consultingTypeService.smtpPasswordEncryptionSecret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
             ],
             check=True,
             capture_output=True,
