@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Coordinate exact-source documentation after a successful Helm chart release."""
-import argparse, base64, hashlib, importlib, json, os, pathlib, re, subprocess, sys, urllib.error, urllib.parse, urllib.request
+import argparse, base64, hashlib, importlib, json, os, pathlib, re, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
 OWNER = "OpenResilienceInitiative"
 HELM = "ORISO-Helm"
@@ -120,6 +120,22 @@ def load_contract(root, revision):
     return contract
 
 
+def verify_trusted_revision(revision, api):
+    """Approve source history before importing Docs Python with release tokens."""
+    require(isinstance(revision, str) and SHA.fullmatch(revision), "full Docs revision required")
+    base = f"repos/{OWNER}/{DOCS}"
+    main = api(base + "/branches/main").get("commit", {}).get("sha")
+    require(isinstance(main, str) and SHA.fullmatch(main), "Docs main revision unavailable")
+    # Pin the branch tip before comparing so a moving main cannot alter the check.
+    comparison = api(base + f"/compare/{revision}...{main}")
+    require(
+        comparison.get("status") in ["ahead", "identical"]
+        and comparison.get("base_commit", {}).get("sha") == revision
+        and comparison.get("merge_base_commit", {}).get("sha") == revision,
+        "Docs revision must be reachable from Docs main before importing its validator",
+    )
+
+
 def verify_receiver(api):
     import yaml
 
@@ -188,6 +204,33 @@ def check_asset(asset, content):
     )
 
 
+def wait_for_asset(client, base, release_id, asset, content):
+    """Retry absent digests only; never accept or overwrite conflicting bytes."""
+    asset_id = asset.get("id")
+    for attempt in range(6):
+        require(
+            asset.get("state") == "uploaded"
+            and type(asset.get("size")) is int
+            and asset["size"] == len(content),
+            "published manifest asset differs; refusing overwrite",
+        )
+        if asset.get("digest") not in [None, ""]:
+            check_asset(asset, content)
+            return
+        if attempt == 5:
+            raise ValueError("manifest asset digest still unavailable; retry the documentation job")
+        require(type(asset_id) is int, "manifest asset identity unavailable")
+        time.sleep(2 ** attempt)
+        # Read the embedded release metadata used by the canonical receiver too.
+        release = client.request("GET", base + f"/releases/{release_id}")
+        assets = [a for a in release.get("assets", []) if a.get("name") == ASSET]
+        require(
+            len(assets) == 1 and assets[0].get("id") == asset_id,
+            "manifest asset identity changed; refusing overwrite",
+        )
+        asset = assets[0]
+
+
 def find_release(client, base, tag):
     # The by-tag endpoint only returns published releases. Authenticated lists
     # also include drafts retained after an interrupted upload/publication.
@@ -248,7 +291,7 @@ def publish(lock, contract, client, tag_sha):
     assets = [a for a in release.get("assets", []) if a.get("name") == ASSET]
     require(len(assets) <= 1, "duplicate manifest assets; refusing release")
     if assets:
-        check_asset(assets[0], content)
+        asset = assets[0]
     else:
         require(
             release["draft"] is True,
@@ -260,11 +303,12 @@ def publish(lock, contract, client, tag_sha):
             raw=content,
             upload=True,
         )
-        check_asset(asset, content)
+    wait_for_asset(client, base, release["id"], asset, content)
     if release["draft"]:
         client.request(
             "PATCH",
             base + f'/releases/{release["id"]}',
+            # This coordination release must not change the repository's Latest selection.
             data=dict(draft=False, make_latest="false"),
         )
     # Exact published identity, full source vector and asset hash are re-read by
@@ -363,8 +407,9 @@ def main():
         os.environ["GITHUB_SHA"],
         os.environ["GITHUB_REF_NAME"],
     )
-    contract = load_contract(args.docs_root, lock["documentationRevision"])
     reader = GitHub(os.environ.get("GITHUB_TOKEN"))
+    verify_trusted_revision(lock["documentationRevision"], reader.get)
+    contract = load_contract(args.docs_root, lock["documentationRevision"])
     sender = GitHub(os.environ.get("ORISO_DOCS_RELEASE_TOKEN"))
     if args.command == "verify":
         verify_sources(lock, contract, reader.get, contract.remote_tag_sha)

@@ -53,6 +53,8 @@ class GitHubFixture:
             if allow404:
                 return None
             raise ValueError("published release lookup HTTP404")
+        if method == "GET" and path.endswith("/releases/1"):
+            return copy.deepcopy(self.release)
         if method == "GET" and "/releases?" in path:
             return [copy.deepcopy(self.release)] if self.release else []
         if method == "GET" and "/releases/" not in path:
@@ -70,6 +72,7 @@ class GitHubFixture:
         if upload:
             self.release["assets"].append(
                 dict(
+                    id=7,
                     name="platform-release.json",
                     state="uploaded",
                     size=len(raw),
@@ -91,6 +94,189 @@ class GitHubFixture:
 
 
 class CoordinatorTests(unittest.TestCase):
+    def test_documentation_rebuilds_original_input_without_chart_artifact(self):
+        import yaml
+
+        workflow = yaml.safe_load(
+            (ROOT / ".github/workflows/release-helm-chart.yml").read_text()
+        )
+        release = workflow["jobs"]["release"]["steps"]
+        documentation = workflow["jobs"]["documentation"]["steps"]
+        self.assertFalse(any(
+            step.get("uses", "").startswith("actions/upload-artifact@")
+            for step in release
+        ), "no artifact upload may fail after the chart publishes")
+        self.assertFalse(any(
+            step.get("uses", "").startswith("actions/download-artifact@")
+            for step in documentation
+        ))
+        prepares = [step for step in documentation if
+                    "release_documentation.py prepare" in step.get("run", "")]
+        self.assertEqual(len(prepares), 1)
+        self.assertEqual(prepares[0]["id"], "release-input")
+        fetch = next(step for step in documentation if
+                     step.get("name") == "Fetch the same released Docs validator")
+        self.assertEqual(fetch["env"]["DOCS_RELEASE_REVISION"],
+                         "${{ steps.release-input.outputs.documentation-revision }}")
+
+    def test_docs_revision_must_be_ancestor_of_pinned_main(self):
+        self.assertTrue(hasattr(coordinator, "verify_trusted_revision"))
+        calls = []
+
+        def api(path):
+            calls.append(path)
+            if path.endswith("/branches/main"):
+                return dict(commit=dict(sha="b" * 40))
+            return dict(status="ahead", base_commit=dict(sha="d" * 40),
+                        merge_base_commit=dict(sha="d" * 40))
+
+        coordinator.verify_trusted_revision("d" * 40, api)
+        self.assertEqual(calls, [
+            "repos/OpenResilienceInitiative/ORISO-Docs/branches/main",
+            "repos/OpenResilienceInitiative/ORISO-Docs/compare/" +
+            "d" * 40 + "..." + "b" * 40,
+        ])
+        for status, merge_base in [("behind", "b" * 40),
+                                   ("diverged", "a" * 40),
+                                   ("ahead", "a" * 40)]:
+            def untrusted(path):
+                if path.endswith("/branches/main"):
+                    return dict(commit=dict(sha="b" * 40))
+                return dict(status=status, base_commit=dict(sha="d" * 40),
+                            merge_base_commit=dict(sha=merge_base))
+
+            with self.subTest(status=status, merge_base=merge_base):
+                with self.assertRaisesRegex(ValueError, "Docs main"):
+                    coordinator.verify_trusted_revision("d" * 40, untrusted)
+
+    def test_exact_main_revision_is_trusted(self):
+        self.assertTrue(hasattr(coordinator, "verify_trusted_revision"))
+
+        def api(path):
+            if path.endswith("/branches/main"):
+                return dict(commit=dict(sha="d" * 40))
+            return dict(status="identical", base_commit=dict(sha="d" * 40),
+                        merge_base_commit=dict(sha="d" * 40))
+
+        coordinator.verify_trusted_revision("d" * 40, api)
+
+    def test_untrusted_revision_is_rejected_before_import_with_tokens(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = pathlib.Path(directory) / "platform-release.json"
+            manifest.write_text(json.dumps(self.lock))
+            env = dict(os.environ, RELEASE_VERSION="2.0.9", GITHUB_SHA="e" * 40,
+                       GITHUB_REF_NAME="main", GITHUB_TOKEN="synthetic-helm",
+                       ORISO_DOCS_RELEASE_TOKEN="synthetic-docs")
+            def api(path):
+                if path.endswith("/branches/main"):
+                    return dict(commit=dict(sha="b" * 40))
+                return dict(status="diverged", base_commit=dict(sha="d" * 40),
+                            merge_base_commit=dict(sha="a" * 40))
+
+            with patch.dict(os.environ, env), patch.object(sys, "argv", [
+                "coordinator", "verify", "--manifest", str(manifest),
+                "--docs-root", str(DOCS),
+            ]), patch.object(coordinator.GitHub, "get", side_effect=api), \
+                    patch.object(coordinator, "load_contract") as load:
+                with self.assertRaisesRegex(ValueError, "Docs main"):
+                    coordinator.main()
+                load.assert_not_called()
+
+    def test_delayed_asset_digest_retries_metadata_without_second_upload(self):
+        original = self.api.request
+        reads = []
+
+        def delayed(method, path, **kwargs):
+            result = original(method, path, **kwargs)
+            if kwargs.get("upload"):
+                result = dict(result, digest="")
+            elif method == "GET" and path.endswith("/releases/1"):
+                reads.append(path)
+                if len(reads) == 1:
+                    result["assets"][0]["digest"] = None
+            return result
+
+        self.api.request = delayed
+        with patch("time.sleep"):
+            coordinator.publish(self.lock, contract, self.api, self.tag)
+            coordinator.dispatch(self.lock, contract, self.api, self.api, self.tag)
+        self.assertEqual(len(reads), 2)
+        self.assertEqual(len([call for call in self.api.calls if call[3] is not None]), 1)
+        self.assertFalse(self.api.release["draft"])
+
+    def test_missing_digest_times_out_and_retry_reuses_draft_asset(self):
+        original = self.api.request
+
+        def pending(method, path, **kwargs):
+            result = original(method, path, **kwargs)
+            if kwargs.get("upload"):
+                self.api.release["assets"][0]["digest"] = None
+                result = copy.deepcopy(self.api.release["assets"][0])
+            return result
+
+        self.api.request = pending
+        with patch("time.sleep"):
+            with self.assertRaisesRegex(ValueError, "digest.*unavailable"):
+                coordinator.publish(self.lock, contract, self.api, self.tag)
+        self.assertTrue(self.api.release["draft"])
+        self.assertFalse(any(call[1].endswith("/dispatches") for call in self.api.calls))
+        self.api.release["assets"][0]["digest"] = (
+            "sha256:" + hashlib.sha256(contract.canonical_bytes(self.lock)).hexdigest()
+        )
+        self.api.request = original
+        coordinator.publish(self.lock, contract, self.api, self.tag)
+        self.assertEqual(len([call for call in self.api.calls if call[3] is not None]), 1)
+
+    def test_mismatched_digest_is_rejected_without_polling_or_publication(self):
+        original = self.api.request
+
+        def mismatch(method, path, **kwargs):
+            result = original(method, path, **kwargs)
+            return dict(result, digest="sha256:" + "0" * 64) if kwargs.get("upload") else result
+
+        self.api.request = mismatch
+        with patch("time.sleep") as sleep:
+            with self.assertRaisesRegex(ValueError, "refusing overwrite"):
+                coordinator.publish(self.lock, contract, self.api, self.tag)
+            sleep.assert_not_called()
+        self.assertTrue(self.api.release["draft"])
+
+    def test_conflicting_metadata_during_digest_polling_never_publishes(self):
+        changes = ["id", "duplicate", "missing", "state", "size", "digest"]
+        for change in changes:
+            with self.subTest(change=change):
+                api = GitHubFixture(self.lock)
+                original = api.request
+
+                def changed(method, path, **kwargs):
+                    result = original(method, path, **kwargs)
+                    if kwargs.get("upload"):
+                        return dict(result, digest=None)
+                    if method == "GET" and path.endswith("/releases/1"):
+                        asset = result["assets"][0]
+                        if change == "id":
+                            asset["id"] = 8
+                        elif change == "duplicate":
+                            result["assets"].append(dict(asset, id=8))
+                        elif change == "missing":
+                            result["assets"] = []
+                        elif change == "state":
+                            asset["state"] = "starter"
+                        elif change == "size":
+                            asset["size"] += 1
+                        elif change == "digest":
+                            asset["digest"] = "sha256:" + "0" * 64
+                    return result
+
+                api.request = changed
+                with patch("time.sleep"):
+                    with self.assertRaisesRegex(ValueError, "refusing overwrite"):
+                        coordinator.publish(self.lock, contract, api, self.tag)
+                self.assertTrue(api.release["draft"])
+                self.assertEqual(len([call for call in api.calls if call[3] is not None]), 1)
+                self.assertFalse(any(call[0] == "PATCH" or call[1].endswith("/dispatches")
+                                     for call in api.calls))
+
     def setUp(self):
         self.lock = lock_fixture()
         self.api = GitHubFixture(self.lock)
@@ -431,12 +617,10 @@ class CoordinatorTests(unittest.TestCase):
             names.index("Create and push release tag"),
         )
         documentation = workflow["jobs"]["documentation"]["steps"]
-        self.assertTrue(
-            any(
-                s.get("uses", "").startswith("actions/download-artifact@")
-                for s in documentation
-            )
-        )
+        self.assertTrue(any(
+            "release_documentation.py prepare" in s.get("run", "")
+            for s in documentation
+        ))
         self.assertFalse(
             any(
                 "helm push" in s.get("run", "") or "git tag" in s.get("run", "")

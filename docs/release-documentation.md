@@ -22,7 +22,11 @@ inputs are excluded. Derive commits from reviewed release/source provenance;
 image version strings alone do not establish those commits. No initial real
 source vector is invented by this change.
 
-The selected Docs commit must contain the Helm-origin/asset verification contract.
+The selected Docs commit must contain the Helm-origin/asset verification contract
+and be reachable from Docs `main`. Before importing any Docs Python with release
+credentials, the coordinator reads the current `main` SHA and compares the selected
+commit against that pinned tip. A commit on an unmerged branch is refused even
+if its SHA and validator marker otherwise match.
 The three receiver workflows must also be active on Docs' default branch and
 accept `platform-release-published`; GitHub delivers repository dispatch there.
 Merging a Docs PR into dev does not by itself install that default-branch receiver.
@@ -48,12 +52,22 @@ this change does not delete or retarget tags.
 
 ## Failure and retry
 
-A chart failure prevents the documentation job from running. If only the later
-documentation job fails, use GitHub Actions **Re-run failed jobs**. That retries
-the coordinator without republishing the chart. Draft lookup includes authenticated,
+A chart failure prevents the documentation job from running. Each job reconstructs
+and validates the same canonical source list from the original workflow event;
+there is no artifact upload after `helm push` and no artifact download dependency.
+If only the later documentation job fails, use GitHub Actions **Re-run failed jobs**.
+That retries the coordinator without republishing the chart. Draft lookup includes authenticated,
 paginated release lists so an interrupted upload/publication reuses its existing
 draft. An identical existing asset is reused; a different, duplicate or incomplete
 asset is refused and needs operator investigation. No release asset is overwritten.
+An absent or empty asset digest is re-read from release metadata up to five times,
+with 1, 2, 4, 8 and 16 second delays. A conflicting digest, wrong size/state, or
+changed asset identity fails immediately. If the digest remains unavailable, the
+job fails before publishing the draft or dispatching; retrying reuses the same
+draft and asset once the digest becomes available.
+
+The coordinator deliberately uses `make_latest="false"`: this documentation source
+release does not change the repository's existing GitHub Latest-release selection.
 
 GitHub repository dispatch has no exactly-once guarantee. A retry may deliver the
 same source list again; the immutable manifest and source checks remain required.

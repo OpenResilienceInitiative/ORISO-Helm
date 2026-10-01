@@ -36,8 +36,6 @@ jobs:
   release:
     name: Create tag and publish Helm chart
     runs-on: ubuntu-latest
-    outputs:
-      documentation-revision: ${{ steps.release-input.outputs.documentation-revision }}
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       PYTHONDONTWRITEBYTECODE: '1'
@@ -198,14 +196,6 @@ jobs:
 
           helm push "$CHART_PACKAGE" "oci://${{ env.REGISTRY }}/${{ env.ORG }}/${{ env.CHART_REPOSITORY }}"
 
-      - name: Retain the verified source list for the documentation job
-        uses: actions/upload-artifact@v4
-        with:
-          name: platform-release-inputs
-          path: ${{ runner.temp }}/platform-release.json
-          if-no-files-found: error
-          retention-days: 90
-
       - name: Release summary
         shell: bash
         run: |
@@ -241,13 +231,14 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.13'}
       - run: python3 -m pip install PyYAML==6.0.3
-      - uses: actions/download-artifact@v4
-        with:
-          name: platform-release-inputs
-          path: ${{ runner.temp }}/release-inputs
+      - name: Rebuild the same source list from the original workflow event
+        id: release-input
+        env:
+          ORISO_DOCS_RELEASE_TOKEN: ${{ secrets.ORISO_DOCS_RELEASE_TOKEN }}
+        run: python3 scripts/release_documentation.py prepare --manifest "$RUNNER_TEMP/platform-release.json"
       - name: Fetch the same released Docs validator
         env:
-          DOCS_RELEASE_REVISION: ${{ needs.release.outputs.documentation-revision }}
+          DOCS_RELEASE_REVISION: ${{ steps.release-input.outputs.documentation-revision }}
         run: |
           set -euo pipefail
           git init --quiet "$RUNNER_TEMP/docs-release-source"
@@ -257,7 +248,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ORISO_DOCS_RELEASE_TOKEN: ${{ secrets.ORISO_DOCS_RELEASE_TOKEN }}
-        run: python3 scripts/release_documentation.py publish-and-dispatch --manifest "$RUNNER_TEMP/release-inputs/platform-release.json" --docs-root "$RUNNER_TEMP/docs-release-source"
+        run: python3 scripts/release_documentation.py publish-and-dispatch --manifest "$RUNNER_TEMP/platform-release.json" --docs-root "$RUNNER_TEMP/docs-release-source"
       - name: Record the receiver acceptance boundary
         run: |
           echo 'Helm source manifest published; Docs event accepted. Check Docs/Understand workflow results and actual public bytes before calling publication complete.' >> "$GITHUB_STEP_SUMMARY"
