@@ -16,6 +16,8 @@ spec:
     metadata:
       labels:
         app: keycloak
+      annotations:
+        checksum/email-identity: {{ printf "%s\x00%s" (include "oriso.emailBrandingName" .) (include "oriso.emailLegalOrganisationName" .) | sha256sum | quote }}
     spec:
       terminationGracePeriodSeconds: 60
       {{- if .Values.keycloakSecurityContext }}
@@ -98,6 +100,16 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   key: ORISO_APP_BASE_URL
+                  name: keycloak-configmap-env
+            - name: EMAIL_BRANDING_NAME
+              valueFrom:
+                configMapKeyRef:
+                  key: EMAIL_BRANDING_NAME
+                  name: keycloak-configmap-env
+            - name: EMAIL_LEGAL_ORGANISATION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  key: EMAIL_LEGAL_ORGANISATION_NAME
                   name: keycloak-configmap-env
             - name: ORISO_LOGO_URL
               valueFrom:

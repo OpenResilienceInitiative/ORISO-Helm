@@ -19,6 +19,7 @@ spec:
       # makes an opt-out replace Pods before they can keep sending pending copy.
       annotations:
         oriso.org/email-allow-unreviewed-locales: {{ .Values.userService.emailAllowUnreviewedLocales | default false | quote }}
+        checksum/email-identity: {{ printf "%s\x00%s" (include "oriso.emailBrandingName" .) (include "oriso.emailLegalOrganisationName" .) | sha256sum | quote }}
     spec:
       affinity:
         podAntiAffinity:

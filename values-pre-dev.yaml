@@ -12,6 +12,9 @@
 # archived ORISO-Kubernetes ingresses belong to another server (404).
 
 global:
+  # Existing ORISO Pre-Dev product identity. The operator must separately
+  # supply global.emailLegalOrganisationName before deployment.
+  emailBrandingName: "ORISO"
   domainName: "predev.oriso.org"
   observability:
     deploymentEnvironment: "pre-dev"
@@ -28,8 +31,6 @@ signozCollector:
   clusterName: "oriso-predev"
 
 userService:
-  # Existing ORISO Pre-Dev identity; fresh installations must set their own name.
-  emailBrandingName: "ORISO"
   # Magic Link, password reset and account-invite links derive from
   # global.domainName: https://predev.oriso.org (admin reset
   # https://predev.oriso.org/admin; admin invite base is the bare origin,

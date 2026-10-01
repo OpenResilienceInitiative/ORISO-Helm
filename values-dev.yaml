@@ -9,6 +9,9 @@
 # this generic dev overlay does not opt in. See docs/infrastructure-report-2026-07.md §7.
 
 global:
+  # Existing ORISO Dev product identity. The operator must separately supply
+  # global.emailLegalOrganisationName before this chart can be deployed.
+  emailBrandingName: "ORISO"
   # Public host of the Dev environment (main-ingress serves App, /admin, /auth
   # and /_matrix on it). Every public URL and mail link derives from it.
   domainName: "dev.oriso.org"
@@ -46,8 +49,6 @@ consultingTypeService:
   liquibaseContexts: "seed"
 userService:
   springProfilesActive: "dev"
-  # Existing ORISO Dev identity; fresh installations must set their own name.
-  emailBrandingName: "ORISO"
   # Dev mailbox QA explicitly exercises all seven App mail languages. This is
   # not human language approval and must not be copied to production values.
   emailAllowUnreviewedLocales: true

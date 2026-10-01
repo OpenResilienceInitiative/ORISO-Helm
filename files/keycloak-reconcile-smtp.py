@@ -23,6 +23,7 @@ from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 MAX_RESPONSE_BYTES = 65536
+MAX_REALM_RESPONSE_BYTES = 1048576
 HTTP_TIMEOUT_SECONDS = 10
 TRIGGER_READY_SECONDS = 120  # Bounded below the Helm Job's 600-second active deadline.
 TRIGGER_RETRY_SECONDS = 5
@@ -92,12 +93,15 @@ class HttpClient:
 
     def request(self, method, url, body=None, headers=None, failure="SOURCE_UNAVAILABLE",
                 revision=False, authenticate_source=False, timeout=HTTP_TIMEOUT_SECONDS,
-                trigger_request=False):
+                trigger_request=False, max_response_bytes=MAX_RESPONSE_BYTES):
+        if (not isinstance(max_response_bytes, int) or isinstance(max_response_bytes, bool)
+                or not 0 < max_response_bytes <= MAX_REALM_RESPONSE_BYTES):
+            raise ReconcileError("SMTP_RECONCILE_CONFIGURATION_INVALID: response limit")
         try:
             request = Request(url, data=body, method=method, headers=headers or {})
             with self.opener.open(request, timeout=timeout) as response:
                 status = response.status
-                data = response.read(MAX_RESPONSE_BYTES + 1)
+                data = response.read(max_response_bytes + 1)
                 source_revision = response.headers.get("X-Smtp-Revision")
         except HTTPError as error:
             error.close()
@@ -118,7 +122,7 @@ class HttpClient:
         except ValueError:
             # Exception strings and response bodies may contain tokens/passwords.
             raise ReconcileError("SMTP_RECONCILE_" + failure) from None
-        if len(data) > MAX_RESPONSE_BYTES:
+        if len(data) > max_response_bytes:
             raise ReconcileError("SMTP_RECONCILE_" + failure + ": response too large")
         if status == 204:
             return (None, source_revision) if revision else None
@@ -132,12 +136,14 @@ class HttpClient:
             raise ReconcileError("SMTP_RECONCILE_" + failure + ": invalid response")
         return (parsed, source_revision) if revision else parsed
 
-    def login(self, url, realm, client, username, password, failure):
+    def login(self, url, realm, client, username, password, failure,
+              transient_startup=False):
         body = urlencode({"grant_type": "password", "client_id": client,
                           "username": username, "password": password}).encode()
         response = self.request(
             "POST", url + "/realms/" + quote(realm, safe="") + "/protocol/openid-connect/token",
             body, {"Content-Type": "application/x-www-form-urlencoded"}, failure,
+            trigger_request=transient_startup,
         )
         token = response.get("access_token") if response else None
         if not isinstance(token, str) or not token.strip():

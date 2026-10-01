@@ -122,6 +122,8 @@ def render(chart: str, server_public_ip: str) -> str:
         "global": {
             # The chart requires a real public host (ORISO-Helm#366).
             "domainName": "render.oriso.internal",
+            "emailBrandingName": "Render Test Platform",
+            "emailLegalOrganisationName": "Render Test Foundation",
             # secrets.yaml.default ships placeholders the chart rejects
             # (ORISO-Helm#367); this minimal chart does not copy that file, so
             # the same render-only values as tests/fixtures/
@@ -135,7 +137,7 @@ def render(chart: str, server_public_ip: str) -> str:
                 "keycloakServiceAdminPassword": "render-only-not-a-real-secret",
             }
         },
-        "userService": {"emailBrandingName": "Render Test Platform"},
+        "userService": {},
         # postgres.* live in secrets.yaml.default, which this minimal chart does
         # not copy, so they are seeded here like the other secrets above.
         # matrix-configmaps.yaml references all three.
