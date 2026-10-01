@@ -4,7 +4,18 @@ cert-manager:
 
 global:
 
-  # REQUIRED: public host, no scheme or path; every public URL derives from it.
+  # REQUIRED: one canonical product name for UserService and Keycloak mail.
+  # Set both names for each installation; neither has a product default.
+  emailBrandingName: ""
+  # REQUIRED: the legal organisation shown in Keycloak mail footers. This is
+  # independent of the product name and must be supplied by the operator.
+  # Keep it consistent with the initial platform tenant (ID 0) legal identity;
+  # UserService continues to resolve its own tenant/platform footer there.
+  emailLegalOrganisationName: ""
+
+  # REQUIRED: public host name of this installation (e.g. app.example.org; no
+  # scheme, no path). Every public URL, mail link and ingress host derives from
+  # it. Empty or a placeholder fails `helm install` on purpose.
   domainName: ""
   # Empty = cluster default StorageClass.
   storageClass: ""
@@ -14,7 +25,7 @@ global:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
-  # OTLP export to SigNoz — auto-enabled when signoz.enabled=true.
+  # OTLP export to SigNoz — auto-enabled when signoz.enabled=true; backend and agents below.
   observability:
     otlpEnabled: false
     autoEnableWithSignoz: true
@@ -82,18 +93,46 @@ global:
     principalAttribute: "preferred_username"
     serviceAppClientId: "app"
     serviceAdminClientId: "admin-cli"
+    # Keycloak user id (`sub`) of the `technical` user; TenantService recognises
+    # the UserService by it (TECHNICAL_SERVICE_SUBJECT). Not a secret. Required,
+    # deliberately without default: an existing realm has its own id, so look it
+    # up once (admin console, Users > technical > ID). Only a FRESH install that
+    # imports realm.json may use the fixed id it seeds:
+    # 8294c392-e1e0-405b-ac2f-ba3043cbad3e. The reconcile hook compares this with
+    # the live realm before changing anything and fails the release on a mismatch.
+    serviceTechUserId: ""
     bootstrapUsers:
       enabled: true
-    # Fails the deploy hook when the live realm loses the ORISO 2FA contract.
-    # Off until the check script in ORISO-Keycloak filters top-level executions.
+    # Checks after every install and upgrade that the live realm still carries
+    # the ORISO 2FA contract, and fails the hook when it does not. It never
+    # writes to the realm: reconciling stays a deliberate operator action,
+    # because the apply script rebinds to the stock flow and recreates the
+    # custom one, which would break 2FA logins for the duration of every
+    # deploy. Set to false only to silence it temporarily.
     verifyTwoFactorContract:
-      enabled: false
-      # Admin API from inside the cluster, not the public ingress URL.
+      enabled: true
+      # Admin API as reached from INSIDE the cluster. Deliberately not
+      # authServerUrl above: that is the public ingress URL, and a hook that
+      # leaves the cluster to come back in fails whenever the ingress is not up
+      # yet — which during a deploy is exactly when this job runs.
+      # The whole endpoint is here rather than defaulted in the template, so an
+      # environment that answers elsewhere changes one line and sees what it is
+      # changing. {{ .Release.Namespace }} is resolved at render time; the rest
+      # is literal. Empty fails the render rather than guessing an address.
       adminUrl: "http://keycloak.{{ .Release.Namespace }}:8080/auth"
-      # Tries at 5s intervals before giving up on the admin API.
+      # Tries at 5s intervals before giving up on the admin API. Helm's
+      # --timeout only stops helm waiting, it never stops this pod, so the
+      # bound has to live here.
       waitAttempts: 60
+      # Kubernetes-side deadline for the whole job, covering a hang anywhere
+      # the retry bound does not reach.
       deadlineSeconds: 600
-      # Set true once an image carrying the check script is deployed.
+      # The check script ships inside the oriso-keycloak image. Images built
+      # before it existed make the job skip and exit 0, which is honest while
+      # that is the rolled-out image and misleading forever after: a job that
+      # can only ever succeed reads like a passing check. Set to true once an
+      # image carrying /opt/keycloak/bin/oriso-verify-2fa-flow.sh is deployed,
+      # and a missing script fails the release instead of being waved through.
       requireCheckScript: false
 
 matrix:
@@ -183,7 +222,7 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.9"
+  imageVersion: "2.0.10"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -209,11 +248,13 @@ matrixrtcAuth:
     livekitApiKeyKey: "livekit-api-key"
     livekitApiSecretKey: "livekit-api-secret"
     redisUrlKey: "redis-url"
+  # The dev branch tracks the dev tag; release branches pin these by digest
+  # because they are the LiveKit authorization boundary.
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.4"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.10"
     pullPolicy: ""
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.4"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.10"
     pullPolicy: ""
   service:
     port: 3010
@@ -245,7 +286,7 @@ online-counseling-redis:
 # Keycloak
 online-counseling-keycloak:
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
-  imageVersion: "2.0.9"
+  imageVersion: "2.0.10"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
@@ -262,7 +303,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.8"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.10"
 
   keycloakResource: "agency-service"
 
@@ -279,7 +320,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "2.0.8"
+  imageVersion: "2.0.10"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -291,11 +332,21 @@ consultingTypeService:
     enabled: true
 
 
+# Keycloak mail follows Admin Settings, including credential rotation.
+# The helper contains only stdlib HTTP/TLS/JSON; no package install at runtime.
+keycloakSmtpReconcile:
+  image: "docker.io/library/python:3.13-alpine@sha256:79e7a9b9ff1cbceff819f856fb374477792a5967759d94df266de7b7b4120e6f"
+
 # Tenant Service
 tenantService:
+  # Pins for TenantService's constrained OWN-server system-mail endpoint.
+  # Blank values deny every call. Operators set the actual Keycloak user `sub`
+  # and token `azp` from the environment before enabling OWN-server delivery.
+  systemEmailDeliveryServiceSubject: ""
+  systemEmailDeliveryServiceClient: ""
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.9"
+  imageVersion: "2.0.10"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -308,17 +359,27 @@ tenantService:
 
 # User service
 userService:
-  # Existing Secret with a Synapse admin token; unset makes suggestions fail closed.
+  # Pending human-review mail translations are never sent by default. The Dev
+  # overlay opts in for mailbox testing; production remains on reviewed copy.
+  emailAllowUnreviewedLocales: false
+  # Enable only after the #874 sender, templates, relay purposes and login return
+  # have been deployed together and the operator has verified tenant origins.
+  groupAppointmentMail:
+    enabled: "false"
+  # Provision/rotate this existing Secret outside anonymous requests before enabling
+  # the new identity suggestions UI. Without it, suggestions fail closed with 503.
+  # The Synapse credential has admin privileges; the lookup code uses only GET.
   identitySuggestions:
     matrixAdminTokenSecret:
       name: ""
       key: "access-token"
-  # Per client IP and ingress-controller replica, for the public entry paths only.
+  # Per client IP and ingress-controller replica, shared by the two public entry paths.
+  # Other UserService routes retain their existing policy.
   publicEntryRateLimit:
     requestsPerSecond: 5
     burstMultiplier: 2
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.9"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.10"
   serviceURL: "http://userservice:8080"
 
   keycloakResource: "user-service"
@@ -357,23 +418,20 @@ userService:
   otpAllowedForTenantSuperAdmins: "true"
   otpAllowedForRestrictedAgencyAdmins: "true"
 
-  # Empty = derived from global.domainName; set only for a separate App/Admin host.
+  # Mail-link base URLs. Empty = derived from global.domainName
+  # (<scheme>://<domainName>, admin reset <scheme>://<domainName>/admin; scheme
+  # https, or http when global.enableTls is false). Set them only
+  # when App or Admin live on another host; explicit values are validated.
   magicLinkFrontendBaseUrl: ""
   passwordResetFrontendBaseUrl: ""
   passwordResetAdminFrontendBaseUrl: ""
 
-  # SMTP is environment-owned; setting a host requires credentials in secrets.
-  smtpHost: ""
-  smtpPort: 587
-  smtpSecure: false
-  smtpFrom: ""
-
-  # Bare origins for invite links (admin must NOT end in /admin); empty = derived.
+  # Bare origins for account-invite links (admin must NOT end in /admin).
+  # Empty = <scheme>://<domainName> (http when global.enableTls is false); set
+  # only when the Admin panel has its own host.
   accountInviteAppFrontendBaseUrl: ""
   accountInviteAdminFrontendBaseUrl: ""
 
-  # Platform-level email branding for mails without a tenant context.
-  emailBrandingName: "ORISO"
   # Absolute https URL of the platform logo; empty = mails render without a logo.
   emailBrandingLogoUrl: ""
 
@@ -397,21 +455,18 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.9"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.10"
 
 nginxController:
   enabled: true
   replicas: 1
 
-# IP anonymization proxy — replaces X-Real-IP/X-Forwarded-For with a
-# session-scoped UUID so no ORISO backend ever sees a real client IP.
-ipAnonymizer:
-  enabled: false
-  replicas: 1
-  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:latest"
-
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
+# SigNoz ships as two upstream charts and this chart mirrors that split:
+#   signoz:    backend — ClickHouse, query service, UI
+#   signozCollector: agents — node DaemonSet + cluster collector
+# Per-service OTLP export is global.observability near the top of this file.
 
 # SigNoz — set signoz.enabled=true to deploy it and auto-enable OTLP export.
 signoz:
@@ -426,14 +481,34 @@ signoz:
     persistence:
       size: 20Gi
 
+# SigNoz collection agents — node DaemonSet (pod logs, host/kubelet metrics)
+# plus one cluster collector (workload objects, k8s events). Requires
+# signoz.enabled=true; observability-validation.yaml enforces that.
+# Pipelines, RBAC and hardening live in templates/signoz/ and files/signoz/.
+signozCollector:
+  enabled: false
+  # Cluster identity tagged onto every exported signal; required when enabled.
+  clusterName: ""
+  image:
+    repository: docker.io/otel/opentelemetry-collector-contrib
+    tag: "0.139.0"
+    pullPolicy: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 # Health Dashboard
 healthDashboard:
   ingress:
-    # Public at /health by default; every enabled ingress requires Basic Auth.
-    enabled: true
-    # Secret with an nginx-compatible `auth` htpasswd entry. Pre-provision it, or set
-    # healthDashboard.ingress.htpasswd in secrets.yaml and the chart renders it.
-    authSecret: "health-dashboard-basic-auth"
+    # Public access is opt-in; every enabled ingress requires Basic Auth.
+    enabled: false
+    # Existing Secret with an nginx-compatible `auth` htpasswd entry, provisioned
+    # in healthDashboard.namespace (or the release namespace when unset).
+    authSecret: ""
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
     tag: "2.0.4"

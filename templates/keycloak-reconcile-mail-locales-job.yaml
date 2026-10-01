@@ -1,0 +1,98 @@
+{{- $kc := index .Values "online-counseling-keycloak" -}}
+{{- $image := required "keycloakSmtpReconcile.image is required for mail locale reconciliation" .Values.keycloakSmtpReconcile.image -}}
+{{- if not (regexMatch "^[^[:space:]]+@sha256:[a-f0-9]{64}$" $image) -}}
+{{- fail "keycloakSmtpReconcile.image must use an immutable sha256 digest" -}}
+{{- end -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-reconcile-mail-locales
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "17"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 240
+  template:
+    metadata:
+      labels:
+        app: keycloak-reconcile-mail-locales
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: verify-keycloak-mail-theme
+          image: "{{ $kc.imageName }}:{{ $kc.imageVersion }}"
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              theme=${KEYCLOAK_EMAIL_THEME_DIR:-/opt/keycloak/themes/oriso/email}
+              for locale in de en fr ru ti tr; do
+                if [ ! -s "$theme/messages/messages_$locale.properties" ]; then
+                  echo "ERROR: Keycloak image lacks oriso mail bundle for $locale" >&2
+                  exit 3
+                fi
+              done
+              if ! grep -qx 'locales=de,en,fr,ru,ti,tr' "$theme/theme.properties"; then
+                echo 'ERROR: Keycloak image lacks the complete oriso mail locale declaration' >&2
+                exit 3
+              fi
+      containers:
+        - name: reconcile-mail-locales
+          image: {{ $image | quote }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 64Mi
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KEYCLOAK_URL
+              value: {{ include "oriso.keycloakAdminUrl" . | quote }}
+            - name: KEYCLOAK_REALM
+              value: {{ .Values.global.keycloak.realm | quote }}
+            - name: KEYCLOAK_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN_PASSWORD
+          volumeMounts:
+            - name: mail-locale-script
+              mountPath: /scripts
+              readOnly: true
+          command: ["python3", "-B", "/scripts/keycloak-reconcile-mail-locales.py"]
+      volumes:
+        - name: mail-locale-script
+          configMap:
+            name: keycloak-reconcile-mail-locales-script
