@@ -125,6 +125,12 @@ spec:
                 configMapKeyRef:
                   key: ROOT_LOGLEVEL
                   name: keycloak-configmap-env
+            # Brute-force protection (ORISO-UserService#1338): without this, Keycloak's
+            # default protector answers a second login of the same user that arrives
+            # while the first is still running with "Invalid user credentials" once the
+            # realm is protected. Every backend signs in as the shared `technical` user.
+            - name: KC_SPI_BRUTE_FORCE_PROTECTOR__DEFAULT_BRUTE_FORCE_DETECTOR__ALLOW_CONCURRENT_REQUESTS
+              value: {{ dig "bruteForce" "allowConcurrentRequests" true .Values.AsMap | toString | quote }}
           {{- if .Values.keycloakSecurityContext }}
           securityContext:
             {{- toYaml .Values.keycloakSecurityContext.container | nindent 12 }}
