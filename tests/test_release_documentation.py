@@ -182,6 +182,29 @@ class CoordinatorTests(unittest.TestCase):
                     coordinator.main()
                 load.assert_not_called()
 
+    def test_untrusted_revision_is_rejected_before_publish_and_dispatch_import(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = pathlib.Path(directory) / "platform-release.json"
+            manifest.write_text(json.dumps(self.lock))
+            env = dict(os.environ, RELEASE_VERSION="2.0.9", GITHUB_SHA="e" * 40,
+                       GITHUB_REF_NAME="main", GITHUB_TOKEN="synthetic-helm",
+                       ORISO_DOCS_RELEASE_TOKEN="synthetic-docs")
+
+            def api(path):
+                if path.endswith("/branches/main"):
+                    return dict(commit=dict(sha="b" * 40))
+                return dict(status="diverged", base_commit=dict(sha="d" * 40),
+                            merge_base_commit=dict(sha="a" * 40))
+
+            with patch.dict(os.environ, env), patch.object(sys, "argv", [
+                "coordinator", "publish-and-dispatch", "--manifest", str(manifest),
+                "--docs-root", str(DOCS),
+            ]), patch.object(coordinator.GitHub, "get", side_effect=api), \
+                    patch.object(coordinator, "load_contract") as load:
+                with self.assertRaisesRegex(ValueError, "Docs main"):
+                    coordinator.main()
+                load.assert_not_called()
+
     def test_delayed_asset_digest_retries_metadata_without_second_upload(self):
         original = self.api.request
         reads = []
