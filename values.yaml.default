@@ -110,6 +110,9 @@ global:
     # preserved (e.g. PROXY protocol between load balancer and ingress-nginx)
     # and a test request from outside shows the real client address in the
     # ingress-nginx access log.
+    # Do NOT use `use-forwarded-headers` for this: the IP anonymizer (#375)
+    # rewrites X-Forwarded-For to a per-session UUID, so nginx would bucket by
+    # UUID and the limit would silently do nothing. Use PROXY protocol only.
     tokenRateLimit:
       enabled: false
       requestsPerSecond: 5
