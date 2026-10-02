@@ -33,8 +33,18 @@ def render(*args):
         capture_output=True, text=True, check=True,
     )
     documents = [doc for doc in yaml.safe_load_all(result.stdout) if doc]
+    # Prove this exercised the application chart and its vendored dependencies.
+    assert len(documents) > 100
     assert any(doc.get("kind") == "Deployment" and doc["metadata"]["name"] == "keycloak"
                for doc in documents), "render must include the keycloak subchart"
+    # The bucket key is only meaningful while the load balancer hands the client
+    # address through. The chart asks for that; Dev does not deliver it yet, which
+    # is why the limit ships off (see values.yaml.default).
+    controller_services = [doc for doc in documents
+                           if doc.get("kind") == "Service" and doc["metadata"]["name"] == "ingress-nginx"]
+    assert len(controller_services) == 1
+    assert controller_services[0]["spec"]["externalTrafficPolicy"] == "Local", \
+        "preserve client addresses for rate buckets"
     return {doc["metadata"]["name"]: doc for doc in documents if doc.get("kind") == "Ingress"}
 
 
