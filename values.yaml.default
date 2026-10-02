@@ -91,6 +91,23 @@ global:
     loginSuffix: "/token"
     logoutSuffix: "/logout"
     principalAttribute: "preferred_username"
+    # Per-client-IP limit on .../realms/<realm>/protocol/openid-connect/token at
+    # the ingress (ORISO-UserService#1338): one address cannot hammer sign-in or
+    # password guessing. Counted per client IP AND per ingress-controller replica.
+    # A browser sign-in needs 2 requests (password, then code), and every open
+    # tab refreshes its token every few minutes, so 5/s with a burst of 25 leaves
+    # room for an office of counsellors behind one NAT address. Over the limit
+    # nginx answers 429 (the app and the Admin panel show "too many requests").
+    # exemptCidrs is never limited: backends (UserService, AgencyService, ...)
+    # and hooks call Keycloak from private cluster addresses. If a backend
+    # reaches the token endpoint through the PUBLIC host and the cluster
+    # rewrites its source to a public node address, add that address here.
+    # Set enabled: false to fall back to the unlimited /auth route.
+    tokenRateLimit:
+      enabled: true
+      requestsPerSecond: 5
+      burstMultiplier: 5
+      exemptCidrs: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"
     serviceAppClientId: "app"
     serviceAdminClientId: "admin-cli"
     # Keycloak user id (`sub`) of the `technical` user; TenantService recognises
