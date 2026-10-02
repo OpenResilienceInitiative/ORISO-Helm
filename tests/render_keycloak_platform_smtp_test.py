@@ -15,7 +15,7 @@ BASE = [
     "-f", os.path.join(ROOT, "tests", "fixtures", "render-required-secrets.yaml"),
     "--set-string", "global.secrets.redisdefaultPass=test-redis-password",
     "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
-    "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
+    "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
     "--set", "global.domainName=predev.oriso.internal",
 
 ]
