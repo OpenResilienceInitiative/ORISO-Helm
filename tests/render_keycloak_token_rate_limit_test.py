@@ -23,6 +23,8 @@ VALUES = [
     "-f", os.path.join(CHART_DIR, "tests", "fixtures", "values-public-entry-render.yaml"),
 ]
 PRIVATE_RANGES = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"
+TEMPLATE = os.path.join(CHART_DIR, "templates", "nginx", "keycloak-token-rate-limit-ingress.yaml")
+ENABLED = ("--set", "global.keycloak.tokenRateLimit.enabled=true")
 
 
 def render(*args):
@@ -50,8 +52,19 @@ def selected_ingress(docs, host, uri):
 
 
 def main():
-    docs = render()
+    # Off by default: on Dev ingress-nginx sees the node's address, not the client's, so one
+    # shared bucket would throttle every external user (review on ORISO-Helm#401).
+    default = render()
+    assert NEW not in default, "the limit must ship switched off"
+    no_block = render("--set", "global.keycloak.tokenRateLimit=null")
+    assert NEW not in no_block, "a missing tokenRateLimit block must mean off"
+    # Exempt ranges come from values only, never from a fallback in the template.
+    with open(TEMPLATE, encoding="utf-8") as handle:
+        assert not re.search(r"\d+\.\d+\.\d+\.\d+/\d+", handle.read()), "no CIDR literal in the template"
+
+    docs = render(*ENABLED)
     limited, main_ingress = docs[NEW], docs[MAIN]
+    assert default[MAIN] == main_ingress
 
     annotations = limited["metadata"]["annotations"]
     assert annotations[PREFIX + "limit-rps"] == "5"
@@ -96,6 +109,7 @@ def main():
         "the broad /auth route must stay unlimited"
 
     overrides = render(
+        *ENABLED,
         "--set", "global.keycloak.tokenRateLimit.requestsPerSecond=9",
         "--set", "global.keycloak.tokenRateLimit.burstMultiplier=3",
         "--set-string", "global.keycloak.tokenRateLimit.exemptCidrs=10.42.0.0/16\\,10.43.0.0/16",
@@ -106,14 +120,14 @@ def main():
     assert changed[PREFIX + "limit-whitelist"] == "10.42.0.0/16,10.43.0.0/16"
     assert overrides[MAIN] == main_ingress
 
-    no_exemptions = render("--set-string", "global.keycloak.tokenRateLimit.exemptCidrs=")
+    no_exemptions = render(*ENABLED, "--set-string", "global.keycloak.tokenRateLimit.exemptCidrs=")
     assert PREFIX + "limit-whitelist" not in no_exemptions[NEW]["metadata"]["annotations"]
 
     disabled = render("--set", "global.keycloak.tokenRateLimit.enabled=false")
     assert NEW not in disabled
     assert disabled[MAIN] == main_ingress
-    print("PASS: token endpoint limit renders, selects only the token path, honours overrides, "
-          "can be switched off, and leaves /auth unlimited")
+    print("PASS: token endpoint limit is off by default, renders when enabled, selects only the "
+          "token path, honours overrides, takes exemptions from values only, and leaves /auth unlimited")
 
 
 if __name__ == "__main__":

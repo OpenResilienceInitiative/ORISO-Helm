@@ -102,9 +102,16 @@ global:
     # and hooks call Keycloak from private cluster addresses. If a backend
     # reaches the token endpoint through the PUBLIC host and the cluster
     # rewrites its source to a public node address, add that address here.
-    # Set enabled: false to fall back to the unlimited /auth route.
+    # OFF by default. The limit counts per address that ingress-nginx sees, and
+    # on Dev (2026-10) that is the node's public address, not the client's
+    # (ORISO-Helm#401 review): switched on there, all external users would share
+    # one bucket, and the private exemptions could let rewritten public traffic
+    # through. Enable per environment only after the client address is
+    # preserved (e.g. PROXY protocol between load balancer and ingress-nginx)
+    # and a test request from outside shows the real client address in the
+    # ingress-nginx access log.
     tokenRateLimit:
-      enabled: true
+      enabled: false
       requestsPerSecond: 5
       burstMultiplier: 5
       exemptCidrs: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"

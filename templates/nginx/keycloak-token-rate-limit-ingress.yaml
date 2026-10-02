@@ -3,12 +3,12 @@ Per-client-IP limit on Keycloak's token endpoint (ORISO-UserService#1338).
 
 Its own Ingress, so only the token path is limited and the broad /auth route in
 main-ingress keeps its behaviour (login pages, certs, admin console stay unlimited).
-Callers inside the cluster arrive from private addresses and are exempt by default;
-see global.keycloak.tokenRateLimit in values.yaml.default.
+Off unless enabled: it only works where ingress-nginx sees the real client address.
+See global.keycloak.tokenRateLimit in values.yaml.default.
 */ -}}
-{{- $limit := dig "tokenRateLimit" dict .Values.global.keycloak }}
-{{- if dig "enabled" true $limit }}
-{{- $exempt := dig "exemptCidrs" "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8" $limit | toString | trim }}
+{{- $limit := dig "tokenRateLimit" dict .Values.global.keycloak | default dict }}
+{{- if dig "enabled" false $limit }}
+{{- $exempt := dig "exemptCidrs" "" $limit | toString | trim }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
