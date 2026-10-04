@@ -91,6 +91,13 @@ global:
     loginSuffix: "/token"
     logoutSuffix: "/logout"
     principalAttribute: "preferred_username"
+    # Disabled until ingress-nginx receives the real client IP. Do not enable
+    # use-forwarded-headers: the IP anonymizer rewrites X-Forwarded-For.
+    tokenRateLimit:
+      enabled: false
+      requestsPerSecond: 5
+      burstMultiplier: 5
+      exemptCidrs: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"
     serviceAppClientId: "app"
     serviceAdminClientId: "admin-cli"
     # Keycloak user id (`sub`) of the `technical` user; TenantService recognises
