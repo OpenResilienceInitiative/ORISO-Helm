@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 CHART_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_AUTH_SECRET = "health-dashboard-basic-auth"
 AUTH_ERROR = (
     "healthDashboard.ingress.authSecret must name an existing basic-auth Secret "
     "when HealthDashboard ingress is enabled"
@@ -124,6 +125,14 @@ class HealthDashboardIngressAuthTest(unittest.TestCase):
         ):
             with self.subTest(secret=name):
                 self.assertIn(AUTH_ERROR, render(health_dashboard={"ingress": ingress}, expect_error=True))
+
+    def test_absent_secret_uses_the_shipped_default_name(self) -> None:
+        # Only an omitted key falls back to values.yaml.default; an explicit
+        # null, empty or blank value is rejected above.
+        resources = health_resources(render(health_dashboard={"ingress": {"enabled": True}}))
+        annotations = resources["Ingress"]["metadata"]["annotations"]
+        self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-secret"], DEFAULT_AUTH_SECRET)
+        self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-type"], "basic")
 
     def test_rejects_namespace_qualified_secret(self) -> None:
         for namespace in ("", "health-operators"):
