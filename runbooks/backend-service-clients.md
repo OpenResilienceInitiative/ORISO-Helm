@@ -41,12 +41,15 @@ helm template service-clients . --namespace "$NAMESPACE" \
 # Review these three resources: dedicated client Secret, script ConfigMap, preparation Job.
 # Their names must match the prepared private values and existing master-recovery Secret.
 # Apply ONLY this reviewed file; it does not alter old backend Secrets or ConfigMaps.
-# kubectl does not execute Helm's hook-delete-policy. Never replace an active Job.
-PREPARATION_ACTIVE=$(kubectl --namespace "$NAMESPACE" get job keycloak-prepare-backend-clients \
-  --ignore-not-found -o jsonpath='{.status.active}')
-if [ "${PREPARATION_ACTIVE:-0}" != "0" ]; then
-  echo "Preparation is still running; wait for it before retrying." >&2
-  exit 1
+# kubectl does not execute Helm's hook-delete-policy. Replace only a terminal Job.
+# Zero active pods can also mean pending creation or backoff, not completion.
+PREPARATION_JOB=$(kubectl --namespace "$NAMESPACE" get job keycloak-prepare-backend-clients \
+  --ignore-not-found -o jsonpath='{.metadata.name}{"|"}{.status.conditions[?(@.type=="Complete")].status}{"|"}{.status.conditions[?(@.type=="Failed")].status}')
+if [ -n "$PREPARATION_JOB" ]; then
+  case "$PREPARATION_JOB" in
+    *'|True|'*|*'|True') ;; # Complete=True or Failed=True
+    *) echo "Preparation has not finished; wait for it before retrying." >&2; exit 1 ;;
+  esac
 fi
 kubectl --namespace "$NAMESPACE" delete job keycloak-prepare-backend-clients \
   --ignore-not-found --wait=true
