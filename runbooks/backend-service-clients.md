@@ -41,6 +41,15 @@ helm template service-clients . --namespace "$NAMESPACE" \
 # Review these three resources: dedicated client Secret, script ConfigMap, preparation Job.
 # Their names must match the prepared private values and existing master-recovery Secret.
 # Apply ONLY this reviewed file; it does not alter old backend Secrets or ConfigMaps.
+# kubectl does not execute Helm's hook-delete-policy. Never replace an active Job.
+PREPARATION_ACTIVE=$(kubectl --namespace "$NAMESPACE" get job keycloak-prepare-backend-clients \
+  --ignore-not-found -o jsonpath='{.status.active}')
+if [ "${PREPARATION_ACTIVE:-0}" != "0" ]; then
+  echo "Preparation is still running; wait for it before retrying." >&2
+  exit 1
+fi
+kubectl --namespace "$NAMESPACE" delete job keycloak-prepare-backend-clients \
+  --ignore-not-found --wait=true
 kubectl --namespace "$NAMESPACE" apply -f "$PRIVATE_REVIEW_DIR/backend-clients-prepare.yaml"
 kubectl --namespace "$NAMESPACE" wait --for=condition=complete \
   job/keycloak-prepare-backend-clients --timeout=600s
