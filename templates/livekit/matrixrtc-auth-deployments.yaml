@@ -64,8 +64,8 @@ spec:
               drop: ["ALL"]
           env:
             - name: MATRIXRTC_LIFECYCLE_ENABLED
-              value: {{ .Values.matrixrtcLifecycle.enabled | quote }}
-            {{- if .Values.matrixrtcLifecycle.enabled }}
+              value: {{ (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") | quote }}
+            {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
             - name: MATRIXRTC_LIFECYCLE_TOKEN_FILE
               value: /run/lifecycle/token
             - name: MATRIXRTC_LIFECYCLE_REDIS_URL_FILE
@@ -102,7 +102,7 @@ spec:
             - name: auth-secrets
               mountPath: /run/secrets
               readOnly: true
-            {{- if .Values.matrixrtcLifecycle.enabled }}
+            {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
             - name: lifecycle-secret
               mountPath: /run/lifecycle
               readOnly: true
@@ -124,7 +124,7 @@ spec:
                 path: matrix-membership-token
               - key: {{ .Values.matrixrtcAuth.existingSecret.callPolicyTokenKey | quote }}
                 path: call-policy-token
-              {{- if .Values.matrixrtcLifecycle.enabled }}
+              {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
               - key: {{ .Values.matrixrtcAuth.existingSecret.redisUrlKey | quote }}
                 path: redis-url
               - key: {{ .Values.matrixrtcAuth.existingSecret.livekitApiKeyKey | quote }}
@@ -132,7 +132,7 @@ spec:
               - key: {{ .Values.matrixrtcAuth.existingSecret.livekitApiSecretKey | quote }}
                 path: livekit-api-secret
               {{- end }}
-        {{- if .Values.matrixrtcLifecycle.enabled }}
+        {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
         - name: lifecycle-secret
           secret:
             secretName: {{ .Values.matrixrtcLifecycle.existingSecret.name | quote }}

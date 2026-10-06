@@ -13,14 +13,13 @@ spec:
     type: RollingUpdate
   template:
     metadata:
-      annotations:
-        checksum/media-lifecycle: {{ .Values.matrixrtcLifecycle | toJson | sha256sum | quote }}
-        checksum/account-inactivity: {{ printf "%v/%v" (dig "accountInactivity" "enabled" false .Values.userService) (dig "accountInactivity" "dryRun" true .Values.userService) | sha256sum | quote }}
       labels:
         app: userservice
       # ConfigMap-backed env vars do not change in running Pods. This annotation
       # makes an opt-out replace Pods before they can keep sending pending copy.
       annotations:
+        checksum/media-lifecycle: {{ .Values.matrixrtcLifecycle | toJson | sha256sum | quote }}
+        checksum/account-inactivity: {{ printf "%v/%v" (dig "accountInactivity" "enabled" false .Values.userService) (dig "accountInactivity" "dryRun" true .Values.userService) | sha256sum | quote }}
         oriso.org/email-allow-unreviewed-locales: {{ .Values.userService.emailAllowUnreviewedLocales | default false | quote }}
         checksum/email-identity: {{ printf "%s\x00%s" (include "oriso.emailBrandingName" .) (include "oriso.emailLegalOrganisationName" .) | sha256sum | quote }}
     spec:
@@ -59,7 +58,7 @@ spec:
                 configMapKeyRef:
                   name: userservice-configmap-env
                   key: MATRIXRTC_LIFECYCLE_BASE_URL
-            {{- if .Values.matrixrtcLifecycle.enabled }}
+            {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
             - name: MATRIXRTC_LIFECYCLE_TOKEN
               valueFrom:
                 secretKeyRef:

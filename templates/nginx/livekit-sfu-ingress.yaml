@@ -2,7 +2,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   annotations:
-    {{- if .Values.matrixrtcLifecycle.enabled }}
+    {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
     nginx.ingress.kubernetes.io/auth-url: {{ printf "http://matrixrtc-auth-policy-gateway.%s.svc.%s:3010/internal/lifecycle/admit" .Release.Namespace (.Values.global.clusterDomain | default "cluster.local") | quote }}
     nginx.ingress.kubernetes.io/auth-method: "GET"
     # Signaling URLs may carry participant access_token credentials.

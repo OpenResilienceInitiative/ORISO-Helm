@@ -26,7 +26,7 @@ spec:
         - podSelector:
             matchLabels:
               app: element-call
-        {{- if .Values.matrixrtcLifecycle.enabled }}
+        {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
         - podSelector:
             matchLabels:
               app: userservice
@@ -38,7 +38,7 @@ spec:
         - protocol: TCP
           port: 3010
   egress:
-    {{- if .Values.matrixrtcLifecycle.enabled }}
+    {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
     - to:
         - podSelector:
             matchLabels:

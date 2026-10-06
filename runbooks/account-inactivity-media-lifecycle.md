@@ -7,6 +7,12 @@ disabled/dry-run by default. Registered-only account deletion and deletion after
 session purge are disabled so they cannot bypass assigned inactivity periods.
 Other content-retention workflows are unchanged.
 
+An environment that omits the optional `matrixrtcLifecycle` block stays disabled.
+An explicitly enabled block must satisfy all lifecycle prerequisites. While the
+new inactivity scheduler is disabled or in dry-run, this chart does not promise
+automatic expiry: the retired legacy jobs do not run either. Global Settings
+remain the platform admin's source for the assigned inactivity periods.
+
 ## Prerequisites
 
 1. Deploy reviewed UserService and MatrixRTC policy-gateway images implementing

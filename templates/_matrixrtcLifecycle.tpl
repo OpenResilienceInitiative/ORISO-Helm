@@ -1,10 +1,20 @@
-{{/* The media gate must not be enabled against legacy host-network runtime configuration. */}}
-{{- define "oriso.matrixrtcLifecycle.validate" -}}
-{{- $cfg := .Values.matrixrtcLifecycle -}}
-{{- if not (kindIs "bool" $cfg.enabled) -}}
+{{/* Missing optional lifecycle configuration is disabled; explicit invalid values fail. */}}
+{{- define "oriso.matrixrtcLifecycle.enabled" -}}
+{{- $cfg := .Values.matrixrtcLifecycle | default dict -}}
+{{- $enabled := false -}}
+{{- if hasKey $cfg "enabled" -}}
+{{- $enabled = $cfg.enabled -}}
+{{- end -}}
+{{- if not (kindIs "bool" $enabled) -}}
 {{- fail "matrixrtcLifecycle.enabled must be a boolean" -}}
 {{- end -}}
-{{- if $cfg.enabled -}}
+{{- $enabled | toString -}}
+{{- end -}}
+
+{{/* The media gate must not be enabled against legacy host-network runtime configuration. */}}
+{{- define "oriso.matrixrtcLifecycle.validate" -}}
+{{- $cfg := .Values.matrixrtcLifecycle | default dict -}}
+{{- if eq (include "oriso.matrixrtcLifecycle.enabled" .) "true" -}}
 {{- $_ := required "matrixrtcLifecycle.tokenRevision is required and must change on token rotation" $cfg.tokenRevision -}}
 {{- $_ := required "matrixrtcLifecycle.livekit.nodeHostname must identify the node owning nodeIp" $cfg.livekit.nodeHostname -}}
 {{- $secret := required "matrixrtcLifecycle.existingSecret.name must name a separately provisioned dedicated secret" $cfg.existingSecret.name -}}

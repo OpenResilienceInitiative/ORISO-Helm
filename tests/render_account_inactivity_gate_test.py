@@ -64,6 +64,10 @@ def render(enabled=None, runtime=None):
                 str(chart),
                 "--namespace",
                 "gate-test",
+                "-f",
+                str(ROOT / "tests/fixtures/values-render-domain.yaml"),
+                "--set-string",
+                "global.keycloak.serviceTechUserId=00000000-0000-4000-8000-000000000000",
             ]
             + extra,
             text=True,

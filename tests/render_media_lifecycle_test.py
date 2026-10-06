@@ -24,17 +24,22 @@ ENABLED = {
     "matrixrtcLifecycle.tokenRevision": "initial",
 }
 
-def run_helm(overrides=None):
+def run_helm(overrides=None, lifecycle_config=True):
     with tempfile.TemporaryDirectory(prefix="media-lifecycle-") as tmp:
         chart = Path(tmp)
         (chart / "Chart.yaml").write_text("apiVersion: v2\nname: media-test\nversion: 0.0.0\n")
-        shutil.copy(ROOT / "values.yaml.default", chart / "values.yaml")
+        values = yaml.safe_load((ROOT / "values.yaml.default").read_text())
+        if not lifecycle_config:
+            values.pop("matrixrtcLifecycle", None)
+        (chart / "values.yaml").write_text(yaml.safe_dump(values))
         for source in (ROOT / "templates").rglob("*"):
             if source.is_file() and (source.suffix == ".tpl" or source.name in FILES or source.name.endswith("ingress.yaml")):
                 dest = chart / source.relative_to(ROOT)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(source, dest)
-        args = ["helm", "template", "media-test", str(chart), "--namespace", "media-test"]
+        args = ["helm", "template", "media-test", str(chart), "--namespace", "media-test",
+                "-f", str(ROOT / "tests/fixtures/values-render-domain.yaml"),
+                "--set-string", "global.keycloak.serviceTechUserId=00000000-0000-4000-8000-000000000000"]
         for key, value in (overrides or {}).items():
             args += ["--set", f"{key}={value}"]
         return subprocess.run(args, text=True, capture_output=True)
@@ -55,10 +60,35 @@ def env(docs, name):
     return {item["name"]: item for item in pod(docs, name)["containers"][0]["env"]}
 
 class MediaLifecycleRenderTest(unittest.TestCase):
+    def test_missing_optional_lifecycle_block_preserves_disabled_media_and_scheduler(self):
+        result = run_helm(lifecycle_config=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        docs = [doc for doc in yaml.safe_load_all(result.stdout) if doc]
+        self.assertEqual(env(docs, "matrixrtc-auth-policy-gateway")["MATRIXRTC_LIFECYCLE_ENABLED"]["value"], "false")
+        self.assertEqual(find(docs, "ConfigMap", "userservice-configmap-env")["data"]["MATRIXRTC_LIFECYCLE_ENABLED"], "false")
+        annotations = find(docs, "Deployment", "userservice")["spec"]["template"]["metadata"]["annotations"]
+        self.assertIn("checksum/email-identity", annotations)
+        self.assertIn("oriso.org/email-allow-unreviewed-locales", annotations)
+        self.assertTrue(pod(docs, "livekit")["hostNetwork"])
+        self.assertNotIn("MATRIXRTC_LIFECYCLE_TOKEN", env(docs, "userservice"))
+        self.assertFalse(any(doc["kind"] == "NetworkPolicy" and doc["metadata"]["name"] == "matrixrtc-lifecycle-livekit" for doc in docs))
+        self.assertNotIn("nginx.ingress.kubernetes.io/auth-url", find(docs, "Ingress", "livekit-sfu-ingress")["metadata"]["annotations"])
+        deployed = find(docs, "ConfigMap", "userservice-configmap-env")["data"]
+        self.assertEqual(deployed["ACCOUNT_INACTIVITY_ENABLED"], "false")
+        self.assertEqual(deployed["ACCOUNT_INACTIVITY_DRY_RUN"], "true")
+
+    def test_explicit_invalid_lifecycle_toggle_still_fails_validation(self):
+        result = run_helm({"matrixrtcLifecycle.enabled": "invalid"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("matrixrtcLifecycle.enabled must be a boolean", result.stderr)
+
     def test_default_off_keeps_existing_media_network_and_needs_no_new_secret(self):
         docs = render()
         self.assertEqual(env(docs, "matrixrtc-auth-policy-gateway")["MATRIXRTC_LIFECYCLE_ENABLED"]["value"], "false")
         self.assertEqual(find(docs, "ConfigMap", "userservice-configmap-env")["data"]["MATRIXRTC_LIFECYCLE_ENABLED"], "false")
+        annotations = find(docs, "Deployment", "userservice")["spec"]["template"]["metadata"]["annotations"]
+        self.assertIn("checksum/email-identity", annotations)
+        self.assertIn("oriso.org/email-allow-unreviewed-locales", annotations)
         self.assertTrue(pod(docs, "livekit")["hostNetwork"])
         self.assertNotIn("MATRIXRTC_LIFECYCLE_TOKEN", env(docs, "userservice"))
         annotations = find(docs, "Ingress", "livekit-sfu-ingress")["metadata"]["annotations"]

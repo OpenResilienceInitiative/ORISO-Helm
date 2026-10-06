@@ -15,6 +15,15 @@ and [UserService #1172](https://github.com/OpenResilienceInitiative/ORISO-UserSe
 Changing either scheduler flag changes a scoped pod-template checksum so UserService
 rolls out and consumes the new environment values.
 
+The platform admin edits the three inactivity periods in Global Settings. Those
+periods govern account policy; this chart does not replace them with a 30-day
+registered-only rule. The legacy registered-only and after-session-purge account
+jobs are retired. With the new scheduler disabled, no automatic account expiry
+runs through those jobs. With dry-run enabled, the scheduler only reports
+candidates. Operators must coordinate the new lifecycle rollout and verify its
+candidate report before enabling execution; applying this chart alone is not
+proof that automatic expiry is active.
+
 The last two values populate `ACCOUNT_INACTIVITY_ENABLED` and
 `ACCOUNT_INACTIVITY_DRY_RUN`. UserService owns the daily UTC cron default.
 
@@ -108,7 +117,7 @@ helm lint . -f values.yaml.default -f secrets.yaml.default \
   --set global.secrets.redisdefaultPass=render-test-secret
 ```
 
-The render suite checks all 45 baseline routes, gate coverage/exclusions, original
+The render suite checks all 47 current baseline routes, gate coverage/exclusions, original
 rewrite/destination preservation, identity headers, no auth-result caching and
 scheduler environment defaults/overrides. It does not prove a running ingress
 controller's generated configuration or live credential revocation.

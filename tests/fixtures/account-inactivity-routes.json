@@ -18,6 +18,8 @@
   {"path": "/room","pathType": "Prefix","backend": {"service": {"name": "element-call","port": {"number": 80}}},"rewrite": null},
   {"path": "/service/(agencies|agencyadmin)(/|$)(.*)","pathType": "ImplementationSpecific","backend": {"service": {"name": "agencyservice","port": {"number": 8080}}},"rewrite": "/$1$2$3"},
   {"path": "/service/(consultingtypes|consultingtypeadmin|topic-groups|topicadmin|topic|settingsadmin|settings)(/|$)(.*)","pathType": "ImplementationSpecific","backend": {"service": {"name": "consultingtypeservice","port": {"number": 8080}}},"rewrite": "/$1$2$3"},
+  {"path": "/service/(error-reports)(/|$)(.*)","pathType": "ImplementationSpecific","backend": {"service": {"name": "userservice","port": {"number": 8080}}},"rewrite": "/$1$2$3"},
+  {"path": "/service/(users/identity-suggestions|users/invitelinks/[^/]+/context)$","pathType": "ImplementationSpecific","backend": {"service": {"name": "userservice","port": {"number": 8080}}},"rewrite": "/$1"},
   {"path": "/service/(users|conversations|useradmin|appointments|matrix)(/|$)(.*)","pathType": "ImplementationSpecific","backend": {"service": {"name": "userservice","port": {"number": 8080}}},"rewrite": "/$1$2$3"},
   {"path": "/service/agencies","pathType": "Prefix","backend": {"service": {"name": "agencyservice","port": {"number": 8080}}},"rewrite": null},
   {"path": "/service/agencyadmin","pathType": "Prefix","backend": {"service": {"name": "agencyservice","port": {"number": 8080}}},"rewrite": null},
