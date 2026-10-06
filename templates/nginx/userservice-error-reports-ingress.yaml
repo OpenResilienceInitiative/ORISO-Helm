@@ -1,0 +1,34 @@
+# /service/error-reports is routed on its own rather than inside
+# userservice-rewrite-ingress' alternation: ingress-nginx orders regex locations
+# by descending path-string length, and adding the prefix there made that route
+# longer than userservice-public-entry-ingress, which silently disabled the
+# public entry rate limit (tests/render_public_entry_rate_limit_test.py).
+#
+# This pattern can only ever match /service/error-reports URIs, so its own
+# position in that ordering cannot take traffic from another route.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /$1$2$3
+    nginx.ingress.kubernetes.io/cors-allow-headers: Authorization, Content-Type, Cache-Control, Pragma, Expires, X-CSRF-Token, x-csrf-token, X-Requested-With, X-WHITELIST-HEADER, acceptlanguage, accept-language, x-tenant-id, X-Tenant-Id, agencyId
+    nginx.ingress.kubernetes.io/cors-allow-methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+    nginx.ingress.kubernetes.io/use-regex: 'true'
+  name: userservice-error-reports-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: '{{ .Values.global.domainName }}'
+    http:
+      paths:
+      - backend:
+          service:
+            name: userservice
+            port:
+              number: 8080
+        path: /service/(error-reports)(/|$)(.*)
+        pathType: ImplementationSpecific

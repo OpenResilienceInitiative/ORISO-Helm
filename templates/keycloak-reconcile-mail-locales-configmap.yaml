@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-reconcile-mail-locales-script
+  namespace: {{ .Release.Namespace }}
+data:
+  keycloak-reconcile-mail-locales.py: |
+    {{- .Files.Get "files/keycloak-reconcile-mail-locales.py" | nindent 4 }}
+  keycloak_reconcile_smtp.py: |
+    {{- .Files.Get "files/keycloak-reconcile-smtp.py" | nindent 4 }}

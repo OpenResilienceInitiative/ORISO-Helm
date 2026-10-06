@@ -17,7 +17,7 @@ import sys
 import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOMAIN = "predev.example.org"
+DOMAIN = "predev.oriso.internal"
 
 
 def render() -> list[dict]:
@@ -25,7 +25,9 @@ def render() -> list[dict]:
         [
             "helm", "template", "matrix-wellknown", CHART_DIR,
             "-f", os.path.join(CHART_DIR, "values.yaml.default"),
+            "-f", os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
             "-f", os.path.join(CHART_DIR, "secrets.yaml.default"),
+            "-f", os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
             "--set-string", "global.secrets.redisdefaultPass=test-redis-password",
             "--set", f"global.domainName={DOMAIN}",
             "--set-string", "userService.smtpUser=smtp-canary-user",

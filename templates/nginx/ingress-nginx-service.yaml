@@ -21,7 +21,9 @@ spec:
     app.kubernetes.io/name: ingress-nginx
   type: LoadBalancer
   sessionAffinity: None
-  externalTrafficPolicy: Cluster
+  # Preserve source addresses for per-client limits. The load balancer must use
+  # the Service healthCheckNodePort so only nodes with controller endpoints receive traffic.
+  externalTrafficPolicy: Local
   ipFamilies:
     - IPv4
   ipFamilyPolicy: SingleStack

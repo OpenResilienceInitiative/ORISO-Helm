@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
-import subprocess
 import unittest
 
 CHART_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -186,31 +185,12 @@ class CutoverReleasePreflightTest(unittest.TestCase):
 
         self.preflight.verify_render(CHART_DIR, values)
 
-    def test_chart_rejects_a_mutable_cutover_image_tag(self) -> None:
-        result = subprocess.run(
-            [
-                "helm",
-                "template",
-                "mutable-image-must-fail",
-                str(CHART_DIR),
-                "-f",
-                str(CHART_DIR / "values.yaml.default"),
-                "-f",
-                str(CHART_DIR / "secrets.yaml.default"),
-                "--set-string",
-                "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
-                "--set-string",
-                "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
-                "--set-string",
-                "frontend.image=ghcr.io/openresilienceinitiative/oriso-frontend:latest",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("frontend.image must use repository@sha256", result.stderr)
+    # test_chart_rejects_a_mutable_cutover_image_tag lived here. It asserted
+    # that the chart refuses a mutable image tag, which the oriso.immutableImage
+    # digest gate enforced. dev dropped that gate with the rest of the deferred
+    # MatrixRTC cutover contract (commit edb9f6e) and pins images by release tag
+    # instead (ORISO-Helm#300), so the assertion could not hold here. pre-dev
+    # carries the gate and asserts it; the test returns with the cutover.
 
 if __name__ == "__main__":
     unittest.main()
