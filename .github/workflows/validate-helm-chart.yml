@@ -77,11 +77,41 @@ jobs:
 
       - name: Run render contracts
         shell: bash
+        # Every contract runs and the step reports all of them. With `set -e`
+        # a bare loop stops at the first failure, so one red contract hides
+        # every contract after it and a branch with several unrelated defects
+        # surfaces them one push at a time. Nothing is tolerated: any failure
+        # still fails the step.
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          failed=()
           for test_file in tests/render_*_test.py; do
-            python "$test_file"
+            echo "::group::${test_file}"
+            if python "$test_file"; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error file=${test_file}::render contract failed"
+              failed+=("$test_file")
+            fi
           done
+
+          total=$(find tests -maxdepth 1 -name 'render_*_test.py' -print | wc -l | tr -d '[:space:]')
+          {
+            echo "### Render contracts"
+            echo ""
+            if [ ${#failed[@]} -eq 0 ]; then
+              echo "All ${total} contracts passed."
+            else
+              echo "${#failed[@]} of ${total} failed:"
+              echo ""
+              for test_file in "${failed[@]}"; do
+                echo "- \`${test_file}\`"
+              done
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          [ ${#failed[@]} -eq 0 ]
 
       - name: Run shell guardrails
         shell: bash
