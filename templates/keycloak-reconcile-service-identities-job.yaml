@@ -1,15 +1,25 @@
-{{- $kc := index .Values "online-counseling-keycloak" -}}
-{{- /* Service identities (ORISO-Helm#367) are reconciled on EVERY install and
-     upgrade: `--import-realm` skips existing realms, so a role change in
-     realm.json alone never reaches an existing environment. Rendered
-     regardless of bootstrapUsers.enabled: the UserService always calls as the
-     backend admin identity, so that identity must exist with its roles. This
-     job never touches realmadmin and only converges the identities in the
-     script to their exact role sets. */ -}}
+{{- $image := required "keycloakSmtpReconcile.image must use an immutable digest" .Values.keycloakSmtpReconcile.image -}}
+{{- if not (regexMatch "^[^[:space:]]+@sha256:[a-f0-9]{64}$" $image) -}}
+{{- fail "keycloakSmtpReconcile.image must use an immutable sha256 digest" -}}
+{{- end -}}
+{{- $migration := .Values.global.keycloak.backendServiceClients -}}
+{{- if and $migration.prepareOnly .Release.IsUpgrade -}}
+{{- fail "backendServiceClients.prepareOnly is for the isolated render/show-only preparation Job; never use it in a Helm upgrade" -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-reconcile-service-clients-script
+data:
+  keycloak-reconcile-service-clients.py: |
+{{ .Files.Get "files/keycloak-reconcile-service-clients.py" | indent 4 }}
+  keycloak-reconcile-smtp.py: |
+{{ .Files.Get "files/keycloak-reconcile-smtp.py" | indent 4 }}
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: keycloak-reconcile-service-identities
+  name: {{ if $migration.prepareOnly }}keycloak-prepare-backend-clients{{ else }}keycloak-reconcile-service-identities{{ end }}
   namespace: {{ .Release.Namespace }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
@@ -24,71 +34,76 @@ spec:
         app: keycloak-reconcile-service-identities
     spec:
       restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: reconcile-service-identities
-          image: "{{ $kc.imageName }}:{{ $kc.imageVersion }}"
+          image: {{ $image | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          command: ["python3", "/scripts/keycloak-reconcile-service-clients.py"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 64Mi
           env:
             - name: KEYCLOAK_URL
               value: {{ include "oriso.keycloakAdminUrl" . | quote }}
             - name: KEYCLOAK_REALM
               value: {{ .Values.global.keycloak.realm | quote }}
-            - name: KEYCLOAK_ADMIN_USERNAME
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- range $pair := list (list "KEYCLOAK_ADMIN_USERNAME" "KEYCLOAK_ADMIN") (list "BOOTSTRAP_ADMIN_USERNAME" "KEYCLOAK_ADMIN") (list "KEYCLOAK_ADMIN_PASSWORD" "KEYCLOAK_ADMIN_PASSWORD") }}
+            - name: {{ index $pair 0 }}
               valueFrom:
                 secretKeyRef:
                   name: keycloak-secret-env
-                  key: KEYCLOAK_ADMIN
-            - name: KEYCLOAK_ADMIN_PASSWORD
+                  key: {{ index $pair 1 }}
+            {{- end }}
+            {{- range $pair := list (list "TECHNICAL_CLIENT_SECRET" "KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET") (list "ADMIN_CLIENT_SECRET" "KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET") }}
+            - name: {{ index $pair 0 }}
               valueFrom:
                 secretKeyRef:
-                  name: keycloak-secret-env
-                  key: KEYCLOAK_ADMIN_PASSWORD
-            - name: BOOTSTRAP_ADMIN_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-secret-env
-                  key: KEYCLOAK_ADMIN
-            - name: SERVICE_ADMIN_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: userservice-secret
-                  key: KEYCLOAK_CONFIG_ADMIN_USERNAME
-            - name: SERVICE_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: userservice-secret
-                  key: KEYCLOAK_CONFIG_ADMIN_PASSWORD
-            - name: TECHNICAL_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: userservice-secret
-                  key: IDENTITY_TECHNICAL_USER_USERNAME
+                  name: keycloak-backend-client-secrets
+                  key: {{ index $pair 1 }}
+            {{- end }}
+            - name: TECHNICAL_CLIENT_ID
+              value: {{ .Values.global.keycloak.backendTechnicalClientId | quote }}
+            - name: ADMIN_CLIENT_ID
+              value: {{ .Values.global.keycloak.serviceAdminClientId | quote }}
+            - name: HUMAN_CLIENT_ID
+              value: {{ .Values.global.keycloak.serviceAppClientId | quote }}
             - name: TECHNICAL_SERVICE_SUBJECT
-              valueFrom:
-                configMapKeyRef:
-                  name: tenantservice-configmap-env
-                  key: TECHNICAL_SERVICE_SUBJECT
-          command:
-            - /bin/sh
-            - -ec
-            - |
-              KCADM=/opt/keycloak/bin/kcadm.sh
-              ATTEMPTS=0
-              MAX_ATTEMPTS=60
-              until "$KCADM" config credentials \
-                  --server "$KEYCLOAK_URL" \
-                  --realm master \
-                  --user "$KEYCLOAK_ADMIN_USERNAME" \
-                  --password "$KEYCLOAK_ADMIN_PASSWORD" >/dev/null 2>&1; do
-                ATTEMPTS=$((ATTEMPTS + 1))
-                if [ "$ATTEMPTS" -ge "$MAX_ATTEMPTS" ]; then
-                  echo "ERROR: no Keycloak admin session after $MAX_ATTEMPTS attempts" >&2
-                  exit 2
-                fi
-                echo "waiting for Keycloak admin API ($ATTEMPTS/$MAX_ATTEMPTS)"
-                sleep 5
-              done
-              unset KEYCLOAK_ADMIN_PASSWORD
-              export KCADM
-
-              {{- .Files.Get "files/keycloak-reconcile-service-identities.sh.in" | nindent 14 }}
+              value: {{ .Values.global.keycloak.serviceTechUserId | quote }}
+            - name: ADMIN_SERVICE_SUBJECT
+              value: {{ .Values.global.keycloak.serviceAdminSubject | quote }}
+            - name: PREPARE_ONLY
+              value: {{ $migration.prepareOnly | toString | quote }}
+            - name: RETIRE_LEGACY_USERS
+              value: {{ $migration.retireLegacyUsers | toString | quote }}
+            - name: LEGACY_TECHNICAL_USERNAME
+              value: {{ $migration.legacyTechnicalUsername | quote }}
+            - name: LEGACY_ADMIN_USERNAME
+              value: {{ $migration.legacyAdminUsername | quote }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: keycloak-reconcile-service-clients-script

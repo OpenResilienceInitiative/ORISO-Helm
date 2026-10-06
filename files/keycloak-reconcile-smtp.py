@@ -93,7 +93,7 @@ class HttpClient:
 
     def request(self, method, url, body=None, headers=None, failure="SOURCE_UNAVAILABLE",
                 revision=False, authenticate_source=False, timeout=HTTP_TIMEOUT_SECONDS,
-                trigger_request=False, max_response_bytes=MAX_RESPONSE_BYTES):
+                trigger_request=False, max_response_bytes=MAX_RESPONSE_BYTES, admin_api=False):
         if (not isinstance(max_response_bytes, int) or isinstance(max_response_bytes, bool)
                 or not 0 < max_response_bytes <= MAX_REALM_RESPONSE_BYTES):
             raise ReconcileError("SMTP_RECONCILE_CONFIGURATION_INVALID: response limit")
@@ -124,7 +124,7 @@ class HttpClient:
             raise ReconcileError("SMTP_RECONCILE_" + failure) from None
         if len(data) > max_response_bytes:
             raise ReconcileError("SMTP_RECONCILE_" + failure + ": response too large")
-        if status == 204:
+        if status == 204 or (admin_api and status == 201):
             return (None, source_revision) if revision else None
         if status != 200:
             raise ReconcileError("SMTP_RECONCILE_" + failure)
@@ -132,7 +132,7 @@ class HttpClient:
             parsed = json.loads(data)
         except (ValueError, UnicodeError):
             raise ReconcileError("SMTP_RECONCILE_" + failure + ": invalid response") from None
-        if not isinstance(parsed, dict):
+        if not isinstance(parsed, dict) and not (admin_api and isinstance(parsed, list)):
             raise ReconcileError("SMTP_RECONCILE_" + failure + ": invalid response")
         return (parsed, source_revision) if revision else parsed
 
@@ -145,6 +145,17 @@ class HttpClient:
             body, {"Content-Type": "application/x-www-form-urlencoded"}, failure,
             trigger_request=transient_startup,
         )
+        token = response.get("access_token") if response else None
+        if not isinstance(token, str) or not token.strip():
+            raise ReconcileError("SMTP_RECONCILE_" + failure)
+        return token
+
+    def service_login(self, url, realm, client, secret, failure):
+        body = urlencode({"grant_type": "client_credentials", "client_id": client,
+                          "client_secret": secret}).encode()
+        response = self.request(
+            "POST", url + "/realms/" + quote(realm, safe="") + "/protocol/openid-connect/token",
+            body, {"Content-Type": "application/x-www-form-urlencoded"}, failure)
         token = response.get("access_token") if response else None
         if not isinstance(token, str) or not token.strip():
             raise ReconcileError("SMTP_RECONCILE_" + failure)
@@ -204,7 +215,7 @@ def configuration(env, mode="reconcile"):
     names = ("KEYCLOAK_URL", "KEYCLOAK_REALM", "CONSULTING_TYPE_SERVICE_URL", "POD_NAMESPACE",
              "TECHNICAL_SERVICE_SUBJECT", "TECHNICAL_CLIENT_ID")
     if mode != "serve":
-        names += ("TECHNICAL_USERNAME", "TECHNICAL_PASSWORD")
+        names += ("TECHNICAL_CLIENT_SECRET",)
     if mode != "trigger":
         names += ("KEYCLOAK_ADMIN_USERNAME", "KEYCLOAK_ADMIN_PASSWORD")
     config = {name: required(env, name) for name in names}
@@ -215,9 +226,9 @@ def configuration(env, mode="reconcile"):
 
 
 def technical_login(http, config):
-    technical_token = http.login(
+    technical_token = http.service_login(
         config["KEYCLOAK_URL"], config["KEYCLOAK_REALM"], config["TECHNICAL_CLIENT_ID"],
-        config["TECHNICAL_USERNAME"], config["TECHNICAL_PASSWORD"], "SOURCE_UNAVAILABLE",
+        config["TECHNICAL_CLIENT_SECRET"], "SOURCE_UNAVAILABLE",
     )
     verify_technical_identity(technical_token, config["TECHNICAL_SERVICE_SUBJECT"], config["TECHNICAL_CLIENT_ID"])
     return technical_token

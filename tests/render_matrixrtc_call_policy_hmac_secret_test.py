@@ -82,7 +82,8 @@ BASE_OVERLAY = {
             "keycloakAdminUsername": "test-kc-user",
             "keycloakAdminPassword": "test-kc-pass",
             "keycloakServiceAdminUsername": "test-kc-service-admin",
-            "keycloakServiceAdminPassword": "test-kc-service-admin-pass",
+            "keycloakBackendTechnicalClientSecret": "render-only-technical-client-secret-canary",
+            "keycloakBackendAdminClientSecret": "render-only-admin-client-secret-canary",
             "matrixRegistrationSharedSecret": "test-shared-secret",
         },
         "matrix": {

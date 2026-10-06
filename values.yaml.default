@@ -99,15 +99,22 @@ global:
       burstMultiplier: 5
       exemptCidrs: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"
     serviceAppClientId: "app"
-    serviceAdminClientId: "admin-cli"
-    # Keycloak user id (`sub`) of the `technical` user; TenantService recognises
-    # the UserService by it (TECHNICAL_SERVICE_SUBJECT). Not a secret. Required,
-    # deliberately without default: an existing realm has its own id, so look it
-    # up once (admin console, Users > technical > ID). Only a FRESH install that
-    # imports realm.json may use the fixed id it seeds:
-    # 8294c392-e1e0-405b-ac2f-ba3043cbad3e. The reconcile hook compares this with
-    # the live realm before changing anything and fails the release on a mismatch.
+    serviceAdminClientId: "backend-admin"
+    backendTechnicalClientId: "backend-technical"
+    backendServiceClients:
+      # Existing realms: render ONLY the preparation Secret/Job (see runbook).
+      # Never install/upgrade the whole chart with prepareOnly=true.
+      # Read both actual subjects, then deploy with prepareOnly=false.
+      prepareOnly: false
+      # Enable only after both backends run on client credentials.
+      retireLegacyUsers: false
+      legacyTechnicalUsername: "technical"
+      legacyAdminUsername: "svc-keycloak-admin"
+    # Actual service-account subject of backendTechnicalClientId. Existing realms
+    # must read it from the preparation job; realm import never updates them.
+    # Fresh imports use 12316d09-a9da-41b9-a13e-ee2c515800b5.
     serviceTechUserId: ""
+    serviceAdminSubject: ""
     bootstrapUsers:
       enabled: true
     # Checks after every install and upgrade that the live realm still carries

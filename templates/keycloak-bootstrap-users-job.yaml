@@ -6,16 +6,10 @@
 {{- if $bootstrapEnabled }}
 {{- $kc := index .Values "online-counseling-keycloak" -}}
 {{- $realmAdmin := default (dict) $bootstrapUsers.realmAdmin -}}
-{{- $technical := default (dict) $bootstrapUsers.technical -}}
 {{- $realmAdminAttributes := default (dict "tenantId" (list "0") "userName" (list "realmadmin") "userId" (list "7c5df021-536b-4f42-bb3c-37b1e4d9864d")) $realmAdmin.attributes -}}
 {{- $realmAdminRealmRoles := default (list "default-roles-online-beratung" "offline_access" "user" "user-admin" "agency-admin" "topic-admin" "single-tenant-admin" "USER_ADMIN" "restricted-agency-admin" "technical" "uma_authorization" "tenant-admin") $realmAdmin.realmRoles -}}
 {{- $realmAdminRemoveRealmRoles := default (list "consultant") $realmAdmin.removeRealmRoles -}}
 {{- $realmAdminClientRoles := default (dict "realm-management" (list "manage-identity-providers" "realm-admin" "query-groups" "view-users" "view-events" "query-realms" "manage-authorization" "manage-events" "view-identity-providers" "manage-users" "view-realm" "impersonation" "query-users" "manage-clients" "manage-realm" "create-client" "view-authorization" "query-clients" "view-clients") "broker" (list "read-token") "account" (list "view-groups" "manage-account" "delete-account" "view-profile" "view-consent" "manage-account-links" "manage-consent" "view-applications")) $realmAdmin.clientRoles -}}
-{{- $technicalAttributes := default (dict "userId" (list "technical")) $technical.attributes -}}
-{{- /* Pure service identity (ORISO-Helm#367); keycloak-reconcile-service-identities
-     enforces the exact set on every upgrade. */ -}}
-{{- $technicalRealmRoles := default (list "default-roles-online-beratung" "technical") $technical.realmRoles -}}
-{{- $technicalClientRoles := default (dict) $technical.clientRoles -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -64,18 +58,6 @@ spec:
                   key: KEYCLOAK_ADMIN_PASSWORD
             - name: REALM_ADMIN_ATTRIBUTES
               value: {{ $realmAdminAttributes | toJson | quote }}
-            - name: TECHNICAL_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: userservice-secret
-                  key: IDENTITY_TECHNICAL_USER_USERNAME
-            - name: TECHNICAL_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: userservice-secret
-                  key: IDENTITY_TECHNICAL_USER_PASSWORD
-            - name: TECHNICAL_ATTRIBUTES
-              value: {{ $technicalAttributes | toJson | quote }}
           command:
             - /bin/sh
             - -ec
@@ -137,13 +119,4 @@ spec:
 {{- end }}
 {{- end }}
 
-              ensure_user "$TECHNICAL_USERNAME" "$TECHNICAL_PASSWORD" "$TECHNICAL_ATTRIBUTES"
-{{- range $role := $technicalRealmRoles }}
-              "$KCADM" add-roles -r "$KEYCLOAK_REALM" --uusername "$TECHNICAL_USERNAME" --rolename {{ $role | quote }} || true
-{{- end }}
-{{- range $client, $roles := $technicalClientRoles }}
-{{- range $role := $roles }}
-              "$KCADM" add-roles -r "$KEYCLOAK_REALM" --uusername "$TECHNICAL_USERNAME" --cclientid {{ $client | quote }} --rolename {{ $role | quote }} || true
-{{- end }}
-{{- end }}
 {{- end }}

@@ -18,6 +18,7 @@ spec:
       # ConfigMap-backed env vars do not change in running Pods. This annotation
       # makes an opt-out replace Pods before they can keep sending pending copy.
       annotations:
+        checksum/backend-service-clients: {{ include "oriso.backendServiceClientsChecksum" . | quote }}
         oriso.org/email-allow-unreviewed-locales: {{ .Values.userService.emailAllowUnreviewedLocales | default false | quote }}
         checksum/email-identity: {{ printf "%s\x00%s" (include "oriso.emailBrandingName" .) (include "oriso.emailLegalOrganisationName" .) | sha256sum | quote }}
     spec:
@@ -217,26 +218,26 @@ spec:
                 configMapKeyRef:
                   key: KEYCLOAK_CONFIG_ADMIN_CLIENTID
                   name: userservice-configmap-env
-            - name: KEYCLOAK_CONFIG_ADMIN_PASSWORD
+            - name: KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT
+            - name: KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  key: KEYCLOAK_CONFIG_ADMIN_PASSWORD
-                  name: userservice-secret
-            - name: KEYCLOAK_CONFIG_ADMIN_USERNAME
+                  name: keycloak-backend-client-secrets
+                  key: KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET
+            - name: IDENTITY_TECHNICAL_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: IDENTITY_TECHNICAL_CLIENT_ID
+            - name: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  key: KEYCLOAK_CONFIG_ADMIN_USERNAME
-                  name: userservice-secret
-            - name: IDENTITY_TECHNICAL_USER_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  key: IDENTITY_TECHNICAL_USER_USERNAME
-                  name: userservice-secret
-            - name: IDENTITY_TECHNICAL_USER_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  key: IDENTITY_TECHNICAL_USER_PASSWORD
-                  name: userservice-secret
+                  name: keycloak-backend-client-secrets
+                  key: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
             - name: KEYCLOAK_CONFIG_APP_CLIENTID
               valueFrom:
                 configMapKeyRef:
