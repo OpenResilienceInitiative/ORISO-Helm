@@ -331,8 +331,11 @@ def test_matrix_identity_rejects_ip_addresses() -> None:
         ("matrix.matrixServerName", "203.0.113.9"),
         ("matrix.matrixServerName", "203.0.113.9:8448"),
         ("matrix.synapseServerName", "203.0.113.9"),
+        ("matrix.synapseServerName", "203.0.113.9:8448"),
         ("global.matrix.matrixServerName", "203.0.113.9"),
+        ("global.matrix.matrixServerName", "203.0.113.9:8448"),
         ("matrixrtcAuth.membershipReaderUserId", "@matrixrtc-auth:203.0.113.9"),
+        ("matrixrtcAuth.membershipReaderUserId", "@matrixrtc-auth:203.0.113.9:8448"),
     ):
         proc = helm_template(*base, "--set-string", f"{key}={bad}")
         assert_fails_naming(proc, key, f"{key}={bad!r}")
