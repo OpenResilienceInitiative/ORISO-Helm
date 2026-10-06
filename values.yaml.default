@@ -323,6 +323,11 @@ online-counseling-keycloak:
   keycloakLogLevel: "WARN"
   rootLogLevel: "WARN"
 
+  # Keep Keycloak's same-user concurrency guard for human OTP credentials.
+  # Backends must use client_credentials before protection is activated (#1351).
+  bruteForce:
+    allowConcurrentRequests: false
+
 
 # ---------- Backend Services -----------------------------------------------------------------------------------------
 
