@@ -1,77 +1,63 @@
-# Keycloak brute-force protection: rollout on an existing realm
+# Keycloak brute-force protection: existing realm activation
 
-ORISO-UserService#1338, slice 5. Needs Hassan9215's sign-off before any step runs.
+ORISO-UserService#1338, slice 5. Operator activation needs Hassan9215's sign-off. Source changes and isolated tests do not activate any shared realm.
 
-`realm.json` is imported only when the realm does not exist yet
-(`kc.sh start --import-realm`). On Dev, Stage and production the realm already
-exists, so merging the chart changes **nothing** in the realm. The realm values
-have to be set once by an operator, after the Keycloak pod runs with the
-concurrency setting from this chart.
+Realm import creates a missing realm; it does not update existing Dev, Stage or production realms. Complete every prerequisite below before enabling protection on an existing realm.
+
+## Required dependencies
+
+1. Deploy and verify Keycloak#50: requesting or waiting for an email/app OTP, the mail cap and SMTP failure must not consume credential failures. Wrong passwords and submitted wrong codes must still count.
+2. Complete UserService#1351: backends use separately scoped confidential service clients with client_credentials and no password fallback. Verify chat, invitations, OTP administration and SMTP reconciliation with strict subject/client checks retained.
+3. Retire the old technical and svc-keycloak-admin password-login paths. A deliberate lock of a disposable old password account must not interrupt backend features. Check every caller; clean recent logs alone do not prove migration.
+4. Verify a working master-realm recovery admin outside application-realm protection. Rehearse recovery only in an isolated fixture.
+
+Do not accept shared technical-account lockout as a default risk. The optional ingress rate limit slows requests but cannot prevent deliberate lockout of a known password account.
 
 ## Values
 
-| Realm field | Value | Why |
+| Realm field | Value | Behavior |
 |---|---|---|
-| `bruteForceProtected` | `true` | Switch it on. |
-| `permanentLockout` / `maxTemporaryLockouts` | `false` / `0` | Never disable an account for good; every lock ends by itself. |
-| `failureFactor` | `15` | A legitimate e-mail sign-in counts up to 9 failures (1 code challenge + 5 resends + 3 wrong codes); 15 leaves room for password typos. |
-| `bruteForceStrategy` / `waitIncrementSeconds` / `maxFailureWaitSeconds` | `MULTIPLE` / `60` / `900` | From the 15th failure on, each further failure locks for 60 s × ⌊failures / 15⌋, at most 15 minutes. |
-| `maxDeltaTimeSeconds` | `43200` | The count is forgotten after 12 h without a failure; a successful sign-in clears it at once. |
-| `quickLoginCheckMilliSeconds` / `minimumQuickLoginWaitSeconds` | `1000` / `5` | Two failures within 1 s (a double click) cost 5 s, not Keycloak's default 60 s. |
+| bruteForceProtected | true | Enables credential-guess protection. |
+| permanentLockout / maxTemporaryLockouts | false / 0 | No permanent lock through these settings. |
+| maxSecondaryAuthFailures | 0 | Disables the separate permanent OTP lockout path, which can disable accounts even when permanentLockout is false. |
+| failureFactor | 15 | Fifteen actual credential failures trigger the first regular wait. Legitimate OTP prompts do not count after Keycloak#50. |
+| bruteForceStrategy / waitIncrementSeconds / maxFailureWaitSeconds | MULTIPLE / 60 / 900 | 60 × floor(count / 15), capped at 900 seconds: counts 15–29 wait 60 seconds, 30–44 wait 120 seconds. Refusals during a lock do not increase the count. |
+| maxDeltaTimeSeconds | 43200 | The next failure after more than 12 hours without a failure starts a new count. Successful authentication clears it. |
+| quickLoginCheckMilliSeconds / minimumQuickLoginWaitSeconds | 1000 / 5 | Closely spaced actual failures can trigger a five-second wait before the regular threshold. |
 
-Chart value `online-counseling-keycloak.bruteForce.allowConcurrentRequests`
-(default `true`) sets
-`KC_SPI_BRUTE_FORCE_PROTECTOR__DEFAULT_BRUTE_FORCE_DETECTOR__ALLOW_CONCURRENT_REQUESTS`.
-Without it, Keycloak refuses a second login of the same user while the first is
-still running. All backends sign in as the shared `technical` user, often in
-parallel.
+Keep chart value online-counseling-keycloak.bruteForce.allowConcurrentRequests=false. Client-credentials grants avoid same-user password-login contention. Globally allowing parallel human authentication produced one success and one HTTP 500 for simultaneous use of one email OTP in the isolated H2 runtime; the default guard produced one success and a clean HTTP 400 refusal. This observation does not establish MariaDB behavior.
 
-## Steps
+The former “one prompt plus five resends plus three wrong codes equals nine” rationale was incorrect: a mail cap does not cap repeated token requests, cooldown prompts or abandoned challenges.
 
-1. Deploy the chart that contains this runbook. Confirm the setting in the
-   running pod:
-   `kubectl -n <ns> exec deploy/keycloak -- /opt/keycloak/bin/kc.sh show-config | grep allow-concurrent-requests`
-   → `... = true`.
-2. Check that no backend is failing to sign in right now (UserService and
-   ConsultingTypeService logs: no 401 from the token endpoint). A wrong
-   `technical` password would lock that user for every backend as soon as
-   protection is on.
-3. Set the realm values from inside the Keycloak pod (the password stays out
-   of process arguments):
+## Operator steps
+
+1. Verify deployed revisions for both dependencies and actual service-client token claims. Confirm the pod configuration reports allow-concurrent-requests=false:
 
    ```sh
-   kubectl -n <ns> exec -it deploy/keycloak -- bash -c '
+   kubectl -n <ns> exec deploy/keycloak -- /opt/keycloak/bin/kc.sh show-config | grep allow-concurrent-requests
+   ```
+
+2. Apply and read back all realm fields. The password stays out of arguments and --no-config avoids writing an admin-token configuration file:
+
+   ```sh
+   kubectl -n <ns> exec -it deploy/keycloak -- bash -ec '
      export KC_CLI_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD"
      KC=/opt/keycloak/bin/kcadm.sh
-     $KC config credentials --server http://localhost:8080/auth --realm master --user "$KEYCLOAK_ADMIN" --config /tmp/kcadm.config
-     $KC update realms/online-beratung --config /tmp/kcadm.config \
-       -s bruteForceProtected=true -s permanentLockout=false -s maxTemporaryLockouts=0 \
+     $KC update realms/online-beratung --no-config --server http://localhost:8080/auth --realm master --user "$KEYCLOAK_ADMIN" \
+       -s bruteForceProtected=true -s permanentLockout=false -s maxTemporaryLockouts=0 -s maxSecondaryAuthFailures=0 \
        -s bruteForceStrategy=MULTIPLE -s failureFactor=15 -s waitIncrementSeconds=60 \
        -s maxFailureWaitSeconds=900 -s maxDeltaTimeSeconds=43200 \
        -s quickLoginCheckMilliSeconds=1000 -s minimumQuickLoginWaitSeconds=5
-     $KC get realms/online-beratung --config /tmp/kcadm.config \
-       --fields bruteForceProtected,permanentLockout,maxTemporaryLockouts,bruteForceStrategy,failureFactor,waitIncrementSeconds,maxFailureWaitSeconds,maxDeltaTimeSeconds,quickLoginCheckMilliSeconds,minimumQuickLoginWaitSeconds
-     rm -f /tmp/kcadm.config'
+     $KC get realms/online-beratung --no-config --server http://localhost:8080/auth --realm master --user "$KEYCLOAK_ADMIN" \
+       --fields bruteForceProtected,permanentLockout,maxTemporaryLockouts,maxSecondaryAuthFailures,bruteForceStrategy,failureFactor,waitIncrementSeconds,maxFailureWaitSeconds,maxDeltaTimeSeconds,quickLoginCheckMilliSeconds,minimumQuickLoginWaitSeconds'
    ```
 
-4. Smoke test: sign in to the app and the Admin panel with e-mail 2FA, and
-   through the Matrix/Element SSO page. Check that backend features that need
-   the `technical` user still work (for example creating a chat).
+3. Verify app/Admin/Matrix SSO sign-in, email resend, abandoned prompts, wrong-code refusal and correct-code completion. Verify chat, invitations and SMTP while a disposable legacy password account is locked. Never conduct failed-password experiments on a shared live technical account.
 
-## If something goes wrong
+## Recovery
 
-- Switch it off again (takes effect at once, no restart):
-  `kcadm.sh update realms/online-beratung -s bruteForceProtected=false`.
-- Unlock one user: Admin console → Users → the user → "Temporarily locked" off,
-  or `DELETE /admin/realms/online-beratung/attack-detection/brute-force/users/<user-id>`.
-- Unlock everyone: `DELETE /admin/realms/online-beratung/attack-detection/brute-force/users`.
+Use the verified master-realm administrator with the same --no-config connection options. Disable application-realm protection with update realms/online-beratung -s bruteForceProtected=false if necessary. Unlock a user through DELETE /admin/realms/online-beratung/attack-detection/brute-force/users/<user-id>, or all users through DELETE /admin/realms/online-beratung/attack-detection/brute-force/users. Keep recovery access available before activation.
 
-## Known risk: deliberate lockout of a known username
+## Evidence boundary
 
-Anyone who knows a username can send wrong passwords and keep that account
-locked (up to 15 minutes per failure once 15 failures are reached). That includes
-`technical` and `svc-keycloak-admin`, whose names are public in `realm.json`.
-Service-account tokens (`client_credentials`) are not subject to brute-force
-protection; moving the backends to them removes this risk and should be a separate
-follow-up; it is not part of this change. The per-IP limit on the token endpoint
-(`global.keycloak.tokenRateLimit`, slice 4 of #1338) slows such attempts but does not prevent them.
+Audit baseline used the exact Dev image (Keycloak 26.6.3, revision 04dc125) in isolated synthetic H2 fixtures. MULTIPLE boundaries were measured with accelerated waits; the 12-hour and 15-minute limits were checked against matching upstream source rather than waited in full. Isolated source/runtime tests are separate from deployed MariaDB, ingress, actual-browser and shared-realm acceptance. No live realm was changed by the audit.

@@ -4,8 +4,7 @@
 Two halves must ship together:
 - realm.json switches protection on with temporary lockout only (fresh imports);
 - the Keycloak pod allows concurrent logins per user. Keycloak's default protector
-  otherwise answers a second, parallel login of the same user with "Invalid user
-  credentials" while the first one runs, and every backend signs in as `technical`.
+  serializes same-user requests. Backends must use client credentials before activation.
 
 The ORISO-Keycloak repository carries the same realm values and asserts them too.
 """
@@ -44,9 +43,10 @@ def main():
     assert realm["bruteForceProtected"] is True
     assert realm["permanentLockout"] is False, "never lock anyone out for good"
     assert realm["maxTemporaryLockouts"] == 0
+    assert realm["maxSecondaryAuthFailures"] == 0
     assert realm["bruteForceStrategy"] == "MULTIPLE"
-    # 1 code challenge + 5 resends + 3 wrong codes = 9 counted failures in a legitimate e-mail sign-in
-    assert realm["failureFactor"] == 15 and realm["failureFactor"] > 1 + 5 + 3
+    # Pending OTP/mail-cap/delivery responses must not count; the SPI integration test pins that.
+    assert realm["failureFactor"] == 15
     assert realm["waitIncrementSeconds"] == 60
     assert realm["maxFailureWaitSeconds"] == 900
     assert realm["maxDeltaTimeSeconds"] == 43200
@@ -54,9 +54,9 @@ def main():
     assert realm["minimumQuickLoginWaitSeconds"] == 5
 
     env = keycloak_env()
-    assert env.get(CONCURRENCY_ENV) == "true", "parallel technical-user logins must not lock each other out"
-    switched_off = keycloak_env("--set", "online-counseling-keycloak.bruteForce.allowConcurrentRequests=false")
-    assert switched_off.get(CONCURRENCY_ENV) == "false"
+    assert env.get(CONCURRENCY_ENV) == "false", "human OTP requests keep Keycloak concurrency protection"
+    override = keycloak_env("--set", "online-counseling-keycloak.bruteForce.allowConcurrentRequests=true")
+    assert override.get(CONCURRENCY_ENV) == "true"
     print("PASS: realm brute-force values and the concurrent-login setting of the Keycloak pod")
 
 

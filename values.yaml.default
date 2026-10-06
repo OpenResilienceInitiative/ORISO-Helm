@@ -303,12 +303,10 @@ online-counseling-keycloak:
   keycloakLogLevel: "WARN"
   rootLogLevel: "WARN"
 
-  # Brute-force protection is a realm setting (realm.json / admin console). This
-  # only decides whether two logins of the SAME user may run at the same time.
-  # Keep true: with false, parallel backend logins as `technical` refuse each
-  # other as soon as the realm is protected (ORISO-UserService#1338).
+  # Keep Keycloak's same-user concurrency guard for human OTP credentials.
+  # Backends must use client_credentials before protection is activated (#1351).
   bruteForce:
-    allowConcurrentRequests: true
+    allowConcurrentRequests: false
 
 
 # ---------- Backend Services -----------------------------------------------------------------------------------------
