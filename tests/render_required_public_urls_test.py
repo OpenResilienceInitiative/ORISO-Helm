@@ -323,6 +323,28 @@ def test_matrix_identity_placeholders_fail() -> None:
     print("PASS: empty or placeholder Matrix identity fails and names the value")
 
 
+def test_matrix_identity_rejects_ip_addresses() -> None:
+    # The server_name is baked into every MXID, so an IPv4 there can never move.
+    # It must stop the install with a message, not be replaced by a default.
+    base = ("--set-string", f"global.domainName={VALID_TEST_DOMAIN}")
+    for key, bad in (
+        ("matrix.matrixServerName", "203.0.113.9"),
+        ("matrix.matrixServerName", "203.0.113.9:8448"),
+        ("matrix.synapseServerName", "203.0.113.9"),
+        ("global.matrix.matrixServerName", "203.0.113.9"),
+        ("matrixrtcAuth.membershipReaderUserId", "@matrixrtc-auth:203.0.113.9"),
+    ):
+        proc = helm_template(*base, "--set-string", f"{key}={bad}")
+        assert_fails_naming(proc, key, f"{key}={bad!r}")
+        assert "not an IPv4 address" in proc.stderr, (
+            f"{key}={bad!r}: the failure must say why, got:\n{proc.stderr[-800:]}"
+        )
+    # A host name that merely starts with digits is still a host name.
+    ok = helm_template(*base, "--set-string", "matrix.matrixServerName=10.matrix.render.oriso.internal")
+    assert ok.returncode == 0, f"digit-leading host name must render, got:\n{ok.stderr[-800:]}"
+    print("PASS: an IPv4 Matrix identity fails with an explicit message and no fallback")
+
+
 def test_prod_overlay_names_no_oriso_host() -> None:
     with open(os.path.join(CHART_DIR, PROD_OVERLAY), encoding="utf-8") as handle:
         hits = [
@@ -382,6 +404,7 @@ def main() -> None:
     test_prod_overlay_requires_domain_at_install()
     test_prod_overlay_names_no_oriso_host()
     test_matrix_identity_placeholders_fail()
+    test_matrix_identity_rejects_ip_addresses()
     test_canonical_public_ipv4_remains_accepted()
     test_dev_mail_links_derive_from_domain()
     test_derived_admin_reset_url_carries_admin_prefix()
