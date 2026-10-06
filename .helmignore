@@ -9,7 +9,13 @@ secrets.yaml.default
 values.yaml.default
 README.md
 *.sh
-*.txt
+helm deploy.txt
+requirements-ci.txt
+charts/keycloak/keycloak-resources/custom-theme/login/resources/fonts/Nunito/*.txt
+charts/signoz/templates/NOTES.txt
+charts/signoz/charts/clickhouse/charts/zookeeper/templates/NOTES.txt
+charts/signoz/charts/redpanda/templates/NOTES.txt
+charts/signoz/charts/redpanda/charts/console/templates/NOTES.txt
 *.tgz
 # Font files: mounted via a ConfigMap `data:` field as base64 text, which never
 # produced valid fonts in the pod anyway, and they alone add ~1MB (chart copy +

@@ -37,7 +37,9 @@ def build_minimal_chart(dst: str) -> None:
 
 
 def render(chart: str, *values: str) -> list[dict]:
-    command = ["helm", "template", "runtime-gate", chart]
+    # The chart requires a real public host (ORISO-Helm#366).
+    render_domain = os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml")
+    command = ["helm", "template", "runtime-gate", chart, "-f", render_domain]
     for values_file in values:
         command.extend(["-f", values_file])
     result = subprocess.run(command, capture_output=True, text=True, check=False)

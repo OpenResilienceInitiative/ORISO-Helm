@@ -1,0 +1,13 @@
+{{- if (.Values.ipAnonymizer).enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: ip-anonymizer
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: ip-anonymizer
+  ports:
+    - port: 8080
+      targetPort: 8080
+{{- end }}

@@ -73,6 +73,15 @@
         "attributes": {}
       },
       {
+        "id": "2ef136cc-fca5-4ff6-b746-ae84aebd4fa1",
+        "name": "otp-config-admin",
+        "description": "May call the otp-config endpoints of the ORISO Keycloak SPI (backend Keycloak admin identity only)",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "online-beratung",
+        "attributes": {}
+      },
+      {
         "id": "c95aff4a-c6a9-4d12-8584-d0ec1f163839",
         "name": "technical",
         "description": "",
@@ -124,15 +133,6 @@
             ]
           }
         },
-        "clientRole": false,
-        "containerId": "online-beratung",
-        "attributes": {}
-      },
-      {
-        "id": "02f5415c-091a-402b-952b-93603b36d341",
-        "name": "TECHNICAL_DEFAULT",
-        "description": "Technical default authority",
-        "composite": false,
         "clientRole": false,
         "containerId": "online-beratung",
         "attributes": {}
@@ -1679,8 +1679,9 @@
       }
     ]
   },
-  "internationalizationEnabled": false,
-  "supportedLocales": [],
+  "internationalizationEnabled": true,
+  "supportedLocales": ["de", "en", "fr", "ru", "ti", "tr"],
+  "defaultLocale": "de",
   "authenticationFlows": [
     {
       "id": "97b43798-4a42-4bd3-a538-680094a90ffb",
@@ -2025,6 +2026,14 @@
           "autheticatorFlow": true,
           "flowAlias": "forms - auth-otp-form - Conditional",
           "userSetupAllowed": false
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 30,
+          "autheticatorFlow": true,
+          "flowAlias": "browser-email-otp-conditional",
+          "userSetupAllowed": false
         }
       ]
     },
@@ -2303,6 +2312,33 @@
           "authenticatorConfig": "email-otp-config"
         }
       ]
+    },
+    {
+      "id": "b7f1c2e4-5a63-47d8-9c10-2ea3f8b96d41",
+      "alias": "browser-email-otp-conditional",
+      "description": "Asks for the e-mail one-time code on browser logins",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "conditional-user-configured"
+        },
+        {
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "autheticatorFlow": false,
+          "userSetupAllowed": false,
+          "authenticator": "email-form-authenticator",
+          "authenticatorConfig": "email-otp-config"
+        }
+      ]
     }
   ],
   "authenticatorConfig": [
@@ -2439,11 +2475,28 @@
         "default-roles-online-beratung",
         "technical"
       ],
+      "notBefore": 0,
+      "groups": []
+    },
+    {
+      "id": "2ede87a6-89ce-4883-9778-7a33d30797ac",
+      "createdTimestamp": 1609459200000,
+      "username": "svc-keycloak-admin",
+      "enabled": true,
+      "totp": false,
+      "emailVerified": false,
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "default-roles-online-beratung",
+        "otp-config-admin"
+      ],
       "clientRoles": {
         "realm-management": [
           "manage-users",
           "view-users",
-          "query-users"
+          "query-users",
+          "view-realm"
         ]
       },
       "notBefore": 0,

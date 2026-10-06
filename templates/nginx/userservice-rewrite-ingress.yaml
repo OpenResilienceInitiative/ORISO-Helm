@@ -22,5 +22,10 @@ spec:
             name: userservice
             port:
               number: 8080
+        # Do NOT extend this alternation: ingress-nginx orders regex locations by
+        # descending path-string length, and userservice-public-entry-ingress must stay
+        # longer than this route or its rate limit is bypassed. Adding "error-reports"
+        # here took this pattern to 83 characters against the public entry's 70 and did
+        # exactly that. A new prefix gets its own ingress instead.
         path: /service/(users|conversations|useradmin|appointments|matrix)(/|$)(.*)
         pathType: ImplementationSpecific

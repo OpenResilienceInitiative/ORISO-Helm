@@ -16,6 +16,8 @@ spec:
     metadata:
       labels:
         app: keycloak
+      annotations:
+        checksum/email-identity: {{ printf "%s\x00%s" (include "oriso.emailBrandingName" .) (include "oriso.emailLegalOrganisationName" .) | sha256sum | quote }}
     spec:
       terminationGracePeriodSeconds: 60
       {{- if .Values.keycloakSecurityContext }}
@@ -94,6 +96,26 @@ spec:
                 configMapKeyRef:
                   key: KEYCLOAK_HOSTNAME
                   name: keycloak-configmap-env
+            - name: ORISO_APP_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: ORISO_APP_BASE_URL
+                  name: keycloak-configmap-env
+            - name: EMAIL_BRANDING_NAME
+              valueFrom:
+                configMapKeyRef:
+                  key: EMAIL_BRANDING_NAME
+                  name: keycloak-configmap-env
+            - name: EMAIL_LEGAL_ORGANISATION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  key: EMAIL_LEGAL_ORGANISATION_NAME
+                  name: keycloak-configmap-env
+            - name: ORISO_LOGO_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: ORISO_LOGO_URL
+                  name: keycloak-configmap-env
             {{- if not .Values.global.enableTls }}
             - name: KC_HOSTNAME_STRICT_HTTPS
               value: "false"
@@ -139,12 +161,6 @@ spec:
               name: keycloak-theme-templates-styles
             - mountPath: /opt/keycloak/themes/custom-theme/login/resources/fonts/Nunito
               name: keycloak-theme-templates-fonts
-            - mountPath: /opt/keycloak/themes/custom-theme/email/messages
-              name: keycloak-theme-email-messages
-            - mountPath: /opt/keycloak/themes/custom-theme/email/html
-              name: keycloak-theme-email-html
-            - mountPath: /opt/keycloak/themes/custom-theme/email/text
-              name: keycloak-theme-email-text
             - mountPath: /opt/keycloak/data/import
               name: keycloak-full-dump
       volumes:
@@ -160,15 +176,6 @@ spec:
         - name: keycloak-theme-templates-fonts
           configMap:
             name: keycloak-configmap-theme-templates-fonts
-        - name: keycloak-theme-email-html
-          configMap:
-            name: keycloak-configmap-theme-email-html
-        - name: keycloak-theme-email-text
-          configMap:
-            name: keycloak-configmap-theme-email-text
-        - name: keycloak-theme-email-messages
-          configMap:
-            name: keycloak-configmap-theme-email-messages
         - name: keycloak-full-dump
           configMap:
             name: keycloak-configmap-data

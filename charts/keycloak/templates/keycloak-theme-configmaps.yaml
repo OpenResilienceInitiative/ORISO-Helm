@@ -11,9 +11,6 @@
   "templates-messages"  "keycloak-resources/custom-theme/login/messages/*"
   "templates-styles"    "keycloak-resources/custom-theme/login/resources/css/*"
   "templates-fonts"     "keycloak-resources/custom-theme/login/resources/fonts/Nunito/*"
-  "email-html"          "keycloak-resources/custom-theme/email/html/*"
-  "email-messages"      "keycloak-resources/custom-theme/email/messages/*"
-  "email-text"          "keycloak-resources/custom-theme/email/text/*"
 -}}
 
 {{- range $suffix, $globPath := $themeParts }}
