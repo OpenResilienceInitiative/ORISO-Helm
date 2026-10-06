@@ -14,6 +14,7 @@ import yaml
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES = [
     "templates/_helpers.tpl",
+    "templates/_matrixrtcLifecycle.tpl",
     "templates/userservice/userservice-configmap-env.yaml",
     "templates/userservice/userservice-deployment.yaml",
 ]

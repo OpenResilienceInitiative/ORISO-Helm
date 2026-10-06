@@ -1,0 +1,11 @@
+{{- if eq (include "oriso.accountInactivity.accessGateEnabled" .) "true" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: account-inactivity-auth-headers
+data:
+  Authorization: "$http_authorization"
+  Cookie: "$http_cookie"
+  X-Tenant-Id: "$http_x_tenant_id"
+  tenantId: "$http_tenantid"
+{{- end }}

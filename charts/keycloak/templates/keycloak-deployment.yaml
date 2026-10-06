@@ -125,6 +125,10 @@ spec:
                 configMapKeyRef:
                   key: ROOT_LOGLEVEL
                   name: keycloak-configmap-env
+            # Human OTP credentials keep Keycloak's concurrency guard. Service clients
+            # use client_credentials and are not subject to per-user brute-force locks.
+            - name: KC_SPI_BRUTE_FORCE_PROTECTOR__DEFAULT_BRUTE_FORCE_DETECTOR__ALLOW_CONCURRENT_REQUESTS
+              value: {{ dig "bruteForce" "allowConcurrentRequests" false .Values.AsMap | toString | quote }}
           {{- if .Values.keycloakSecurityContext }}
           securityContext:
             {{- toYaml .Values.keycloakSecurityContext.container | nindent 12 }}

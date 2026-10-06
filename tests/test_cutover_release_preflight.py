@@ -185,6 +185,21 @@ class CutoverReleasePreflightTest(unittest.TestCase):
 
         self.preflight.verify_render(CHART_DIR, values)
 
+    def test_a_mutable_image_reference_fails_closed(self) -> None:
+        """A tag is a moving target; a cutover has to name the exact bytes.
+
+        The other fail-closed cases cover a wrong repository and an all-zero
+        digest. Neither catches the mistake that is easiest to make by hand:
+        pasting the tag that was just built instead of the digest it produced.
+        """
+        manifest = ready_manifest()
+        manifest["registryRelease"]["frontend"] = (
+            "ghcr.io/openresilienceinitiative/oriso-frontend:latest"
+        )
+
+        with self.assertRaisesRegex(ValueError, "must use repository@sha256"):
+            self.preflight.validate_and_build_values(manifest)
+
     # test_chart_rejects_a_mutable_cutover_image_tag lived here. It asserted
     # that the chart refuses a mutable image tag, which the oriso.immutableImage
     # digest gate enforced. dev dropped that gate with the rest of the deferred
