@@ -91,6 +91,13 @@ global:
     loginSuffix: "/token"
     logoutSuffix: "/logout"
     principalAttribute: "preferred_username"
+    # Disabled until ingress-nginx receives the real client IP. Do not enable
+    # use-forwarded-headers: the IP anonymizer rewrites X-Forwarded-For.
+    tokenRateLimit:
+      enabled: false
+      requestsPerSecond: 5
+      burstMultiplier: 5
+      exemptCidrs: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"
     serviceAppClientId: "app"
     serviceAdminClientId: "admin-cli"
     # Keycloak user id (`sub`) of the `technical` user; TenantService recognises
@@ -468,6 +475,13 @@ nginxController:
   enabled: true
   replicas: 1
 
+# IP anonymization proxy — replaces X-Real-IP/X-Forwarded-For with a
+# session-scoped UUID so no ORISO backend ever sees a real client IP.
+ipAnonymizer:
+  enabled: false
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:latest"
+
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
 # SigNoz ships as two upstream charts and this chart mirrors that split:
@@ -511,11 +525,10 @@ signozCollector:
 # Health Dashboard
 healthDashboard:
   ingress:
-    # Public access is opt-in; every enabled ingress requires Basic Auth.
-    enabled: false
-    # Existing Secret with an nginx-compatible `auth` htpasswd entry, provisioned
-    # in healthDashboard.namespace (or the release namespace when unset).
-    authSecret: ""
+    # Public at /health by default; every enabled ingress requires Basic Auth.
+    enabled: true
+    # Secret with an nginx `auth` htpasswd entry; set ingress.htpasswd in secrets.yaml to render it.
+    authSecret: "health-dashboard-basic-auth"
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
     tag: dev

@@ -1,0 +1,10 @@
+{{- if (.Values.ipAnonymizer).enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-ip-anonymizer-headers
+  namespace: {{ .Release.Namespace }}
+data:
+  X-Real-IP: "$http_x_anon_id"
+  X-Forwarded-For: "$http_x_anon_id"
+{{- end }}

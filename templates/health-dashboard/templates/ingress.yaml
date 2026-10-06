@@ -7,6 +7,14 @@
 {{- if or (gt (len $authSecret) 253) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" $authSecret)) }}
 {{- fail "healthDashboard.ingress.authSecret must be a valid Kubernetes Secret name (DNS subdomain, at most 253 characters)" }}
 {{- end }}
+{{- $authNamespace := default .Release.Namespace .Values.healthDashboard.namespace }}
+{{- /* Without htpasswd the Secret must be pre-provisioned. Only checked against a live
+       cluster: lookup returns nothing under `helm template`, so CI renders stay unaffected. */}}
+{{- if and (not ($ingress.htpasswd | default "" | trim)) (lookup "v1" "Namespace" "" $authNamespace) }}
+{{- if not (lookup "v1" "Secret" $authNamespace $authSecret) }}
+{{- fail (printf "healthDashboard.ingress is enabled but Secret %s/%s does not exist: set healthDashboard.ingress.htpasswd in secrets.yaml, or create the Secret with an htpasswd entry under the key `auth`" $authNamespace $authSecret) }}
+{{- end }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
