@@ -10,6 +10,8 @@ spec:
       app: tenantservice
   template:
     metadata:
+      annotations:
+        checksum/technical-subject: {{ .Values.global.keycloak.serviceTechUserId | sha256sum | quote }}
       labels:
         app: tenantservice
         tier: backend

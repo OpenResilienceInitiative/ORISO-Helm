@@ -250,7 +250,8 @@ operator Deployment and will fail if an upstream chart update changes it.
 {{/*
 Matrix identity (ADR-005, ORISO-Helm#366): the server_name is baked into every
 user and room ID, so an empty or placeholder value must stop the install
-instead of creating users under "your-server.local".
+instead of creating users under "your-server.local". An IPv4 address is
+rejected the same way: it would be baked into every ID and could never move.
 Usage: include "oriso.matrixServerName" (list "matrix.matrixServerName" $value)
 */}}
 {{- define "oriso.matrixServerName" -}}
@@ -263,6 +264,9 @@ Usage: include "oriso.matrixServerName" (list "matrix.matrixServerName" $value)
 {{- fail (printf "%s is still a placeholder (got %q). Set the real Matrix server name for this environment." $name $value) -}}
 {{- end -}}
 {{- include "oriso.rejectUrlPlaceholder" (list $name $value $value) -}}
+{{- if regexMatch "^[0-9]{1,3}(\\.[0-9]{1,3}){3}(:[0-9]+)?$" $value -}}
+{{- fail (printf "%s must be a DNS host name, not an IPv4 address (got %q): the Matrix server name is part of every user and room ID and cannot be changed after install (ADR-005). There is no fallback; set the real Matrix host." $name $value) -}}
+{{- end -}}
 {{- include "oriso.validateHost" (list $name $value) -}}
 {{- end -}}
 
@@ -400,4 +404,8 @@ readinessProbe:
 {{- define "oriso.signozCollector.enabled" -}}
 {{- $c := get .Values "signozCollector" | default dict -}}
 {{- get $c "enabled" | default false -}}
+{{- end -}}
+
+{{- define "oriso.backendServiceClientsChecksum" -}}
+{{- printf "%s\x00%s\x00%s\x00%s\x00%s\x00%s" .Values.global.keycloak.backendTechnicalClientId .Values.global.keycloak.serviceAdminClientId .Values.global.keycloak.serviceTechUserId .Values.global.keycloak.serviceAdminSubject (.Values.global.secrets.keycloakBackendTechnicalClientSecret | default "") (.Values.global.secrets.keycloakBackendAdminClientSecret | default "") | sha256sum -}}
 {{- end -}}
