@@ -11,6 +11,8 @@ spec:
   template:
     metadata:
       annotations:
+        checksum/task-bindings: {{ include "oriso.taskBindingsChecksum" . | quote }}
+        checksum/command-keys: {{ include "oriso.commandKeysChecksum" (dict "root" . "keys" (list "tenantCreation" "wizardPolicy")) | quote }}
         checksum/technical-subject: {{ .Values.global.keycloak.serviceTechUserId | sha256sum | quote }}
       labels:
         app: tenantservice
@@ -32,6 +34,21 @@ spec:
         ports:
         - containerPort: 8081
         env:
+          {{- include "oriso.taskBindingEnv" (dict "keys" (list "CONFIG_WIZARD" "INVITE_RESERVATIONS" "NOTIFICATION_DISPATCH" "RUNTIME_POLICY")) | nindent 10 }}
+          - name: TASK_IDENTITY_REQUIRED_TASKS
+            value: "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,RUNTIME_POLICY"
+          - name: ORISO_WIZARD_POLICY_CONTEXT_KEY
+            valueFrom:
+              secretKeyRef:
+                name: oriso-command-origin-keys
+                key: ORISO_WIZARD_POLICY_CONTEXT_KEY
+          - name: TASK_IDENTITY_AUDIENCE
+            value: "tenantservice"
+          - name: ORISO_TENANT_CREATION_CONTEXT_KEY
+            valueFrom:
+              secretKeyRef:
+                name: oriso-command-origin-keys
+                key: ORISO_TENANT_CREATION_CONTEXT_KEY
           - name: SPRING_PROFILES_ACTIVE
             valueFrom:
               configMapKeyRef:

@@ -1,3 +1,4 @@
+import base64
 import json
 import subprocess
 import unittest
@@ -42,11 +43,11 @@ class OtpEmailThemeTest(unittest.TestCase):
         realm_config = next(
             document
             for document in manifests
-            if document.get("kind") == "ConfigMap"
+            if document.get("kind") == "Secret"
             and document.get("metadata", {}).get("name")
-            == "keycloak-configmap-data"
+            == "keycloak-realm-import"
         )
-        realm = json.loads(realm_config["data"]["realm.json"])
+        realm = json.loads(base64.b64decode(realm_config["data"]["realm.json"]))
         self.assertEqual(realm["emailTheme"], "oriso")
 
         deployment = next(

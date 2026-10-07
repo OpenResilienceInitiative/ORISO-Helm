@@ -13,6 +13,8 @@ spec:
     metadata:
       labels:
         app: agencyservice
+      annotations:
+        checksum/task-bindings: {{ include "oriso.taskBindingsChecksum" . | quote }}
     spec:
       affinity:
         podAntiAffinity:
@@ -28,6 +30,11 @@ spec:
           image: {{ include "oriso.immutableImage" (list "agencyService.image" .Values.agencyService.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            {{- include "oriso.taskBindingEnv" (dict "keys" (list "CONFIG_WIZARD" "INVITE_RESERVATIONS" "NOTIFICATION_DISPATCH" "MATRIX_AGENCY")) | nindent 12 }}
+            - name: TASK_IDENTITY_REQUIRED_TASKS
+              value: "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,MATRIX_AGENCY"
+            - name: TASK_IDENTITY_AUDIENCE
+              value: "agencyservice"
             - name: CSRF_COOKIE_PROPERTY
               valueFrom:
                 configMapKeyRef:

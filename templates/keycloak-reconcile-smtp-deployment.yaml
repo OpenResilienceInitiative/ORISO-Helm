@@ -16,6 +16,8 @@ spec:
       labels:
         app: keycloak-reconcile-smtp
       annotations:
+        checksum/task-bindings: {{ include "oriso.taskBindingsChecksum" . | quote }}
+        checksum/task-credentials: {{ include "oriso.taskCredentialsChecksum" (dict "root" . "keys" (list "SMTP_SYNC")) | quote }}
         checksum/script: {{ .Files.Get "files/keycloak-reconcile-smtp.py" | sha256sum | quote }}
     spec:
       {{- include "oriso.keycloakSmtpReconcilePod" (dict "root" . "mode" "serve") | nindent 6 }}

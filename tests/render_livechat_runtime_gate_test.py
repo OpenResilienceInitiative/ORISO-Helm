@@ -14,6 +14,7 @@ import yaml
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES = [
     "templates/_helpers.tpl",
+    "templates/_task-identities.tpl",
     "templates/_matrixrtcLifecycle.tpl",
     "templates/userservice/userservice-configmap-env.yaml",
     "templates/userservice/userservice-deployment.yaml",
@@ -31,6 +32,8 @@ def build_minimal_chart(dst: str) -> None:
         os.path.join(CHART_DIR, "values.yaml.default"),
         os.path.join(dst, "values.yaml"),
     )
+    os.makedirs(os.path.join(dst, "files"))
+    shutil.copyfile(os.path.join(CHART_DIR, "files/task-identities.json"), os.path.join(dst, "files/task-identities.json"))
     for relative_path in TEMPLATES:
         destination = os.path.join(dst, relative_path)
         os.makedirs(os.path.dirname(destination), exist_ok=True)
@@ -40,7 +43,7 @@ def build_minimal_chart(dst: str) -> None:
 def render(chart: str, *values: str) -> list[dict]:
     # The chart requires a real public host (ORISO-Helm#366).
     render_domain = os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml")
-    command = ["helm", "template", "runtime-gate", chart, "-f", render_domain, "-f", os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml")]
+    command = ["helm", "template", "runtime-gate", chart, "-f", render_domain, "-f", os.path.join(CHART_DIR, "tests/fixtures/render-required-secrets.yaml")]
     for values_file in values:
         command.extend(["-f", values_file])
     result = subprocess.run(command, capture_output=True, text=True, check=False)

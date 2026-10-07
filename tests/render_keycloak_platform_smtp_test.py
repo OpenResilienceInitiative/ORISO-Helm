@@ -56,38 +56,17 @@ def main():
     assert server["command"] == ["python3", "-B", "/scripts/keycloak-reconcile-smtp.py", "--serve"]
     server_env = {entry["name"]: entry for entry in server["env"]}
     assert "TECHNICAL_PASSWORD" not in server_env
-    assert server_env["KEYCLOAK_ADMIN_PASSWORD"]["valueFrom"]["secretKeyRef"] == {
-        "name": "keycloak-secret-env", "key": "KEYCLOAK_ADMIN_PASSWORD"}
-    cts_deployment = next(doc for doc in docs if doc.get("kind") == "Deployment"
-                          and doc["metadata"]["name"] == "consultingtypeservice")
+    assert not any(name.startswith("KEYCLOAK_ADMIN_") for name in server_env)
+    cts_deployment = next(doc for doc in docs if doc.get("kind") == "Deployment" and doc["metadata"]["name"] == "consultingtypeservice")
     cts_env = {entry["name"]: entry for entry in cts_deployment["spec"]["template"]["spec"]["containers"][0]["env"]}
-    assert cts_env["KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"] == {
-        "name": "keycloak-backend-client-secrets", "key": "KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET"}
-    assert not any(name.startswith("KEYCLOAK_ADMIN_") for name in cts_env)
+    for task_env in (env, server_env, cts_env):
+        assert task_env["KEYCLOAK_SMTP_SYNC_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"] == {"name": "oriso-task-identity-credentials", "key": "KEYCLOAK_SMTP_SYNC_CLIENT_SECRET"}
+        assert "IDENTITY_TECHNICAL_USER_PASSWORD" not in task_env
+        assert not any(name.startswith("KEYCLOAK_ADMIN_") for name in task_env)
     assert not any(name.startswith("SMTP_") and name != "SMTP_RECONCILE_URL" for name in env)
-    for name, key in (("TECHNICAL_CLIENT_SECRET", "KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET"),):
-        assert env[name]["valueFrom"]["secretKeyRef"] == {"name": "keycloak-backend-client-secrets", "key": key}
-    assert env["TECHNICAL_SERVICE_SUBJECT"]["valueFrom"]["configMapKeyRef"] == {
-        "name": "tenantservice-configmap-env", "key": "TECHNICAL_SERVICE_SUBJECT"}
-    assert env["TECHNICAL_CLIENT_ID"]["valueFrom"]["configMapKeyRef"] == {
-        "name": "userservice-configmap-env", "key": "IDENTITY_TECHNICAL_CLIENT_ID"}
-    assert env["CONSULTING_TYPE_SERVICE_URL"]["valueFrom"]["configMapKeyRef"] == {
-        "name": "userservice-configmap-env", "key": "CONSULTING_TYPE_SERVICE_API_URL"}
-    result, distinct_docs = render(
-        "--set-string", "userService.keycloakResource=resource-only-canary",
-        "--set-string", "global.keycloak.backendTechnicalClientId=technical-login-client-canary",
-    )
-    assert result.returncode == 0, result.stderr
-    service_config = next(doc for doc in distinct_docs if doc.get("kind") == "ConfigMap"
-                          and doc["metadata"]["name"] == "userservice-configmap-env")
-    distinct_job = next(doc for doc in distinct_docs if doc.get("kind") == "Job"
-                        and doc["metadata"]["name"] == "keycloak-reconcile-smtp")
-    client_ref = next(entry for entry in distinct_job["spec"]["template"]["spec"]["containers"][0]["env"]
-                      if entry["name"] == "TECHNICAL_CLIENT_ID")["valueFrom"]["configMapKeyRef"]
-    assert client_ref["name"] == service_config["metadata"]["name"]
-    resolved_client = service_config["data"][client_ref["key"]]
-    assert resolved_client == "technical-login-client-canary", resolved_client
-    assert resolved_client != service_config["data"]["KEYCLOAK_RESOURCE"]
+    assert env["IDENTITY_SMTP_SYNC_SERVICE_SUBJECT"]["valueFrom"]["configMapKeyRef"] == {"name": "oriso-task-identity-bindings", "key": "IDENTITY_SMTP_SYNC_SERVICE_SUBJECT"}
+    assert env["IDENTITY_SMTP_SYNC_CLIENT_ID"]["valueFrom"]["configMapKeyRef"] == {"name": "oriso-task-identity-bindings", "key": "IDENTITY_SMTP_SYNC_CLIENT_ID"}
+    assert env["CONSULTING_TYPE_SERVICE_URL"]["valueFrom"]["configMapKeyRef"] == {"name": "userservice-configmap-env", "key": "CONSULTING_TYPE_SERVICE_API_URL"}
     config = next(doc for doc in docs if doc.get("kind") == "ConfigMap" and doc["metadata"]["name"] == "keycloak-reconcile-smtp-script")
     assert "keycloak-reconcile-smtp.py" in config["data"]
     result, _ = render(

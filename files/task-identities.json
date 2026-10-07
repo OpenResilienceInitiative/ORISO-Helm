@@ -1,0 +1,150 @@
+[
+  {
+    "key": "CONFIG_WIZARD",
+    "clientId": "backend-config-wizard",
+    "roles": [
+      "config-wizard"
+    ],
+    "audiences": [
+      "tenantservice",
+      "agencyservice",
+      "consultingtypeservice"
+    ]
+  },
+  {
+    "key": "INVITE_RESERVATIONS",
+    "clientId": "backend-invite-reservations",
+    "roles": [
+      "invitation-reservations"
+    ],
+    "audiences": [
+      "tenantservice",
+      "agencyservice"
+    ]
+  },
+  {
+    "key": "NOTIFICATION_DISPATCH",
+    "clientId": "backend-notification-dispatch",
+    "roles": [
+      "notification-dispatch",
+      "notifications-technical"
+    ],
+    "audiences": [
+      "tenantservice",
+      "agencyservice",
+      "userservice"
+    ]
+  },
+  {
+    "key": "SYSTEM_EMAIL_DELIVERY",
+    "clientId": "backend-system-email-delivery",
+    "roles": [
+      "system-email-delivery"
+    ],
+    "audiences": [
+      "consultingtypeservice"
+    ]
+  },
+  {
+    "key": "RUNTIME_POLICY",
+    "clientId": "backend-runtime-policy",
+    "roles": [
+      "runtime-policy"
+    ],
+    "audiences": [
+      "tenantservice"
+    ]
+  },
+  {
+    "key": "MATRIX_AGENCY",
+    "clientId": "backend-matrix-agency",
+    "roles": [
+      "matrix-agency",
+      "matrix-agency-provision"
+    ],
+    "audiences": [
+      "agencyservice"
+    ]
+  },
+  {
+    "key": "APPOINTMENT_SYNC",
+    "clientId": "backend-appointment-sync",
+    "roles": [
+      "appointment-sync"
+    ],
+    "audiences": [
+      "appointmentservice"
+    ]
+  },
+  {
+    "key": "APPOINTMENT_CLEANUP",
+    "clientId": "backend-appointment-cleanup",
+    "roles": [
+      "appointment-participant-cleanup"
+    ],
+    "audiences": [
+      "appointmentservice"
+    ]
+  },
+  {
+    "key": "ACCOUNT_PROVISIONING",
+    "clientId": "backend-account-provisioning",
+    "roles": [
+      "account-provisioning",
+      "account-read"
+    ],
+    "audiences": [
+      "oriso-task-commands"
+    ]
+  },
+  {
+    "key": "ACCOUNT_MAINTENANCE",
+    "clientId": "backend-account-maintenance",
+    "roles": [
+      "account-maintenance",
+      "account-read"
+    ],
+    "audiences": [
+      "oriso-task-commands"
+    ]
+  },
+  {
+    "key": "OTP",
+    "clientId": "backend-account-otp",
+    "roles": [
+      "otp-config-admin"
+    ],
+    "audiences": [
+      "oriso-task-commands"
+    ]
+  },
+  {
+    "key": "SESSION_EXCHANGE",
+    "clientId": "backend-session-exchange",
+    "roles": [
+      "session-exchange"
+    ],
+    "audiences": []
+  },
+  {
+    "key": "SMTP_SYNC",
+    "clientId": "backend-smtp-sync",
+    "roles": [
+      "smtp-sync"
+    ],
+    "audiences": [
+      "oriso-task-commands",
+      "consultingtypeservice"
+    ]
+  },
+  {
+    "key": "CONSULTANT_IMPORT",
+    "clientId": "backend-consultant-import",
+    "roles": [
+      "consultant-import"
+    ],
+    "audiences": [
+      "userservice"
+    ]
+  }
+]

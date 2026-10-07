@@ -29,6 +29,25 @@ def jwt(claims):
     return "e30." + encoded + ".fake-test-signature"
 
 
+def fake_provider_transport(snapshot):
+    from email.utils import parseaddr
+    if snapshot.get("globalSmtpEnabled") is not True or snapshot.get("globalFeatureSystemNotificationEmailsEnabled") is not True:
+        return {}
+    required = [snapshot.get("globalSmtp" + key) for key in ("Host", "Port", "From", "Username", "Password")]
+    if any(not isinstance(value, str) or not value.strip() for value in required):
+        return {}
+    host, port, sender, username, password = required
+    secure = snapshot.get("globalSmtpSecure")
+    if not isinstance(secure, bool) or not port.strip().isascii() or not port.strip().isdigit() or not 1 <= int(port) <= 65535 or any(c.isspace() for c in host) or '/' in host:
+        return {}
+    if any(ord(c) < 32 or ord(c) == 127 for c in host + port + sender):
+        return {}
+    display, address = parseaddr(sender, strict=True)
+    if address.count('@') != 1 or not all(address.split('@')):
+        return {}
+    return {"host": host.strip(), "port": str(int(port)), "from": address, "fromDisplayName": display, "user": username, "password": password, "ssl": str(secure).lower(), "starttls": str(not secure).lower(), "auth": "true"}
+
+
 class SmtpFixture(unittest.TestCase):
     def setUp(self):
         self.snapshot = {
@@ -43,7 +62,7 @@ class SmtpFixture(unittest.TestCase):
         }
         self.claims = {
             "sub": "environment-technical-subject", "azp": "configured-app-client",
-            "realm_access": {"roles": ["technical"]}, "exp": time.time() + 300,
+            "realm_access": {"roles": ["smtp-sync"]}, "aud": ["oriso-task-commands", "consultingtypeservice"], "exp": time.time() + 300,
         }
         self.requests = []
         self.updates = []
@@ -79,7 +98,7 @@ class SmtpFixture(unittest.TestCase):
                 owner.requests.append(("POST", self.path, dict(self.headers), form))
                 if self.path == "/auth/realms/example/protocol/openid-connect/token":
                     if form != {"grant_type": ["client_credentials"], "client_id": ["configured-app-client"],
-                                "client_secret": ["technical-client-secret-canary"]}:
+                                "client_secret": ["smtp-sync-secret-canary"]}:
                         return self.reply(401, {"error": "private-token-error"})
                     return self.reply(owner.technical_status, {"access_token": jwt(owner.claims)})
                 if self.path == "/auth/realms/master/protocol/openid-connect/token":
@@ -117,12 +136,21 @@ class SmtpFixture(unittest.TestCase):
             def do_PUT(self):
                 payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 owner.requests.append(("PUT", self.path, dict(self.headers), payload))
-                if self.path != "/auth/admin/realms/example" or self.headers.get("Authorization") != "Bearer admin-token-canary":
+                if self.path != "/auth/realms/example/oriso-commands/v1/smtp" or self.headers.get("Authorization") != "Bearer " + jwt(owner.claims):
                     return self.reply(403)
+                if owner.admin_redirect:
+                    self.send_response(302)
+                    self.send_header("Location", "/credential-leak-target")
+                    self.end_headers()
+                    return
+                if owner.admin_status != 200:
+                    return self.reply(owner.admin_status)
                 owner.update_started.set()
                 owner.update_release.wait(10)
                 if owner.update_status == 204:
-                    owner.updates.append(payload)
+                    owner.updates.append({"smtpServer": fake_provider_transport(payload)})
+                    status = "APPLIED" if owner.updates[-1]["smtpServer"] else "DISABLED_OR_INCOMPLETE"
+                    return self.reply(200, {"revision": payload["revision"], "status": status})
                 self.reply(owner.update_status, {"error": "private-smtp-provider-error"})
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -132,10 +160,9 @@ class SmtpFixture(unittest.TestCase):
         self.env = {
             "PATH": os.environ["PATH"], "POD_NAMESPACE": "test", "KEYCLOAK_URL": base + "/auth",
             "KEYCLOAK_REALM": "example", "CONSULTING_TYPE_SERVICE_URL": base + "/cts",
-            "TECHNICAL_CLIENT_SECRET": "technical-client-secret-canary",
-            "TECHNICAL_SERVICE_SUBJECT": "environment-technical-subject",
-            "TECHNICAL_CLIENT_ID": "configured-app-client",
-            "KEYCLOAK_ADMIN_USERNAME": "realm-admin-canary", "KEYCLOAK_ADMIN_PASSWORD": "admin-password-canary",
+            "IDENTITY_SMTP_SYNC_SERVICE_SUBJECT": "environment-technical-subject",
+            "IDENTITY_SMTP_SYNC_CLIENT_ID": "configured-app-client",
+            "KEYCLOAK_SMTP_SYNC_CLIENT_SECRET": "smtp-sync-secret-canary",
         }
 
     def tearDown(self):
@@ -160,6 +187,7 @@ class ReconcileSmtpTest(SmtpFixture):
         result = self.run_reconciler()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len([r for r in self.requests if r[0] == "GET"]), 1)
+        self.assertFalse(any('/admin/realms/' in request[1] or '/realms/master/' in request[1] for request in self.requests), "Runtime SMTP must never use deployment administration")
         smtp = self.updates[0]["smtpServer"]
         self.assertEqual(smtp["host"], "smtp.provider.example")
         self.assertEqual(smtp["from"], "sender@provider.example")
@@ -226,7 +254,7 @@ class ReconcileSmtpTest(SmtpFixture):
                 self.snapshot = {"error": "private-smtp-provider-error"}
                 result = self.run_reconciler()
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("SMTP_RECONCILE_SOURCE_UNAVAILABLE", result.stderr)
+                self.assertIn("SMTP_RECONCILE_UNAUTHORIZED" if status in (401, 403) else "SMTP_RECONCILE_SOURCE_UNAVAILABLE", result.stderr)
                 self.assertEqual(self.updates, [])
 
     def test_wrong_subject_client_role_and_expired_token_never_read_credentials(self):
@@ -316,7 +344,7 @@ class ReconcileSmtpTest(SmtpFixture):
         self.assertEqual(self.updates, [])
 
     def test_missing_identity_configuration_never_guesses_an_account(self):
-        for field in ("TECHNICAL_CLIENT_SECRET", "TECHNICAL_SERVICE_SUBJECT", "TECHNICAL_CLIENT_ID"):
+        for field in ("KEYCLOAK_SMTP_SYNC_CLIENT_SECRET", "IDENTITY_SMTP_SYNC_SERVICE_SUBJECT", "IDENTITY_SMTP_SYNC_CLIENT_ID"):
             with self.subTest(field=field):
                 result = self.run_reconciler(**{field: ""})
                 self.assertNotEqual(result.returncode, 0)

@@ -18,7 +18,9 @@ spec:
       # ConfigMap-backed env vars do not change in running Pods. This annotation
       # makes an opt-out replace Pods before they can keep sending pending copy.
       annotations:
-        checksum/backend-service-clients: {{ include "oriso.backendServiceClientsChecksum" . | quote }}
+        checksum/task-bindings: {{ include "oriso.taskBindingsChecksum" . | quote }}
+        checksum/task-credentials: {{ include "oriso.taskCredentialsChecksum" (dict "root" . "keys" (list "CONFIG_WIZARD" "INVITE_RESERVATIONS" "NOTIFICATION_DISPATCH" "SYSTEM_EMAIL_DELIVERY" "RUNTIME_POLICY" "MATRIX_AGENCY" "APPOINTMENT_SYNC" "APPOINTMENT_CLEANUP" "ACCOUNT_PROVISIONING" "ACCOUNT_MAINTENANCE" "OTP" "SESSION_EXCHANGE")) | quote }}
+        checksum/command-keys: {{ include "oriso.commandKeysChecksum" (dict "root" . "keys" (list "provisioning" "maintenance" "wizardPolicy")) | quote }}
         checksum/media-lifecycle: {{ .Values.matrixrtcLifecycle | toJson | sha256sum | quote }}
         checksum/account-inactivity: {{ printf "%v/%v" (dig "accountInactivity" "enabled" false .Values.userService) (dig "accountInactivity" "dryRun" true .Values.userService) | sha256sum | quote }}
         oriso.org/email-allow-unreviewed-locales: {{ .Values.userService.emailAllowUnreviewedLocales | default false | quote }}
@@ -42,6 +44,27 @@ spec:
           image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            {{- include "oriso.taskBindingEnv" (dict "keys" (list "CONSULTANT_IMPORT" "CONFIG_WIZARD" "INVITE_RESERVATIONS" "NOTIFICATION_DISPATCH" "SYSTEM_EMAIL_DELIVERY" "RUNTIME_POLICY" "MATRIX_AGENCY" "APPOINTMENT_SYNC" "APPOINTMENT_CLEANUP" "ACCOUNT_PROVISIONING" "ACCOUNT_MAINTENANCE" "OTP" "SESSION_EXCHANGE")) | nindent 12 }}
+            {{- include "oriso.taskSecretEnv" (dict "root" . "keys" (list "CONFIG_WIZARD" "INVITE_RESERVATIONS" "NOTIFICATION_DISPATCH" "SYSTEM_EMAIL_DELIVERY" "RUNTIME_POLICY" "MATRIX_AGENCY" "APPOINTMENT_SYNC" "APPOINTMENT_CLEANUP" "ACCOUNT_PROVISIONING" "ACCOUNT_MAINTENANCE" "OTP" "SESSION_EXCHANGE")) | nindent 12 }}
+            - name: ORISO_WIZARD_POLICY_CONTEXT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oriso-command-origin-keys
+                  key: ORISO_WIZARD_POLICY_CONTEXT_KEY
+            - name: TASK_IDENTITY_AUDIENCE
+              value: "userservice"
+            - name: IDENTITY_EMAIL_DUMMY_SUFFIX
+              value: {{ .Values.global.identityDummyEmailSuffix | quote }}
+            - name: ORISO_PROVISIONING_ORIGIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oriso-command-origin-keys
+                  key: ORISO_PROVISIONING_ORIGIN_KEY
+            - name: ORISO_MAINTENANCE_ORIGIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oriso-command-origin-keys
+                  key: ORISO_MAINTENANCE_ORIGIN_KEY
             - name: MATRIXRTC_LIFECYCLE_ENABLED
               valueFrom:
                 configMapKeyRef:
@@ -250,26 +273,6 @@ spec:
                 configMapKeyRef:
                   key: KEYCLOAK_CONFIG_ADMIN_CLIENTID
                   name: userservice-configmap-env
-            - name: KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT
-              valueFrom:
-                configMapKeyRef:
-                  name: userservice-configmap-env
-                  key: KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT
-            - name: KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-backend-client-secrets
-                  key: KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET
-            - name: IDENTITY_TECHNICAL_CLIENT_ID
-              valueFrom:
-                configMapKeyRef:
-                  name: userservice-configmap-env
-                  key: IDENTITY_TECHNICAL_CLIENT_ID
-            - name: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-backend-client-secrets
-                  key: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
             - name: KEYCLOAK_CONFIG_APP_CLIENTID
               valueFrom:
                 configMapKeyRef:

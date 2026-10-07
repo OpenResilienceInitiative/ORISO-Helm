@@ -41,6 +41,8 @@ def render(enabled=None, runtime=None):
                 dest = chart / source.relative_to(ROOT)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(source, dest)
+        (chart / "files").mkdir()
+        shutil.copy(ROOT / "files/task-identities.json", chart / "files/task-identities.json")
         extra = (
             []
             if runtime is None
@@ -62,6 +64,7 @@ def render(enabled=None, runtime=None):
                 "template",
                 "inactivity-test",
                 str(chart),
+                "-f", str(ROOT / "tests/fixtures/render-required-secrets.yaml"),
                 "--namespace",
                 "gate-test",
                 "-f",
