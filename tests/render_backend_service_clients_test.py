@@ -19,6 +19,34 @@ def main():
     assert config['IDENTITY_TECHNICAL_CLIENT_ID'] == 'backend-technical'
     assert config['KEYCLOAK_CONFIG_ADMIN_CLIENTID'] == 'backend-admin'
     assert config['KEYCLOAK_CONFIG_APP_CLIENTID'] == 'app'
+    agency_config = docs[('ConfigMap', 'agencyservice-configmap-env')]['data']
+    assert agency_config['IDENTITY_TECHNICAL_CLIENT_ID'] == 'backend-technical'
+    assert agency_config['TECHNICAL_SERVICE_SUBJECT'] == '00000000-0000-4000-8000-000000000000'
+    agency_pod = docs[('Deployment', 'agencyservice')]['spec']['template']
+    agency_env = {item['name']: item for item in agency_pod['spec']['containers'][0]['env']}
+    for key in ('IDENTITY_TECHNICAL_CLIENT_ID', 'TECHNICAL_SERVICE_SUBJECT'):
+        assert agency_env[key]['valueFrom']['configMapKeyRef'] == {
+            'name': 'agencyservice-configmap-env', 'key': key}
+    assert 'KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET' not in agency_env
+    for override in ('global.keycloak.serviceTechUserId=22222222-2222-4222-8222-222222222222',
+                     'global.keycloak.backendTechnicalClientId=backend-technical-rotated'):
+        rotated, changed = render('--set-string', override)
+        assert rotated.returncode == 0, rotated.stderr
+        changed_pod = changed[('Deployment', 'agencyservice')]['spec']['template']
+        assert agency_pod['metadata']['annotations'] != changed_pod['metadata']['annotations']
+        assert docs[('Secret', 'keycloak-backend-client-secrets')] == changed[('Secret', 'keycloak-backend-client-secrets')]
+        assert docs[('Deployment', 'frontend')] == changed[('Deployment', 'frontend')]
+        changed_config = changed[('ConfigMap', 'agencyservice-configmap-env')]['data']
+        key, value = override.split('=', 1)
+        env_key = 'TECHNICAL_SERVICE_SUBJECT' if key.endswith('serviceTechUserId') else 'IDENTITY_TECHNICAL_CLIENT_ID'
+        assert changed_config[env_key] == value
+    for override in ('global.keycloak.serviceTechUserId=',
+                     'global.keycloak.serviceTechUserId=not-a-subject',
+                     'global.keycloak.backendTechnicalClientId=',
+                     'global.keycloak.backendTechnicalClientId=backend-admin',
+                     'global.keycloak.backendTechnicalClientId=app'):
+        invalid, _ = render('--set-string', override)
+        assert invalid.returncode != 0, 'AgencyService must never receive an unbound service identity'
     for deployment in ('userservice', 'consultingtypeservice'):
         pod = docs[('Deployment', deployment)]['spec']['template']
         env = {item['name']: item for item in pod['spec']['containers'][0]['env']}
