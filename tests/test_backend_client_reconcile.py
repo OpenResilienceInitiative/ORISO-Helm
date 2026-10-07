@@ -24,6 +24,9 @@ class ReconcileClientsTest(unittest.TestCase):
                       'recovery': {'username':'realmadmin','enabled':True}}
         self.role_maps = {}
         self.scope_maps = {}
+        self.groups = {}
+        self.client_scopes = {}
+        self.fail_delete_path = None
         self.fail_mapping = False
         self.bad_claims = {}
         outer = self
@@ -56,7 +59,9 @@ class ReconcileClientsTest(unittest.TestCase):
                 elif '/admin/realms/online-beratung/' in path:
                     key = path.split('/admin/realms/online-beratung/')[1]
                     parts = key.split('/')
-                    if key == 'clients':
+                    if self.command == 'DELETE' and key == outer.fail_delete_path:
+                        status = 500
+                    elif key == 'clients':
                         if self.command == 'GET':
                             client_id = parse_qs(urlsplit(self.path).query).get('clientId', [''])[0]
                             answer = [v for v in outer.clients.values() if v['clientId'] == client_id]
@@ -79,7 +84,13 @@ class ReconcileClientsTest(unittest.TestCase):
                         answer = {'id':parts[3], 'name':parts[3]}
                     elif parts[0] == 'users' and len(parts)==2 and self.command=='PUT':
                         outer.users[parts[1]].update(payload); status=204
-                    elif parts[0]=='users' and parts[2]=='groups': answer=[]
+                    elif parts[0]=='users' and parts[2]=='groups':
+                        groups = outer.groups.setdefault(parts[1], [])
+                        if self.command == 'DELETE':
+                            groups[:] = [group for group in groups if group['id'] != parts[3]]
+                            status = 204
+                        else:
+                            answer = groups
                     elif parts[0]=='users' and parts[2]=='credentials': answer=[]
                     elif parts[0]=='users' and parts[2]=='logout': status=204
                     elif 'role-mappings' in parts or 'scope-mappings' in parts:
@@ -90,11 +101,35 @@ class ReconcileClientsTest(unittest.TestCase):
                             if outer.fail_mapping: status=500
                             else:
                                 m=mapping.setdefault(owner, {'realmMappings':[],'clientMappings':{}})
-                                if parts[3]=='realm': m['realmMappings']=payload
-                                else: m['clientMappings'][parts[4]]={'id':parts[4],'mappings':payload}
+                                if parts[3] == 'realm':
+                                    roles = m['realmMappings']
+                                else:
+                                    roles = m['clientMappings'].setdefault(
+                                        parts[4], {'id': parts[4], 'mappings': []}
+                                    )['mappings']
+                                existing = {role['name'] for role in roles}
+                                roles.extend(role for role in payload if role['name'] not in existing)
                                 status=204
-                        elif self.command=='DELETE': status=204
-                    elif parts[0]=='clients' and parts[2] in ('default-client-scopes','optional-client-scopes'): answer=[]
+                        elif self.command == 'DELETE':
+                            m = mapping.setdefault(owner, {'realmMappings': [], 'clientMappings': {}})
+                            removed = {role['name'] for role in payload}
+                            if parts[3] == 'realm':
+                                m['realmMappings'][:] = [
+                                    role for role in m['realmMappings'] if role['name'] not in removed
+                                ]
+                            else:
+                                roles = m['clientMappings'][parts[4]]['mappings']
+                                roles[:] = [role for role in roles if role['name'] not in removed]
+                                if not roles:
+                                    del m['clientMappings'][parts[4]]
+                            status = 204
+                    elif parts[0]=='clients' and parts[2] in ('default-client-scopes','optional-client-scopes'):
+                        scopes = outer.client_scopes.setdefault(parts[1], {}).setdefault(parts[2], [])
+                        if self.command == 'DELETE':
+                            scopes[:] = [scope for scope in scopes if scope['id'] != parts[3]]
+                            status = 204
+                        else:
+                            answer = scopes
                     else: status=404
                 else: status=404
                 raw = json.dumps(answer).encode() if answer is not None else b''
@@ -171,5 +206,96 @@ class ReconcileClientsTest(unittest.TestCase):
     def test_idempotent_reconcile(self):
         self.prepare();first=copy.deepcopy(self.clients)
         result=self.run_helper();self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(self.clients,first)
+
+    def add_surplus_permissions(self):
+        for mapping, owners in (
+            (self.role_maps, ('sa-backend-technical', 'sa-backend-admin')),
+            (self.scope_maps, ('backend-technical', 'backend-admin')),
+        ):
+            for owner in owners:
+                permissions = mapping[owner]
+                permissions['realmMappings'].append({'id': 'unwanted', 'name': 'unwanted'})
+                management = permissions['clientMappings'].setdefault(
+                    'realm-management', {'id': 'realm-management', 'mappings': []}
+                )
+                management['mappings'].append({'id': 'realm-admin', 'name': 'realm-admin'})
+                permissions['clientMappings']['unrelated-client'] = {
+                    'id': 'unrelated-client',
+                    'mappings': [{'id': 'unrelated-admin', 'name': 'unrelated-admin'}],
+                }
+
+    def test_surplus_roles_and_scope_mappings_are_removed(self):
+        self.prepare()
+        expected_roles = copy.deepcopy(self.role_maps)
+        expected_scopes = copy.deepcopy(self.scope_maps)
+        self.add_surplus_permissions()
+
+        result = self.run_helper()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.role_maps, expected_roles)
+        self.assertEqual(self.scope_maps, expected_scopes)
+
+    def test_inherited_groups_and_optional_scopes_are_removed(self):
+        self.prepare()
+        for client in ('backend-technical', 'backend-admin'):
+            self.groups['sa-' + client] = [{'id': 'inherited-admin-group'}]
+            self.client_scopes[client] = {
+                'default-client-scopes': [
+                    {'id': 'roles', 'name': 'roles'},
+                    {'id': 'email', 'name': 'email'},
+                ],
+                'optional-client-scopes': [{'id': 'profile', 'name': 'profile'}],
+            }
+
+        result = self.run_helper()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for client in ('backend-technical', 'backend-admin'):
+            self.assertEqual(self.groups['sa-' + client], [])
+            self.assertEqual(self.client_scopes[client], {
+                'default-client-scopes': [{'id': 'roles', 'name': 'roles'}],
+                'optional-client-scopes': [],
+            })
+
+    def test_permission_removal_failure_prevents_retirement(self):
+        failures = (
+            'users/sa-backend-technical/role-mappings/realm',
+            'users/sa-backend-technical/groups/inherited-admin-group',
+            'clients/backend-technical/optional-client-scopes/profile',
+        )
+        for path in failures:
+            with self.subTest(path=path):
+                self.prepare()
+                self.add_surplus_permissions()
+                self.groups['sa-backend-technical'] = [{'id': 'inherited-admin-group'}]
+                self.client_scopes['backend-technical'] = {
+                    'optional-client-scopes': [{'id': 'profile', 'name': 'profile'}],
+                }
+                self.fail_delete_path = path
+
+                result = self.run_helper(RETIRE_LEGACY_USERS='true')
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(any(
+                    method == 'DELETE' and request_path.endswith('/' + path)
+                    for method, request_path, _ in self.events
+                ))
+                self.assertTrue(self.users['legacy-tech']['enabled'])
+                self.assertTrue(self.users['legacy-admin']['enabled'])
+                self.fail_delete_path = None
+
+    def test_normal_reconcile_sets_secrets_on_existing_secretless_clients(self):
+        self.prepare()
+        del self.clients['backend-technical']['secret']
+        del self.clients['backend-admin']['secret']
+
+        result = self.run_helper()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.clients['backend-technical']['secret'],
+                         'technical-fixture-secret-32-characters')
+        self.assertEqual(self.clients['backend-admin']['secret'],
+                         'admin-fixture-secret-32-characters')
 
 if __name__=='__main__': unittest.main()

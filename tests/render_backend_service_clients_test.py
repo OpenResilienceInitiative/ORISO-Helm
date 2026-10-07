@@ -29,6 +29,9 @@ def main():
         assert 'IDENTITY_TECHNICAL_CLIENT_ID' in env
     user_env = {item['name']: item for item in docs[('Deployment', 'userservice')]['spec']['template']['spec']['containers'][0]['env']}
     assert user_env['KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET']['valueFrom']['secretKeyRef']['key'] == 'KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET'
+    assert user_env['KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT']['valueFrom']['configMapKeyRef'] == {
+        'name': 'userservice-configmap-env', 'key': 'KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT'}
+    assert config['KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT'] == '00000000-0000-4000-8000-000000000001'
     assert 'KEYCLOAK_CONFIG_ADMIN_PASSWORD' not in user_env
     for key in ('keycloakBackendTechnicalClientSecret', 'keycloakBackendAdminClientSecret'):
         missing, _ = render('--set-string', 'global.secrets.' + key + '=')
@@ -40,6 +43,8 @@ def main():
                      'global.keycloak.serviceAdminSubject=11111111-1111-4111-8111-111111111111'):
         rotated, changed = render('--set-string', override)
         assert rotated.returncode == 0, rotated.stderr
+        if override.startswith('global.keycloak.serviceAdminSubject='):
+            assert changed[('ConfigMap', 'userservice-configmap-env')]['data']['KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT'] == override.split('=', 1)[1]
         for name in ('userservice', 'consultingtypeservice'):
             assert docs[('Deployment', name)]['spec']['template']['metadata']['annotations'] != changed[('Deployment', name)]['spec']['template']['metadata']['annotations']
     missing_admin, _ = render('--set-string', 'global.keycloak.serviceAdminSubject=')
