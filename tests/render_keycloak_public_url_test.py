@@ -21,7 +21,7 @@ import sys
 import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOMAIN = "predev.example.org"
+DOMAIN = "predev.oriso.internal"
 
 
 def render(*extra_args: str) -> list[dict]:
@@ -29,10 +29,12 @@ def render(*extra_args: str) -> list[dict]:
         [
             "helm", "template", "keycloak-public-url", CHART_DIR,
             "-f", os.path.join(CHART_DIR, "values.yaml.default"),
+            "-f", os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
             "-f", os.path.join(CHART_DIR, "secrets.yaml.default"),
+            "-f", os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
             "--set-string", "global.secrets.redisdefaultPass=test-redis-password",
             "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
-            "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
+            "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
             "--set", f"global.domainName={DOMAIN}",
             "--set", f"global.external.keycloakURL=https://{DOMAIN}/auth/",
             "--set-string", "userService.smtpUser=smtp-canary-user",

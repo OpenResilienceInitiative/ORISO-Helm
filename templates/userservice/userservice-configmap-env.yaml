@@ -1,3 +1,6 @@
+{{- if hasKey .Values.userService "emailBrandingName" -}}
+{{- fail "userService.emailBrandingName is obsolete: move it to global.emailBrandingName and set global.emailLegalOrganisationName separately" -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -16,7 +19,8 @@ data:
   SYSTEM_NOTIFICATION_FRONTEND_BASE_URL: {{ $origin | quote }}
   INACTIVE_ACCOUNT_NOTIFICATION_APP_BASE_URL: {{ $origin | quote }}
   # Platform-level email branding (used when a mail has no tenant context).
-  EMAIL_BRANDING_NAME: {{ .Values.userService.emailBrandingName | quote }}
+  EMAIL_BRANDING_NAME: {{ include "oriso.emailBrandingName" . | quote }}
+  EMAIL_ALLOW_UNREVIEWED_LOCALES: {{ .Values.userService.emailAllowUnreviewedLocales | default false | quote }}
   {{- if .Values.userService.emailBrandingLogoUrl }}
   EMAIL_BRANDING_LOGO_URL: {{ .Values.userService.emailBrandingLogoUrl | quote }}
   {{- end }}
@@ -65,14 +69,9 @@ data:
   PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL: {{ include "oriso.publicUrl" (list "userService.passwordResetAdminFrontendBaseUrl" .Values.userService.passwordResetAdminFrontendBaseUrl (printf "%s/admin" $origin)) | quote }}
   ACCOUNT_INVITE_APP_FRONTEND_BASE_URL: {{ include "oriso.publicUrl" (list "userService.accountInviteAppFrontendBaseUrl" .Values.userService.accountInviteAppFrontendBaseUrl $origin) | quote }}
   ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL: {{ include "oriso.publicUrl" (list "userService.accountInviteAdminFrontendBaseUrl" .Values.userService.accountInviteAdminFrontendBaseUrl $origin) | quote }}
-  # SMTP transport for the Magic Link and password-reset mails. UserService
-  # sends these itself over SMTP; the credentials live in userservice-secret
-  # because the platform-settings copy is only readable with a super-admin
-  # token, which the unauthenticated reset flow never has.
-  SMTP_HOST: {{ .Values.userService.smtpHost | default "" | quote }}
-  SMTP_PORT: {{ .Values.userService.smtpPort | default 587 | quote }}
-  SMTP_SECURE: {{ .Values.userService.smtpSecure | default false | quote }}
-  SMTP_FROM: {{ .Values.userService.smtpFrom | default "" | quote }}
+  # Platform SMTP is saved in Admin Settings/ConsultingTypeService after first
+  # platform-admin sign-in. The technical identity above reads it at send time;
+  # chart SMTP values must never become a second runtime source.
   # CSRF
   CSRF_HEADER_PROPERTY: {{ .Values.global.csrfHeaderProperty}}
   CSRF_WHITELIST_HEADER_PROPERTY: {{ .Values.global.csrfWhitelistHeaderProperty}}
@@ -143,6 +142,8 @@ data:
   # is pending data protection officer sign-off, so the chart never enables deletion on its own.
   # hasKey instead of `default`: Helm treats 0 as empty, which would drop an explicit "off".
   TEAM_DISCUSSION_ARCHIVE_RETENTION_DAYS: {{ if hasKey (.Values.userService.teamDiscussion | default dict) "archiveRetentionDays" }}{{ .Values.userService.teamDiscussion.archiveRetentionDays | quote }}{{ else }}"0"{{ end }}
+  # #874 self-help appointment sender stays off until its dependent services are deployed.
+  GROUP_APPOINTMENT_MAIL_ENABLED: {{ .Values.userService.groupAppointmentMail.enabled | quote }}
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: "{{ .Values.global.keycloak.authServerUrl }}/realms/{{ .Values.global.keycloak.realm }}"
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: "{{ .Values.global.keycloak.authServerUrl }}{{ .Values.global.keycloak.openidConnectUrl }}/certs"
   # OBS-P2: OTLP traces/metrics to the SigNoz gateway collector. Property

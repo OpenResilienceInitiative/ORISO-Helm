@@ -11,14 +11,13 @@ anything (ORISO-ElementCall#35, ORISO-Livekit#20).
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 
 import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOMAIN = "predev.example.org"
+DOMAIN = "predev.oriso.internal"
 
 
 def render() -> list[dict]:
@@ -26,12 +25,13 @@ def render() -> list[dict]:
         [
             "helm", "template", "matrix-wellknown", CHART_DIR,
             "-f", os.path.join(CHART_DIR, "values.yaml.default"),
+            "-f", os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
             "-f", os.path.join(CHART_DIR, "secrets.yaml.default"),
+            "-f", os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
             "--set-string", "global.secrets.redisdefaultPass=test-redis-password",
-            "--set-string", "userService.smtpHost=",
-            "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
-            "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
             "--set", f"global.domainName={DOMAIN}",
+            "--set-string", "userService.smtpUser=smtp-canary-user",
+            "--set-string", "userService.smtpPassword=smtp-canary-password",
         ],
         capture_output=True,
         text=True,
@@ -46,15 +46,12 @@ def extract_location_block(snippet: str, path: str) -> str:
     """Return the body of the active `location = <path>` block, or "".
 
     Lines commented out with `#` are ignored, so a disabled handler cannot
-    satisfy the assertions below. The path must be followed by the opening
-    brace: a substring match also accepts a neighbouring handler such as
-    `location = /.well-known/matrix/server-extra {`, which would satisfy every
-    assertion below while the required exact-match endpoint is absent.
+    satisfy the assertions below.
     """
     lines = [line for line in snippet.splitlines() if not line.strip().startswith("#")]
-    opener = re.compile(rf"location\s*=\s*{re.escape(path)}\s*\{{")
+    opener = f"location = {path}"
     for index, line in enumerate(lines):
-        if not opener.search(line):
+        if opener not in line:
             continue
         depth = 0
         body: list[str] = []

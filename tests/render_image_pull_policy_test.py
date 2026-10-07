@@ -23,7 +23,11 @@ def render(*extra_args: str) -> list[dict]:
             "-f",
             os.path.join(CHART_DIR, "values.yaml.default"),
             "-f",
+            os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
+            "-f",
             os.path.join(CHART_DIR, "secrets.yaml.default"),
+            "-f",
+            os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
             "--set-string",
             "global.secrets.redisdefaultPass=test-redis-password",
             "--set-string",
@@ -67,10 +71,11 @@ def main() -> None:
 
     assert default_values["matrix"]["image"] == "matrixdotorg/synapse:v1.158.0"
     assert default_values["matrix"]["initImage"] == "busybox:1.38.0"
-    assert default_values["livekit"]["image"] == (
-        "docker.io/livekit/livekit-server@sha256:"
-        "3497163e15c48fef6e7830c78716f9e9d5edc28abf7aa90b61c86e93bbc306b1"
-    )
+    # ORISO-Helm#300: dev pins LiveKit by release tag, not by digest. v1.13.5 is
+    # a fixed release tag, and the immutable-image mechanism this assertion was
+    # written against belongs to the deferred MatrixRTC cutover contract, which
+    # dev deliberately does not carry (see templates/_helpers.tpl).
+    assert default_values["livekit"]["image"] == "docker.io/livekit/livekit-server:v1.13.5"
 
     assert_pull_policy(render(), "Always")
     assert_pull_policy(
