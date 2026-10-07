@@ -11,6 +11,8 @@ spec:
     type: RollingUpdate
   template:
     metadata:
+      annotations:
+        checksum/backend-service-clients: {{ include "oriso.backendServiceClientsChecksum" . | quote }}
       labels:
         app: consultingtypeservice
     spec:
@@ -38,22 +40,17 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   name: userservice-configmap-env
-                  key: KEYCLOAK_CONFIG_APP_CLIENTID
+                  key: IDENTITY_TECHNICAL_CLIENT_ID
             - name: TECHNICAL_SERVICE_SUBJECT
               valueFrom:
                 configMapKeyRef:
                   name: tenantservice-configmap-env
                   key: TECHNICAL_SERVICE_SUBJECT
-            - name: IDENTITY_TECHNICAL_USER_USERNAME
+            - name: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: userservice-secret
-                  key: IDENTITY_TECHNICAL_USER_USERNAME
-            - name: IDENTITY_TECHNICAL_USER_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: userservice-secret
-                  key: IDENTITY_TECHNICAL_USER_PASSWORD
+                  name: keycloak-backend-client-secrets
+                  key: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:

@@ -1,3 +1,8 @@
+{{- $technical := required "global.keycloak.backendTechnicalClientId is required" .Values.global.keycloak.backendTechnicalClientId -}}
+{{- $admin := required "global.keycloak.serviceAdminClientId is required" .Values.global.keycloak.serviceAdminClientId -}}
+{{- if or (eq $technical $admin) (has $technical (list .Values.global.keycloak.serviceAppClientId "admin-cli" "account" "broker" "security-admin-console")) (has $admin (list .Values.global.keycloak.serviceAppClientId "admin-cli" "account" "broker" "security-admin-console")) (not (regexMatch "^[a-zA-Z0-9_-]+$" $technical)) (not (regexMatch "^[a-zA-Z0-9_-]+$" $admin)) -}}
+{{- fail "Backend service client ids must be distinct and cannot be human or built-in clients" -}}
+{{- end -}}
 {{- if hasKey .Values.userService "emailBrandingName" -}}
 {{- fail "userService.emailBrandingName is obsolete: move it to global.emailBrandingName and set global.emailLegalOrganisationName separately" -}}
 {{- end -}}
@@ -50,6 +55,12 @@ data:
   KEYCLOAK_PRINCIPAL_ATTRIBUTE: {{ .Values.global.keycloak.principalAttribute }}
   KEYCLOAK_RESOURCE: {{ .Values.userService.keycloakResource }}
   KEYCLOAK_CORS: "false"
+  {{- $adminSubject := required "global.keycloak.serviceAdminSubject must be the actual backend admin service-account UUID" .Values.global.keycloak.serviceAdminSubject }}
+  {{- if not (regexMatch "^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$" $adminSubject) }}
+  {{- fail "global.keycloak.serviceAdminSubject must be a Keycloak service-account UUID" }}
+  {{- end }}
+  KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT: {{ $adminSubject | quote }}
+  IDENTITY_TECHNICAL_CLIENT_ID: {{ $technical | quote }}
   KEYCLOAK_CONFIG_ADMIN_CLIENTID: {{ .Values.global.keycloak.serviceAdminClientId }}
   KEYCLOAK_CONFIG_APP_CLIENTID: {{ .Values.global.keycloak.serviceAppClientId }}
   KEYCLOAKSERVICE_TECHUSER_ID: {{ .Values.global.keycloak.serviceTechUserId }}

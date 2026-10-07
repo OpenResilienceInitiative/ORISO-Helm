@@ -61,6 +61,8 @@ jobs:
           helm lint . \
             -f values.yaml.default \
             -f secrets.yaml.default \
+            -f tests/fixtures/values-render-domain.yaml \
+            -f tests/fixtures/render-required-secrets.yaml \
             --set-string global.emailBrandingName='Render Test Platform' \
             --set-string global.emailLegalOrganisationName='Render Test Foundation' \
             --set-string global.secrets.redisdefaultPass=test-redis-password \

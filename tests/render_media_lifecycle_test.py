@@ -39,6 +39,7 @@ def run_helm(overrides=None, lifecycle_config=True):
                 shutil.copy(source, dest)
         args = ["helm", "template", "media-test", str(chart), "--namespace", "media-test",
                 "-f", str(ROOT / "tests/fixtures/values-render-domain.yaml"),
+                "-f", str(ROOT / "tests/fixtures/render-required-secrets.yaml"),
                 "--set-string", "global.keycloak.serviceTechUserId=00000000-0000-4000-8000-000000000000"]
         for key, value in (overrides or {}).items():
             args += ["--set", f"{key}={value}"]
