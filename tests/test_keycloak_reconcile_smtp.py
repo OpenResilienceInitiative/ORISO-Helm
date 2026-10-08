@@ -148,7 +148,8 @@ class SmtpFixture(unittest.TestCase):
         command = [sys.executable, "-B", str(SCRIPT)]
         result = subprocess.run(command, env={**self.env, **overrides}, capture_output=True, text=True, timeout=15)
         output = result.stdout + result.stderr
-        for private in ("technical-password-canary", "admin-password-canary", "admin-token-canary",
+        for private in (self.env["TECHNICAL_CLIENT_SECRET"], "technical-password-canary",
+                        "admin-password-canary", "admin-token-canary",
                         "private-smtp-provider-error", "private-token-error", "saved-username"):
             self.assertNotIn(private, output)
         self.assertNotIn("Traceback", output)
