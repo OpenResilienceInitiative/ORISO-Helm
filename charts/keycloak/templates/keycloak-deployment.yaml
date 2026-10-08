@@ -17,6 +17,7 @@ spec:
       labels:
         app: keycloak
       annotations:
+        checksum/command-keys: {{ include "oriso.commandKeysChecksum" (dict "root" . "keys" (list "provisioning" "maintenance")) | quote }}
         checksum/email-identity: {{ printf "%s\x00%s" (include "oriso.emailBrandingName" .) (include "oriso.emailLegalOrganisationName" .) | sha256sum | quote }}
     spec:
       terminationGracePeriodSeconds: 60
@@ -50,6 +51,22 @@ spec:
             # Keep this out of lifecycle hooks so pod restarts never re-import over live data.
             - --import-realm
           env:
+            - name: ORISO_LEGACY_OTP_COMPATIBILITY
+              value: {{ .Values.global.taskIdentities.legacyOtpCompatibility | quote }}
+            - name: ORISO_LEGACY_OTP_CLIENT_ID
+              value: {{ .Values.global.taskIdentities.legacyOtpClientId | quote }}
+            - name: ORISO_IDENTITY_DUMMY_EMAIL_SUFFIX
+              value: {{ .Values.global.identityDummyEmailSuffix | quote }}
+            - name: ORISO_PROVISIONING_ORIGIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oriso-command-origin-keys
+                  key: ORISO_PROVISIONING_ORIGIN_KEY
+            - name: ORISO_MAINTENANCE_ORIGIN_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oriso-command-origin-keys
+                  key: ORISO_MAINTENANCE_ORIGIN_KEY
             - name: KC_DB
               valueFrom:
                 configMapKeyRef:
@@ -181,5 +198,5 @@ spec:
           configMap:
             name: keycloak-configmap-theme-templates-fonts
         - name: keycloak-full-dump
-          configMap:
-            name: keycloak-configmap-data
+          secret:
+            secretName: keycloak-realm-import

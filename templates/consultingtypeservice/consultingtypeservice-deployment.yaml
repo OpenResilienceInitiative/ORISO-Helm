@@ -11,10 +11,12 @@ spec:
     type: RollingUpdate
   template:
     metadata:
-      annotations:
-        checksum/backend-service-clients: {{ include "oriso.backendServiceClientsChecksum" . | quote }}
       labels:
         app: consultingtypeservice
+      annotations:
+        checksum/task-bindings: {{ include "oriso.taskBindingsChecksum" . | quote }}
+        checksum/task-credentials: {{ include "oriso.taskCredentialsChecksum" (dict "root" . "keys" (list "SMTP_SYNC")) | quote }}
+        checksum/command-keys: {{ include "oriso.commandKeysChecksum" (dict "root" . "keys" (list "tenantCreation")) | quote }}
     spec:
       affinity:
         podAntiAffinity:
@@ -30,27 +32,28 @@ spec:
           image:  {{ .Values.consultingTypeService.imageName }}:{{ .Values.consultingTypeService.imageVersion }}          
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            {{- include "oriso.taskBindingEnv" (dict "keys" (list "CONFIG_WIZARD" "SYSTEM_EMAIL_DELIVERY" "SMTP_SYNC")) | nindent 12 }}
+            {{- include "oriso.taskSecretEnv" (dict "root" . "keys" (list "SMTP_SYNC")) | nindent 12 }}
+            - name: TASK_IDENTITY_REQUIRED_TASKS
+              value: "CONFIG_WIZARD,SYSTEM_EMAIL_DELIVERY,SMTP_SYNC"
+            - name: TASK_IDENTITY_AUDIENCE
+              value: "consultingtypeservice"
+            - name: ORISO_TENANT_CREATION_CONTEXT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oriso-command-origin-keys
+                  key: ORISO_TENANT_CREATION_CONTEXT_KEY
             # Same existing technical identity; no realm-admin credentials in CTS.
             - name: SMTP_RECONCILE_URL
               valueFrom:
                 configMapKeyRef:
                   name: consultingtypeservice-configmap-env
                   key: SMTP_RECONCILE_URL
-            - name: IDENTITY_TECHNICAL_CLIENT_ID
-              valueFrom:
-                configMapKeyRef:
-                  name: userservice-configmap-env
-                  key: IDENTITY_TECHNICAL_CLIENT_ID
             - name: TECHNICAL_SERVICE_SUBJECT
               valueFrom:
                 configMapKeyRef:
                   name: tenantservice-configmap-env
                   key: TECHNICAL_SERVICE_SUBJECT
-            - name: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-backend-client-secrets
-                  key: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:

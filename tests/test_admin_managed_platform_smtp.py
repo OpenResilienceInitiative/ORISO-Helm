@@ -75,9 +75,9 @@ class AdminManagedPlatformSmtpTest(unittest.TestCase):
         self.assertTrue(SMTP_KEYS.isdisjoint(secret["data"]))
         self.assertTrue(SMTP_KEYS.isdisjoint(entry["name"] for entry in env))
         self.assertTrue(config["data"]["CONSULTING_TYPE_SERVICE_API_URL"])
-        client_secret = next(doc for doc in docs if doc.get("metadata", {}).get("name") == "keycloak-backend-client-secrets")
-        self.assertTrue(client_secret["data"]["KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET"])
-        self.assertTrue(client_secret["data"]["KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET"])
+        self.assertNotIn("IDENTITY_TECHNICAL_USER_USERNAME", secret["data"])
+        self.assertNotIn("IDENTITY_TECHNICAL_USER_PASSWORD", secret["data"])
+        self.assertTrue(any(e["name"] == "KEYCLOAK_SYSTEM_EMAIL_DELIVERY_CLIENT_SECRET" for e in env))
 
 
 if __name__ == "__main__":

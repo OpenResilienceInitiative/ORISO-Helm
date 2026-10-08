@@ -1,7 +1,7 @@
 apiVersion: v1
-kind: ConfigMap
+kind: Secret
 metadata:
-  name: keycloak-configmap-data
+  name: keycloak-realm-import
+type: Opaque
 data:
-  realm.json: |-
-{{ tpl (.Files.Get "keycloak-resources/realm.json") . | indent 4 }}
+  realm.json: {{ tpl (.Files.Get "keycloak-resources/realm.json") . | b64enc | quote }}

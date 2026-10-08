@@ -2,10 +2,20 @@
 {{- if eq $liquibaseChangeLog "classpath:db/changelog/db.changelog-master.xml" -}}
 {{- $liquibaseChangeLog = "classpath:db/changelog/agencyservice-master.xml" -}}
 {{- end -}}
-{{- $technicalClient := required "global.keycloak.backendTechnicalClientId is required" .Values.global.keycloak.backendTechnicalClientId -}}
-{{- $technicalSubject := required "global.keycloak.serviceTechUserId must be the technical service account subject" .Values.global.keycloak.serviceTechUserId -}}
+{{- $technicalClient := .Values.global.keycloak.backendTechnicalClientId | default "" -}}
+{{- $technicalSubject := .Values.global.keycloak.serviceTechUserId | default "" -}}
+{{- if $technicalSubject -}}
 {{- if not (regexMatch "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" $technicalSubject) -}}
 {{- fail "global.keycloak.serviceTechUserId must be the technical service account UUID" -}}
+{{- end -}}
+{{- if or (not $technicalClient) (eq $technicalClient .Values.global.keycloak.serviceAppClientId) (eq $technicalClient .Values.global.keycloak.serviceAdminClientId) (has $technicalClient (list "app" "admin-cli" "account" "account-console" "realm-management" "security-admin-console")) -}}
+{{- fail "Legacy technical client must be distinct from human and administrator clients" -}}
+{{- end -}}
+{{- range $task := .Files.Get "files/task-identities.json" | fromJsonArray -}}
+{{- if eq $technicalClient $task.clientId -}}
+{{- fail "Legacy technical client must be distinct from task clients" -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 apiVersion: v1
 kind: ConfigMap
@@ -24,8 +34,10 @@ data:
   KEYCLOAK_REALM: {{ .Values.global.keycloak.realm }}
   KEYCLOAK_RESOURCE: {{ .Values.agencyService.keycloakResource }}
   KEYCLOAKSERVICE_ADMIN_CLIENTID: {{ .Values.global.keycloak.serviceAdminClientId }}
+  {{- if $technicalSubject }}
   IDENTITY_TECHNICAL_CLIENT_ID: {{ $technicalClient | quote }}
   TECHNICAL_SERVICE_SUBJECT: {{ $technicalSubject | quote }}
+  {{- end }}
   TOPIC_ENRICHMENT_ENABLED: {{ .Values.agencyService.topicEnrichmentEnabled | quote }}
   KEYCLOAKSERVICE_APP_CLIENTID: {{ .Values.global.keycloak.serviceAppClientId }}
   SPRING_DATASOURCE_URL: "jdbc:mariadb://mariadb.{{ .Release.Namespace }}:3306/agencyservice"

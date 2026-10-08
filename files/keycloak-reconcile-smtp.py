@@ -16,7 +16,6 @@ import socketserver
 import sys
 import threading
 import time
-from email.utils import parseaddr
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
@@ -93,7 +92,7 @@ class HttpClient:
 
     def request(self, method, url, body=None, headers=None, failure="SOURCE_UNAVAILABLE",
                 revision=False, authenticate_source=False, timeout=HTTP_TIMEOUT_SECONDS,
-                trigger_request=False, max_response_bytes=MAX_RESPONSE_BYTES, admin_api=False):
+                trigger_request=False, max_response_bytes=MAX_RESPONSE_BYTES):
         if (not isinstance(max_response_bytes, int) or isinstance(max_response_bytes, bool)
                 or not 0 < max_response_bytes <= MAX_REALM_RESPONSE_BYTES):
             raise ReconcileError("SMTP_RECONCILE_CONFIGURATION_INVALID: response limit")
@@ -124,7 +123,7 @@ class HttpClient:
             raise ReconcileError("SMTP_RECONCILE_" + failure) from None
         if len(data) > max_response_bytes:
             raise ReconcileError("SMTP_RECONCILE_" + failure + ": response too large")
-        if status == 204 or (admin_api and status == 201):
+        if status == 204:
             return (None, source_revision) if revision else None
         if status != 200:
             raise ReconcileError("SMTP_RECONCILE_" + failure)
@@ -132,14 +131,14 @@ class HttpClient:
             parsed = json.loads(data)
         except (ValueError, UnicodeError):
             raise ReconcileError("SMTP_RECONCILE_" + failure + ": invalid response") from None
-        if not isinstance(parsed, dict) and not (admin_api and isinstance(parsed, list)):
+        if not isinstance(parsed, dict):
             raise ReconcileError("SMTP_RECONCILE_" + failure + ": invalid response")
         return (parsed, source_revision) if revision else parsed
 
-    def login(self, url, realm, client, username, password, failure,
+    def login(self, url, realm, client, secret, failure,
               transient_startup=False):
-        body = urlencode({"grant_type": "password", "client_id": client,
-                          "username": username, "password": password}).encode()
+        body = urlencode({"grant_type": "client_credentials", "client_id": client,
+                          "client_secret": secret}).encode()
         response = self.request(
             "POST", url + "/realms/" + quote(realm, safe="") + "/protocol/openid-connect/token",
             body, {"Content-Type": "application/x-www-form-urlencoded"}, failure,
@@ -150,19 +149,8 @@ class HttpClient:
             raise ReconcileError("SMTP_RECONCILE_" + failure)
         return token
 
-    def service_login(self, url, realm, client, secret, failure):
-        body = urlencode({"grant_type": "client_credentials", "client_id": client,
-                          "client_secret": secret}).encode()
-        response = self.request(
-            "POST", url + "/realms/" + quote(realm, safe="") + "/protocol/openid-connect/token",
-            body, {"Content-Type": "application/x-www-form-urlencoded"}, failure)
-        token = response.get("access_token") if response else None
-        if not isinstance(token, str) or not token.strip():
-            raise ReconcileError("SMTP_RECONCILE_" + failure)
-        return token
 
-
-def verify_technical_identity(token, subject, client):
+def verify_task_identity(token, subject, client):
     # This token was just issued by the configured Keycloak endpoint. The CTS
     # resource server independently verifies its signature and authority; these
     # checks prevent accidentally using a different configured service account.
@@ -174,7 +162,10 @@ def verify_technical_identity(token, subject, client):
         expiry = claims.get("exp")
         roles = claims.get("realm_access", {}).get("roles")
         valid = (claims.get("sub") == subject and claims.get("azp") == client
-                 and isinstance(roles, list) and "technical" in roles
+                 and isinstance(roles, list) and "smtp-sync" in roles
+                 and not {"technical", "tenant-admin", "realm-admin"}.intersection(roles)
+                 and {"oriso-task-commands", "consultingtypeservice"}.issubset(
+                     {claims.get("aud")} if isinstance(claims.get("aud"), str) else set(claims.get("aud", [])))
                  and isinstance(expiry, (int, float)) and not isinstance(expiry, bool)
                  and math.isfinite(expiry) and expiry > time.time())
     except (ValueError, UnicodeError, AttributeError, TypeError):
@@ -183,41 +174,10 @@ def verify_technical_identity(token, subject, client):
         raise ReconcileError("SMTP_RECONCILE_TECHNICAL_IDENTITY_MISMATCH")
 
 
-def smtp_transport(snapshot):
-    if snapshot is None:
-        return {}
-    if (snapshot.get("globalSmtpEnabled") is not True
-            or snapshot.get("globalFeatureSystemNotificationEmailsEnabled") is not True):
-        return {}
-    names = ("Host", "Port", "From", "Username", "Password")
-    values = [snapshot.get("globalSmtp" + name) for name in names]
-    if any(not isinstance(v, str) or not v.strip() for v in values):
-        return {}
-    # SMTP credentials are opaque strings. JSON encodes their control bytes;
-    # only host/port/from need field validation, never password normalization.
-    if any(any(ord(c) < 32 or ord(c) == 127 for c in v) for v in values[:3]):
-        return {}
-    host, port, sender, username, password = values
-    host, port = host.strip(), port.strip()
-    secure = snapshot.get("globalSmtpSecure")
-    if (not isinstance(secure, bool) or len(port) > 5 or not port.isascii() or not port.isdecimal()
-            or not 1 <= int(port) <= 65535 or "/" in host or any(c.isspace() for c in host)):
-        return {}
-    display_name, address = parseaddr(sender, strict=True)
-    if not address or address.count("@") != 1 or not all(address.split("@")):
-        return {}
-    return {"host": host, "port": str(int(port)), "ssl": str(secure).lower(),
-            "starttls": str(not secure).lower(), "auth": "true", "from": address,
-            "fromDisplayName": display_name, "user": username, "password": password}
-
-
 def configuration(env, mode="reconcile"):
     names = ("KEYCLOAK_URL", "KEYCLOAK_REALM", "CONSULTING_TYPE_SERVICE_URL", "POD_NAMESPACE",
-             "TECHNICAL_SERVICE_SUBJECT", "TECHNICAL_CLIENT_ID")
-    if mode != "serve":
-        names += ("TECHNICAL_CLIENT_SECRET",)
-    if mode != "trigger":
-        names += ("KEYCLOAK_ADMIN_USERNAME", "KEYCLOAK_ADMIN_PASSWORD")
+             "IDENTITY_SMTP_SYNC_SERVICE_SUBJECT", "IDENTITY_SMTP_SYNC_CLIENT_ID",
+             "KEYCLOAK_SMTP_SYNC_CLIENT_SECRET")
     config = {name: required(env, name) for name in names}
     config["KEYCLOAK_URL"] = base_url(config["KEYCLOAK_URL"], "keycloak", config["POD_NAMESPACE"])
     config["CONSULTING_TYPE_SERVICE_URL"] = base_url(
@@ -225,12 +185,12 @@ def configuration(env, mode="reconcile"):
     return config
 
 
-def technical_login(http, config):
-    technical_token = http.service_login(
-        config["KEYCLOAK_URL"], config["KEYCLOAK_REALM"], config["TECHNICAL_CLIENT_ID"],
-        config["TECHNICAL_CLIENT_SECRET"], "SOURCE_UNAVAILABLE",
+def task_login(http, config):
+    technical_token = http.login(
+        config["KEYCLOAK_URL"], config["KEYCLOAK_REALM"], config["IDENTITY_SMTP_SYNC_CLIENT_ID"],
+        config["KEYCLOAK_SMTP_SYNC_CLIENT_SECRET"], "SOURCE_UNAVAILABLE",
     )
-    verify_technical_identity(technical_token, config["TECHNICAL_SERVICE_SUBJECT"], config["TECHNICAL_CLIENT_ID"])
+    verify_task_identity(technical_token, config["IDENTITY_SMTP_SYNC_SERVICE_SUBJECT"], config["IDENTITY_SMTP_SYNC_CLIENT_ID"])
     return technical_token
 
 
@@ -243,23 +203,29 @@ def read_snapshot(http, config, technical_token, revision=False):
                         authenticate_source=revision)
 
 
-def apply_snapshot(http, config, snapshot):
-    transport = smtp_transport(snapshot)
-    admin_token = http.login(
-        config["KEYCLOAK_URL"], "master", "admin-cli", config["KEYCLOAK_ADMIN_USERNAME"],
-        config["KEYCLOAK_ADMIN_PASSWORD"], "KEYCLOAK_UPDATE_FAILED",
-    )
-    http.request("PUT", config["KEYCLOAK_URL"] + "/admin/realms/" + quote(config["KEYCLOAK_REALM"], safe=""),
-                 json.dumps({"smtpServer": transport}).encode(),
-                 {"Authorization": "Bearer " + admin_token, "Content-Type": "application/json"},
-                 "KEYCLOAK_UPDATE_FAILED")
-    return "APPLIED" if transport else "DISABLED_OR_INCOMPLETE"
+def apply_snapshot(http, config, snapshot, revision, task_token):
+    # Only bounded SMTP fields cross the command boundary; no realm update and
+    # no deployment administrator authentication occurs in this runtime.
+    fields = ("globalSmtpEnabled", "globalFeatureSystemNotificationEmailsEnabled",
+              "globalSmtpHost", "globalSmtpPort", "globalSmtpFrom",
+              "globalSmtpUsername", "globalSmtpPassword", "globalSmtpSecure")
+    command = {field: (snapshot or {}).get(field) for field in fields}
+    command["revision"] = revision
+    response = http.request("PUT", config["KEYCLOAK_URL"] + "/realms/" + quote(config["KEYCLOAK_REALM"], safe="") + "/oriso-commands/v1/smtp",
+                            json.dumps(command).encode(),
+                            {"Authorization": "Bearer " + task_token, "Content-Type": "application/json"},
+                            "KEYCLOAK_UPDATE_FAILED")
+    if not isinstance(response, dict) or response.get("revision") != revision or response.get("status") not in ("APPLIED", "DISABLED_OR_INCOMPLETE"):
+        raise ReconcileError("SMTP_RECONCILE_KEYCLOAK_UPDATE_FAILED")
+    return response["status"]
 
 
 def reconcile(env):
     config = configuration(env)
     http = HttpClient()
-    status = apply_snapshot(http, config, read_snapshot(http, config, technical_login(http, config)))
+    token = task_login(http, config)
+    snapshot, revision = read_snapshot(http, config, token, revision=True)
+    status = apply_snapshot(http, config, snapshot, saved_revision(revision), token)
     if status == "APPLIED":
         print("SMTP_RECONCILE_APPLIED: current Admin Settings")
     else:
@@ -277,7 +243,7 @@ def trigger(env, ready_seconds=TRIGGER_READY_SECONDS, retry_seconds=TRIGGER_RETR
     config = configuration(env, "trigger")
     url = base_url(required(env, "SMTP_RECONCILE_URL"), "keycloak-reconcile-smtp", config["POD_NAMESPACE"])
     http = HttpClient()
-    headers = {"Authorization": "Bearer " + technical_login(http, config),
+    headers = {"Authorization": "Bearer " + task_login(http, config),
                "Content-Type": "application/json"}
     deadline = time.monotonic() + ready_seconds
     while True:
@@ -353,7 +319,7 @@ def serve(env):
                 return self.reply(403, {"code": "SMTP_RECONCILE_UNAUTHORIZED"})
             token = authorization[7:]
             try:
-                verify_technical_identity(token, config["TECHNICAL_SERVICE_SUBJECT"], config["TECHNICAL_CLIENT_ID"])
+                verify_task_identity(token, config["IDENTITY_SMTP_SYNC_SERVICE_SUBJECT"], config["IDENTITY_SMTP_SYNC_CLIENT_ID"])
             except ReconcileError:
                 return self.reply(403, {"code": "SMTP_RECONCILE_UNAUTHORIZED"})
             if not lock.acquire(blocking=False):
@@ -365,7 +331,7 @@ def serve(env):
                 if revision > current or (applied["revision"] is not None and current < applied["revision"]):
                     raise ReconcileError("SMTP_RECONCILE_REVISION_CONFLICT", 409)
                 if current != applied["revision"]:
-                    status = apply_snapshot(http, config, snapshot)
+                    status = apply_snapshot(http, config, snapshot, current, token)
                     applied.update(revision=current, status=status)
                 self.reply(200, {"appliedRevision": current, "status": applied["status"]})
             except ReconcileError as error:

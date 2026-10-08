@@ -46,35 +46,11 @@ containers:
           configMapKeyRef:
             name: userservice-configmap-env
             key: CONSULTING_TYPE_SERVICE_API_URL
-      - name: TECHNICAL_CLIENT_ID
-        valueFrom:
-          configMapKeyRef:
-            name: userservice-configmap-env
-            key: IDENTITY_TECHNICAL_CLIENT_ID
-      - name: TECHNICAL_SERVICE_SUBJECT
-        valueFrom:
-          configMapKeyRef:
-            name: tenantservice-configmap-env
-            key: TECHNICAL_SERVICE_SUBJECT
+      {{- include "oriso.taskBindingEnv" (dict "keys" (list "SMTP_SYNC")) | nindent 6 }}
+      {{- include "oriso.taskSecretEnv" (dict "root" . "keys" (list "SMTP_SYNC")) | nindent 6 }}
       {{- if eq $mode "trigger" }}
       - name: SMTP_RECONCILE_URL
         value: {{ printf "http://keycloak-reconcile-smtp.%s:8080/smtp/reconcile" .Release.Namespace | quote }}
-      {{- range $pair := list (list "TECHNICAL_CLIENT_SECRET" "KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET") }}
-      - name: {{ index $pair 0 }}
-        valueFrom:
-          secretKeyRef:
-            name: keycloak-backend-client-secrets
-            key: {{ index $pair 1 }}
-      {{- end }}
-      {{- end }}
-      {{- if eq $mode "serve" }}
-      {{- range $pair := list (list "KEYCLOAK_ADMIN_USERNAME" "KEYCLOAK_ADMIN") (list "KEYCLOAK_ADMIN_PASSWORD" "KEYCLOAK_ADMIN_PASSWORD") }}
-      - name: {{ index $pair 0 }}
-        valueFrom:
-          secretKeyRef:
-            name: keycloak-secret-env
-            key: {{ index $pair 1 }}
-      {{- end }}
       {{- end }}
     command: ["python3", "-B", "/scripts/keycloak-reconcile-smtp.py", {{ printf "--%s" $mode | quote }}]
     {{- if eq $mode "serve" }}

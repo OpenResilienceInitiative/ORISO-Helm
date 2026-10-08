@@ -3,6 +3,18 @@ cert-manager:
   enabled: true
 
 global:
+
+  # Runtime identity contract for ORISO-Helm#367. Empty subject overrides use a
+  # deterministic realm/client UUID for a NEW service account only. Existing
+  # clients require their actual service-account ID here; mismatches stop the hook.
+  taskIdentities:
+    image: "" # blank reuses the existing immutable Python SMTP helper image
+    subjects: {}
+    retireLegacy: false # enable only after deployed consumer/mapping readback
+    legacySubjects: {} # actual UUIDs for TECHNICAL_PASSWORD, SERVICE_ADMIN_PASSWORD, TECHNICAL_CLIENT, ADMIN_CLIENT
+    legacyOtpCompatibility: false # migration-only, turn off after UserService cutover
+    legacyOtpClientId: backend-admin
+  identityDummyEmailSuffix: "@beratungcaritas.de" # existing controlled account placeholder suffix
   # Kubernetes service DNS suffix, supplied by the cluster operator.
   clusterDomain: "cluster.local"
   # Enable only after the lifecycle endpoint and candidate report are verified.
@@ -105,21 +117,11 @@ global:
       exemptCidrs: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"
     serviceAppClientId: "app"
     serviceAdminClientId: "backend-admin"
-    backendTechnicalClientId: "backend-technical"
-    backendServiceClients:
-      # Existing realms: render ONLY the preparation Secret/Job (see runbook).
-      # Never install/upgrade the whole chart with prepareOnly=true.
-      # Read both actual subjects, then deploy with prepareOnly=false.
-      prepareOnly: false
-      # Enable only after both backends run on client credentials.
-      retireLegacyUsers: false
-      legacyTechnicalUsername: "technical"
-      legacyAdminUsername: "svc-keycloak-admin"
-    # Actual service-account subject of backendTechnicalClientId. Existing realms
-    # must read it from the preparation job; realm import never updates them.
-    # Fresh imports use 12316d09-a9da-41b9-a13e-ee2c515800b5.
+    backendTechnicalClientId: "backend-technical" # nonsecret legacy compatibility inventory
+    # Optional legacy technical subject. Blank disables that receiver binding.
+    # An existing consumer requires its verified live UUID during migration.
+    # New installations use the task-specific subjects above.
     serviceTechUserId: ""
-    serviceAdminSubject: ""
     bootstrapUsers:
       enabled: true
     # Checks after every install and upgrade that the live realm still carries

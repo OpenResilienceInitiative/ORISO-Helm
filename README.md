@@ -35,8 +35,9 @@ Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fi
 
 - `global.secrets.*Password` / `*Pass` — database and service passwords
 - `global.secrets.matrixRegistrationSharedSecret` — Matrix shared secret
-- `global.keycloak.technicalUser.password` — Keycloak technical user password
-- `global.keycloak.serviceTechUserId` (in `values.yaml.default`, not a secret) — Keycloak user id (`sub`) of the `technical` user, rendered as TenantService `TECHNICAL_SERVICE_SUBJECT`. **Required, a UUID, no default.** On an existing realm look up the live id once (admin console, Users > technical > ID). Only a fresh install that imports `realm.json` may use its fixed id `8294c392-e1e0-405b-ac2f-ba3043cbad3e`. The reconcile hook compares it with the realm before changing anything and fails the release on a mismatch.
+- `global.taskIdentitySecrets.<TASK_KEY>` — a distinct persistent client secret for every entry in `files/task-identities.json` (14 task identities). Generate independent random credentials and keep them in your managed secrets source. Blank, example and reused values fail rendering.
+- `global.commandOriginKeys.{provisioning,maintenance,tenantCreation,wizardPolicy}` — four independent Base64 keys, each at least 32 decoded bytes, for the corresponding signed operation contexts. They must not reuse a task credential.
+- `global.taskIdentities.subjects.<TASK_KEY>` — for existing task clients, the verified actual Keycloak service-account UUID. A fresh realm derives deterministic UUIDs; the reconciler refuses identity collisions and verifies native client ownership before changes.
 - `postgres.postgresPassword` — PostgreSQL root password
 - `global.matrix.matrixAdminUsername` / `matrixAdminPassword` — Matrix admin credentials (must live under `global:` so subcharts can read them)
 - `online-counseling-mongodb.*Password` / `*Pass` — MongoDB passwords
@@ -45,8 +46,80 @@ Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fi
 - `livekit.api.key` / `livekit.api.secret` — LiveKit API credentials
 - `tenantService.springDatasourcePassword` / `springRabbitmqPassword`
 - `agencyService.serviceEncryptionAppkey` — AgencyService encryption key (Matrix service-account passwords). **Required** — the chart refuses to render if it is blank, because an empty key silently breaks agency creation. Rotating it invalidates already-stored credentials.
-- `userService.serviceEncryptionAppkey` / `identityTechnicalUser*` — `identityTechnicalUser*` is the UserService's service identity (realm user `technical`, realm role `technical` only). **Required.** The former duplicate pair `userService.keycloakTechnical*` is no longer read.
-- `global.secrets.keycloakServiceAdminUsername` / `keycloakServiceAdminPassword` — backend Keycloak admin identity (`svc-keycloak-admin`: `manage-users`, `view-users`, `query-users`, `view-realm`, `otp-config-admin`). **Required**; the password may not be empty or `changeme`, and the username may not be `technical` or the `realmadmin` username (the hook fails). Mounted into the UserService as `KEYCLOAK_CONFIG_ADMIN_*`; the `realmadmin` credentials (`keycloakAdmin*`) stay deployment-time only (Keycloak pod and bootstrap hooks). The hook `keycloak-reconcile-service-identities` converges both identities to these exact role sets on every install and upgrade (ORISO-Helm#367).
+- `userService.serviceEncryptionAppkey` — UserService encryption key. Runtime workloads use their own task credentials; the shared technical password and Keycloak administrator credentials are no longer runtime dependencies.
+- `global.secrets.keycloakAdminUsername` / `keycloakAdminPassword` — installation-time Keycloak access used by the Keycloak pod and deployment hooks. Never mount it into application services or the running SMTP synchronizer.
+
+Existing-realm migration is coordinated across Keycloak, UserService, TenantService,
+AgencyService and ConsultingTypeService. Review their matching task-contract changes
+before deploying the chart. The task reconciler runs **pre-upgrade**, before receiver
+pods request their new task tokens; credentials and script hooks run first and remain
+available after success. On a fresh installation, native realm import creates the task
+clients and reconciliation runs post-install. The realm import is a Kubernetes Secret.
+
+Keep `global.taskIdentities.retireLegacy=false` until the actual consumers of all four
+legacy actors have been verified. Existing credentials are retained only if both old
+client secrets are explicitly supplied; no old secret is a runtime fallback. Retirement
+requires every verified `legacySubjects` UUID and native username/client ownership,
+then disables only those actors and removes their grants. Human accounts stay intact.
+The optional `legacyOtpCompatibility` bridge defaults false and only supports the
+existing verified backend-admin OTP caller; disable it before legacy retirement.
+Unknown external mail/appointment authentication and received-mail acceptance remain
+release gates. The provider ADR remains Proposed until human technical review.
+
+Before an existing installation switches its invitation/Wizard/cleanup callers,
+inventory pending invitations, durable release tasks and the actual tenant/agency
+reservation ledgers. Old agency rows and release tasks may have no owner proof.
+The narrowed actor deliberately cannot release or consume those rows; new-proof
+tests do not establish that old cancellation/expiry still works.
+
+1. Match the original invitation, exact reserved ID, tenant, current unconsumed
+   receiver record and genuine captured token. A verified existing token may be
+   migrated with its original ownership; never invent a token or infer an owner
+   from an ID alone, and never log reservation proofs.
+2. A receiver row with no genuine proof needs an operator-owned resolution. Drain
+   or reissue it only after verifying the unit is unassigned, identifying its
+   original owner and checking every live dependent invite; capture only the
+   receiver-generated fresh proof on the matching invite/release record.
+3. Keep the affected caller cutover and legacy retirement gated until these rows
+   are resolved and representative old invitation acceptance, cancellation and
+   expiry pass. Unknown counts or unverifiable ownership keep this gate open.
+   There is no shared technical/admin fallback or automatic guessed backfill.
+
+For developers — isolated permission checks use synthetic credentials only:
+
+```bash
+python3 tests/keycloak_task_migration_test.py
+python3 tests/task_receiver_permission_matrix.py \
+  --receiver ../ORISO-TenantService \
+  --receiver ../ORISO-AgencyService \
+  --receiver ../ORISO-ConsultingTypeService \
+  --receiver ../ORISO-UserService \
+  --java-home "$JAVA_HOME"
+```
+
+Use the matching integration branches, Maven, Docker and Java 21. The receiver run
+starts its own native Keycloak container, sends actual issued bearer tokens through
+normal resource-server decoders and HTTP endpoints, and checks signed wrong-subject,
+wrong-audience and unrelated-grant denials. It removes its container/private temporary
+fixture; it does not change a deployed realm or send real email. The harness requires a
+fresh executed suite with zero failures, errors and skips; Maven exit alone is not
+permission evidence.
+
+The required cross-repository CI job pins the receiver and custom-provider source
+commits and also runs the actual UserService command adapter plus its file-backed
+journal through native provider restart and process-death recovery. To reproduce
+that second gate after building the matching custom image:
+
+```bash
+python3 ../ORISO-Keycloak/scripts/test-task-command-permissions.py \
+  --image oriso-keycloak:permission-contract \
+  --userservice-receiver ../ORISO-UserService \
+  --userservice-java-home "$JAVA_HOME"
+```
+
+Ordinary test selection excludes the fixture-dependent native classes; these
+explicit joined runs must execute them. This remains local/CI evidence, separate
+from human review, deployment, browser completion and received email.
 
 ### 3. Install / Upgrade
 

@@ -10,15 +10,9 @@ from threading import Thread
 from urllib.parse import parse_qs
 
 import yaml
+from realm_contract_fixture import rendered_realm
 
 
-REALM_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "charts"
-    / "keycloak"
-    / "keycloak-resources"
-    / "realm.json"
-)
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_SCRIPT = ROOT / "files" / "keycloak-reconcile-mail-locales.py"
 HTTP_HELPER = ROOT / "files" / "keycloak-reconcile-smtp.py"
@@ -288,7 +282,7 @@ class KeycloakMailLocalesTest(unittest.TestCase):
             server.shutdown()
             server.server_close()
     def test_realm_supports_every_app_mail_language(self):
-        realm = json.loads(REALM_PATH.read_text())
+        realm = rendered_realm()
         self.assertTrue(realm["internationalizationEnabled"])
         self.assertEqual(
             ["de", "en", "fr", "ru", "ti", "tr"],

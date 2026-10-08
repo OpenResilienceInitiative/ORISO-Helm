@@ -1,21 +1,12 @@
-import json
 import unittest
-from pathlib import Path
+from realm_contract_fixture import rendered_realm
 
-
-REALM_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "charts"
-    / "keycloak"
-    / "keycloak-resources"
-    / "realm.json"
-)
 
 
 class KeycloakTwoFactorRealmContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.realm = json.loads(REALM_PATH.read_text())
+        cls.realm = rendered_realm()
         cls.flows = {
             flow["alias"]: flow for flow in cls.realm["authenticationFlows"]
         }
@@ -139,12 +130,14 @@ class KeycloakTwoFactorRealmContractTest(unittest.TestCase):
         self.assertEqual("email-authenticator", direct[1]["authenticator"])
         self.assertEqual("email-form-authenticator", browser[1]["authenticator"])
 
-    def test_technical_user_keeps_the_otp_spi_role(self):
-        technical_user = next(
-            user for user in self.realm["users"] if user["username"] == "technical"
-        )
-
-        self.assertIn("technical", technical_user["realmRoles"])
+    def test_only_the_dedicated_actor_receives_otp_administration(self):
+        actor = next(u for u in self.realm["users"] if u.get("serviceAccountClientId") == "backend-account-otp")
+        self.assertEqual(["otp-config-admin"], actor["realmRoles"])
+        self.assertFalse(actor.get("clientRoles"))
+        for name in ("technical", "svc-keycloak-admin"):
+            old = next(u for u in self.realm["users"] if u["username"] == name)
+            self.assertFalse(old["enabled"])
+            self.assertNotIn("otp-config-admin", old["realmRoles"])
 
     def test_realm_uses_the_oriso_email_theme(self):
         self.assertEqual("oriso", self.realm.get("emailTheme"))

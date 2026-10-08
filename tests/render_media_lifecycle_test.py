@@ -37,6 +37,8 @@ def run_helm(overrides=None, lifecycle_config=True):
                 dest = chart / source.relative_to(ROOT)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(source, dest)
+        (chart / "files").mkdir()
+        shutil.copy(ROOT / "files/task-identities.json", chart / "files/task-identities.json")
         args = ["helm", "template", "media-test", str(chart), "--namespace", "media-test",
                 "-f", str(ROOT / "tests/fixtures/values-render-domain.yaml"),
                 "-f", str(ROOT / "tests/fixtures/render-required-secrets.yaml"),

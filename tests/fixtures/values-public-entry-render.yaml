@@ -1,12 +1,11 @@
-# Synthetic render-only values. Never deploy this fixture.
-# Complements values.yaml.default; no environment secrets are loaded by the test.
+# Synthetic render-only credentials; never deploy this fixture.
 global:
   keycloak:
-    serviceAdminSubject: "00000000-0000-4000-8000-000000000001"
+    serviceAdminSubject: 00000000-0000-4000-8000-000000000001
     serviceTechUserId: 00000000-0000-4000-8000-000000000000
   secrets:
-    keycloakBackendTechnicalClientSecret: "render-only-technical-client-secret-canary"
-    keycloakBackendAdminClientSecret: "render-only-admin-client-secret-canary"
+    keycloakBackendTechnicalClientSecret: render-only-technical-client-secret-canary
+    keycloakBackendAdminClientSecret: render-only-admin-client-secret-canary
     liquibaseUser: render-only-not-a-real-secret
     liquibasePassword: render-only-not-a-real-secret
     rabbitmqUsername: render-only-not-a-real-secret
@@ -37,6 +36,26 @@ global:
     matrixAdminUsername: render-only-not-a-real-secret
     matrixAdminPassword: render-only-not-a-real-secret
   domainName: public-entry.oriso.internal
+  taskIdentitySecrets:
+    CONFIG_WIZARD: render-only-config_wizard-credential
+    INVITE_RESERVATIONS: render-only-invite_reservations-credential
+    NOTIFICATION_DISPATCH: render-only-notification_dispatch-credential
+    SYSTEM_EMAIL_DELIVERY: render-only-system_email_delivery-credential
+    RUNTIME_POLICY: render-only-runtime_policy-credential
+    MATRIX_AGENCY: render-only-matrix_agency-credential
+    APPOINTMENT_SYNC: render-only-appointment_sync-credential
+    APPOINTMENT_CLEANUP: render-only-appointment_cleanup-credential
+    ACCOUNT_PROVISIONING: render-only-account_provisioning-credential
+    ACCOUNT_MAINTENANCE: render-only-account_maintenance-credential
+    OTP: render-only-otp-credential
+    SESSION_EXCHANGE: render-only-session_exchange-credential
+    CONSULTANT_IMPORT: render-only-consultant_import-credential
+    SMTP_SYNC: render-only-smtp_sync-credential
+  commandOriginKeys:
+    tenantCreation: dGVuYW50LWNyZWF0aW9uLXJlbmRlci1vbmx5LWtleTAx
+    provisioning: cHJvdmlzaW9uaW5nLXJlbmRlci1vbmx5LWtleS0wMDE=
+    maintenance: bWFpbnRlbmFuY2UtcmVuZGVyLW9ubHkta2V5LTAwMDI=
+    wizardPolicy: d2l6YXJkLXBvbGljeS1yZW5kZXItb25seS1rZXktMDAwMw==
 postgres:
   postgresDB: render-only-not-a-real-secret
   postgresPassword: render-only-not-a-real-secret

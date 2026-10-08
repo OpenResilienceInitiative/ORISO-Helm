@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oriso-task-identity-bindings
+data:
+{{- include "oriso.taskBindingData" . }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oriso-task-identity-credentials
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation
+type: Opaque
+data:
+  ORISO_TASK_IDENTITIES_JSON: {{ include "oriso.taskDefinitions" . | b64enc | quote }}
+{{- range $task := include "oriso.taskDefinitions" . | fromJsonArray }}
+  KEYCLOAK_{{ $task.key }}_CLIENT_SECRET: {{ $task.secret | b64enc | quote }}
+{{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: oriso-command-origin-keys
+type: Opaque
+data:
+  ORISO_PROVISIONING_ORIGIN_KEY: {{ .Values.global.commandOriginKeys.provisioning | b64enc | quote }}
+  ORISO_MAINTENANCE_ORIGIN_KEY: {{ .Values.global.commandOriginKeys.maintenance | b64enc | quote }}
+  ORISO_WIZARD_POLICY_CONTEXT_KEY: {{ .Values.global.commandOriginKeys.wizardPolicy | b64enc | quote }}
+  ORISO_TENANT_CREATION_CONTEXT_KEY: {{ .Values.global.commandOriginKeys.tenantCreation | b64enc | quote }}

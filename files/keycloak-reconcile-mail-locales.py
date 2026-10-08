@@ -9,7 +9,7 @@ import json
 import os
 import sys
 import time
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from keycloak_reconcile_smtp import (
     HttpClient,
@@ -54,8 +54,16 @@ def reconcile(env):
     ready_by = time.monotonic() + STARTUP_READY_SECONDS
     while True:
         try:
-            token = client.login(url, "master", "admin-cli", username, password,
-                                 "AUTH_FAILED", transient_startup=True)
+            # Installer-only credentials stay in this hook, never the running
+            # SMTP synchronizer or its task-only token adapter.
+            body = urlencode({"grant_type": "password", "client_id": "admin-cli",
+                              "username": username, "password": password}).encode()
+            response = client.request("POST", url + "/realms/master/protocol/openid-connect/token",
+                                      body, {"Content-Type": "application/x-www-form-urlencoded"},
+                                      "AUTH_FAILED", trigger_request=True)
+            token = response.get("access_token") if response else None
+            if not isinstance(token, str) or not token.strip():
+                raise LocaleError("MAIL_LOCALE_AUTH_FAILED")
             break
         except TriggerNotReady:
             if time.monotonic() + STARTUP_RETRY_SECONDS >= ready_by:

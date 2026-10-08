@@ -36,7 +36,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: OpenResilienceInitiative/ORISO-Docs
-          ref: 18d7fe0bf52028bb554ec7c3d209a2ae367219ce
+          ref: 90dbec3293ef740657a90bf4f96b86d4210beb13
           path: _contract_docs
           persist-credentials: false
 
@@ -60,8 +60,8 @@ jobs:
         run: |
           helm lint . \
             -f values.yaml.default \
-            -f secrets.yaml.default \
             -f tests/fixtures/values-render-domain.yaml \
+            -f secrets.yaml.default \
             -f tests/fixtures/render-required-secrets.yaml \
             --set-string global.emailBrandingName='Render Test Platform' \
             --set-string global.emailLegalOrganisationName='Render Test Foundation' \
@@ -115,9 +115,96 @@ jobs:
 
           [ ${#failed[@]} -eq 0 ]
 
+      - name: Verify native Keycloak task tokens and repeated realm migration
+        run: python tests/keycloak_task_migration_test.py
+
       - name: Run shell guardrails
         shell: bash
         run: |
           set -euo pipefail
           bash tests/check-no-bare-ip-servername.sh
           bash tests/guardrail_selftest.sh
+
+  task-permission-matrix:
+    name: Native task receivers and durable creation restart
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Check out chart under test
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: chart
+          persist-credentials: false
+      # Immutable external sources stay outside the packaged chart.
+      - name: Check out TenantService receiver
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: OpenResilienceInitiative/ORISO-TenantService
+          ref: 7c0883ec8a0ee2ff2b2d096472ad8bfc81bad53c
+          path: receivers/ORISO-TenantService
+          persist-credentials: false
+      - name: Check out AgencyService receiver
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: OpenResilienceInitiative/ORISO-AgencyService
+          ref: 5f204f52f0708cb98ade0d9e252f5dc552af3172
+          path: receivers/ORISO-AgencyService
+          persist-credentials: false
+      - name: Check out ConsultingTypeService receiver
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: OpenResilienceInitiative/ORISO-ConsultingTypeService
+          ref: fc3404819574f2c38a2e559910a2c84206e9001b
+          path: receivers/ORISO-ConsultingTypeService
+          persist-credentials: false
+      - name: Check out UserService receiver
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: OpenResilienceInitiative/ORISO-UserService
+          ref: 4e6ea74c2346d06b787147b41392dedf7c8ffa29
+          path: receivers/ORISO-UserService
+          persist-credentials: false
+      - name: Check out custom Keycloak provider
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: OpenResilienceInitiative/ORISO-Keycloak
+          ref: b5de1fa089b413f56f6d880e71798b6c2d7bbd6e
+          path: provider/ORISO-Keycloak
+          persist-credentials: false
+      - name: Set up Java 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: receivers/**/pom.xml
+      - name: Set up Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.13"
+      - name: Install fixture parser
+        run: python -m pip install --disable-pip-version-check -r chart/requirements-ci.txt
+      - name: Verify native tokens at all four receiving HTTP servers
+        run: >-
+          python chart/tests/task_receiver_permission_matrix.py
+          --receiver receivers/ORISO-TenantService
+          --receiver receivers/ORISO-AgencyService
+          --receiver receivers/ORISO-ConsultingTypeService
+          --receiver receivers/ORISO-UserService
+          --java-home "$JAVA_HOME"
+      - name: Build exact custom provider image
+        run: docker build --tag oriso-keycloak:joined-permission-contract provider/ORISO-Keycloak/keycloak-image
+      - name: Verify provider wire and durable UserService crash recovery
+        run: |
+          set -euo pipefail
+          started=$(date +%s)
+          python provider/ORISO-Keycloak/scripts/test-task-command-permissions.py \
+            --image oriso-keycloak:joined-permission-contract \
+            --userservice-receiver receivers/ORISO-UserService \
+            --userservice-java-home "$JAVA_HOME"
+          python chart/tests/task_receiver_permission_matrix.py \
+            --verify-creation-report receivers/ORISO-UserService --started "$started"

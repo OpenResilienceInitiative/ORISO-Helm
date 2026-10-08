@@ -102,7 +102,9 @@ def build_minimal_chart(dst: str) -> None:
         os.path.join(CHART_DIR, "values.yaml.default"),
         os.path.join(dst, "values.yaml"),
     )
-    for rel in TEMPLATES:
+    # The actual AgencyService config validates enabled legacy bindings against
+    # the task-client registry; preserve that real input in this isolated chart.
+    for rel in TEMPLATES + ["files/task-identities.json"]:
         src = os.path.join(CHART_DIR, rel)
         if not os.path.isfile(src):
             die(f"template under test is missing: {rel}")

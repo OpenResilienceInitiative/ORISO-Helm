@@ -1,21 +1,12 @@
-import json
 import unittest
-from pathlib import Path
+from realm_contract_fixture import rendered_realm
 
-
-REALM_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "charts"
-    / "keycloak"
-    / "keycloak-resources"
-    / "realm.json"
-)
 
 
 class KeycloakOtpAdminClientTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.realm = json.loads(REALM_PATH.read_text())
+        cls.realm = rendered_realm()
 
     def test_admin_cli_access_tokens_keep_identity_and_roles_for_otp_spi(self):
         admin_cli = next(

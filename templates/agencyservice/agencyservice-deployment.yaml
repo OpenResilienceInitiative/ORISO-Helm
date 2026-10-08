@@ -11,10 +11,11 @@ spec:
     type: RollingUpdate
   template:
     metadata:
-      annotations:
-        checksum/technical-service-identity: {{ printf "%s\x00%s" .Values.global.keycloak.backendTechnicalClientId .Values.global.keycloak.serviceTechUserId | sha256sum | quote }}
       labels:
         app: agencyservice
+      annotations:
+        checksum/technical-service-identity: {{ printf "%s\x00%s" .Values.global.keycloak.backendTechnicalClientId .Values.global.keycloak.serviceTechUserId | sha256sum | quote }}
+        checksum/task-bindings: {{ include "oriso.taskBindingsChecksum" . | quote }}
     spec:
       affinity:
         podAntiAffinity:
@@ -30,6 +31,11 @@ spec:
           image: {{ include "oriso.immutableImage" (list "agencyService.image" .Values.agencyService.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            {{- include "oriso.taskBindingEnv" (dict "keys" (list "CONFIG_WIZARD" "INVITE_RESERVATIONS" "NOTIFICATION_DISPATCH" "MATRIX_AGENCY")) | nindent 12 }}
+            - name: TASK_IDENTITY_REQUIRED_TASKS
+              value: "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,MATRIX_AGENCY"
+            - name: TASK_IDENTITY_AUDIENCE
+              value: "agencyservice"
             - name: CSRF_COOKIE_PROPERTY
               valueFrom:
                 configMapKeyRef:
@@ -55,6 +61,7 @@ spec:
                 configMapKeyRef:
                   key: KEYCLOAKSERVICE_ADMIN_CLIENTID
                   name: agencyservice-configmap-env
+            {{- if .Values.global.keycloak.serviceTechUserId }}
             - name: IDENTITY_TECHNICAL_CLIENT_ID
               valueFrom:
                 configMapKeyRef:
@@ -65,6 +72,7 @@ spec:
                 configMapKeyRef:
                   key: TECHNICAL_SERVICE_SUBJECT
                   name: agencyservice-configmap-env
+            {{- end }}
             - name: KEYCLOAKSERVICE_APP_CLIENTID
               valueFrom:
                 configMapKeyRef:
