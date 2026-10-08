@@ -163,14 +163,14 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: OpenResilienceInitiative/ORISO-UserService
-          ref: 7eeaf8a8fd83340add8ff3e6fbd7d4443de607c4
+          ref: d88ffa42f10e36ff8c308754331877fc0fe1b35a
           path: receivers/ORISO-UserService
           persist-credentials: false
       - name: Check out custom Keycloak provider
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: OpenResilienceInitiative/ORISO-Keycloak
-          ref: 0317b698fdf687b18ca45951a52012b50e140684
+          ref: b5de1fa089b413f56f6d880e71798b6c2d7bbd6e
           path: provider/ORISO-Keycloak
           persist-credentials: false
       - name: Set up Java 21
@@ -199,8 +199,12 @@ jobs:
       - name: Build exact custom provider image
         run: docker build --tag oriso-keycloak:joined-permission-contract provider/ORISO-Keycloak/keycloak-image
       - name: Verify provider wire and durable UserService crash recovery
-        run: >-
-          python provider/ORISO-Keycloak/scripts/test-task-command-permissions.py
-          --image oriso-keycloak:joined-permission-contract
-          --userservice-receiver receivers/ORISO-UserService
-          --userservice-java-home "$JAVA_HOME"
+        run: |
+          set -euo pipefail
+          started=$(date +%s)
+          python provider/ORISO-Keycloak/scripts/test-task-command-permissions.py \
+            --image oriso-keycloak:joined-permission-contract \
+            --userservice-receiver receivers/ORISO-UserService \
+            --userservice-java-home "$JAVA_HOME"
+          python chart/tests/task_receiver_permission_matrix.py \
+            --verify-creation-report receivers/ORISO-UserService --started "$started"

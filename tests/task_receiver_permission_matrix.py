@@ -14,14 +14,16 @@ import xml.etree.ElementTree as XML
 from keycloak_task_migration_test import claims, isolated_keycloak, rendered_contract, request
 
 
-def executed_counts(receiver, started):
-    reports = list((receiver / "target/surefire-reports").glob("TEST-*RealTaskTokenAuthorizationIT.xml"))
+def executed_counts(receiver, started, suite_name="RealTaskTokenAuthorizationIT", expected_tests=None):
+    reports = list((receiver / "target/surefire-reports").glob("TEST-*" + suite_name + ".xml"))
     if len(reports) != 1 or reports[0].stat().st_mtime < started:
         raise RuntimeError("Receiver gate produced no fresh single-suite execution report: " + receiver.name)
     report = XML.parse(reports[0]).getroot()
     counts = {key: int(report.get(key, "0")) for key in ("tests", "failures", "errors", "skipped")}
     if counts["tests"] < 1 or any(counts[key] for key in ("failures", "errors", "skipped")):
         raise RuntimeError("Receiver gate must execute cases with zero failures/errors/skips: " + receiver.name)
+    if expected_tests is not None and counts["tests"] != expected_tests:
+        raise RuntimeError("Native suite inventory changed: " + suite_name)
     return counts
 
 
@@ -112,15 +114,24 @@ def real_negative_variants(base, realm, admin, tasks):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
         "--receiver",
         action="append",
         type=Path,
-        required=True,
         help="Existing receiver worktree containing RealTaskTokenAuthorizationIT",
     )
+    mode.add_argument("--verify-creation-report", type=Path, help="Verify all five native creation cases")
+    parser.add_argument("--started", type=float, help="Timestamp recorded before the native command")
     parser.add_argument("--java-home", type=Path, help="Pinned supported JDK for the receiver build")
     args = parser.parse_args()
+    if args.verify_creation_report is not None:
+        if args.started is None:
+            parser.error("--verify-creation-report requires --started from before the native command")
+        counts = executed_counts(args.verify_creation_report.resolve(), args.started,
+            suite_name="IdentityCreationNativeRestartIT", expected_tests=5)
+        print(json.dumps({"nativeCreationExecution": counts}), flush=True)
+        return
     realm, tasks = rendered_contract()
     realm["realm"] = "task-receiver-fixture"
     # Isolated native fixture: remove ORISO authenticators, retain task bindings.
