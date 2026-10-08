@@ -2,6 +2,7 @@
 import base64
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 import yaml
 
@@ -106,6 +107,25 @@ def test_runtime_does_not_receive_deployment_admin_credentials():
         env = resource(docs, "Deployment", name)["spec"]["template"]["spec"]["containers"][0]["env"]
         assert any(v["name"] == "TASK_IDENTITY_REQUIRED_TASKS" and v.get("value") for v in env)
 
+def test_task_secrets_round_trip_json_quotes_and_backslashes():
+    registry = json.loads((ROOT / "files/task-identities.json").read_text())
+    tasks = registry
+    secrets = {
+        task["key"]: 'render-only-quoted-"-backslash-\\-credential-' + task["key"]
+        for task in tasks
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        values = Path(directory) / "escaped-task-secrets.yaml"
+        values.write_text(yaml.safe_dump({"global": {"taskIdentitySecrets": secrets}}))
+        docs = render("-f", str(values))
+    realm = json.loads(base64.b64decode(
+        resource(docs, "Secret", "keycloak-realm-import")["data"]["realm.json"]))
+    clients = {client["clientId"]: client for client in realm["clients"]}
+    credentials = resource(docs, "Secret", "oriso-task-identity-credentials")["data"]
+    for task in tasks:
+        assert clients[task["clientId"]]["secret"] == secrets[task["key"]]
+        assert base64.b64decode(credentials["KEYCLOAK_" + task["key"] + "_CLIENT_SECRET"]).decode() == secrets[task["key"]]
+
 if __name__ == "__main__":
     test_fresh_import_uses_scoped_task_clients()
     test_new_install_does_not_reenable_legacy_actors()
@@ -114,4 +134,5 @@ if __name__ == "__main__":
     test_missing_or_reused_task_credential_fails_without_rendering_secrets()
     test_upgrade_prepares_task_clients_before_receiver_pods_start()
     test_runtime_does_not_receive_deployment_admin_credentials()
+    test_task_secrets_round_trip_json_quotes_and_backslashes()
     print("PASS: scoped task clients, distinct credentials and runtime admin exclusion")

@@ -10,14 +10,13 @@ The ORISO-Keycloak repository carries the same realm values and asserts them too
 """
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 
 import yaml
+from realm_contract_fixture import rendered_realm
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REALM = os.path.join(CHART_DIR, "charts", "keycloak", "keycloak-resources", "realm.json")
 VALUES = [
     "-f", os.path.join(CHART_DIR, "values.yaml.default"),
     "-f", os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml"),
@@ -38,8 +37,7 @@ def keycloak_env(*args):
 
 
 def main():
-    with open(REALM, encoding="utf-8") as handle:
-        realm = json.load(handle)
+    realm = rendered_realm()
     assert realm["bruteForceProtected"] is True
     assert realm["permanentLockout"] is False, "never lock anyone out for good"
     assert realm["maxTemporaryLockouts"] == 0

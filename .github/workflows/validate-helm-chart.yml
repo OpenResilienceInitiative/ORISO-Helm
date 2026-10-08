@@ -163,14 +163,14 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: OpenResilienceInitiative/ORISO-UserService
-          ref: b19640c51ef6aa810ba3ef50baeaf52656396d38
+          ref: 3843cf86ced15ca6c3ea316edd95f6ffc8c7ae36
           path: receivers/ORISO-UserService
           persist-credentials: false
       - name: Check out custom Keycloak provider
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: OpenResilienceInitiative/ORISO-Keycloak
-          ref: d1b13809a923c2f7c11b5fb22accf79883d265e6
+          ref: 0317b698fdf687b18ca45951a52012b50e140684
           path: provider/ORISO-Keycloak
           persist-credentials: false
       - name: Set up Java 21

@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import yaml
+from realm_contract_fixture import rendered_realm
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -170,7 +171,7 @@ def test_only_the_reconcile_hook_has_installer_credentials():
     assert env["KEYCLOAK_ADMIN_USERNAME"]["valueFrom"]["secretKeyRef"] == {"name": "keycloak-secret-env", "key": "KEYCLOAK_ADMIN"}
 
 def test_fresh_realms_seed_technical_with_the_default_subject():
-    realm = json.loads((ROOT / "charts/keycloak/keycloak-resources/realm.json").read_text())
+    realm = rendered_realm()
     technical = next(user for user in realm["users"] if user["username"] == "technical")
     assert technical["id"] == TECHNICAL_ID
 
@@ -184,7 +185,7 @@ def test_agencyservice_no_longer_receives_app_base_url():
 
 
 def test_fresh_realms_have_dedicated_otp_and_zero_retired_admin_grants():
-    realm = json.loads((ROOT / "charts/keycloak/keycloak-resources/realm.json").read_text())
+    realm = rendered_realm()
     assert "otp-config-admin" in {role["name"] for role in realm["roles"]["realm"]}
     actor = next(u for u in realm["users"] if u.get("serviceAccountClientId") == "backend-account-otp")
     assert actor["realmRoles"] == ["otp-config-admin"]

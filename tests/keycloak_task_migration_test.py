@@ -9,6 +9,7 @@ import base64
 import importlib.util
 import json
 import subprocess
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -37,7 +38,15 @@ def rendered_contract():
     for path in ("values.yaml.default", "tests/fixtures/values-render-domain.yaml",
                  "secrets.yaml.default", "tests/fixtures/render-required-secrets.yaml"):
         command.extend(["-f", str(ROOT / path)])
-    result = subprocess.run(command, check=True, capture_output=True, text=True)
+    registry = json.loads((ROOT / "files/task-identities.json").read_text())
+    secrets = {
+        task["key"]: 'native-only-quoted-"-backslash-\\-credential-' + task["key"]
+        for task in registry
+    }
+    with tempfile.TemporaryDirectory(prefix="oriso-quoted-task-fixture-") as directory:
+        values = Path(directory) / "task-secrets.yaml"
+        values.write_text(yaml.safe_dump({"global": {"taskIdentitySecrets": secrets}}))
+        result = subprocess.run(command + ["-f", str(values)], check=True, capture_output=True, text=True)
     docs = [doc for doc in yaml.safe_load_all(result.stdout) if doc]
     config = next(doc for doc in docs if doc["kind"] == "Secret" and doc["metadata"]["name"] == "keycloak-realm-import")
     secret = next(doc for doc in docs if doc["kind"] == "Secret" and doc["metadata"]["name"] == "oriso-task-identity-credentials")

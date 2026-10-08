@@ -1,21 +1,12 @@
-import json
 import unittest
-from pathlib import Path
+from realm_contract_fixture import rendered_realm
 
-
-REALM_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "charts"
-    / "keycloak"
-    / "keycloak-resources"
-    / "realm.json"
-)
 
 
 class KeycloakTwoFactorRealmContractTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.realm = json.loads(REALM_PATH.read_text())
+        cls.realm = rendered_realm()
         cls.flows = {
             flow["alias"]: flow for flow in cls.realm["authenticationFlows"]
         }

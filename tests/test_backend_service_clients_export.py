@@ -1,10 +1,9 @@
-import json
-from pathlib import Path
 import unittest
+from realm_contract_fixture import rendered_realm
 
 class BackendServiceClients(unittest.TestCase):
     def test_legacy_export_preserves_ids_without_enabling_shared_privileges(self):
-        realm = json.loads((Path(__file__).resolve().parents[1] / 'charts/keycloak/keycloak-resources/realm.json').read_text())
+        realm = rendered_realm()
         clients = {c['clientId']: c for c in realm['clients']}
         users = {u.get('serviceAccountClientId'): u for u in realm['users']}
         for name, subject in {'backend-technical':'12316d09-a9da-41b9-a13e-ee2c515800b5',
