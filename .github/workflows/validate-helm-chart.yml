@@ -163,7 +163,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: OpenResilienceInitiative/ORISO-UserService
-          ref: 2fd1b924f73104282dc1551e093d8d7d19d8211d
+          ref: 4e6ea74c2346d06b787147b41392dedf7c8ffa29
           path: receivers/ORISO-UserService
           persist-credentials: false
       - name: Check out custom Keycloak provider
