@@ -221,11 +221,17 @@ def reconcile(url, realm, token, tasks, legacy_actors=None, administrator=""):
         api.request('POST','clients/'+cid+'/protocol-mappers/models',role_mapper)
         for audience in task['audiences']:
             api.request('POST','clients/'+cid+'/protocol-mappers/models',{'name':'audience-'+audience,'protocol':'openid-connect','protocolMapper':'oidc-audience-mapper','config':{'included.custom.audience':audience,'access.token.claim':'true','id.token.claim':'false'}})
-        current=api.request('GET','clients/'+cid+'/scope-mappings/realm')
-        if current:api.request('DELETE','clients/'+cid+'/scope-mappings/realm',current)
+        current=api.request('GET','clients/'+cid+'/scope-mappings') or {}
+        if current.get('realmMappings'):
+            api.request('DELETE','clients/'+cid+'/scope-mappings/realm',current['realmMappings'])
+        for mapping in current.get('clientMappings',{}).values():
+            if mapping.get('mappings'):
+                api.request('DELETE','clients/'+cid+'/scope-mappings/clients/'+quote(mapping['id'],safe=''),mapping['mappings'])
         api.request('POST','clients/'+cid+'/scope-mappings/realm',desired)
         actual=api.request('GET','users/'+uid+'/role-mappings')
         if sorted(r['name'] for r in actual.get('realmMappings',[]))!=sorted(task['roles']) or actual.get('clientMappings'):raise ReconcileError('TASK_IDENTITY_MAPPING_READBACK_FAILED')
+        actual_scope=api.request('GET','clients/'+cid+'/scope-mappings') or {}
+        if sorted(r['name'] for r in actual_scope.get('realmMappings',[]))!=sorted(task['roles']) or actual_scope.get('clientMappings'):raise ReconcileError('TASK_IDENTITY_MAPPING_READBACK_FAILED')
     retire_legacy(api, legacy)
     return len(tasks)
 

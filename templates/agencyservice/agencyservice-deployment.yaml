@@ -14,6 +14,7 @@ spec:
       labels:
         app: agencyservice
       annotations:
+        checksum/technical-service-identity: {{ printf "%s\x00%s" .Values.global.keycloak.backendTechnicalClientId .Values.global.keycloak.serviceTechUserId | sha256sum | quote }}
         checksum/task-bindings: {{ include "oriso.taskBindingsChecksum" . | quote }}
     spec:
       affinity:
@@ -60,6 +61,18 @@ spec:
                 configMapKeyRef:
                   key: KEYCLOAKSERVICE_ADMIN_CLIENTID
                   name: agencyservice-configmap-env
+            {{- if .Values.global.keycloak.serviceTechUserId }}
+            - name: IDENTITY_TECHNICAL_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  key: IDENTITY_TECHNICAL_CLIENT_ID
+                  name: agencyservice-configmap-env
+            - name: TECHNICAL_SERVICE_SUBJECT
+              valueFrom:
+                configMapKeyRef:
+                  key: TECHNICAL_SERVICE_SUBJECT
+                  name: agencyservice-configmap-env
+            {{- end }}
             - name: KEYCLOAKSERVICE_APP_CLIENTID
               valueFrom:
                 configMapKeyRef:
