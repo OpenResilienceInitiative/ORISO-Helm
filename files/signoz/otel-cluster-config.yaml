@@ -88,6 +88,71 @@ receivers:
     auth_type: serviceAccount
     namespaces:
     - ${env:K8S_NAMESPACE}
+{{- if eq (include "oriso.podScrape.enabled" .) "true" }}
+  # Pod metrics (global.observability.appMetrics or dbMetrics): scrapes only pods in
+  # the release namespace that carry oriso.io/scrape="true", on the port and
+  # path from their oriso.io/* annotations. `$$` escapes the collector's own
+  # ${env:...} expansion inside the relabel replacement.
+  prometheus/oriso-apps:
+    config:
+      scrape_configs:
+      - job_name: oriso-apps
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - {{ .Release.Namespace }}
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_oriso_io_scrape]
+          action: keep
+          regex: "true"
+        - source_labels: [__meta_kubernetes_pod_annotation_oriso_io_path]
+          action: replace
+          regex: (.+)
+          target_label: __metrics_path__
+        - source_labels: [__address__, __meta_kubernetes_pod_annotation_oriso_io_port]
+          action: replace
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $$1:$$2
+          target_label: __address__
+        - source_labels: [__meta_kubernetes_pod_annotation_oriso_io_job]
+          action: replace
+          target_label: job
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: k8s_namespace_name
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: k8s_pod_name
+{{- end }}
+{{- if eq (include "oriso.dbMetrics.enabled" .) "true" }}
+  # Data store metrics (global.observability.dbMetrics): status counters only,
+  # read with the monitoring users db-monitoring-reconcile-job maintains.
+  mysql:
+    endpoint: mariadb.{{ .Release.Namespace }}:3306
+    username: oriso_monitor
+    password: ${env:DBMON_MARIADB_PASSWORD}
+    collection_interval: 60s
+  mongodb:
+    hosts:
+    - endpoint: mongodb.{{ .Release.Namespace }}:27017
+    username: oriso_monitor
+    password: ${env:DBMON_MONGODB_PASSWORD}
+    direct_connection: true
+    collection_interval: 60s
+    tls:
+      insecure: true
+    metrics:
+      # MongoDB 5 no longer reports the WiredTiger flush counter; without this the
+      # receiver logs "could not find key" on every collection.
+      mongodb.flushes.rate:
+        enabled: false
+  rabbitmq:
+    endpoint: http://rabbitmq.{{ .Release.Namespace }}:15672
+    username: oriso-monitor
+    password: ${env:DBMON_RABBITMQ_PASSWORD}
+    collection_interval: 60s
+{{- end }}
 service:
   extensions:
   - health_check
@@ -114,6 +179,30 @@ service:
       - batch
       receivers:
       - k8s_cluster
+{{- if eq (include "oriso.podScrape.enabled" .) "true" }}
+    metrics/apps:
+      exporters:
+      - otlphttp
+      processors:
+      - resource/deployenv
+      - resourcedetection
+      - batch
+      receivers:
+      - prometheus/oriso-apps
+{{- end }}
+{{- if eq (include "oriso.dbMetrics.enabled" .) "true" }}
+    metrics/dbs:
+      exporters:
+      - otlphttp
+      processors:
+      - resource/deployenv
+      - resourcedetection
+      - batch
+      receivers:
+      - mysql
+      - mongodb
+      - rabbitmq
+{{- end }}
   telemetry:
     logs:
       encoding: json

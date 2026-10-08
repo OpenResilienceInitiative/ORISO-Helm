@@ -124,6 +124,17 @@ data:
         resources:
           - names: [client, federation]
             compress: false
+      {{- if eq (include "oriso.appMetrics.enabled" $) "true" }}
+      # Prometheus metrics for the SigNoz cluster collector. Separate port, no
+      # ingress routes it; the client listener above never serves /_synapse/metrics.
+      - port: 9000
+        type: metrics
+        bind_addresses: ["0.0.0.0"]
+      {{- end }}
+
+    {{- if eq (include "oriso.appMetrics.enabled" $) "true" }}
+    enable_metrics: true
+    {{- end }}
 
     database:
       name: sqlite3
