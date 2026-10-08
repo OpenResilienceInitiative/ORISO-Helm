@@ -11,6 +11,8 @@ spec:
     type: RollingUpdate
   template:
     metadata:
+      annotations:
+        checksum/technical-service-identity: {{ printf "%s\x00%s" .Values.global.keycloak.backendTechnicalClientId .Values.global.keycloak.serviceTechUserId | sha256sum | quote }}
       labels:
         app: agencyservice
     spec:
@@ -52,6 +54,16 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   key: KEYCLOAKSERVICE_ADMIN_CLIENTID
+                  name: agencyservice-configmap-env
+            - name: IDENTITY_TECHNICAL_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  key: IDENTITY_TECHNICAL_CLIENT_ID
+                  name: agencyservice-configmap-env
+            - name: TECHNICAL_SERVICE_SUBJECT
+              valueFrom:
+                configMapKeyRef:
+                  key: TECHNICAL_SERVICE_SUBJECT
                   name: agencyservice-configmap-env
             - name: KEYCLOAKSERVICE_APP_CLIENTID
               valueFrom:
