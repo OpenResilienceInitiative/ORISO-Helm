@@ -142,7 +142,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: OpenResilienceInitiative/ORISO-TenantService
-          ref: 8dbed496ff7dba01564bc585378752eb5fc149aa
+          ref: 7c0883ec8a0ee2ff2b2d096472ad8bfc81bad53c
           path: receivers/ORISO-TenantService
           persist-credentials: false
       - name: Check out AgencyService receiver
@@ -163,7 +163,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: OpenResilienceInitiative/ORISO-UserService
-          ref: 52ae28ba83770f6f0a3838f7ad750ce0e2c9bb0c
+          ref: 2fd1b924f73104282dc1551e093d8d7d19d8211d
           path: receivers/ORISO-UserService
           persist-credentials: false
       - name: Check out custom Keycloak provider
