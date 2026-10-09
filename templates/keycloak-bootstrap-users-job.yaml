@@ -1,9 +1,18 @@
 {{- $bootstrapUsers := default (dict) .Values.global.keycloak.bootstrapUsers -}}
 {{- $realmAdmin := default (dict) $bootstrapUsers.realmAdmin -}}
 {{- $realmAdminName := default "realmadmin" $realmAdmin.username -}}
-{{- /* Helm#422: the master bootstrap admin and the ORISO-realm user must not share a name. */ -}}
-{{- if and .Release.IsInstall (eq (lower .Values.global.secrets.keycloakAdminUsername) (lower $realmAdminName)) -}}
+{{- /* Helm#422: the installer names the master bootstrap admin; upgrades keep the existing name. */ -}}
+{{- $masterAdminName := lower (default "" .Values.global.secrets.keycloakAdminUsername) -}}
+{{- if not $masterAdminName -}}
+{{- fail "global.secrets.keycloakAdminUsername is required: choose the master bootstrap admin name, e.g. bootstrap-admin (runbooks/keycloak-break-glass.md)" -}}
+{{- end -}}
+{{- if .Release.IsInstall -}}
+{{- if has $masterAdminName (list "admin" "realmadmin" "keycloak" "root") -}}
+{{- fail "global.secrets.keycloakAdminUsername must not be a well-known name (admin, realmadmin, keycloak, root) (runbooks/keycloak-break-glass.md)" -}}
+{{- end -}}
+{{- if eq $masterAdminName (lower $realmAdminName) -}}
 {{- fail "global.secrets.keycloakAdminUsername must differ from bootstrapUsers.realmAdmin.username (runbooks/keycloak-break-glass.md)" -}}
+{{- end -}}
 {{- end -}}
 {{- $bootstrapEnabled := true -}}
 {{- if hasKey $bootstrapUsers "enabled" -}}

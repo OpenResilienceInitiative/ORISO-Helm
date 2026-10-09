@@ -10,7 +10,8 @@ ORISO-Helm#422. The chart used to give two different Keycloak accounts the same 
 
 They are two separate user objects that shared a name and, on fresh installs, a password.
 
-Now the master bootstrap admin is the only break-glass identity. Its default name is `oriso-bootstrap-admin`. The
+Now the master bootstrap admin is the only break-glass identity. The installer chooses its name (for example
+`bootstrap-admin`); the chart ships none. The
 ORISO-realm `realmadmin` ships disabled with no password, and the bootstrap Job keeps it that way. No automation logs
 in as it. Hook Jobs log in only to `master`, as the bootstrap admin. Runtime services and the SMTP sync use realm
 clients (`backend-technical`, `backend-admin`, `smtp-sync`).
@@ -110,12 +111,13 @@ Fresh imports already ship it disabled. Existing realms keep whatever state they
 ## Renaming the master bootstrap admin on an existing install
 
 Keycloak ignores a changed `keycloakAdminUsername` once `master` has users. Every hook Job would then fail to log
-in. A fresh install refuses to render when the master name equals `bootstrapUsers.realmAdmin.username`. An upgrade
-still renders the old shared name, so existing installs keep working until this migration is done:
+in. The chart refuses to render with an empty name. A fresh install also refuses the well-known names `admin`,
+`realmadmin`, `keycloak` and `root` (any case) and a name equal to `bootstrapUsers.realmAdmin.username`. An upgrade
+still renders an existing name such as `realmadmin`, so existing installs keep working until this migration is done:
 
 1. In a break-glass session, create the new master user. It has the realm role `admin` in `master` and a fresh
-   generated password: `kc create users -r master -s username=oriso-bootstrap-admin -s enabled=true`, then
-   `kc set-password ...` and `kc add-roles -r master --uusername oriso-bootstrap-admin --rolename admin`.
+   generated password: `kc create users -r master -s username=bootstrap-admin -s enabled=true`, then
+   `kc set-password ...` and `kc add-roles -r master --uusername bootstrap-admin --rolename admin`.
 2. Log in once as the new user with `kcadm config credentials --realm master` to prove it works.
 3. Put the new name and password into the private secrets values, then upgrade. The service-identity hook logs in
    with them, so a successful hook proves the switch.
