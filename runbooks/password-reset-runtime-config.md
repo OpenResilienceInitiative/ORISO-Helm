@@ -101,8 +101,15 @@ short Jobs copy it into the realm; no pod stays up between runs (ORISO-Helm#420)
   Admin panel reaches Keycloak within one interval.
 
 Each run reads `/settingsadmin/smtp-credentials` with the existing technical
-client, then writes only `smtpServer` with the `smtp-sync` client of the ORISO
-realm (client_credentials). The master admin password is not mounted in any
+client, then reads the realm and writes only `smtpServer` with the `smtp-sync`
+client of the ORISO realm (client_credentials). Unchanged SMTP does not cause
+realm writes: when the realm already holds the saved values the run logs
+`SMTP_RECONCILE_UNCHANGED` and only acknowledges the revision. Keycloak masks
+the stored password on read, so the written `smtpServer` carries an
+`orisoSyncFingerprint` (HMAC-SHA256 of the transport, keyed with the
+`smtp-sync` client secret); a changed password or a console edit of any other
+field is written back on the next run. Rotating that secret causes one extra
+write. The master admin password is not mounted in any
 SMTP pod. Native Keycloak cannot limit a client to SMTP fields: updating
 realm SMTP needs `realm-management` `manage-realm`, so `smtp-sync` holds exactly
 that role in the ORISO realm and nothing in master. The narrowing is: realm
@@ -121,9 +128,12 @@ CTS no longer has a push helper: `SMTP_RECONCILE_URL` is empty, so a save stays
 Job posts `{revision, status}` to CTS `/settingsadmin/smtp-sync-acknowledgement`
 with the technical client. CTS marks only that exact saved revision; an older one
 gets 409 (`SMTP_RECONCILE_ACK_STALE`) and the next run applies the newer save.
-A failed Keycloak write is never acknowledged. This needs the CTS companion
-(branch `feat/420-smtp-sync-ack`); with an older CTS the acknowledgement fails
-and the Job reports `SMTP_RECONCILE_ACK_FAILED` after writing Keycloak.
+A failed Keycloak write is never acknowledged. **Ship order:** CTS
+`feat/420-smtp-sync-ack` must be deployed before or together with this chart.
+With an older CTS the acknowledgement endpoint answers 404/405: the Job still
+exits 0 after writing Keycloak and logs `WARNING SMTP_RECONCILE_ACK_UNSUPPORTED`;
+the Admin status stays `SMTP_SYNC_PENDING` until that CTS is deployed. Any other
+acknowledgement failure reports `SMTP_RECONCILE_ACK_FAILED`.
 
 **For developers — run the real-Keycloak proof (needs Docker, removes its container):**
 ```text

@@ -59,6 +59,9 @@ class SmtpFixture(unittest.TestCase):
         self.revision_header = True
         self.acks = []
         self.ack_status = 204
+        # Keycloak masks the stored SMTP password on read, like the real Admin API.
+        self.realm_smtp = {"host": "previous.example", "password": "previous-password"}
+        self.realm_status = 200
         self.update_started = threading.Event()
         self.update_release = threading.Event()
         self.update_release.set()
@@ -106,6 +109,13 @@ class SmtpFixture(unittest.TestCase):
 
             def do_GET(self):
                 owner.requests.append(("GET", self.path, dict(self.headers), None))
+                if self.path == "/auth/admin/realms/example":
+                    if self.headers.get("Authorization") != "Bearer " + jwt(owner.sync_claims):
+                        return self.reply(403)
+                    smtp = dict(owner.realm_smtp)
+                    if "password" in smtp:
+                        smtp["password"] = "**********"
+                    return self.reply(owner.realm_status, {"realm": "example", "smtpServer": smtp})
                 if self.path != "/cts/settingsadmin/smtp-credentials":
                     return self.reply(404)
                 if self.headers.get("Authorization") != "Bearer " + jwt(owner.claims):
@@ -133,6 +143,7 @@ class SmtpFixture(unittest.TestCase):
                 owner.update_release.wait(10)
                 if owner.update_status == 204:
                     owner.updates.append(payload)
+                    owner.realm_smtp = payload["smtpServer"]
                 self.reply(owner.update_status, {"error": "private-smtp-provider-error"})
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -170,7 +181,7 @@ class ReconcileSmtpTest(SmtpFixture):
     def test_saved_snapshot_updates_starttls_without_chart_values(self):
         result = self.run_reconciler()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len([r for r in self.requests if r[0] == "GET"]), 1)
+        self.assertEqual(len([r for r in self.requests if r[1].endswith("/smtp-credentials")]), 1)
         smtp = self.updates[0]["smtpServer"]
         self.assertEqual(smtp["host"], "smtp.provider.example")
         self.assertEqual(smtp["from"], "sender@provider.example")
@@ -208,6 +219,7 @@ class ReconcileSmtpTest(SmtpFixture):
     def test_disabled_saved_switches_clear_old_realm_transport(self):
         for field in ("globalFeatureSystemNotificationEmailsEnabled", "globalSmtpEnabled"):
             with self.subTest(field=field):
+                self.realm_smtp = {"host": "previous.example", "password": "previous-password"}
                 self.snapshot[field] = False
                 result = self.run_reconciler()
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -218,6 +230,7 @@ class ReconcileSmtpTest(SmtpFixture):
     def test_partial_snapshot_clears_old_realm_transport_without_fallback(self):
         for field in ("globalSmtpHost", "globalSmtpPort", "globalSmtpFrom", "globalSmtpUsername", "globalSmtpPassword", "globalSmtpSecure"):
             with self.subTest(field=field):
+                self.realm_smtp = {"host": "previous.example", "password": "previous-password"}
                 value = self.snapshot.pop(field)
                 result = self.run_reconciler()
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -306,6 +319,7 @@ class ReconcileSmtpTest(SmtpFixture):
                              ("globalSmtpPort", "not-a-port"), ("globalSmtpSecure", "false"),
                              ("globalSmtpFrom", "invalid"), ("globalSmtpFrom", "private\nvalue")):
             with self.subTest(field=field, value=value):
+                self.realm_smtp = {"host": "previous.example", "password": "previous-password"}
                 self.snapshot = {**original, field: value}
                 result = self.run_reconciler()
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -413,9 +427,49 @@ class ReconcileSmtpTest(SmtpFixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("SMTP_RECONCILE_ACK_STALE", result.stdout)
 
+    # Every 5-minute run reads the realm first; only a real difference writes it.
+    def test_unchanged_smtp_does_not_write_the_realm_again(self):
+        self.assertEqual(self.run_reconciler().returncode, 0)
+        result = self.run_reconciler()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.updates), 1)
+        self.assertIn("SMTP_RECONCILE_UNCHANGED", result.stdout)
+        self.assertEqual(self.acks, [{"revision": 1, "status": "APPLIED"}] * 2)
+
+    def test_password_only_rotation_is_written_although_keycloak_masks_it(self):
+        self.assertEqual(self.run_reconciler().returncode, 0)
+        self.snapshot["globalSmtpPassword"] = "rotated-password-canary"
+        self.assertEqual(self.run_reconciler().returncode, 0)
+        self.assertEqual(len(self.updates), 2)
+        self.assertEqual(self.updates[-1]["smtpServer"]["password"], "rotated-password-canary")
+
+    def test_realm_changed_outside_the_job_is_written_back(self):
+        self.assertEqual(self.run_reconciler().returncode, 0)
+        self.realm_smtp = {**self.realm_smtp, "host": "edited-in-console.example"}
+        self.assertEqual(self.run_reconciler().returncode, 0)
+        self.assertEqual(len(self.updates), 2)
+        self.assertEqual(self.updates[-1]["smtpServer"]["host"], "smtp.provider.example")
+
+    def test_already_disabled_realm_is_not_written(self):
+        self.realm_smtp = {}
+        self.snapshot["globalSmtpEnabled"] = False
+        result = self.run_reconciler()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.updates, [])
+        self.assertEqual(self.acks, [{"revision": 1, "status": "DISABLED_OR_INCOMPLETE"}])
+
+    def test_unreadable_realm_is_neither_written_nor_acknowledged(self):
+        self.realm_status = 500
+        result = self.run_reconciler()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("SMTP_RECONCILE_KEYCLOAK_UPDATE_FAILED", result.stderr)
+        self.assertEqual(self.updates, [])
+        self.assertEqual(self.acks, [])
+
     def test_older_cts_without_acknowledgement_endpoint_still_succeeds(self):
         for status in (404, 405):
             with self.subTest(status=status):
+                self.realm_smtp = {"host": "previous.example", "password": "previous-password"}
                 self.ack_status = status
                 result = self.run_reconciler()
                 self.assertEqual(result.returncode, 0, result.stderr)

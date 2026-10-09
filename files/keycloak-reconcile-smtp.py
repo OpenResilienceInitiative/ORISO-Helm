@@ -7,6 +7,8 @@ file, deployment SMTP fallback or raw upstream error is used by this helper.
 
 import base64
 import errno
+import hashlib
+import hmac
 import json
 import math
 import os
@@ -21,6 +23,8 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 MAX_RESPONSE_BYTES = 65536
 MAX_REALM_RESPONSE_BYTES = 1048576
 HTTP_TIMEOUT_SECONDS = 10
+# Keycloak masks the stored password on read; this keyed digest stands in for it.
+FINGERPRINT = "orisoSyncFingerprint"
 
 
 class ReconcileError(Exception):
@@ -290,14 +294,34 @@ def acknowledge(http, config, technical_token, revision, status):
     return "SMTP_RECONCILE_ACKNOWLEDGED"
 
 
+def desired_smtp(transport, key):
+    if not transport:
+        return {}
+    digest = hmac.new(key.encode(), json.dumps(transport, sort_keys=True).encode(), hashlib.sha256)
+    return {**transport, FINGERPRINT: digest.hexdigest()}
+
+
+def realm_holds(current, desired):
+    if not isinstance(current, dict) or ("password" in current) != ("password" in desired):
+        return False
+    return ({k: v for k, v in current.items() if k != "password"}
+            == {k: v for k, v in desired.items() if k != "password"})
+
+
 def apply_snapshot(http, config, snapshot):
     transport = smtp_transport(snapshot)
     admin_token = sync_login(http, config)
-    http.request("PUT", config["KEYCLOAK_URL"] + "/admin/realms/" + quote(config["KEYCLOAK_REALM"], safe=""),
-                 json.dumps({"smtpServer": transport}).encode(),
+    desired = desired_smtp(transport, config["SMTP_SYNC_CLIENT_SECRET"])
+    realm_url = config["KEYCLOAK_URL"] + "/admin/realms/" + quote(config["KEYCLOAK_REALM"], safe="")
+    realm = http.request("GET", realm_url, headers={"Authorization": "Bearer " + admin_token},
+                         failure="KEYCLOAK_UPDATE_FAILED", max_response_bytes=MAX_REALM_RESPONSE_BYTES)
+    status = "APPLIED" if transport else "DISABLED_OR_INCOMPLETE"
+    if realm_holds(realm.get("smtpServer"), desired):
+        return status, False
+    http.request("PUT", realm_url, json.dumps({"smtpServer": desired}).encode(),
                  {"Authorization": "Bearer " + admin_token, "Content-Type": "application/json"},
                  "KEYCLOAK_UPDATE_FAILED")
-    return "APPLIED" if transport else "DISABLED_OR_INCOMPLETE"
+    return status, True
 
 
 def reconcile(env):
@@ -305,8 +329,10 @@ def reconcile(env):
     http = HttpClient()
     technical_token = technical_login(http, config)
     snapshot, revision = read_snapshot(http, config, technical_token)
-    status = apply_snapshot(http, config, snapshot)
-    if status == "APPLIED":
+    status, written = apply_snapshot(http, config, snapshot)
+    if not written:
+        print("SMTP_RECONCILE_UNCHANGED: Keycloak already holds the current Admin Settings")
+    elif status == "APPLIED":
         print("SMTP_RECONCILE_APPLIED: current Admin Settings")
     else:
         print("SMTP_DISABLED_OR_INCOMPLETE: Keycloak mail disabled until Admin Settings are complete")
