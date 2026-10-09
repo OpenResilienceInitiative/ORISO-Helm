@@ -84,7 +84,6 @@ class HttpClient:
         # urllib's HTTPS handler verifies the normal trust store and host name.
         # No redirects/proxy credentials/disabled-certificate fallback are used.
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
-        self.last_status = None
 
     def request(self, method, url, body=None, headers=None, failure="SOURCE_UNAVAILABLE",
                 revision=False, authenticate_source=False, timeout=HTTP_TIMEOUT_SECONDS,
@@ -100,14 +99,13 @@ class HttpClient:
                 source_revision = response.headers.get("X-Smtp-Revision")
         except HTTPError as error:
             error.close()
-            self.last_status = error.code
             if authenticate_source and error.code in (401, 403):
                 raise ReconcileError("SMTP_RECONCILE_UNAUTHORIZED", 403) from None
             # 502/503 while an upstream is still starting is transient for callers
             # that opted in (mail locale hook); they retry within their own budget.
             if trigger_request and error.code in (502, 503):
                 raise TriggerNotReady() from None
-            raise ReconcileError("SMTP_RECONCILE_" + failure) from None
+            raise ReconcileError("SMTP_RECONCILE_" + failure, error.code) from None
         except (URLError, OSError) as error:
             if trigger_request and transient_connection(error):
                 raise TriggerNotReady() from None
@@ -121,7 +119,7 @@ class HttpClient:
         if status == 204 or (admin_api and status == 201):
             return (None, source_revision) if revision else None
         if status != 200:
-            raise ReconcileError("SMTP_RECONCILE_" + failure)
+            raise ReconcileError("SMTP_RECONCILE_" + failure, status)
         try:
             parsed = json.loads(data)
         except (ValueError, UnicodeError):
@@ -276,15 +274,18 @@ def acknowledge(http, config, technical_token, revision, status):
     # CTS marks only this exact revision; 409 means a newer save the next run applies.
     if revision == 0:
         return "SMTP_RECONCILE_NOTHING_SAVED"
-    http.last_status = None
     try:
         http.request("POST", config["CONSULTING_TYPE_SERVICE_URL"] + "/settingsadmin/smtp-sync-acknowledgement",
                      json.dumps({"revision": revision, "status": status}).encode(),
                      {"Authorization": "Bearer " + technical_token, "tenantId": "0",
                       "Content-Type": "application/json"}, "ACK_FAILED")
-    except ReconcileError:
-        if http.last_status == 409:
+    except ReconcileError as error:
+        if error.status == 409:
             return "SMTP_RECONCILE_ACK_STALE"
+        if error.status in (404, 405):
+            # Upgrade window: Keycloak is already written; only the Admin status lags.
+            return ("WARNING SMTP_RECONCILE_ACK_UNSUPPORTED: CTS has no acknowledgement endpoint; status stays "
+                    "pending until CTS feat/420-smtp-sync-ack is deployed")
         raise
     return "SMTP_RECONCILE_ACKNOWLEDGED"
 

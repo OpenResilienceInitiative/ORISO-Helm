@@ -413,6 +413,18 @@ class ReconcileSmtpTest(SmtpFixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("SMTP_RECONCILE_ACK_STALE", result.stdout)
 
+    def test_older_cts_without_acknowledgement_endpoint_still_succeeds(self):
+        for status in (404, 405):
+            with self.subTest(status=status):
+                self.ack_status = status
+                result = self.run_reconciler()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(self.updates), 1)
+                self.assertIn("CTS has no acknowledgement endpoint; status stays pending until "
+                              "CTS feat/420-smtp-sync-ack is deployed", result.stdout + result.stderr)
+                self.assertNotIn("SMTP_RECONCILE_ACK_FAILED", result.stdout + result.stderr)
+                self.updates.clear()
+
     def test_acknowledgement_failure_is_visible(self):
         for status in (403, 500):
             with self.subTest(status=status):
