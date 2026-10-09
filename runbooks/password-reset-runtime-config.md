@@ -116,10 +116,14 @@ checks a real token. Supply `global.secrets.keycloakSmtpSyncClientSecret`
 (persistent, random, at least 32 printable characters, different from the
 backend client secrets) before upgrading; the render fails without it.
 
-CTS no longer has a push helper: `SMTP_RECONCILE_URL` is empty. Until CTS stops
-dispatching, its SMTP sync status stays `SMTP_SYNC_PENDING` after a save even
-though the CronJob has applied it. Check Keycloak's realm email settings or a
-received mail instead of that status.
+CTS no longer has a push helper: `SMTP_RECONCILE_URL` is empty, so a save stays
+`SMTP_SYNC_PENDING` until the next Job run. After a successful Keycloak write the
+Job posts `{revision, status}` to CTS `/settingsadmin/smtp-sync-acknowledgement`
+with the technical client. CTS marks only that exact saved revision; an older one
+gets 409 (`SMTP_RECONCILE_ACK_STALE`) and the next run applies the newer save.
+A failed Keycloak write is never acknowledged. This needs the CTS companion
+(branch `feat/420-smtp-sync-ack`); with an older CTS the acknowledgement fails
+and the Job reports `SMTP_RECONCILE_ACK_FAILED` after writing Keycloak.
 
 **For developers — run the real-Keycloak proof (needs Docker, removes its container):**
 ```text

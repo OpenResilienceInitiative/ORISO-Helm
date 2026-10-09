@@ -84,6 +84,7 @@ class HttpClient:
         # urllib's HTTPS handler verifies the normal trust store and host name.
         # No redirects/proxy credentials/disabled-certificate fallback are used.
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
+        self.last_status = None
 
     def request(self, method, url, body=None, headers=None, failure="SOURCE_UNAVAILABLE",
                 revision=False, authenticate_source=False, timeout=HTTP_TIMEOUT_SECONDS,
@@ -99,6 +100,7 @@ class HttpClient:
                 source_revision = response.headers.get("X-Smtp-Revision")
         except HTTPError as error:
             error.close()
+            self.last_status = error.code
             if authenticate_source and error.code in (401, 403):
                 raise ReconcileError("SMTP_RECONCILE_UNAUTHORIZED", 403) from None
             # 502/503 while an upstream is still starting is transient for callers
@@ -254,10 +256,37 @@ def sync_login(http, config):
     return token
 
 
+def saved_revision(value):
+    if (not isinstance(value, str) or not value.isascii() or not value.isdecimal()
+            or len(value) > 19 or int(value) > 2**63 - 1):
+        raise ReconcileError("SMTP_RECONCILE_SOURCE_REVISION_INVALID")
+    return int(value)
+
+
 def read_snapshot(http, config, technical_token):
-    return http.request("GET", config["CONSULTING_TYPE_SERVICE_URL"] + "/settingsadmin/smtp-credentials",
-                        headers={"Authorization": "Bearer " + technical_token, "tenantId": "0",
-                                 "Cache-Control": "no-store"})
+    # Body and X-Smtp-Revision come from one saved document; the revision is what we acknowledge.
+    snapshot, revision = http.request(
+        "GET", config["CONSULTING_TYPE_SERVICE_URL"] + "/settingsadmin/smtp-credentials",
+        headers={"Authorization": "Bearer " + technical_token, "tenantId": "0",
+                 "Cache-Control": "no-store"}, revision=True)
+    return snapshot, saved_revision(revision)
+
+
+def acknowledge(http, config, technical_token, revision, status):
+    # CTS marks only this exact revision; 409 means a newer save the next run applies.
+    if revision == 0:
+        return "SMTP_RECONCILE_NOTHING_SAVED"
+    http.last_status = None
+    try:
+        http.request("POST", config["CONSULTING_TYPE_SERVICE_URL"] + "/settingsadmin/smtp-sync-acknowledgement",
+                     json.dumps({"revision": revision, "status": status}).encode(),
+                     {"Authorization": "Bearer " + technical_token, "tenantId": "0",
+                      "Content-Type": "application/json"}, "ACK_FAILED")
+    except ReconcileError:
+        if http.last_status == 409:
+            return "SMTP_RECONCILE_ACK_STALE"
+        raise
+    return "SMTP_RECONCILE_ACKNOWLEDGED"
 
 
 def apply_snapshot(http, config, snapshot):
@@ -273,11 +302,14 @@ def apply_snapshot(http, config, snapshot):
 def reconcile(env):
     config = configuration(env)
     http = HttpClient()
-    status = apply_snapshot(http, config, read_snapshot(http, config, technical_login(http, config)))
+    technical_token = technical_login(http, config)
+    snapshot, revision = read_snapshot(http, config, technical_token)
+    status = apply_snapshot(http, config, snapshot)
     if status == "APPLIED":
         print("SMTP_RECONCILE_APPLIED: current Admin Settings")
     else:
         print("SMTP_DISABLED_OR_INCOMPLETE: Keycloak mail disabled until Admin Settings are complete")
+    print(acknowledge(http, config, technical_token, revision, status))
 
 
 def main():
