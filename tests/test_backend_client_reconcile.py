@@ -351,4 +351,39 @@ class ReconcileClientsTest(unittest.TestCase):
         self.assertEqual(self.clients['backend-admin']['secret'],
                          'admin-fixture-secret-32-characters')
 
+    # Helm#422: opt-in disabling of the ORISO-realm break-glass user on existing realms.
+    def test_realm_admin_stays_enabled_without_flag(self):
+        self.prepare()
+        result=self.run_helper(REALM_ADMIN_USERNAME='realmadmin')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertTrue(self.users['recovery']['enabled'])
+
+    def test_flag_disables_realm_admin_ends_sessions_and_is_idempotent(self):
+        self.prepare();self.events.clear()
+        for _ in range(2):
+            result=self.run_helper(REALM_ADMIN_USERNAME='realmadmin',DISABLE_REALM_ADMIN='true')
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertIn('REALM_ADMIN_DISABLED',result.stdout)
+            self.assertFalse(self.users['recovery']['enabled'])
+        self.assertEqual(sum(1 for e in self.events if e[0]=='POST' and e[1].endswith('/users/recovery/logout')),2)
+        self.assertTrue(self.users['legacy-tech']['enabled'])
+
+    def test_missing_realm_admin_is_not_an_error(self):
+        self.prepare();del self.users['recovery']
+        result=self.run_helper(REALM_ADMIN_USERNAME='realmadmin',DISABLE_REALM_ADMIN='true')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('REALM_ADMIN_ABSENT',result.stdout)
+
+    def test_failed_reconcile_leaves_realm_admin_enabled(self):
+        self.prepare();self.bad_claims={'sub':'wrong'}
+        result=self.run_helper(REALM_ADMIN_USERNAME='realmadmin',DISABLE_REALM_ADMIN='true')
+        self.assertNotEqual(result.returncode,0)
+        self.assertTrue(self.users['recovery']['enabled'])
+
+    def test_realm_admin_flag_rejects_unsafe_configuration(self):
+        for values in ({'DISABLE_REALM_ADMIN':'yes'},{'DISABLE_REALM_ADMIN':'true','REALM_ADMIN_USERNAME':''},
+                       {'DISABLE_REALM_ADMIN':'true','REALM_ADMIN_USERNAME':'service-account-backend-admin'}):
+            self.events.clear();result=self.run_helper(**values)
+            self.assertNotEqual(result.returncode,0);self.assertEqual(self.events,[])
+
 if __name__=='__main__': unittest.main()

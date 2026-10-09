@@ -55,6 +55,13 @@ def configuration(env):
     c['retire'] = flag(env, 'RETIRE_LEGACY_USERS')
     if c['prepare'] and c['retire']:
         raise Error('BACKEND_CLIENT_CONFIGURATION_INVALID: preparation cannot retire users')
+    # Helm#422: ORISO-realm break-glass user; disabled only on explicit opt-in.
+    c['disable_realm_admin'] = flag(env, 'DISABLE_REALM_ADMIN')
+    if c['disable_realm_admin']:
+        name = env.get('REALM_ADMIN_USERNAME', '')
+        if c['prepare'] or not re.fullmatch(r'[A-Za-z0-9._@-]+', name) or name.casefold().startswith('service-account-'):
+            raise Error('BACKEND_CLIENT_CONFIGURATION_INVALID: realm admin')
+        c['REALM_ADMIN_USERNAME'] = name
     if not c['prepare']:
         # SMTP sync realm client (Helm#420); preparation leaves it alone.
         c['SMTP_SYNC_CLIENT_ID'] = required(env, 'SMTP_SYNC_CLIENT_ID')
@@ -143,6 +150,7 @@ class Admin:
             self.request('PUT', 'users/' + uid, {'enabled': False})
             # Revoke existing sessions as well as future password grants.
             self.request('POST', 'users/' + uid + '/logout')
+        return bool(users)
 
 
 def verify_client_token(http, config, client, subject, admin):
@@ -257,6 +265,9 @@ def reconcile(config):
     if config['retire']:
         api.retire(config['LEGACY_TECHNICAL_USERNAME'])
         api.retire(config['LEGACY_ADMIN_USERNAME'])
+    if config['disable_realm_admin']:
+        found = api.retire(config['REALM_ADMIN_USERNAME'])
+        print('REALM_ADMIN_DISABLED' if found else 'REALM_ADMIN_ABSENT')
     print('BACKEND_CLIENTS_PREPARED' if config['prepare'] else 'BACKEND_CLIENTS_RECONCILED')
 
 
