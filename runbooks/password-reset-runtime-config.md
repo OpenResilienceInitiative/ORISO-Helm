@@ -135,9 +135,10 @@ exits 0 after writing Keycloak and logs `WARNING SMTP_RECONCILE_ACK_UNSUPPORTED`
 the Admin status stays `SMTP_SYNC_PENDING` until that CTS is deployed. Any other
 acknowledgement failure reports `SMTP_RECONCILE_ACK_FAILED`.
 
-**For developers — run the real-Keycloak proof (needs Docker, removes its container):**
+**For developers — run the real-Keycloak proofs (needs Docker, removes its containers; CI runs them too):**
 ```text
-python3 tests/keycloak_smtp_sync_client_test.py
+python3 tests/keycloak_smtp_sync_client_test.py -v
+python3 -m unittest discover -s tests -p 'keycloak_*_test.py'   # all three
 ```
 
 A successfully read disabled, incomplete or absent snapshot clears the old
