@@ -120,11 +120,26 @@ def check_fresh_realm(docs):
     assert not any(m.get("client") == "smtp-sync" for m in realm.get("scopeMappings", []))
 
 
+def check_existing_realm_reconcile(docs):
+    job = find(docs, "Job", "keycloak-reconcile-service-identities")
+    env = {entry["name"]: entry for entry in job["spec"]["template"]["spec"]["containers"][0]["env"]}
+    assert env["SMTP_SYNC_CLIENT_ID"]["value"] == "smtp-sync"
+    assert env["SMTP_SYNC_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"] == {
+        "name": SECRET_NAME, "key": "KEYCLOAK_SMTP_SYNC_CLIENT_SECRET"}
+    # The isolated preparation Job applies without this Secret, so it must not reference it.
+    result, prepared = render("--set", "global.keycloak.backendServiceClients.prepareOnly=true",
+                              "--show-only", "templates/keycloak-reconcile-service-identities-job.yaml")
+    assert result.returncode == 0, result.stderr
+    prepare = find(prepared, "Job", "keycloak-prepare-backend-clients")
+    assert SECRET_NAME not in json.dumps(prepare) and "SMTP_SYNC" not in json.dumps(prepare)
+
+
 def main():
     result, docs = render()
     assert result.returncode == 0, result.stderr
     check_secret(docs)
     check_fresh_realm(docs)
+    check_existing_realm_reconcile(docs)
     check_no_long_running_master_admin(docs)
     check_jobs(docs)
     print("PASS: SMTP sync uses a short-lived realm client without master admin credentials")

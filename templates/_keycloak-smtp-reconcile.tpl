@@ -1,3 +1,6 @@
+{{- /* Must match the smtp-sync client in charts/keycloak/keycloak-resources/realm.json. */ -}}
+{{- define "oriso.smtpSyncClientId" -}}smtp-sync{{- end -}}
+
 {{- /* Short-lived SMTP sync pod: reads Admin Settings with the technical client,
 writes the realm with the smtp-sync realm client. No master admin credential. */ -}}
 {{- define "oriso.keycloakSmtpReconcilePod" -}}
@@ -62,7 +65,7 @@ containers:
             name: keycloak-backend-client-secrets
             key: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
       - name: SMTP_SYNC_CLIENT_ID
-        value: "smtp-sync"
+        value: {{ include "oriso.smtpSyncClientId" . | quote }}
       - name: SMTP_SYNC_CLIENT_SECRET
         valueFrom:
           secretKeyRef:

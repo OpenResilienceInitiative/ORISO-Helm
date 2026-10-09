@@ -99,6 +99,16 @@ spec:
               value: {{ $migration.legacyTechnicalUsername | quote }}
             - name: LEGACY_ADMIN_USERNAME
               value: {{ $migration.legacyAdminUsername | quote }}
+            {{- if not $migration.prepareOnly }}
+            # Ensures the SMTP sync realm client on existing realms (Helm#420).
+            - name: SMTP_SYNC_CLIENT_ID
+              value: {{ include "oriso.smtpSyncClientId" . | quote }}
+            - name: SMTP_SYNC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-smtp-sync-client
+                  key: KEYCLOAK_SMTP_SYNC_CLIENT_SECRET
+            {{- end }}
           volumeMounts:
             - name: scripts
               mountPath: /scripts

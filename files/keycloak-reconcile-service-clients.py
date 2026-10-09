@@ -55,6 +55,15 @@ def configuration(env):
     c['retire'] = flag(env, 'RETIRE_LEGACY_USERS')
     if c['prepare'] and c['retire']:
         raise Error('BACKEND_CLIENT_CONFIGURATION_INVALID: preparation cannot retire users')
+    if not c['prepare']:
+        # SMTP sync realm client (Helm#420); preparation leaves it alone.
+        c['SMTP_SYNC_CLIENT_ID'] = required(env, 'SMTP_SYNC_CLIENT_ID')
+        c['SMTP_SYNC_CLIENT_SECRET'] = required(env, 'SMTP_SYNC_CLIENT_SECRET')
+        sync_id, sync_secret = c['SMTP_SYNC_CLIENT_ID'], c['SMTP_SYNC_CLIENT_SECRET']
+        if sync_id in reserved or sync_id in ids or not re.fullmatch(r'[A-Za-z0-9_-]+', sync_id):
+            raise Error('BACKEND_CLIENT_CONFIGURATION_INVALID: client ids')
+        if sync_secret in secrets or len(sync_secret) < 32 or not all(32 <= ord(ch) < 127 for ch in sync_secret):
+            raise Error('BACKEND_CLIENT_CONFIGURATION_INVALID: independent secrets')
     return c
 
 
@@ -167,6 +176,44 @@ def verify_client_token(http, config, client, subject, admin):
         raise Error('BACKEND_CLIENT_TOKEN_CONTRACT_MISMATCH')
 
 
+def reconcile_smtp_sync(api, config, client, management):
+    # Native Keycloak needs manage-realm to update SMTP settings; nothing else.
+    name = config['SMTP_SYNC_CLIENT_ID']
+    if not client:
+        api.request('POST', 'clients', {'clientId': name, 'protocol': 'openid-connect', 'enabled': True,
+                    'publicClient': False, 'bearerOnly': False, 'serviceAccountsEnabled': True,
+                    'directAccessGrantsEnabled': False, 'standardFlowEnabled': False,
+                    'implicitFlowEnabled': False, 'fullScopeAllowed': False})
+        client = api.find_client(name)
+        if not client:
+            raise Error('BACKEND_CLIENT_INVALID: client creation failed')
+    manage_realm = api.request('GET', 'clients/' + quote(management['id'], safe='') + '/roles/manage-realm')
+    subject = api.subject(client)
+    api.reconcile(client, subject, config['SMTP_SYNC_CLIENT_SECRET'], [], [manage_realm], management['id'])
+    verify_smtp_sync_token(api.http, config, subject)
+    print('SMTP_SYNC_CLIENT_RECONCILED')
+
+
+def verify_smtp_sync_token(http, config, subject):
+    client = config['SMTP_SYNC_CLIENT_ID']
+    token = http.service_login(config['KEYCLOAK_URL'], config['KEYCLOAK_REALM'], client,
+                               config['SMTP_SYNC_CLIENT_SECRET'], 'CLIENT_UNAVAILABLE')
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(token.split('.')[1] + '=' * (-len(token.split('.')[1]) % 4)))
+        expiry = claims.get('exp')
+        realm_roles = claims.get('realm_access', {}).get('roles', [])
+        management = claims.get('resource_access', {}).get('realm-management', {}).get('roles')
+        valid = (claims.get('sub') == subject and claims.get('azp') == client
+                 and isinstance(expiry, (int, float)) and not isinstance(expiry, bool)
+                 and math.isfinite(expiry) and expiry > time.time() and realm_roles == []
+                 and set(claims.get('resource_access', {})) == {'realm-management'}
+                 and isinstance(management, list) and set(management) == {'manage-realm'})
+    except (ValueError, UnicodeError, TypeError, AttributeError, IndexError):
+        valid = False
+    if not valid:
+        raise Error('BACKEND_CLIENT_TOKEN_CONTRACT_MISMATCH')
+
+
 def reconcile(config):
     api = Admin(config)
     names = (config['TECHNICAL_CLIENT_ID'], config['ADMIN_CLIENT_ID'])
@@ -176,6 +223,9 @@ def reconcile(config):
             api.validate_client(client)
     if not config['prepare'] and not all(clients):
         raise Error('BACKEND_CLIENT_PREPARATION_REQUIRED: clients are missing; nothing changed')
+    sync_client = None if config['prepare'] else api.find_client(config['SMTP_SYNC_CLIENT_ID'])
+    if sync_client:
+        api.validate_client(sync_client)
     if not config['prepare'] and any(api.subject(client) != config[pin] for client, pin in zip(clients, ('TECHNICAL_SERVICE_SUBJECT', 'ADMIN_SERVICE_SUBJECT'))):
         raise Error('BACKEND_CLIENT_SUBJECT_MISMATCH: set serviceTechUserId to the prepared service account; nothing changed')
     management = api.find_client('realm-management')
@@ -202,6 +252,8 @@ def reconcile(config):
         verify_client_token(api.http, config, name, actual_subjects[i], i == 1)
     print('TECHNICAL_SERVICE_SUBJECT=' + actual_subjects[0])
     print('ADMIN_SERVICE_SUBJECT=' + actual_subjects[1])
+    if not config['prepare']:
+        reconcile_smtp_sync(api, config, sync_client, management)
     if config['retire']:
         api.retire(config['LEGACY_TECHNICAL_USERNAME'])
         api.retire(config['LEGACY_ADMIN_USERNAME'])
