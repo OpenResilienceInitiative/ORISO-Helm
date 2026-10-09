@@ -57,6 +57,8 @@ class SmtpFixture(unittest.TestCase):
         self.admin_redirect = False
         self.revision = 1
         self.revision_header = True
+        self.acks = []
+        self.ack_status = 204
         self.update_started = threading.Event()
         self.update_release = threading.Event()
         self.update_release.set()
@@ -76,7 +78,15 @@ class SmtpFixture(unittest.TestCase):
                     self.wfile.write(json.dumps(body).encode())
 
             def do_POST(self):
-                form = parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode())
+                raw = self.rfile.read(int(self.headers["Content-Length"]))
+                if self.path == "/cts/settingsadmin/smtp-sync-acknowledgement":
+                    owner.requests.append(("POST", self.path, dict(self.headers), json.loads(raw)))
+                    if (self.headers.get("Authorization") != "Bearer " + jwt(owner.claims)
+                            or self.headers.get("tenantId") != "0"):
+                        return self.reply(403)
+                    owner.acks.append(json.loads(raw))
+                    return self.reply(owner.ack_status)
+                form = parse_qs(raw.decode())
                 owner.requests.append(("POST", self.path, dict(self.headers), form))
                 if self.path == "/auth/realms/example/protocol/openid-connect/token":
                     if form == {"grant_type": ["client_credentials"], "client_id": ["smtp-sync"],
@@ -360,6 +370,56 @@ class ReconcileSmtpTest(SmtpFixture):
                 self.assertFalse(any(r[0] == "PUT" for r in self.requests))
         self.sync_claims = original
 
+
+    # CTS shows the Admin panel status from this acknowledgement (Helm#420).
+    def test_acknowledges_exactly_the_revision_it_wrote(self):
+        self.revision = 41
+        result = self.run_reconciler()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.acks, [{"revision": 41, "status": "APPLIED"}])
+        put = next(i for i, r in enumerate(self.requests) if r[0] == "PUT")
+        ack = next(i for i, r in enumerate(self.requests) if r[1].endswith("/smtp-sync-acknowledgement"))
+        self.assertLess(put, ack)
+
+    def test_disabled_snapshot_is_acknowledged_as_disabled(self):
+        self.snapshot["globalSmtpEnabled"] = False
+        self.assertEqual(self.run_reconciler().returncode, 0)
+        self.assertEqual(self.acks, [{"revision": 1, "status": "DISABLED_OR_INCOMPLETE"}])
+
+    def test_failed_keycloak_write_is_never_acknowledged(self):
+        self.update_status = 500
+        self.assertNotEqual(self.run_reconciler().returncode, 0)
+        self.assertEqual(self.acks, [])
+
+    def test_absent_settings_revision_zero_is_not_acknowledged(self):
+        self.source_status = 204
+        self.revision = 0
+        self.assertEqual(self.run_reconciler().returncode, 0)
+        self.assertEqual(self.acks, [])
+
+    def test_missing_or_invalid_revision_fails_before_writing(self):
+        for header, value in ((False, 1), (True, "not-a-number"), (True, -1)):
+            with self.subTest(value=value, header=header):
+                self.revision_header, self.revision = header, value
+                result = self.run_reconciler()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("SMTP_RECONCILE_SOURCE_REVISION_INVALID", result.stderr)
+                self.assertEqual(self.updates, [])
+                self.assertEqual(self.acks, [])
+
+    def test_newer_save_conflict_is_left_for_the_next_run(self):
+        self.ack_status = 409
+        result = self.run_reconciler()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SMTP_RECONCILE_ACK_STALE", result.stdout)
+
+    def test_acknowledgement_failure_is_visible(self):
+        for status in (403, 500):
+            with self.subTest(status=status):
+                self.ack_status = status
+                result = self.run_reconciler()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("SMTP_RECONCILE_ACK_FAILED", result.stderr)
 
     def test_no_long_running_helper_modes_remain(self):
         for mode in ("--serve", "--trigger"):

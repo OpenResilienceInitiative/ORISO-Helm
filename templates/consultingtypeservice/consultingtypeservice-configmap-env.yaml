@@ -24,7 +24,7 @@ data:
   KEYCLOAK_RESOURCE: {{ .Values.consultingTypeService.keycloakResource }}
   KEYCLOAKSERVICE_ADMIN_CLIENTID: {{ .Values.global.keycloak.serviceAdminClientId }}
   KEYCLOAKSERVICE_APP_CLIENTID: {{ .Values.global.keycloak.serviceAppClientId }}
-  # No push helper any more (Helm#420): the keycloak-reconcile-smtp CronJob pulls saved settings.
+  # No push helper (Helm#420): the keycloak-reconcile-smtp Jobs pull saved settings and acknowledge.
   SMTP_RECONCILE_URL: ""
   SETTING_MAIN_TENANT_SUBDOMAIN_FOR_SINGLE_DOMAIN_MULTITENANCY: {{ .Values.global.keycloak.realm}}
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: {{ .Values.global.springSecurityOAuth2ResourceserverJWTIssuerURI }}   

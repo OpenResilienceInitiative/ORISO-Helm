@@ -34,6 +34,8 @@ SECRETS = {
 # Fresh realm export UUIDs (runbooks/backend-service-clients.md).
 SUBJECTS = {"TECHNICAL_SERVICE_SUBJECT": "12316d09-a9da-41b9-a13e-ee2c515800b5",
             "ADMIN_SERVICE_SUBJECT": "615a7bf8-3e12-40c7-a949-f88640acea8e"}
+REVISION = 3
+ACKS = []
 SNAPSHOT = {
     "globalFeatureSystemNotificationEmailsEnabled": True, "globalSmtpEnabled": True,
     "globalSmtpHost": "smtp.synthetic.example", "globalSmtpPort": "587", "globalSmtpSecure": False,
@@ -113,9 +115,18 @@ def fake_admin_settings():
             ok = self.path == "/settingsadmin/smtp-credentials" and self.headers.get("Authorization", "").startswith("Bearer ")
             self.send_response(200 if ok else 403)
             self.send_header("Content-Type", "application/json")
+            self.send_header("X-Smtp-Revision", str(REVISION))
             self.end_headers()
             if ok:
                 self.wfile.write(json.dumps(SNAPSHOT).encode())
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            ok = self.path == "/settingsadmin/smtp-sync-acknowledgement"
+            if ok:
+                ACKS.append(body)
+            self.send_response(204 if ok else 404)
+            self.end_headers()
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -189,8 +200,10 @@ def prove(base, realm_name, cts, subjects):
     out = run_script("keycloak-reconcile-service-clients.py", {**hook, **subjects, "PREPARE_ONLY": "false"})
     assert "SMTP_SYNC_CLIENT_RECONCILED" in out, out
     # SMTP Job: no master credential in its environment at all.
+    ACKS.clear()
     out = run_script("keycloak-reconcile-smtp.py", {**common, "CONSULTING_TYPE_SERVICE_URL": cts})
-    assert "SMTP_RECONCILE_APPLIED" in out, out
+    assert "SMTP_RECONCILE_APPLIED" in out and "SMTP_RECONCILE_ACKNOWLEDGED" in out, out
+    assert ACKS == [{"revision": REVISION, "status": "APPLIED"}], ACKS
     smtp = request(base, "GET", "/admin/realms/" + realm_name, token=master_admin(base))["smtpServer"]
     assert smtp["host"] == "smtp.synthetic.example" and smtp["from"] == "sender@synthetic.example", smtp
     assert smtp["fromDisplayName"] == "Synthetic Sender" and smtp["user"] == "synthetic-user", smtp
