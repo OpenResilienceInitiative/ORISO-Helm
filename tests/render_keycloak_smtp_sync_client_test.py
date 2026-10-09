@@ -102,10 +102,29 @@ def check_jobs(docs):
     assert cts["data"]["SMTP_RECONCILE_URL"] == ""
 
 
+def check_fresh_realm(docs):
+    realm = json.loads(find(docs, "ConfigMap", "keycloak-configmap-data")["data"]["realm.json"])
+    assert realm["realm"] != "master"
+    client = next(c for c in realm["clients"] if c["clientId"] == "smtp-sync")
+    assert client["publicClient"] is False and client["serviceAccountsEnabled"] is True
+    for flag in ("standardFlowEnabled", "implicitFlowEnabled", "directAccessGrantsEnabled", "fullScopeAllowed"):
+        assert client[flag] is False, flag
+    assert "secret" not in client, "the secret comes from the reconcile Job, never from the realm file"
+    assert client["defaultClientScopes"] == ["roles"] and client["optionalClientScopes"] == []
+    account = next(u for u in realm["users"] if u.get("serviceAccountClientId") == "smtp-sync")
+    assert account["realmRoles"] == []
+    # Native Keycloak needs manage-realm to change SMTP settings; nothing more.
+    assert account["clientRoles"] == {"realm-management": ["manage-realm"]}
+    scope = [m for m in realm["clientScopeMappings"]["realm-management"] if m["client"] == "smtp-sync"]
+    assert scope == [{"client": "smtp-sync", "roles": ["manage-realm"]}]
+    assert not any(m.get("client") == "smtp-sync" for m in realm.get("scopeMappings", []))
+
+
 def main():
     result, docs = render()
     assert result.returncode == 0, result.stderr
     check_secret(docs)
+    check_fresh_realm(docs)
     check_no_long_running_master_admin(docs)
     check_jobs(docs)
     print("PASS: SMTP sync uses a short-lived realm client without master admin credentials")
