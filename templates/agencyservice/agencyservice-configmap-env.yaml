@@ -2,6 +2,11 @@
 {{- if eq $liquibaseChangeLog "classpath:db/changelog/db.changelog-master.xml" -}}
 {{- $liquibaseChangeLog = "classpath:db/changelog/agencyservice-master.xml" -}}
 {{- end -}}
+{{- $technicalClient := required "global.keycloak.backendTechnicalClientId is required" .Values.global.keycloak.backendTechnicalClientId -}}
+{{- $technicalSubject := required "global.keycloak.serviceTechUserId must be the technical service account subject" .Values.global.keycloak.serviceTechUserId -}}
+{{- if not (regexMatch "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" $technicalSubject) -}}
+{{- fail "global.keycloak.serviceTechUserId must be the technical service account UUID" -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -19,6 +24,8 @@ data:
   KEYCLOAK_REALM: {{ .Values.global.keycloak.realm }}
   KEYCLOAK_RESOURCE: {{ .Values.agencyService.keycloakResource }}
   KEYCLOAKSERVICE_ADMIN_CLIENTID: {{ .Values.global.keycloak.serviceAdminClientId }}
+  IDENTITY_TECHNICAL_CLIENT_ID: {{ $technicalClient | quote }}
+  TECHNICAL_SERVICE_SUBJECT: {{ $technicalSubject | quote }}
   TOPIC_ENRICHMENT_ENABLED: {{ .Values.agencyService.topicEnrichmentEnabled | quote }}
   KEYCLOAKSERVICE_APP_CLIENTID: {{ .Values.global.keycloak.serviceAppClientId }}
   SPRING_DATASOURCE_URL: "jdbc:mariadb://mariadb.{{ .Release.Namespace }}:3306/agencyservice"

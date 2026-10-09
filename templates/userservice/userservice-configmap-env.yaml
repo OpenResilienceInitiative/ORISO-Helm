@@ -1,3 +1,8 @@
+{{- $technical := required "global.keycloak.backendTechnicalClientId is required" .Values.global.keycloak.backendTechnicalClientId -}}
+{{- $admin := required "global.keycloak.serviceAdminClientId is required" .Values.global.keycloak.serviceAdminClientId -}}
+{{- if or (eq $technical $admin) (has $technical (list .Values.global.keycloak.serviceAppClientId "admin-cli" "account" "broker" "security-admin-console")) (has $admin (list .Values.global.keycloak.serviceAppClientId "admin-cli" "account" "broker" "security-admin-console")) (not (regexMatch "^[a-zA-Z0-9_-]+$" $technical)) (not (regexMatch "^[a-zA-Z0-9_-]+$" $admin)) -}}
+{{- fail "Backend service client ids must be distinct and cannot be human or built-in clients" -}}
+{{- end -}}
 {{- if hasKey .Values.userService "emailBrandingName" -}}
 {{- fail "userService.emailBrandingName is obsolete: move it to global.emailBrandingName and set global.emailLegalOrganisationName separately" -}}
 {{- end -}}
@@ -8,6 +13,10 @@ metadata:
     app: userservice-configmap-env
   name: userservice-configmap-env
 data:
+  MATRIXRTC_LIFECYCLE_BASE_URL: "http://matrixrtc-auth-policy-gateway:3010"
+  MATRIXRTC_LIFECYCLE_ENABLED: {{ (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") | quote }}
+  ACCOUNT_INACTIVITY_ENABLED: {{ dig "accountInactivity" "enabled" false .Values.userService | quote }}
+  ACCOUNT_INACTIVITY_DRY_RUN: {{ dig "accountInactivity" "dryRun" true .Values.userService | quote }}
   # General
   # Public origins embedded in outgoing mails (DPA signing, system/supervisor
   # notifications, inactivity notices) and the app base URL. All derive from the
@@ -46,6 +55,12 @@ data:
   KEYCLOAK_PRINCIPAL_ATTRIBUTE: {{ .Values.global.keycloak.principalAttribute }}
   KEYCLOAK_RESOURCE: {{ .Values.userService.keycloakResource }}
   KEYCLOAK_CORS: "false"
+  {{- $adminSubject := required "global.keycloak.serviceAdminSubject must be the actual backend admin service-account UUID" .Values.global.keycloak.serviceAdminSubject }}
+  {{- if not (regexMatch "^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$" $adminSubject) }}
+  {{- fail "global.keycloak.serviceAdminSubject must be a Keycloak service-account UUID" }}
+  {{- end }}
+  KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT: {{ $adminSubject | quote }}
+  IDENTITY_TECHNICAL_CLIENT_ID: {{ $technical | quote }}
   KEYCLOAK_CONFIG_ADMIN_CLIENTID: {{ .Values.global.keycloak.serviceAdminClientId }}
   KEYCLOAK_CONFIG_APP_CLIENTID: {{ .Values.global.keycloak.serviceAppClientId }}
   KEYCLOAKSERVICE_TECHUSER_ID: {{ .Values.global.keycloak.serviceTechUserId }}
@@ -129,6 +144,16 @@ data:
   MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}
   MATRIX_ENCRYPTION_ENABLED: {{ .Values.userService.matrixEncryptionEnabled | default "true" | quote }}
   MATRIX_MIGRATION_ENABLED: "true"
+  # ADR-020 P2 feed-update signal. After a row is persisted into a recipient's Activity-Timeline
+  # feed, UserService nudges their clients with a content-free Matrix to-device event so the feed
+  # refreshes at once instead of on the next 15 s client poll. Best-effort: the poll stays as the
+  # floor, so switching this off degrades to the previous behaviour rather than to nothing.
+  {{- $feedSignal := .Values.userService.feedSignal | default dict }}
+  MATRIX_FEED_SIGNAL_ENABLED: {{ dig "enabled" "true" $feedSignal | quote }}
+  # Per-recipient trailing coalescing window in milliseconds. A burst of N feed rows for one
+  # recipient costs one to-device message at the end of the window, not N. Raise to cut Synapse
+  # load, lower to cut latency; 0 sends one signal per row.
+  MATRIX_FEED_SIGNAL_COALESCE_MILLIS: {{ dig "coalesceMillis" 500 $feedSignal | quote }}
   # ADR-018 Global Support Access. The flag gates only NEW handshakes: the revocation worker, the
   # four-hour expiry sweep and the audit retention job keep running when it is off, so switching the
   # feature off can never strand a session that is still granting access.

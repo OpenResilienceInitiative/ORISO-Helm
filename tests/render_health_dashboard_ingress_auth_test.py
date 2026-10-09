@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 CHART_DIR = Path(__file__).resolve().parents[1]
+DEFAULT_AUTH_SECRET = "health-dashboard-basic-auth"
 AUTH_ERROR = (
     "healthDashboard.ingress.authSecret must name an existing basic-auth Secret "
     "when HealthDashboard ingress is enabled"
@@ -61,8 +62,8 @@ def health_resources(docs: list[dict]) -> dict[str, dict]:
 
 
 class HealthDashboardIngressAuthTest(unittest.TestCase):
-    def test_default_disables_only_external_ingress(self) -> None:
-        resources = health_resources(render())
+    def test_explicit_off_disables_only_external_ingress(self) -> None:
+        resources = health_resources(render(health_dashboard={"ingress": {"enabled": False}}))
         self.assertEqual(set(resources), {"Deployment", "Service"})
         service = resources["Service"]
         self.assertEqual(service["metadata"]["namespace"], "render-test")
@@ -74,6 +75,15 @@ class HealthDashboardIngressAuthTest(unittest.TestCase):
         deployment = resources["Deployment"]
         self.assertEqual(deployment["metadata"]["namespace"], "render-test")
         self.assertEqual(deployment["spec"]["selector"]["matchLabels"], service["spec"]["selector"])
+
+    def test_default_ingress_and_inherited_secret_require_basic_auth(self) -> None:
+        for override in (None, {"ingress": {"enabled": True}}):
+            with self.subTest(override=override):
+                resources = health_resources(render(health_dashboard=override))
+                self.assertEqual(set(resources), {"Deployment", "Service", "Ingress"})
+                annotations = resources["Ingress"]["metadata"]["annotations"]
+                self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-type"], "basic")
+                self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-secret"], "health-dashboard-basic-auth")
 
     def test_enabled_ingress_preserves_route_and_internal_resources(self) -> None:
         baseline = render()
@@ -109,13 +119,20 @@ class HealthDashboardIngressAuthTest(unittest.TestCase):
 
     def test_enabled_requires_nonblank_secret(self) -> None:
         for name, ingress in (
-            ("absent", {"enabled": True}),
             ("null", {"enabled": True, "authSecret": None}),
             ("empty", {"enabled": True, "authSecret": ""}),
             ("whitespace", {"enabled": True, "authSecret": " \t\n "}),
         ):
             with self.subTest(secret=name):
                 self.assertIn(AUTH_ERROR, render(health_dashboard={"ingress": ingress}, expect_error=True))
+
+    def test_absent_secret_uses_the_shipped_default_name(self) -> None:
+        # Only an omitted key falls back to values.yaml.default; an explicit
+        # null, empty or blank value is rejected above.
+        resources = health_resources(render(health_dashboard={"ingress": {"enabled": True}}))
+        annotations = resources["Ingress"]["metadata"]["annotations"]
+        self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-secret"], DEFAULT_AUTH_SECRET)
+        self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-type"], "basic")
 
     def test_rejects_namespace_qualified_secret(self) -> None:
         for namespace in ("", "health-operators"):
@@ -204,10 +221,16 @@ class HealthDashboardIngressAuthTest(unittest.TestCase):
         }}))
         self.assertEqual(set(disabled), {"Deployment", "Service"})
 
-    def test_other_overlays_keep_ingress_disabled(self) -> None:
+    def test_other_overlays_keep_ingress_guarded_and_allow_explicit_off(self) -> None:
         for overlay in ("values-pre-dev.yaml", "values-prod.yaml"):
             with self.subTest(overlay=overlay):
-                self.assertEqual(set(health_resources(render(overlay))), {"Deployment", "Service"})
+                resources = health_resources(render(overlay))
+                self.assertEqual(set(resources), {"Deployment", "Service", "Ingress"})
+                annotations = resources["Ingress"]["metadata"]["annotations"]
+                self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-type"], "basic")
+                self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-secret"], "health-dashboard-basic-auth")
+                disabled = health_resources(render(overlay, health_dashboard={"ingress": {"enabled": False}}))
+                self.assertEqual(set(disabled), {"Deployment", "Service"})
 
 
 if __name__ == "__main__":

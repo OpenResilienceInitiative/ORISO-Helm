@@ -1,0 +1,27 @@
+{{- if eq (include "oriso.accountInactivity.accessGateEnabled" .) "true" }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    {{- include "oriso.accountInactivity.authAnnotations" . | nindent 4 }}
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/configuration-snippet: add_header Permissions-Policy
+      'camera=(self "https://acme{{ .Values.global.domainName }}"), microphone=(self
+      "https://acme{{ .Values.global.domainName }}"), display-capture=(self "https://acme{{
+      .Values.global.domainName }}")' always;
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+  name: account-inactivity-api-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: '{{ .Values.global.domainName }}'
+    http:
+      paths:
+{{ include "oriso.mainApiPaths" . | indent 6 }}
+  tls:
+  - hosts:
+    - '{{ .Values.global.domainName }}'
+    - acme{{ .Values.global.domainName }}
+    secretName: {{ .Values.global.domainName | replace "." "-" }}-tls
+{{- end }}

@@ -3,6 +3,11 @@ cert-manager:
   enabled: true
 
 global:
+  # Kubernetes service DNS suffix, supplied by the cluster operator.
+  clusterDomain: "cluster.local"
+  # Enable only after the lifecycle endpoint and candidate report are verified.
+  accountInactivity:
+    accessGateEnabled: false
 
   # REQUIRED: one canonical product name for UserService and Keycloak mail.
   # Set both names for each installation; neither has a product default.
@@ -91,16 +96,30 @@ global:
     loginSuffix: "/token"
     logoutSuffix: "/logout"
     principalAttribute: "preferred_username"
+    # Disabled until ingress-nginx receives the real client IP. Do not enable
+    # use-forwarded-headers: the IP anonymizer rewrites X-Forwarded-For.
+    tokenRateLimit:
+      enabled: false
+      requestsPerSecond: 5
+      burstMultiplier: 5
+      exemptCidrs: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"
     serviceAppClientId: "app"
-    serviceAdminClientId: "admin-cli"
-    # Keycloak user id (`sub`) of the `technical` user; TenantService recognises
-    # the UserService by it (TECHNICAL_SERVICE_SUBJECT). Not a secret. Required,
-    # deliberately without default: an existing realm has its own id, so look it
-    # up once (admin console, Users > technical > ID). Only a FRESH install that
-    # imports realm.json may use the fixed id it seeds:
-    # 8294c392-e1e0-405b-ac2f-ba3043cbad3e. The reconcile hook compares this with
-    # the live realm before changing anything and fails the release on a mismatch.
+    serviceAdminClientId: "backend-admin"
+    backendTechnicalClientId: "backend-technical"
+    backendServiceClients:
+      # Existing realms: render ONLY the preparation Secret/Job (see runbook).
+      # Never install/upgrade the whole chart with prepareOnly=true.
+      # Read both actual subjects, then deploy with prepareOnly=false.
+      prepareOnly: false
+      # Enable only after both backends run on client credentials.
+      retireLegacyUsers: false
+      legacyTechnicalUsername: "technical"
+      legacyAdminUsername: "svc-keycloak-admin"
+    # Actual service-account subject of backendTechnicalClientId. Existing realms
+    # must read it from the preparation job; realm import never updates them.
+    # Fresh imports use 12316d09-a9da-41b9-a13e-ee2c515800b5.
     serviceTechUserId: ""
+    serviceAdminSubject: ""
     bootstrapUsers:
       enabled: true
     # Checks after every install and upgrade that the live realm still carries
@@ -150,7 +169,7 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call:2.0.8"
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.11"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Storybook is a development surface and stays absent unless an environment
@@ -222,7 +241,7 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.10"
+  imageVersion: "2.0.11"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -233,6 +252,21 @@ online-counseling-mariadb:
   imageName: "mariadb"
   imageVersion: "11.0.6"
   maxconnections: "1000"
+# Off until the gateway image, dedicated secrets and RTC network acceptance pass.
+matrixrtcLifecycle:
+  enabled: false
+  # Change with every externally managed token rotation to restart both consumers.
+  tokenRevision: ""
+  existingSecret:
+    name: ""
+    tokenKey: "media-lifecycle-token"
+  livekit:
+    existingConfigSecret:
+      name: ""
+      key: "config.yaml"
+    nodeIp: ""
+    # Exact kubernetes.io/hostname label of the node owning nodeIp.
+    nodeHostname: ""
 matrixrtcAuth:
   replicas: 1
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
@@ -251,10 +285,10 @@ matrixrtcAuth:
   # The dev branch tracks the dev tag; release branches pin these by digest
   # because they are the LiveKit authorization boundary.
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.10"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.11"
     pullPolicy: ""
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.10"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.11"
     pullPolicy: ""
   service:
     port: 3010
@@ -286,7 +320,7 @@ online-counseling-redis:
 # Keycloak
 online-counseling-keycloak:
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
-  imageVersion: "2.0.10"
+  imageVersion: "2.0.11"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
@@ -296,6 +330,11 @@ online-counseling-keycloak:
   keycloakLogLevel: "WARN"
   rootLogLevel: "WARN"
 
+  # Keep Keycloak's same-user concurrency guard for human OTP credentials.
+  # Backends must use client_credentials before protection is activated (#1351).
+  bruteForce:
+    allowConcurrentRequests: false
+
 
 # ---------- Backend Services -----------------------------------------------------------------------------------------
 
@@ -303,7 +342,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.10"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.11"
 
   keycloakResource: "agency-service"
 
@@ -320,7 +359,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "2.0.10"
+  imageVersion: "2.0.11"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -346,7 +385,7 @@ tenantService:
   systemEmailDeliveryServiceClient: ""
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.10"
+  imageVersion: "2.0.11"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -359,6 +398,9 @@ tenantService:
 
 # User service
 userService:
+  accountInactivity:
+    enabled: false
+    dryRun: true
   # Pending human-review mail translations are never sent by default. The Dev
   # overlay opts in for mailbox testing; production remains on reviewed copy.
   emailAllowUnreviewedLocales: false
@@ -379,7 +421,7 @@ userService:
     requestsPerSecond: 5
     burstMultiplier: 2
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.10"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.11"
   serviceURL: "http://userservice:8080"
 
   keycloakResource: "user-service"
@@ -395,6 +437,19 @@ userService:
   redisHost: "redis"
   redisPort: 6379
   consultantAvailabilityRedisTtlSeconds: 120
+
+  # ADR-020 P2 feed-update signal. UserService nudges a recipient's clients over Matrix
+  # (content-free to-device event) when a row lands in their Activity-Timeline feed, so the feed
+  # refreshes at once instead of on the next 15 s client poll.
+  #   enabled        — "false" switches signalling off without a rollback; the 15 s poll remains
+  #                    the guaranteed floor, so nothing breaks, it only gets slower again.
+  #   coalesceMillis — per-recipient trailing window. A burst of N rows for one recipient costs
+  #                    one to-device message at the end of the window, not N. Raise it to cut
+  #                    Synapse load, lower it to cut latency; 0 sends one signal per row. The
+  #                    client debounces its refresh by a further 400 ms.
+  feedSignal:
+    enabled: "true"
+    coalesceMillis: 500
 
   # ADR-018 Global Support Access — see runbooks/support-access-enablement.md.
   supportAccess:
@@ -455,11 +510,18 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.10"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.11"
 
 nginxController:
   enabled: true
   replicas: 1
+
+# IP anonymization proxy — replaces X-Real-IP/X-Forwarded-For with a
+# session-scoped UUID so no ORISO backend ever sees a real client IP.
+ipAnonymizer:
+  enabled: false
+  replicas: 1
+  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:latest"
 
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
@@ -504,11 +566,10 @@ signozCollector:
 # Health Dashboard
 healthDashboard:
   ingress:
-    # Public access is opt-in; every enabled ingress requires Basic Auth.
-    enabled: false
-    # Existing Secret with an nginx-compatible `auth` htpasswd entry, provisioned
-    # in healthDashboard.namespace (or the release namespace when unset).
-    authSecret: ""
+    # Public at /health by default; every enabled ingress requires Basic Auth.
+    enabled: true
+    # Secret with an nginx `auth` htpasswd entry; set ingress.htpasswd in secrets.yaml to render it.
+    authSecret: "health-dashboard-basic-auth"
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
     tag: "2.0.4"

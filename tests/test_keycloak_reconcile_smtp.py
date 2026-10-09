@@ -78,8 +78,8 @@ class SmtpFixture(unittest.TestCase):
                 form = parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode())
                 owner.requests.append(("POST", self.path, dict(self.headers), form))
                 if self.path == "/auth/realms/example/protocol/openid-connect/token":
-                    if form != {"grant_type": ["password"], "client_id": ["configured-app-client"],
-                                "username": ["technical-canary"], "password": ["technical-password-canary"]}:
+                    if form != {"grant_type": ["client_credentials"], "client_id": ["configured-app-client"],
+                                "client_secret": ["technical-client-secret-canary"]}:
                         return self.reply(401, {"error": "private-token-error"})
                     return self.reply(owner.technical_status, {"access_token": jwt(owner.claims)})
                 if self.path == "/auth/realms/master/protocol/openid-connect/token":
@@ -132,7 +132,7 @@ class SmtpFixture(unittest.TestCase):
         self.env = {
             "PATH": os.environ["PATH"], "POD_NAMESPACE": "test", "KEYCLOAK_URL": base + "/auth",
             "KEYCLOAK_REALM": "example", "CONSULTING_TYPE_SERVICE_URL": base + "/cts",
-            "TECHNICAL_USERNAME": "technical-canary", "TECHNICAL_PASSWORD": "technical-password-canary",
+            "TECHNICAL_CLIENT_SECRET": "technical-client-secret-canary",
             "TECHNICAL_SERVICE_SUBJECT": "environment-technical-subject",
             "TECHNICAL_CLIENT_ID": "configured-app-client",
             "KEYCLOAK_ADMIN_USERNAME": "realm-admin-canary", "KEYCLOAK_ADMIN_PASSWORD": "admin-password-canary",
@@ -148,7 +148,8 @@ class SmtpFixture(unittest.TestCase):
         command = [sys.executable, "-B", str(SCRIPT)]
         result = subprocess.run(command, env={**self.env, **overrides}, capture_output=True, text=True, timeout=15)
         output = result.stdout + result.stderr
-        for private in ("technical-password-canary", "admin-password-canary", "admin-token-canary",
+        for private in (self.env["TECHNICAL_CLIENT_SECRET"], "technical-password-canary",
+                        "admin-password-canary", "admin-token-canary",
                         "private-smtp-provider-error", "private-token-error", "saved-username"):
             self.assertNotIn(private, output)
         self.assertNotIn("Traceback", output)
@@ -316,7 +317,7 @@ class ReconcileSmtpTest(SmtpFixture):
         self.assertEqual(self.updates, [])
 
     def test_missing_identity_configuration_never_guesses_an_account(self):
-        for field in ("TECHNICAL_USERNAME", "TECHNICAL_PASSWORD", "TECHNICAL_SERVICE_SUBJECT", "TECHNICAL_CLIENT_ID"):
+        for field in ("TECHNICAL_CLIENT_SECRET", "TECHNICAL_SERVICE_SUBJECT", "TECHNICAL_CLIENT_ID"):
             with self.subTest(field=field):
                 result = self.run_reconciler(**{field: ""})
                 self.assertNotEqual(result.returncode, 0)

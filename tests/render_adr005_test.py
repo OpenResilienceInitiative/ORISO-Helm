@@ -58,6 +58,7 @@ IPV4 = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES = [
     "templates/_helpers.tpl",
+    "templates/_matrixrtcLifecycle.tpl",
     "templates/matrix/matrix-configmaps.yaml",
     "templates/userservice/userservice-configmap-env.yaml",
     "templates/agencyservice/agencyservice-configmap-env.yaml",
@@ -130,11 +131,13 @@ def render(chart: str, server_public_ip: str) -> str:
             # render-required-secrets.yaml are seeded here.
             "keycloak": {
                 "serviceTechUserId": "00000000-0000-4000-8000-000000000000",
+                "serviceAdminSubject": "00000000-0000-4000-8000-000000000001",
             },
             "secrets": {
                 "redisdefaultPass": "test-redis-pass",
                 "matrixRegistrationSharedSecret": "test-shared-secret",
-                "keycloakServiceAdminPassword": "render-only-not-a-real-secret",
+                "keycloakBackendTechnicalClientSecret": "render-only-technical-client-secret-canary",
+                "keycloakBackendAdminClientSecret": "render-only-admin-client-secret-canary",
             }
         },
         "userService": {},

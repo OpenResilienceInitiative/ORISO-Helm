@@ -15,7 +15,7 @@ BASE = [
     "-f", os.path.join(ROOT, "tests", "fixtures", "render-required-secrets.yaml"),
     "--set-string", "global.secrets.redisdefaultPass=test-redis-password",
     "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
-    "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=render-test-secret",
+    "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
     "--set", "global.domainName=predev.oriso.internal",
 
 ]
@@ -61,22 +61,21 @@ def main():
     cts_deployment = next(doc for doc in docs if doc.get("kind") == "Deployment"
                           and doc["metadata"]["name"] == "consultingtypeservice")
     cts_env = {entry["name"]: entry for entry in cts_deployment["spec"]["template"]["spec"]["containers"][0]["env"]}
-    assert cts_env["IDENTITY_TECHNICAL_USER_PASSWORD"]["valueFrom"]["secretKeyRef"] == {
-        "name": "userservice-secret", "key": "IDENTITY_TECHNICAL_USER_PASSWORD"}
+    assert cts_env["KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"] == {
+        "name": "keycloak-backend-client-secrets", "key": "KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET"}
     assert not any(name.startswith("KEYCLOAK_ADMIN_") for name in cts_env)
     assert not any(name.startswith("SMTP_") and name != "SMTP_RECONCILE_URL" for name in env)
-    for name, key in (("TECHNICAL_USERNAME", "IDENTITY_TECHNICAL_USER_USERNAME"),
-                      ("TECHNICAL_PASSWORD", "IDENTITY_TECHNICAL_USER_PASSWORD")):
-        assert env[name]["valueFrom"]["secretKeyRef"] == {"name": "userservice-secret", "key": key}
+    for name, key in (("TECHNICAL_CLIENT_SECRET", "KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET"),):
+        assert env[name]["valueFrom"]["secretKeyRef"] == {"name": "keycloak-backend-client-secrets", "key": key}
     assert env["TECHNICAL_SERVICE_SUBJECT"]["valueFrom"]["configMapKeyRef"] == {
         "name": "tenantservice-configmap-env", "key": "TECHNICAL_SERVICE_SUBJECT"}
     assert env["TECHNICAL_CLIENT_ID"]["valueFrom"]["configMapKeyRef"] == {
-        "name": "userservice-configmap-env", "key": "KEYCLOAK_CONFIG_APP_CLIENTID"}
+        "name": "userservice-configmap-env", "key": "IDENTITY_TECHNICAL_CLIENT_ID"}
     assert env["CONSULTING_TYPE_SERVICE_URL"]["valueFrom"]["configMapKeyRef"] == {
         "name": "userservice-configmap-env", "key": "CONSULTING_TYPE_SERVICE_API_URL"}
     result, distinct_docs = render(
         "--set-string", "userService.keycloakResource=resource-only-canary",
-        "--set-string", "global.keycloak.serviceAppClientId=technical-login-client-canary",
+        "--set-string", "global.keycloak.backendTechnicalClientId=technical-login-client-canary",
     )
     assert result.returncode == 0, result.stderr
     service_config = next(doc for doc in distinct_docs if doc.get("kind") == "ConfigMap"

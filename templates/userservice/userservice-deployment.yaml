@@ -18,7 +18,13 @@ spec:
       # ConfigMap-backed env vars do not change in running Pods. This annotation
       # makes an opt-out replace Pods before they can keep sending pending copy.
       annotations:
+        checksum/backend-service-clients: {{ include "oriso.backendServiceClientsChecksum" . | quote }}
+        checksum/media-lifecycle: {{ .Values.matrixrtcLifecycle | toJson | sha256sum | quote }}
+        checksum/account-inactivity: {{ printf "%v/%v" (dig "accountInactivity" "enabled" false .Values.userService) (dig "accountInactivity" "dryRun" true .Values.userService) | sha256sum | quote }}
         oriso.org/email-allow-unreviewed-locales: {{ .Values.userService.emailAllowUnreviewedLocales | default false | quote }}
+        {{- $feedSignal := .Values.userService.feedSignal | default dict }}
+        oriso.org/matrix-feed-signal-enabled: {{ dig "enabled" "true" $feedSignal | quote }}
+        oriso.org/matrix-feed-signal-coalesce-millis: {{ dig "coalesceMillis" 500 $feedSignal | quote }}
         checksum/email-identity: {{ printf "%s\x00%s" (include "oriso.emailBrandingName" .) (include "oriso.emailLegalOrganisationName" .) | sha256sum | quote }}
     spec:
       affinity:
@@ -36,6 +42,33 @@ spec:
           image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            - name: MATRIXRTC_LIFECYCLE_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: MATRIXRTC_LIFECYCLE_ENABLED
+            - name: ACCOUNT_INACTIVITY_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: ACCOUNT_INACTIVITY_ENABLED
+            - name: ACCOUNT_INACTIVITY_DRY_RUN
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: ACCOUNT_INACTIVITY_DRY_RUN
+            - name: MATRIXRTC_LIFECYCLE_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: MATRIXRTC_LIFECYCLE_BASE_URL
+            {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
+            - name: MATRIXRTC_LIFECYCLE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.matrixrtcLifecycle.existingSecret.name | quote }}
+                  key: {{ .Values.matrixrtcLifecycle.existingSecret.tokenKey | quote }}
+            {{- end }}
             - name: MATRIXRTC_CALL_POLICY_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -217,26 +250,26 @@ spec:
                 configMapKeyRef:
                   key: KEYCLOAK_CONFIG_ADMIN_CLIENTID
                   name: userservice-configmap-env
-            - name: KEYCLOAK_CONFIG_ADMIN_PASSWORD
+            - name: KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT
+            - name: KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  key: KEYCLOAK_CONFIG_ADMIN_PASSWORD
-                  name: userservice-secret
-            - name: KEYCLOAK_CONFIG_ADMIN_USERNAME
+                  name: keycloak-backend-client-secrets
+                  key: KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET
+            - name: IDENTITY_TECHNICAL_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: IDENTITY_TECHNICAL_CLIENT_ID
+            - name: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  key: KEYCLOAK_CONFIG_ADMIN_USERNAME
-                  name: userservice-secret
-            - name: IDENTITY_TECHNICAL_USER_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  key: IDENTITY_TECHNICAL_USER_USERNAME
-                  name: userservice-secret
-            - name: IDENTITY_TECHNICAL_USER_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  key: IDENTITY_TECHNICAL_USER_PASSWORD
-                  name: userservice-secret
+                  name: keycloak-backend-client-secrets
+                  key: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
             - name: KEYCLOAK_CONFIG_APP_CLIENTID
               valueFrom:
                 configMapKeyRef:
@@ -393,9 +426,9 @@ spec:
                   key: LOGSTASH_HOST
                   name: userservice-configmap-env
             - name: USER_REGISTEREDONLY_DELETEWORKFLOW_ENABLED
-              value: "true"
+              value: "false"
             - name: USER_REGISTEREDONLY_DELETEWORKFLOW_AFTERSESSIONPURGE_ENABLED
-              value: "true"
+              value: "false"
             - name: IDENTITY_OTP_ALLOWED_FOR_USERS
               valueFrom:
                 configMapKeyRef:
@@ -550,6 +583,17 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   key: MATRIX_MIGRATION_ENABLED
+                  name: userservice-configmap-env
+            # ADR-020 P2 feed-update signal.
+            - name: MATRIX_FEED_SIGNAL_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  key: MATRIX_FEED_SIGNAL_ENABLED
+                  name: userservice-configmap-env
+            - name: MATRIX_FEED_SIGNAL_COALESCE_MILLIS
+              valueFrom:
+                configMapKeyRef:
+                  key: MATRIX_FEED_SIGNAL_COALESCE_MILLIS
                   name: userservice-configmap-env
             # ADR-018 Global Support Access. Only the policy-bearing settings are wired here; the
             # worker tuning knobs stay on their code defaults so this list keeps stating decisions

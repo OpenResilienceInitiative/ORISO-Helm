@@ -50,7 +50,7 @@ containers:
         valueFrom:
           configMapKeyRef:
             name: userservice-configmap-env
-            key: KEYCLOAK_CONFIG_APP_CLIENTID
+            key: IDENTITY_TECHNICAL_CLIENT_ID
       - name: TECHNICAL_SERVICE_SUBJECT
         valueFrom:
           configMapKeyRef:
@@ -59,11 +59,11 @@ containers:
       {{- if eq $mode "trigger" }}
       - name: SMTP_RECONCILE_URL
         value: {{ printf "http://keycloak-reconcile-smtp.%s:8080/smtp/reconcile" .Release.Namespace | quote }}
-      {{- range $pair := list (list "TECHNICAL_USERNAME" "IDENTITY_TECHNICAL_USER_USERNAME") (list "TECHNICAL_PASSWORD" "IDENTITY_TECHNICAL_USER_PASSWORD") }}
+      {{- range $pair := list (list "TECHNICAL_CLIENT_SECRET" "KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET") }}
       - name: {{ index $pair 0 }}
         valueFrom:
           secretKeyRef:
-            name: userservice-secret
+            name: keycloak-backend-client-secrets
             key: {{ index $pair 1 }}
       {{- end }}
       {{- end }}

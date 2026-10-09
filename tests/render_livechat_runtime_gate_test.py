@@ -14,6 +14,7 @@ import yaml
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES = [
     "templates/_helpers.tpl",
+    "templates/_matrixrtcLifecycle.tpl",
     "templates/userservice/userservice-configmap-env.yaml",
     "templates/userservice/userservice-deployment.yaml",
 ]
@@ -39,7 +40,7 @@ def build_minimal_chart(dst: str) -> None:
 def render(chart: str, *values: str) -> list[dict]:
     # The chart requires a real public host (ORISO-Helm#366).
     render_domain = os.path.join(CHART_DIR, "tests", "fixtures", "values-render-domain.yaml")
-    command = ["helm", "template", "runtime-gate", chart, "-f", render_domain]
+    command = ["helm", "template", "runtime-gate", chart, "-f", render_domain, "-f", os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml")]
     for values_file in values:
         command.extend(["-f", values_file])
     result = subprocess.run(command, capture_output=True, text=True, check=False)
