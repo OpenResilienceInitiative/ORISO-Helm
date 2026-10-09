@@ -10,14 +10,10 @@ import errno
 import json
 import math
 import os
-import signal
 import socket
-import socketserver
 import sys
-import threading
 import time
 from email.utils import parseaddr
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
@@ -25,8 +21,6 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 MAX_RESPONSE_BYTES = 65536
 MAX_REALM_RESPONSE_BYTES = 1048576
 HTTP_TIMEOUT_SECONDS = 10
-TRIGGER_READY_SECONDS = 120  # Bounded below the Helm Job's 600-second active deadline.
-TRIGGER_RETRY_SECONDS = 5
 
 
 class ReconcileError(Exception):
@@ -107,10 +101,8 @@ class HttpClient:
             error.close()
             if authenticate_source and error.code in (401, 403):
                 raise ReconcileError("SMTP_RECONCILE_UNAUTHORIZED", 403) from None
-            # 502 is the server reporting that Admin Settings/CTS is not
-            # answering yet. A post-upgrade hook routinely runs while that
-            # Deployment is still rolling, so it is as transient as the 503 the
-            # server returns for itself: both wait out TRIGGER_READY_SECONDS.
+            # 502/503 while an upstream is still starting is transient for callers
+            # that opted in (mail locale hook); they retry within their own budget.
             if trigger_request and error.code in (502, 503):
                 raise TriggerNotReady() from None
             raise ReconcileError("SMTP_RECONCILE_" + failure) from None
@@ -211,13 +203,10 @@ def smtp_transport(snapshot):
             "fromDisplayName": display_name, "user": username, "password": password}
 
 
-def configuration(env, mode="reconcile"):
+def configuration(env):
     names = ("KEYCLOAK_URL", "KEYCLOAK_REALM", "CONSULTING_TYPE_SERVICE_URL", "POD_NAMESPACE",
-             "TECHNICAL_SERVICE_SUBJECT", "TECHNICAL_CLIENT_ID")
-    if mode != "serve":
-        names += ("TECHNICAL_CLIENT_SECRET",)
-    if mode != "trigger":
-        names += ("SMTP_SYNC_CLIENT_ID", "SMTP_SYNC_CLIENT_SECRET")
+             "TECHNICAL_SERVICE_SUBJECT", "TECHNICAL_CLIENT_ID", "TECHNICAL_CLIENT_SECRET",
+             "SMTP_SYNC_CLIENT_ID", "SMTP_SYNC_CLIENT_SECRET")
     config = {name: required(env, name) for name in names}
     # The sync client lives in the ORISO realm; master is never a valid target.
     if config["KEYCLOAK_REALM"] == "master":
@@ -265,13 +254,10 @@ def sync_login(http, config):
     return token
 
 
-def read_snapshot(http, config, technical_token, revision=False):
-    # For a callback, CTS independently verifies the presented access token's
-    # signature and authority. Decoded matching claims alone never grant access.
+def read_snapshot(http, config, technical_token):
     return http.request("GET", config["CONSULTING_TYPE_SERVICE_URL"] + "/settingsadmin/smtp-credentials",
                         headers={"Authorization": "Bearer " + technical_token, "tenantId": "0",
-                                 "Cache-Control": "no-store"}, revision=revision,
-                        authenticate_source=revision)
+                                 "Cache-Control": "no-store"})
 
 
 def apply_snapshot(http, config, snapshot):
@@ -294,155 +280,9 @@ def reconcile(env):
         print("SMTP_DISABLED_OR_INCOMPLETE: Keycloak mail disabled until Admin Settings are complete")
 
 
-def saved_revision(value):
-    if (not isinstance(value, str) or not value.isascii() or not value.isdecimal()
-            or len(value) > 19 or int(value) > 2**63 - 1):
-        raise ReconcileError("SMTP_RECONCILE_SOURCE_REVISION_INVALID")
-    return int(value)
-
-
-def trigger(env, ready_seconds=TRIGGER_READY_SECONDS, retry_seconds=TRIGGER_RETRY_SECONDS):
-    config = configuration(env, "trigger")
-    url = base_url(required(env, "SMTP_RECONCILE_URL"), "keycloak-reconcile-smtp", config["POD_NAMESPACE"])
-    http = HttpClient()
-    headers = {"Authorization": "Bearer " + technical_login(http, config),
-               "Content-Type": "application/json"}
-    deadline = time.monotonic() + ready_seconds
-    while True:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise TriggerNotReady()
-        try:
-            result = http.request("POST", url, b'{"revision":0}', headers, "TRIGGER_FAILED",
-                                  timeout=min(40, remaining), trigger_request=True)
-            break
-        except TriggerNotReady:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise
-            time.sleep(min(retry_seconds, remaining))
-    if (not result or not isinstance(result.get("appliedRevision"), int)
-            or isinstance(result["appliedRevision"], bool) or not 0 <= result["appliedRevision"] <= 2**63 - 1
-            or result.get("status") not in ("APPLIED", "DISABLED_OR_INCOMPLETE")):
-        raise ReconcileError("SMTP_RECONCILE_TRIGGER_FAILED")
-    code = "SMTP_RECONCILE_APPLIED" if result["status"] == "APPLIED" else "SMTP_DISABLED_OR_INCOMPLETE"
-    print(code + ": installation snapshot acknowledged")
-
-
-def serve(env):
-    config = configuration(env, "serve")
-    lock = threading.Lock()
-    stopping = threading.Event()
-    applied = {"revision": None, "status": None}
-
-    class Handler(BaseHTTPRequestHandler):
-        def setup(self):
-            super().setup()
-            self.connection.settimeout(5)
-
-        def log_message(self, *_):
-            pass  # Requests and exception text may contain bearer credentials.
-
-        def reply(self, status, payload):
-            code = payload.get("code") if isinstance(payload, dict) else None
-            if status >= 400 and code:
-                # Codes only. Request lines, headers and response bodies may
-                # carry bearer tokens or the SMTP password.
-                print("%s %s" % (status, code), file=sys.stderr, flush=True)
-            body = json.dumps(payload).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def do_GET(self):
-            self.reply(200 if self.path == "/health" and not stopping.is_set() else 404, {})
-
-        def do_POST(self):
-            if self.path != "/smtp/reconcile":
-                return self.reply(404, {"code": "SMTP_RECONCILE_ROUTE_NOT_FOUND"})
-            if stopping.is_set():
-                return self.reply(503, {"code": "SMTP_RECONCILE_STOPPING"})
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 256 or self.headers.get("Content-Type") != "application/json":
-                    raise ValueError()
-                payload = json.loads(self.rfile.read(length))
-                revision = payload.get("revision") if isinstance(payload, dict) else None
-                if (set(payload) != {"revision"} or not isinstance(revision, int)
-                        or isinstance(revision, bool) or not 0 <= revision <= 2**63 - 1):
-                    raise ValueError()
-            except (ValueError, TypeError, UnicodeError, OSError):
-                return self.reply(400, {"code": "SMTP_RECONCILE_REQUEST_INVALID"})
-            authorization = self.headers.get("Authorization", "")
-            if not authorization.startswith("Bearer ") or len(authorization) > 8192:
-                return self.reply(403, {"code": "SMTP_RECONCILE_UNAUTHORIZED"})
-            token = authorization[7:]
-            try:
-                verify_technical_identity(token, config["TECHNICAL_SERVICE_SUBJECT"], config["TECHNICAL_CLIENT_ID"])
-            except ReconcileError:
-                return self.reply(403, {"code": "SMTP_RECONCILE_UNAUTHORIZED"})
-            if not lock.acquire(blocking=False):
-                return self.reply(503, {"code": "SMTP_RECONCILE_BUSY"})
-            try:
-                http = HttpClient()
-                snapshot, raw_revision = read_snapshot(http, config, token, revision=True)
-                current = saved_revision(raw_revision)
-                if revision > current or (applied["revision"] is not None and current < applied["revision"]):
-                    raise ReconcileError("SMTP_RECONCILE_REVISION_CONFLICT", 409)
-                if current != applied["revision"]:
-                    status = apply_snapshot(http, config, snapshot)
-                    applied.update(revision=current, status=status)
-                self.reply(200, {"appliedRevision": current, "status": applied["status"]})
-            except ReconcileError as error:
-                self.reply(error.status, {"code": str(error)})
-            except Exception:
-                self.reply(502, {"code": "SMTP_RECONCILE_FAILED"})
-            finally:
-                lock.release()
-
-    class Server(ThreadingHTTPServer):
-        daemon_threads = False
-        block_on_close = True
-
-        def server_bind(self):
-            # This API has no hostname-dependent response. Avoid an unbounded
-            # reverse lookup of the bind-all address during process startup.
-            socketserver.TCPServer.server_bind(self)
-            self.server_name = "keycloak-reconcile-smtp"
-            self.server_port = self.server_address[1]
-
-        def handle_error(self, *_):
-            pass  # Never log traceback/header/HTTP body on a failed connection.
-
-    try:
-        port = int(env.get("SMTP_RECONCILE_PORT", "8080"))
-        if not 0 < port <= 65535:
-            raise ValueError()
-    except ValueError:
-        raise ReconcileError("SMTP_RECONCILE_CONFIGURATION_INVALID: listen port") from None
-    server = Server(("0.0.0.0", port), Handler)
-    server.timeout = 0.2
-    signal.signal(signal.SIGTERM, lambda *_: stopping.set())
-    signal.signal(signal.SIGINT, lambda *_: stopping.set())
-    try:
-        while not stopping.is_set():
-            server.handle_request()
-    finally:
-        # Stop accepting before waiting for bounded inflight writes. Recreate
-        # must not replace this process until the drain and termination finish.
-        server.server_close()
-
-
 def main():
     try:
-        if sys.argv[1:] == ["--serve"]:
-            serve(os.environ)
-        elif sys.argv[1:] == ["--trigger"]:
-            trigger(os.environ)
-        elif not sys.argv[1:]:
+        if not sys.argv[1:]:
             reconcile(os.environ)
         else:
             raise ReconcileError("SMTP_RECONCILE_CONFIGURATION_INVALID: mode")
@@ -451,7 +291,7 @@ def main():
         return 2
     except Exception:
         # Do not leak a traceback, an HTTP reply or a credential on an unplanned
-        # failure. The pending CTS revision stays eligible for targeted retry.
+        # failure. The next CronJob run retries.
         print("SMTP_RECONCILE_FAILED", file=sys.stderr)
         return 2
     return 0
