@@ -2597,7 +2597,7 @@
       "id": "7c5df021-536b-4f42-bb3c-37b1e4d9864d",
       "createdTimestamp": 1609459200000,
       "username": "realmadmin",
-      "enabled": true,
+      "enabled": false,
       "totp": false,
       "emailVerified": false,
       "firstName": "Realm",
