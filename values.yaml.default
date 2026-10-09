@@ -122,6 +122,11 @@ global:
     serviceAdminSubject: ""
     bootstrapUsers:
       enabled: true
+      # ORISO-realm platform admin; disabled, no password (runbooks/keycloak-break-glass.md).
+      realmAdmin:
+        username: "realmadmin"
+        # true: every install/upgrade disables this user on an existing realm and ends its sessions.
+        disableExisting: false
     # Checks after every install and upgrade that the live realm still carries
     # the ORISO 2FA contract, and fails the hook when it does not. It never
     # writes to the realm: reconciling stays a deliberate operator action,
