@@ -10,6 +10,8 @@ global.keycloak.backendTechnicalClientId: backend-technical
 global.keycloak.serviceAdminClientId: backend-admin
 global.secrets.keycloakBackendTechnicalClientSecret: independently generated persistent secret
 global.secrets.keycloakBackendAdminClientSecret: a different persistent secret
+global.secrets.keycloakSmtpSyncClientSecret: a third persistent secret (smtp-sync, Helm#420;
+    not needed for the preparation Job)
 
 global.keycloak.serviceTechUserId: actual technical service-account UUID
 global.keycloak.serviceAdminSubject: actual admin service-account UUID

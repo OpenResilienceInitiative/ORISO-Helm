@@ -590,6 +590,12 @@
           "query-users",
           "view-realm"
         ]
+      },
+      {
+        "client": "smtp-sync",
+        "roles": [
+          "manage-realm"
+        ]
       }
     ]
   },
@@ -982,6 +988,27 @@
       "id": "abb2340b-208d-4a9a-ba58-c57295e7f0f4",
       "clientId": "backend-admin",
       "name": "backend-admin",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "roles"
+      ],
+      "optionalClientScopes": []
+    },
+    {
+      "id": "6b0f3d2e-5c1a-4f7e-9a8d-2e4c7b1f0a93",
+      "clientId": "smtp-sync",
+      "name": "smtp-sync",
+      "description": "SMTP sync Jobs only (ORISO-Helm#420). manage-realm; secret set by the reconcile Job.",
       "enabled": true,
       "clientAuthenticatorType": "client-secret",
       "protocol": "openid-connect",
@@ -2621,6 +2648,22 @@
           "view-users",
           "query-users",
           "view-realm"
+        ]
+      }
+    },
+    {
+      "id": "3d9a6c41-8e2b-4b57-a0f6-7c15e9d2b864",
+      "username": "service-account-smtp-sync",
+      "enabled": true,
+      "emailVerified": false,
+      "serviceAccountClientId": "smtp-sync",
+      "realmRoles": [],
+      "credentials": [],
+      "requiredActions": [],
+      "groups": [],
+      "clientRoles": {
+        "realm-management": [
+          "manage-realm"
         ]
       }
     }

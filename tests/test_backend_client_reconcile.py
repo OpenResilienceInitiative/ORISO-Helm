@@ -29,6 +29,7 @@ class ReconcileClientsTest(unittest.TestCase):
         self.fail_delete_path = None
         self.fail_mapping = False
         self.bad_claims = {}
+        self.bad_claims_client = None
         outer = self
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_): pass
@@ -50,7 +51,7 @@ class ReconcileClientsTest(unittest.TestCase):
                         else:
                             roles=outer.role_maps['sa-'+client]
                             claims={'sub':'sa-'+client,'azp':client,'exp':time.time()+60,'realm_access':{'roles':[r['name'] for r in roles['realmMappings']]},'resource_access':{k:{'roles':[r['name'] for r in v['mappings']]} for k,v in roles['clientMappings'].items()}}
-                            claims.update(outer.bad_claims)
+                            if outer.bad_claims_client in (None, client): claims.update(outer.bad_claims)
                             payload=base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
                             answer={'access_token':'header.'+payload+'.fixture-signature'}
                     elif values.get('client_id') != ['admin-cli'] or values.get('username') != ['master-recovery']:
@@ -146,7 +147,8 @@ class ReconcileClientsTest(unittest.TestCase):
              'ADMIN_CLIENT_SECRET':'admin-fixture-secret-32-characters',
              'ADMIN_SERVICE_SUBJECT':'sa-backend-admin','TECHNICAL_SERVICE_SUBJECT':'sa-backend-technical','PREPARE_ONLY':'false',
              'RETIRE_LEGACY_USERS':'false','LEGACY_TECHNICAL_USERNAME':'technical',
-             'LEGACY_ADMIN_USERNAME':'svc-keycloak-admin','BOOTSTRAP_ADMIN_USERNAME':'realmadmin',**overrides}
+             'LEGACY_ADMIN_USERNAME':'svc-keycloak-admin','BOOTSTRAP_ADMIN_USERNAME':'realmadmin',
+             'SMTP_SYNC_CLIENT_ID':'smtp-sync','SMTP_SYNC_CLIENT_SECRET':'smtp-sync-fixture-secret-32-characters',**overrides}
         return subprocess.run(['python3',str(SCRIPT)],env=env,capture_output=True,text=True)
     def prepare(self):
         result=self.run_helper(PREPARE_ONLY='true')
@@ -204,8 +206,58 @@ class ReconcileClientsTest(unittest.TestCase):
             self.assertTrue(self.users['legacy-tech']['enabled']);self.assertTrue(self.users['legacy-admin']['enabled'])
             self.bad_claims={}
     def test_idempotent_reconcile(self):
-        self.prepare();first=copy.deepcopy(self.clients)
+        self.prepare();self.assertEqual(self.run_helper().returncode,0);first=copy.deepcopy(self.clients)
         result=self.run_helper();self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(self.clients,first)
+
+    # Helm#420: existing realms get the SMTP sync client through this Job.
+    def test_existing_realm_gets_smtp_sync_client_with_manage_realm_only(self):
+        self.prepare()
+        result=self.run_helper()
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('SMTP_SYNC_CLIENT_RECONCILED',result.stdout)
+        client=self.clients['smtp-sync']
+        self.assertFalse(client['publicClient']);self.assertTrue(client['serviceAccountsEnabled'])
+        for key in ('directAccessGrantsEnabled','standardFlowEnabled','implicitFlowEnabled','fullScopeAllowed'): self.assertFalse(client[key])
+        self.assertEqual(client['secret'],'smtp-sync-fixture-secret-32-characters')
+        for mapping in (self.role_maps['sa-smtp-sync'],self.scope_maps['smtp-sync']):
+            self.assertEqual(mapping['realmMappings'],[])
+            self.assertEqual({k:[r['name'] for r in v['mappings']] for k,v in mapping['clientMappings'].items()},
+                             {'realm-management':['manage-realm']})
+        self.assertNotIn('smtp-sync-fixture-secret-32-characters',result.stdout+result.stderr)
+
+    def test_smtp_sync_surplus_roles_are_removed(self):
+        self.prepare();self.assertEqual(self.run_helper().returncode,0)
+        self.role_maps['sa-smtp-sync']['clientMappings']['realm-management']['mappings'].append({'id':'realm-admin','name':'realm-admin'})
+        self.role_maps['sa-smtp-sync']['realmMappings'].append({'id':'technical','name':'technical'})
+        self.assertEqual(self.run_helper().returncode,0)
+        mapping=self.role_maps['sa-smtp-sync']
+        self.assertEqual(mapping['realmMappings'],[])
+        self.assertEqual([r['name'] for r in mapping['clientMappings']['realm-management']['mappings']],['manage-realm'])
+
+    def test_preparation_neither_needs_nor_creates_smtp_sync_client(self):
+        result=self.run_helper(PREPARE_ONLY='true',SMTP_SYNC_CLIENT_SECRET='',SMTP_SYNC_CLIENT_ID='')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertNotIn('smtp-sync',self.clients)
+
+    def test_existing_non_dedicated_smtp_sync_client_fails_before_changes(self):
+        self.prepare();self.events.clear()
+        self.clients['smtp-sync']={'id':'smtp-sync','clientId':'smtp-sync','publicClient':True}
+        result=self.run_helper()
+        self.assertNotEqual(result.returncode,0);self.assertEqual(self.mutations(),[])
+
+    def test_unsafe_smtp_sync_configuration_is_rejected_before_requests(self):
+        for values in ({'SMTP_SYNC_CLIENT_SECRET':''},{'SMTP_SYNC_CLIENT_SECRET':'short'},
+                       {'SMTP_SYNC_CLIENT_SECRET':'technical-fixture-secret-32-characters'},
+                       {'SMTP_SYNC_CLIENT_ID':'backend-admin'},{'SMTP_SYNC_CLIENT_ID':'admin-cli'}):
+            self.events.clear();result=self.run_helper(**values)
+            self.assertNotEqual(result.returncode,0);self.assertEqual(self.events,[])
+
+    def test_smtp_sync_token_with_extra_rights_is_rejected(self):
+        self.prepare();self.assertEqual(self.run_helper().returncode,0)
+        self.bad_claims_client='smtp-sync'
+        self.bad_claims={'resource_access':{'realm-management':{'roles':['manage-realm','realm-admin']}}}
+        result=self.run_helper()
+        self.assertNotEqual(result.returncode,0);self.assertIn('TOKEN_CONTRACT_MISMATCH',result.stderr)
 
     def add_surplus_permissions(self):
         for mapping, owners in (
@@ -226,6 +278,7 @@ class ReconcileClientsTest(unittest.TestCase):
 
     def test_surplus_roles_and_scope_mappings_are_removed(self):
         self.prepare()
+        self.assertEqual(self.run_helper().returncode, 0)
         expected_roles = copy.deepcopy(self.role_maps)
         expected_scopes = copy.deepcopy(self.scope_maps)
         self.add_surplus_permissions()

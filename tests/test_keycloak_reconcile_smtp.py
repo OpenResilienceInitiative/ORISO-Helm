@@ -9,12 +9,9 @@ import sys
 import threading
 import time
 import unittest
-from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "files" / "keycloak-reconcile-smtp.py"
@@ -45,6 +42,10 @@ class SmtpFixture(unittest.TestCase):
             "sub": "environment-technical-subject", "azp": "configured-app-client",
             "realm_access": {"roles": ["technical"]}, "exp": time.time() + 300,
         }
+        self.sync_claims = {
+            "sub": "sync-service-account", "azp": "smtp-sync", "exp": time.time() + 300,
+            "resource_access": {"realm-management": {"roles": ["manage-realm"]}},
+        }
         self.requests = []
         self.updates = []
         self.source_status = 200
@@ -56,6 +57,8 @@ class SmtpFixture(unittest.TestCase):
         self.admin_redirect = False
         self.revision = 1
         self.revision_header = True
+        self.acks = []
+        self.ack_status = 204
         self.update_started = threading.Event()
         self.update_release = threading.Event()
         self.update_release.set()
@@ -75,23 +78,30 @@ class SmtpFixture(unittest.TestCase):
                     self.wfile.write(json.dumps(body).encode())
 
             def do_POST(self):
-                form = parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode())
+                raw = self.rfile.read(int(self.headers["Content-Length"]))
+                if self.path == "/cts/settingsadmin/smtp-sync-acknowledgement":
+                    owner.requests.append(("POST", self.path, dict(self.headers), json.loads(raw)))
+                    if (self.headers.get("Authorization") != "Bearer " + jwt(owner.claims)
+                            or self.headers.get("tenantId") != "0"):
+                        return self.reply(403)
+                    owner.acks.append(json.loads(raw))
+                    return self.reply(owner.ack_status)
+                form = parse_qs(raw.decode())
                 owner.requests.append(("POST", self.path, dict(self.headers), form))
                 if self.path == "/auth/realms/example/protocol/openid-connect/token":
+                    if form == {"grant_type": ["client_credentials"], "client_id": ["smtp-sync"],
+                                "client_secret": ["sync-client-secret-canary"]}:
+                        if owner.admin_redirect:
+                            self.send_response(302)
+                            self.send_header("Location", "/credential-leak-target")
+                            self.end_headers()
+                            return
+                        return self.reply(owner.admin_status, {"access_token": jwt(owner.sync_claims)})
                     if form != {"grant_type": ["client_credentials"], "client_id": ["configured-app-client"],
                                 "client_secret": ["technical-client-secret-canary"]}:
                         return self.reply(401, {"error": "private-token-error"})
                     return self.reply(owner.technical_status, {"access_token": jwt(owner.claims)})
-                if self.path == "/auth/realms/master/protocol/openid-connect/token":
-                    if owner.admin_redirect:
-                        self.send_response(302)
-                        self.send_header("Location", "/credential-leak-target")
-                        self.end_headers()
-                        return
-                    if form != {"grant_type": ["password"], "client_id": ["admin-cli"],
-                                "username": ["realm-admin-canary"], "password": ["admin-password-canary"]}:
-                        return self.reply(401)
-                    return self.reply(owner.admin_status, {"access_token": "admin-token-canary"})
+                # The master realm is never a valid authority for this helper.
                 self.reply(404)
 
             def do_GET(self):
@@ -117,7 +127,7 @@ class SmtpFixture(unittest.TestCase):
             def do_PUT(self):
                 payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 owner.requests.append(("PUT", self.path, dict(self.headers), payload))
-                if self.path != "/auth/admin/realms/example" or self.headers.get("Authorization") != "Bearer admin-token-canary":
+                if self.path != "/auth/admin/realms/example" or self.headers.get("Authorization") != "Bearer " + jwt(owner.sync_claims):
                     return self.reply(403)
                 owner.update_started.set()
                 owner.update_release.wait(10)
@@ -135,7 +145,7 @@ class SmtpFixture(unittest.TestCase):
             "TECHNICAL_CLIENT_SECRET": "technical-client-secret-canary",
             "TECHNICAL_SERVICE_SUBJECT": "environment-technical-subject",
             "TECHNICAL_CLIENT_ID": "configured-app-client",
-            "KEYCLOAK_ADMIN_USERNAME": "realm-admin-canary", "KEYCLOAK_ADMIN_PASSWORD": "admin-password-canary",
+            "SMTP_SYNC_CLIENT_ID": "smtp-sync", "SMTP_SYNC_CLIENT_SECRET": "sync-client-secret-canary",
         }
 
     def tearDown(self):
@@ -149,7 +159,7 @@ class SmtpFixture(unittest.TestCase):
         result = subprocess.run(command, env={**self.env, **overrides}, capture_output=True, text=True, timeout=15)
         output = result.stdout + result.stderr
         for private in (self.env["TECHNICAL_CLIENT_SECRET"], "technical-password-canary",
-                        "admin-password-canary", "admin-token-canary",
+                        "sync-client-secret-canary", jwt(self.sync_claims),
                         "private-smtp-provider-error", "private-token-error", "saved-username"):
             self.assertNotIn(private, output)
         self.assertNotIn("Traceback", output)
@@ -324,319 +334,101 @@ class ReconcileSmtpTest(SmtpFixture):
                 self.assertEqual(self.requests, [])
 
 
-class TriggerSmtpTest(SmtpFixture):
-    def setUp(self):
-        super().setUp()
-        port_source = ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
-        port = port_source.server_port
-        port_source.server_close()
-        self.bridge_url = "http://127.0.0.1:" + str(port)
-        self.process = subprocess.Popen(
-            [sys.executable, "-B", str(SCRIPT), "--serve"],
-            env={**self.env, "SMTP_RECONCILE_PORT": str(port)}, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True,
-        )
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and self.process.poll() is None:
-            try:
-                with urlopen(self.bridge_url + "/health", timeout=0.2) as response:
-                    if response.status == 200:
-                        return
-            except (URLError, OSError):
-                time.sleep(0.02)
-        if self.process.poll() is None:
-            self.process.terminate()
-        output = self.process.communicate(timeout=2)
-        super().tearDown()
-        self.fail("bridge did not start: " + "".join(output))
-
-    def tearDown(self):
-        self.update_release.set()
-        if hasattr(self, "process"):
-            if self.process.poll() is None:
-                self.process.terminate()
-            output = "".join(self.process.communicate(timeout=12))
-            for private in ("saved-password", "saved-username", "admin-password-canary",
-                            "technical-password-canary", "private-smtp-provider-error"):
-                self.assertNotIn(private, output)
-            self.assertNotIn("Traceback", output)
-        super().tearDown()
-
-    def trigger(self, revision=1, token=None, body=None):
-        request = Request(self.bridge_url + "/smtp/reconcile", method="POST",
-                          data=json.dumps({"revision": revision} if body is None else body).encode(),
-                          headers={"Content-Type": "application/json",
-                                   "Authorization": "Bearer " + (jwt(self.claims) if token is None else token)})
-        try:
-            response = urlopen(request, timeout=8)
-        except HTTPError as error:
-            response = error
-        with response:
-            return response.status, json.loads(response.read())
-
-    def test_authenticated_save_applies_one_current_snapshot_and_revision(self):
-        self.assertEqual(self.trigger(), (200, {"appliedRevision": 1, "status": "APPLIED"}))
-        self.assertEqual(len([r for r in self.requests if r[0] == "GET"]), 1)
-        self.assertEqual(self.updates[-1]["smtpServer"]["password"], self.snapshot["globalSmtpPassword"])
-
-    def test_forged_matching_claims_are_not_authority(self):
-        self.assertEqual(self.trigger()[0], 200)
-        self.requests.clear()
-        self.updates.clear()
-        forged = jwt(self.claims).rsplit(".", 1)[0] + ".forged-signature"
-        self.assertEqual(self.trigger(token=forged)[0], 403)
-        self.assertEqual(self.updates, [])
-        self.assertFalse(any(r[1].startswith("/auth/") for r in self.requests))
-
-    def test_install_hook_calls_same_bridge_without_realm_admin_secret(self):
-        env = {key: value for key, value in self.env.items() if not key.startswith("KEYCLOAK_ADMIN_")}
-        result = subprocess.run([sys.executable, "-B", str(SCRIPT), "--trigger"],
-                                env={**env, "SMTP_RECONCILE_URL": self.bridge_url + "/smtp/reconcile"},
-                                capture_output=True, text=True, timeout=10)
+    def test_writes_with_realm_sync_client_and_never_touches_master(self):
+        result = self.run_reconciler()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("SMTP_RECONCILE_APPLIED", result.stdout)
         self.assertEqual(len(self.updates), 1)
-        self.assertTrue(any(r[1] == "/auth/realms/example/protocol/openid-connect/token" for r in self.requests))
-        self.assertNotIn("password-canary", result.stdout + result.stderr)
+        self.assertFalse(any("/realms/master/" in r[1] for r in self.requests))
+        grants = [r[3] for r in self.requests if r[1].endswith("/openid-connect/token")]
+        self.assertTrue(all(g["grant_type"] == ["client_credentials"] for g in grants))
+        self.assertIn(["smtp-sync"], [g["client_id"] for g in grants])
 
-    def test_install_trigger_recovers_from_busy_bridge_without_reapplying(self):
-        self.update_release.clear()
-        first = []
-        first_thread = threading.Thread(target=lambda: first.append(self.trigger()))
-        first_thread.start()
-        self.assertTrue(self.update_started.wait(3))
-        self.assertEqual(self.trigger()[0], 503)
-        hook = subprocess.Popen(
-            [sys.executable, "-B", str(SCRIPT), "--trigger"],
-            env={**self.env, "SMTP_RECONCILE_URL": self.bridge_url + "/smtp/reconcile"},
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        )
-        try:
-            time.sleep(0.4)  # The first POST observes the busy helper before it is released.
-        finally:
-            self.update_release.set()
-        stdout, stderr = hook.communicate(timeout=12)
-        first_thread.join(3)
-        self.assertEqual(first, [(200, {"appliedRevision": 1, "status": "APPLIED"})])
-        self.assertEqual(hook.returncode, 0, stderr)
-        self.assertIn("SMTP_RECONCILE_APPLIED", stdout)
-        self.assertNotIn("password-canary", stdout + stderr)
-        self.assertEqual(len(self.updates), 1)
+    def test_master_admin_credentials_are_neither_required_nor_used(self):
+        result = self.run_reconciler(KEYCLOAK_ADMIN_USERNAME="", KEYCLOAK_ADMIN_PASSWORD="")
+        self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_install_trigger_retries_connection_refusal_then_acknowledges(self):
-        unused = ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
-        port = unused.server_port
-        unused.server_close()
-        calls = []
+    def test_missing_sync_client_configuration_fails_before_any_request(self):
+        for field in ("SMTP_SYNC_CLIENT_ID", "SMTP_SYNC_CLIENT_SECRET"):
+            with self.subTest(field=field):
+                result = self.run_reconciler(**{field: ""})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.requests, [])
 
-        class LateBridge(BaseHTTPRequestHandler):
-            def log_message(self, *_):
-                pass
+    def test_master_realm_is_refused_before_any_request(self):
+        result = self.run_reconciler(KEYCLOAK_REALM="master")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.requests, [])
 
-            def do_POST(self):
-                calls.append((self.path, self.headers.get("Authorization")))
-                body = self.rfile.read(int(self.headers["Content-Length"]))
-                self.send_response(200 if body == b'{"revision":0}' else 400)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"appliedRevision":1,"status":"APPLIED"}')
+    def test_wrong_sync_identity_never_updates_realm(self):
+        original = dict(self.sync_claims)
+        for field, value in (("azp", "other-client"), ("resource_access", {}), ("exp", time.time() - 60)):
+            with self.subTest(field=field):
+                self.sync_claims = {**original, field: value}
+                result = self.run_reconciler()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("SMTP_RECONCILE_SYNC_IDENTITY_MISMATCH", result.stderr)
+                self.assertFalse(any(r[0] == "PUT" for r in self.requests))
+        self.sync_claims = original
 
-        bridge = {}
-        def start_bridge():
-            time.sleep(0.25)
-            bridge["server"] = ThreadingHTTPServer(("127.0.0.1", port), LateBridge)
-            bridge["server"].serve_forever()
 
-        thread = threading.Thread(target=start_bridge, daemon=True)
-        thread.start()
-        transient_failures = []
-        original_request = reconciler.HttpClient.request
+    # CTS shows the Admin panel status from this acknowledgement (Helm#420).
+    def test_acknowledges_exactly_the_revision_it_wrote(self):
+        self.revision = 41
+        result = self.run_reconciler()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.acks, [{"revision": 41, "status": "APPLIED"}])
+        put = next(i for i, r in enumerate(self.requests) if r[0] == "PUT")
+        ack = next(i for i, r in enumerate(self.requests) if r[1].endswith("/smtp-sync-acknowledgement"))
+        self.assertLess(put, ack)
 
-        def record_request(client, *args, **kwargs):
-            try:
-                return original_request(client, *args, **kwargs)
-            except reconciler.TriggerNotReady:
-                transient_failures.append(1)
-                raise
+    def test_disabled_snapshot_is_acknowledged_as_disabled(self):
+        self.snapshot["globalSmtpEnabled"] = False
+        self.assertEqual(self.run_reconciler().returncode, 0)
+        self.assertEqual(self.acks, [{"revision": 1, "status": "DISABLED_OR_INCOMPLETE"}])
 
-        try:
-            with patch.object(reconciler.HttpClient, "request", record_request):
-                reconciler.trigger({**self.env, "SMTP_RECONCILE_URL": f"http://127.0.0.1:{port}/smtp/reconcile"},
-                                   ready_seconds=2, retry_seconds=0.05)
-            self.assertGreaterEqual(len(transient_failures), 1)
-            self.assertGreaterEqual(len(calls), 1)
-            self.assertEqual(calls[0][0], "/smtp/reconcile")
-            self.assertTrue(calls[0][1].startswith("Bearer "))
-        finally:
-            if "server" in bridge:
-                bridge["server"].shutdown()
-                bridge["server"].server_close()
-            thread.join(2)
+    def test_failed_keycloak_write_is_never_acknowledged(self):
+        self.update_status = 500
+        self.assertNotEqual(self.run_reconciler().returncode, 0)
+        self.assertEqual(self.acks, [])
 
-    def test_install_trigger_exhausts_connection_budget_safely(self):
-        unused = ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
-        port = unused.server_port
-        unused.server_close()
-        with self.assertRaisesRegex(reconciler.ReconcileError, "SMTP_RECONCILE_TRIGGER_NOT_READY"):
-            reconciler.trigger({**self.env, "SMTP_RECONCILE_URL": f"http://127.0.0.1:{port}/smtp/reconcile"},
-                               ready_seconds=0.1, retry_seconds=0.02)
-        self.assertEqual(self.updates, [])
-
-    def test_install_trigger_waits_for_the_source_to_finish_starting(self):
-        # Helm runs this hook without waiting for ConsultingTypeService to become
-        # Ready, so the helper answers 502 SOURCE_UNAVAILABLE while that
-        # Deployment is still rolling. That is as transient as the helper's own
-        # 503 and must be waited out, not reported as a failed release.
-        attempts = []
-
-        class StartingBridge(BaseHTTPRequestHandler):
-            def log_message(self, *_):
-                pass
-
-            def do_POST(self):
-                attempts.append(1)
-                if len(attempts) < 3:
-                    self.send_response(502)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(b'{"code":"SMTP_RECONCILE_SOURCE_UNAVAILABLE"}')
-                    return
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"appliedRevision":4,"status":"APPLIED"}')
-
-        bridge = ThreadingHTTPServer(("127.0.0.1", 0), StartingBridge)
-        thread = threading.Thread(target=bridge.serve_forever, daemon=True)
-        thread.start()
-        try:
-            reconciler.trigger({**self.env, "SMTP_RECONCILE_URL":
-                                f"http://127.0.0.1:{bridge.server_port}/smtp/reconcile"},
-                               ready_seconds=2, retry_seconds=0.02)
-            # It got past the 502s instead of failing on the first one; the
-            # exact attempt count depends on retry timing.
-            self.assertGreaterEqual(len(attempts), 3)
-        finally:
-            bridge.shutdown()
-            bridge.server_close()
-            thread.join(2)
-
-    def test_install_trigger_does_not_retry_auth_or_permanent_helper_failure(self):
-        failures = []
-
-        class RefusingBridge(BaseHTTPRequestHandler):
-            status = 403
-
-            def log_message(self, *_):
-                pass
-
-            def do_POST(self):
-                failures.append(self.status)
-                self.send_response(self.status)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"code":"fixed-error"}')
-
-        bridge = ThreadingHTTPServer(("127.0.0.1", 0), RefusingBridge)
-        thread = threading.Thread(target=bridge.serve_forever, daemon=True)
-        thread.start()
-        try:
-            for status in (401, 403, 500):
-                with self.subTest(status=status):
-                    RefusingBridge.status = status
-                    failures.clear()
-                    with self.assertRaises(reconciler.ReconcileError):
-                        reconciler.trigger({**self.env, "SMTP_RECONCILE_URL":
-                                            f"http://127.0.0.1:{bridge.server_port}/smtp/reconcile"},
-                                           ready_seconds=0.5, retry_seconds=0.02)
-                    self.assertEqual(failures, [status])
-        finally:
-            bridge.shutdown()
-            bridge.server_close()
-            thread.join(2)
-
-    def test_absent_saved_snapshot_acknowledges_zero_and_clears_stale_transport(self):
+    def test_absent_settings_revision_zero_is_not_acknowledged(self):
         self.source_status = 204
         self.revision = 0
-        self.assertEqual(self.trigger(0), (200, {"appliedRevision": 0, "status": "DISABLED_OR_INCOMPLETE"}))
-        self.assertEqual(self.updates, [{"smtpServer": {}}])
+        self.assertEqual(self.run_reconciler().returncode, 0)
+        self.assertEqual(self.acks, [])
 
-    def test_wrong_subject_client_role_or_expiry_rejected_before_source(self):
-        for field, value in (("sub", "other"), ("azp", "other"),
-                             ("realm_access", {"roles": []}), ("exp", time.time() - 1)):
-            with self.subTest(field=field):
-                self.assertEqual(self.trigger(token=jwt({**self.claims, field: value}))[0], 403)
-        self.assertEqual(self.requests, [])
+    def test_missing_or_invalid_revision_fails_before_writing(self):
+        for header, value in ((False, 1), (True, "not-a-number"), (True, -1)):
+            with self.subTest(value=value, header=header):
+                self.revision_header, self.revision = header, value
+                result = self.run_reconciler()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("SMTP_RECONCILE_SOURCE_REVISION_INVALID", result.stderr)
+                self.assertEqual(self.updates, [])
+                self.assertEqual(self.acks, [])
 
-    def test_replayed_old_trigger_reads_latest_and_does_not_regress_or_repeat_put(self):
-        self.revision = 2
-        self.snapshot["globalSmtpPassword"] = "rotated-latest-password"
-        self.assertEqual(self.trigger(1), (200, {"appliedRevision": 2, "status": "APPLIED"}))
-        self.assertEqual(self.trigger(1), (200, {"appliedRevision": 2, "status": "APPLIED"}))
-        self.assertEqual(len(self.updates), 1)
-        self.assertEqual(self.updates[0]["smtpServer"]["password"], "rotated-latest-password")
+    def test_newer_save_conflict_is_left_for_the_next_run(self):
+        self.ack_status = 409
+        result = self.run_reconciler()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SMTP_RECONCILE_ACK_STALE", result.stdout)
 
-    def test_missing_revision_or_future_request_does_not_modify_realm(self):
-        self.assertEqual(self.trigger(2)[0], 409)
-        self.revision_header = False
-        self.assertEqual(self.trigger()[0], 502)
-        self.assertEqual(self.updates, [])
+    def test_acknowledgement_failure_is_visible(self):
+        for status in (403, 500):
+            with self.subTest(status=status):
+                self.ack_status = status
+                result = self.run_reconciler()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("SMTP_RECONCILE_ACK_FAILED", result.stderr)
 
-    def test_partial_or_disabled_source_clears_and_acknowledges_actual_revision(self):
-        self.snapshot.pop("globalSmtpPassword")
-        self.assertEqual(self.trigger(), (200, {"appliedRevision": 1, "status": "DISABLED_OR_INCOMPLETE"}))
-        self.assertEqual(self.updates, [{"smtpServer": {}}])
-
-    def test_source_outage_preserves_previous_realm_and_never_acknowledges(self):
-        self.source_status = 503
-        status, body = self.trigger()
-        self.assertEqual(status, 502)
-        self.assertNotIn("appliedRevision", body)
-        self.assertEqual(self.updates, [])
-
-    def test_failed_update_keeps_retry_eligible(self):
-        self.update_status = 500
-        self.assertEqual(self.trigger()[0], 502)
-        self.update_status = 204
-        self.assertEqual(self.trigger()[0], 200)
-        self.assertEqual(len(self.updates), 1)
-
-    def test_concurrent_save_is_busy_then_next_retry_applies_newest_snapshot(self):
-        self.update_release.clear()
-        first = []
-        thread = threading.Thread(target=lambda: first.append(self.trigger()))
-        thread.start()
-        self.assertTrue(self.update_started.wait(3))
-        self.revision = 2
-        self.snapshot["globalSmtpPassword"] = "rotation-during-apply"
-        self.assertEqual(self.trigger(2)[0], 503)
-        self.update_release.set()
-        thread.join(5)
-        self.assertEqual(first, [(200, {"appliedRevision": 1, "status": "APPLIED"})])
-        self.assertEqual(self.trigger(2), (200, {"appliedRevision": 2, "status": "APPLIED"}))
-        self.assertEqual(self.updates[-1]["smtpServer"]["password"], "rotation-during-apply")
-
-    def test_shutdown_drains_inflight_apply_before_process_exit(self):
-        self.update_release.clear()
-        result = []
-        thread = threading.Thread(target=lambda: result.append(self.trigger()))
-        thread.start()
-        self.assertTrue(self.update_started.wait(3))
-        self.process.terminate()
-        time.sleep(0.1)
-        self.assertIsNone(self.process.poll())
-        self.update_release.set()
-        thread.join(5)
-        self.process.wait(5)
-        self.assertEqual(result[0][0], 200)
-        self.assertEqual(len(self.updates), 1)
-
-    def test_request_accepts_only_revision_metadata(self):
-        for body in ({"revision": True}, {"revision": -1}, {"revision": 2**63},
-                     {"revision": 1, "smtpPassword": "must-not-be-accepted"}, {}):
-            with self.subTest(body=body):
-                self.assertEqual(self.trigger(body=body)[0], 400)
-        self.assertEqual(self.requests, [])
+    def test_no_long_running_helper_modes_remain(self):
+        for mode in ("--serve", "--trigger"):
+            with self.subTest(mode=mode):
+                result = subprocess.run([sys.executable, "-B", str(SCRIPT), mode], env=self.env,
+                                        capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("SMTP_RECONCILE_CONFIGURATION_INVALID: mode", result.stderr)
+                self.assertEqual(self.requests, [])
 
 
 if __name__ == "__main__":

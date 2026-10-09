@@ -1,14 +1,17 @@
+{{- /* Must match the smtp-sync client in charts/keycloak/keycloak-resources/realm.json. */ -}}
+{{- define "oriso.smtpSyncClientId" -}}smtp-sync{{- end -}}
+
+{{- /* Short-lived SMTP sync pod: reads Admin Settings with the technical client,
+writes the realm with the smtp-sync realm client. No master admin credential. */ -}}
 {{- define "oriso.keycloakSmtpReconcilePod" -}}
-{{- $mode := .mode -}}
-{{- with .root -}}
 {{- $image := required "keycloakSmtpReconcile.image is required and must use an immutable digest" .Values.keycloakSmtpReconcile.image -}}
 {{- if not (regexMatch "^[^[:space:]]+@sha256:[a-f0-9]{64}$" $image) -}}
 {{- fail "keycloakSmtpReconcile.image must use an immutable sha256 digest" -}}
 {{- end -}}
-restartPolicy: {{ if eq $mode "serve" }}Always{{ else }}Never{{ end }}
-{{- if eq $mode "serve" }}
-terminationGracePeriodSeconds: 60
-{{- end }}
+{{- if eq .Values.global.keycloak.realm "master" -}}
+{{- fail "global.keycloak.realm must not be master: the SMTP sync client lives in the ORISO realm" -}}
+{{- end -}}
+restartPolicy: Never
 automountServiceAccountToken: false
 securityContext:
   runAsNonRoot: true
@@ -56,44 +59,19 @@ containers:
           configMapKeyRef:
             name: tenantservice-configmap-env
             key: TECHNICAL_SERVICE_SUBJECT
-      {{- if eq $mode "trigger" }}
-      - name: SMTP_RECONCILE_URL
-        value: {{ printf "http://keycloak-reconcile-smtp.%s:8080/smtp/reconcile" .Release.Namespace | quote }}
-      {{- range $pair := list (list "TECHNICAL_CLIENT_SECRET" "KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET") }}
-      - name: {{ index $pair 0 }}
+      - name: TECHNICAL_CLIENT_SECRET
         valueFrom:
           secretKeyRef:
             name: keycloak-backend-client-secrets
-            key: {{ index $pair 1 }}
-      {{- end }}
-      {{- end }}
-      {{- if eq $mode "serve" }}
-      {{- range $pair := list (list "KEYCLOAK_ADMIN_USERNAME" "KEYCLOAK_ADMIN") (list "KEYCLOAK_ADMIN_PASSWORD" "KEYCLOAK_ADMIN_PASSWORD") }}
-      - name: {{ index $pair 0 }}
+            key: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
+      - name: SMTP_SYNC_CLIENT_ID
+        value: {{ include "oriso.smtpSyncClientId" . | quote }}
+      - name: SMTP_SYNC_CLIENT_SECRET
         valueFrom:
           secretKeyRef:
-            name: keycloak-secret-env
-            key: {{ index $pair 1 }}
-      {{- end }}
-      {{- end }}
-    command: ["python3", "-B", "/scripts/keycloak-reconcile-smtp.py", {{ printf "--%s" $mode | quote }}]
-    {{- if eq $mode "serve" }}
-    ports:
-      - name: http
-        containerPort: 8080
-    readinessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 5
-      timeoutSeconds: 2
-    livenessProbe:
-      httpGet:
-        path: /health
-        port: http
-      periodSeconds: 10
-      timeoutSeconds: 2
-    {{- end }}
+            name: keycloak-smtp-sync-client
+            key: KEYCLOAK_SMTP_SYNC_CLIENT_SECRET
+    command: ["python3", "-B", "/scripts/keycloak-reconcile-smtp.py"]
     volumeMounts:
       - name: reconcile-script
         mountPath: /scripts
@@ -103,5 +81,4 @@ volumes:
     configMap:
       name: keycloak-reconcile-smtp-script
       defaultMode: 0444
-{{- end -}}
 {{- end -}}
