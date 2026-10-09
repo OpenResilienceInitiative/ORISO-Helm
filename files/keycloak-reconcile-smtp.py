@@ -158,15 +158,20 @@ class HttpClient:
         return token
 
 
+def decode_claims(token):
+    # Payload only; the issuer and the receiving service verify the signature.
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ValueError()
+    return json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+
+
 def verify_technical_identity(token, subject, client):
     # This token was just issued by the configured Keycloak endpoint. The CTS
     # resource server independently verifies its signature and authority; these
     # checks prevent accidentally using a different configured service account.
     try:
-        parts = token.split(".")
-        if len(parts) != 3:
-            raise ValueError()
-        claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+        claims = decode_claims(token)
         expiry = claims.get("exp")
         roles = claims.get("realm_access", {}).get("roles")
         valid = (claims.get("sub") == subject and claims.get("azp") == client
@@ -233,10 +238,7 @@ def technical_login(http, config):
 def verify_sync_identity(token, client):
     # Fail with a clear code instead of a later 403 when the client lacks manage-realm.
     try:
-        parts = token.split(".")
-        if len(parts) != 3:
-            raise ValueError()
-        claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+        claims = decode_claims(token)
         expiry = claims.get("exp")
         roles = claims.get("resource_access", {}).get("realm-management", {}).get("roles")
         valid = (claims.get("azp") == client and isinstance(roles, list) and "manage-realm" in roles

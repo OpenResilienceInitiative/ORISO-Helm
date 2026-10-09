@@ -4,7 +4,6 @@
 Uses the existing pinned SMTP helper runtime and transport. Secrets stay in
 memory and never enter a subprocess, file, argv or error message.
 """
-import base64
 import math
 import time
 import importlib.util
@@ -19,6 +18,7 @@ spec = importlib.util.spec_from_file_location('smtp_transport', Path(__file__).w
 smtp = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(smtp)
 Error = smtp.ReconcileError
+decode_claims = smtp.decode_claims
 
 
 def required(env, name):
@@ -157,10 +157,7 @@ def verify_client_token(http, config, client, subject, admin):
     token = http.service_login(config['KEYCLOAK_URL'], config['KEYCLOAK_REALM'], client,
                                config['ADMIN_CLIENT_SECRET' if admin else 'TECHNICAL_CLIENT_SECRET'], 'CLIENT_UNAVAILABLE')
     try:
-        parts = token.split('.')
-        if len(parts) != 3:
-            raise ValueError()
-        claims = json.loads(base64.urlsafe_b64decode(parts[1] + '=' * (-len(parts[1]) % 4)))
+        claims = decode_claims(token)
         expiry = claims.get('exp')
         realm_roles = claims.get('realm_access', {}).get('roles')
         resources = claims.get('resource_access', {})
@@ -207,7 +204,7 @@ def verify_smtp_sync_token(http, config, subject):
     token = http.service_login(config['KEYCLOAK_URL'], config['KEYCLOAK_REALM'], client,
                                config['SMTP_SYNC_CLIENT_SECRET'], 'CLIENT_UNAVAILABLE')
     try:
-        claims = json.loads(base64.urlsafe_b64decode(token.split('.')[1] + '=' * (-len(token.split('.')[1]) % 4)))
+        claims = decode_claims(token)
         expiry = claims.get('exp')
         realm_roles = claims.get('realm_access', {}).get('roles', [])
         management = claims.get('resource_access', {}).get('realm-management', {}).get('roles')
@@ -216,7 +213,7 @@ def verify_smtp_sync_token(http, config, subject):
                  and math.isfinite(expiry) and expiry > time.time() and realm_roles == []
                  and set(claims.get('resource_access', {})) == {'realm-management'}
                  and isinstance(management, list) and set(management) == {'manage-realm'})
-    except (ValueError, UnicodeError, TypeError, AttributeError, IndexError):
+    except (ValueError, UnicodeError, TypeError, AttributeError):
         valid = False
     if not valid:
         raise Error('BACKEND_CLIENT_TOKEN_CONTRACT_MISMATCH')
