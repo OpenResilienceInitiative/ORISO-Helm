@@ -3,8 +3,7 @@
 replace the custom account provider?
 
 Real Keycloak, real client_credentials tokens, real Admin REST API. Synthetic
-credentials only. Starts and removes its own isolated container (prefix
-``spike56-``); skipped when docker is not available. Run separately:
+credentials only. Container lifecycle: tests/_keycloak_container.py. Run:
 
     python3 tests/keycloak_native_admin_permissions_test.py -v
 
@@ -16,22 +15,16 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import subprocess
-import time
 import unittest
 import uuid
-from pathlib import Path
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
-ROOT = Path(__file__).resolve().parents[1]
-# Same pinned 26.6.3 image as tests/keycloak_task_migration_test.py on the option D branch.
-IMAGE = "quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992"
+import _keycloak_container as shared
+
+ROOT = shared.ROOT
 REALM = "spike56"
-ADMIN_USER = "synthetic-installer"
-ADMIN_PASSWORD = "synthetic-install-test-credential"
 SOURCE_REALM = ROOT / "charts/keycloak/keycloak-resources/realm.json"
 
 # Roles account-create may hand out (provider contract; extend per role, one map-role grant each).
@@ -40,14 +33,6 @@ NATIVE_ROLES = {"offline_access", "uma_authorization"}
 TASK_CLIENTS = ("account-create", "account-admin", "backend-admin")
 OTP_SECRET = "JBSWY3DPEHPK3PXP"
 RESULTS: list[str] = []
-
-
-def docker_available() -> bool:
-    if os.environ.get("SPIKE56_KEYCLOAK_URL"):
-        return True
-    if not shutil.which("docker"):
-        return False
-    return subprocess.run(["docker", "info"], capture_output=True).returncode == 0
 
 
 def call(base, method, path, body=None, token=None, form=False):
@@ -92,40 +77,20 @@ class Keycloak:
     """Isolated Keycloak plus a seeded spike56 realm."""
 
     def __init__(self):
-        self.name = None
-        self.base = os.environ.get("SPIKE56_KEYCLOAK_URL")
+        self.container = shared.KeycloakContainer("spike56", os.environ.get("SPIKE56_KEYCLOAK_URL"))
+
+    @property
+    def base(self):
+        return self.container.base
 
     def start(self):
-        if not self.base:
-            self.name = "spike56-" + uuid.uuid4().hex[:10]
-            subprocess.run(["docker", "run", "-d", "--name", self.name, "-p", "127.0.0.1::8080",
-                            "-e", "JAVA_OPTS_APPEND=-XX:ActiveProcessorCount=2",
-                            "-e", "KC_BOOTSTRAP_ADMIN_USERNAME=" + ADMIN_USER,
-                            "-e", "KC_BOOTSTRAP_ADMIN_PASSWORD=" + ADMIN_PASSWORD,
-                            IMAGE, "start-dev", "--http-relative-path=/auth"], check=True, capture_output=True)
-            endpoint = subprocess.run(["docker", "port", self.name, "8080/tcp"], check=True,
-                                      capture_output=True, text=True).stdout.strip()
-            self.base = "http://" + endpoint + "/auth"
-        deadline = time.monotonic() + 300
-        while True:
-            try:
-                self.admin_token()
-                return
-            except (URLError, ConnectionError, TimeoutError, AssertionError, OSError):
-                if time.monotonic() > deadline:
-                    raise AssertionError("isolated Keycloak did not become ready") from None
-                time.sleep(2)
+        self.container.start()
 
     def stop(self):
-        if self.name:
-            subprocess.run(["docker", "rm", "-f", self.name], check=True, capture_output=True)
+        self.container.stop()
 
     def admin_token(self):
-        status, body = call(self.base, "POST", "/realms/master/protocol/openid-connect/token",
-                            {"grant_type": "password", "client_id": "admin-cli",
-                             "username": ADMIN_USER, "password": ADMIN_PASSWORD}, form=True)
-        assert status == 200, (status, body)
-        return body["access_token"]
+        return shared.master_admin(self.base)
 
     # -- master-admin helpers (fixture only) -------------------------------------------------
     def admin(self, method, path, body=None):
@@ -247,7 +212,6 @@ class Keycloak:
                                                      "scopes": scopes, "policies": [policy]})
 
 
-@unittest.skipUnless(docker_available(), "docker not available")
 class NativeAdminPermissionsSpikeTest(unittest.TestCase):
     kc: Keycloak
 
