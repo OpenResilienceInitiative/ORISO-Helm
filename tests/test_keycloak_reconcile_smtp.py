@@ -45,6 +45,10 @@ class SmtpFixture(unittest.TestCase):
             "sub": "environment-technical-subject", "azp": "configured-app-client",
             "realm_access": {"roles": ["technical"]}, "exp": time.time() + 300,
         }
+        self.sync_claims = {
+            "sub": "sync-service-account", "azp": "smtp-sync", "exp": time.time() + 300,
+            "resource_access": {"realm-management": {"roles": ["manage-realm"]}},
+        }
         self.requests = []
         self.updates = []
         self.source_status = 200
@@ -78,20 +82,19 @@ class SmtpFixture(unittest.TestCase):
                 form = parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode())
                 owner.requests.append(("POST", self.path, dict(self.headers), form))
                 if self.path == "/auth/realms/example/protocol/openid-connect/token":
+                    if form == {"grant_type": ["client_credentials"], "client_id": ["smtp-sync"],
+                                "client_secret": ["sync-client-secret-canary"]}:
+                        if owner.admin_redirect:
+                            self.send_response(302)
+                            self.send_header("Location", "/credential-leak-target")
+                            self.end_headers()
+                            return
+                        return self.reply(owner.admin_status, {"access_token": jwt(owner.sync_claims)})
                     if form != {"grant_type": ["client_credentials"], "client_id": ["configured-app-client"],
                                 "client_secret": ["technical-client-secret-canary"]}:
                         return self.reply(401, {"error": "private-token-error"})
                     return self.reply(owner.technical_status, {"access_token": jwt(owner.claims)})
-                if self.path == "/auth/realms/master/protocol/openid-connect/token":
-                    if owner.admin_redirect:
-                        self.send_response(302)
-                        self.send_header("Location", "/credential-leak-target")
-                        self.end_headers()
-                        return
-                    if form != {"grant_type": ["password"], "client_id": ["admin-cli"],
-                                "username": ["realm-admin-canary"], "password": ["admin-password-canary"]}:
-                        return self.reply(401)
-                    return self.reply(owner.admin_status, {"access_token": "admin-token-canary"})
+                # The master realm is never a valid authority for this helper.
                 self.reply(404)
 
             def do_GET(self):
@@ -117,7 +120,7 @@ class SmtpFixture(unittest.TestCase):
             def do_PUT(self):
                 payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 owner.requests.append(("PUT", self.path, dict(self.headers), payload))
-                if self.path != "/auth/admin/realms/example" or self.headers.get("Authorization") != "Bearer admin-token-canary":
+                if self.path != "/auth/admin/realms/example" or self.headers.get("Authorization") != "Bearer " + jwt(owner.sync_claims):
                     return self.reply(403)
                 owner.update_started.set()
                 owner.update_release.wait(10)
@@ -135,7 +138,7 @@ class SmtpFixture(unittest.TestCase):
             "TECHNICAL_CLIENT_SECRET": "technical-client-secret-canary",
             "TECHNICAL_SERVICE_SUBJECT": "environment-technical-subject",
             "TECHNICAL_CLIENT_ID": "configured-app-client",
-            "KEYCLOAK_ADMIN_USERNAME": "realm-admin-canary", "KEYCLOAK_ADMIN_PASSWORD": "admin-password-canary",
+            "SMTP_SYNC_CLIENT_ID": "smtp-sync", "SMTP_SYNC_CLIENT_SECRET": "sync-client-secret-canary",
         }
 
     def tearDown(self):
@@ -149,7 +152,7 @@ class SmtpFixture(unittest.TestCase):
         result = subprocess.run(command, env={**self.env, **overrides}, capture_output=True, text=True, timeout=15)
         output = result.stdout + result.stderr
         for private in (self.env["TECHNICAL_CLIENT_SECRET"], "technical-password-canary",
-                        "admin-password-canary", "admin-token-canary",
+                        "sync-client-secret-canary", jwt(self.sync_claims),
                         "private-smtp-provider-error", "private-token-error", "saved-username"):
             self.assertNotIn(private, output)
         self.assertNotIn("Traceback", output)
@@ -324,6 +327,43 @@ class ReconcileSmtpTest(SmtpFixture):
                 self.assertEqual(self.requests, [])
 
 
+    def test_writes_with_realm_sync_client_and_never_touches_master(self):
+        result = self.run_reconciler()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.updates), 1)
+        self.assertFalse(any("/realms/master/" in r[1] for r in self.requests))
+        grants = [r[3] for r in self.requests if r[1].endswith("/openid-connect/token")]
+        self.assertTrue(all(g["grant_type"] == ["client_credentials"] for g in grants))
+        self.assertIn(["smtp-sync"], [g["client_id"] for g in grants])
+
+    def test_master_admin_credentials_are_neither_required_nor_used(self):
+        result = self.run_reconciler(KEYCLOAK_ADMIN_USERNAME="", KEYCLOAK_ADMIN_PASSWORD="")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_missing_sync_client_configuration_fails_before_any_request(self):
+        for field in ("SMTP_SYNC_CLIENT_ID", "SMTP_SYNC_CLIENT_SECRET"):
+            with self.subTest(field=field):
+                result = self.run_reconciler(**{field: ""})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.requests, [])
+
+    def test_master_realm_is_refused_before_any_request(self):
+        result = self.run_reconciler(KEYCLOAK_REALM="master")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.requests, [])
+
+    def test_wrong_sync_identity_never_updates_realm(self):
+        original = dict(self.sync_claims)
+        for field, value in (("azp", "other-client"), ("resource_access", {}), ("exp", time.time() - 60)):
+            with self.subTest(field=field):
+                self.sync_claims = {**original, field: value}
+                result = self.run_reconciler()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("SMTP_RECONCILE_SYNC_IDENTITY_MISMATCH", result.stderr)
+                self.assertFalse(any(r[0] == "PUT" for r in self.requests))
+        self.sync_claims = original
+
+
 class TriggerSmtpTest(SmtpFixture):
     def setUp(self):
         super().setUp()
@@ -356,7 +396,7 @@ class TriggerSmtpTest(SmtpFixture):
             if self.process.poll() is None:
                 self.process.terminate()
             output = "".join(self.process.communicate(timeout=12))
-            for private in ("saved-password", "saved-username", "admin-password-canary",
+            for private in ("saved-password", "saved-username", "sync-client-secret-canary",
                             "technical-password-canary", "private-smtp-provider-error"):
                 self.assertNotIn(private, output)
             self.assertNotIn("Traceback", output)
@@ -389,7 +429,7 @@ class TriggerSmtpTest(SmtpFixture):
         self.assertFalse(any(r[1].startswith("/auth/") for r in self.requests))
 
     def test_install_hook_calls_same_bridge_without_realm_admin_secret(self):
-        env = {key: value for key, value in self.env.items() if not key.startswith("KEYCLOAK_ADMIN_")}
+        env = {key: value for key, value in self.env.items() if not key.startswith("SMTP_SYNC_")}
         result = subprocess.run([sys.executable, "-B", str(SCRIPT), "--trigger"],
                                 env={**env, "SMTP_RECONCILE_URL": self.bridge_url + "/smtp/reconcile"},
                                 capture_output=True, text=True, timeout=10)

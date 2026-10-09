@@ -217,8 +217,11 @@ def configuration(env, mode="reconcile"):
     if mode != "serve":
         names += ("TECHNICAL_CLIENT_SECRET",)
     if mode != "trigger":
-        names += ("KEYCLOAK_ADMIN_USERNAME", "KEYCLOAK_ADMIN_PASSWORD")
+        names += ("SMTP_SYNC_CLIENT_ID", "SMTP_SYNC_CLIENT_SECRET")
     config = {name: required(env, name) for name in names}
+    # The sync client lives in the ORISO realm; master is never a valid target.
+    if config["KEYCLOAK_REALM"] == "master":
+        raise ReconcileError("SMTP_RECONCILE_CONFIGURATION_INVALID: protected realm")
     config["KEYCLOAK_URL"] = base_url(config["KEYCLOAK_URL"], "keycloak", config["POD_NAMESPACE"])
     config["CONSULTING_TYPE_SERVICE_URL"] = base_url(
         config["CONSULTING_TYPE_SERVICE_URL"], "consultingtypeservice", config["POD_NAMESPACE"])
@@ -234,6 +237,34 @@ def technical_login(http, config):
     return technical_token
 
 
+def verify_sync_identity(token, client):
+    # Fail with a clear code instead of a later 403 when the client lacks manage-realm.
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            raise ValueError()
+        claims = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+        expiry = claims.get("exp")
+        roles = claims.get("resource_access", {}).get("realm-management", {}).get("roles")
+        valid = (claims.get("azp") == client and isinstance(roles, list) and "manage-realm" in roles
+                 and isinstance(expiry, (int, float)) and not isinstance(expiry, bool)
+                 and math.isfinite(expiry) and expiry > time.time())
+    except (ValueError, UnicodeError, AttributeError, TypeError):
+        valid = False
+    if not valid:
+        raise ReconcileError("SMTP_RECONCILE_SYNC_IDENTITY_MISMATCH")
+
+
+def sync_login(http, config):
+    # client_credentials in the ORISO realm; no master-realm credential exists here.
+    token = http.service_login(
+        config["KEYCLOAK_URL"], config["KEYCLOAK_REALM"], config["SMTP_SYNC_CLIENT_ID"],
+        config["SMTP_SYNC_CLIENT_SECRET"], "KEYCLOAK_UPDATE_FAILED",
+    )
+    verify_sync_identity(token, config["SMTP_SYNC_CLIENT_ID"])
+    return token
+
+
 def read_snapshot(http, config, technical_token, revision=False):
     # For a callback, CTS independently verifies the presented access token's
     # signature and authority. Decoded matching claims alone never grant access.
@@ -245,10 +276,7 @@ def read_snapshot(http, config, technical_token, revision=False):
 
 def apply_snapshot(http, config, snapshot):
     transport = smtp_transport(snapshot)
-    admin_token = http.login(
-        config["KEYCLOAK_URL"], "master", "admin-cli", config["KEYCLOAK_ADMIN_USERNAME"],
-        config["KEYCLOAK_ADMIN_PASSWORD"], "KEYCLOAK_UPDATE_FAILED",
-    )
+    admin_token = sync_login(http, config)
     http.request("PUT", config["KEYCLOAK_URL"] + "/admin/realms/" + quote(config["KEYCLOAK_REALM"], safe=""),
                  json.dumps({"smtpServer": transport}).encode(),
                  {"Authorization": "Bearer " + admin_token, "Content-Type": "application/json"},
