@@ -59,13 +59,38 @@ def doc_containers(doc):
     return spec["template"]["spec"].get("containers", [])
 
 
-def check_install_rejects_shared_name():
-    shared = ("--set-string", "global.secrets.keycloakAdminUsername=realmadmin")
-    result, _ = render(*shared)
-    assert result.returncode != 0 and "keycloakAdminUsername" in result.stderr, result.stderr
+def check_installer_chooses_master_name(docs):
+    shipped = yaml.safe_load((ROOT / "secrets.yaml.default").read_text())
+    assert shipped["global"]["secrets"]["keycloakAdminUsername"] == "", "no shipped master admin name"
+    secret = docs[("Secret", "keycloak-secret-env")]["data"]
+    assert base64.b64decode(secret["KEYCLOAK_ADMIN"]).decode() == "bootstrap-admin"
+
+
+def name(value):
+    return ("--set-string", "global.secrets.keycloakAdminUsername=" + value)
+
+
+def check_install_rejects_missing_or_well_known_name():
+    result, _ = render(*name(""))
+    assert result.returncode != 0 and "keycloakAdminUsername is required" in result.stderr, result.stderr
+    for value in ("admin", "realmadmin", "keycloak", "root", "Admin", "REALMADMIN", "KeyCloak", "Root"):
+        result, _ = render(*name(value))
+        assert result.returncode != 0 and "well-known name" in result.stderr, (value, result.stderr)
+    custom = ("--set-string", "global.keycloak.bootstrapUsers.realmAdmin.username=ops-admin")
+    result, _ = render(*name("Ops-Admin"), *custom)
+    assert result.returncode != 0 and "must differ from" in result.stderr, result.stderr
+    # An empty name would break every hook login, so upgrades refuse it too.
+    result, _ = render(*name(""), "--is-upgrade")
+    assert result.returncode != 0 and "keycloakAdminUsername is required" in result.stderr, result.stderr
+
+
+def check_upgrade_keeps_legacy_name():
     # Existing installs keep their master name until the runbook migration is done.
-    result, _ = render(*shared, "--is-upgrade")
-    assert result.returncode == 0, result.stderr
+    for value in ("realmadmin", "admin"):
+        result, docs = render(*name(value), "--is-upgrade")
+        assert result.returncode == 0, (value, result.stderr)
+        master = base64.b64decode(docs[("Secret", "keycloak-secret-env")]["data"]["KEYCLOAK_ADMIN"]).decode()
+        assert master == value, master
 
 
 def reconcile_env(docs, name="keycloak-reconcile-service-identities"):
@@ -91,7 +116,9 @@ def main():
     assert result.returncode == 0, result.stderr
     check_fresh_import_disables_realm_admin(docs)
     check_no_automation_uses_realm_admin(docs)
-    check_install_rejects_shared_name()
+    check_installer_chooses_master_name(docs)
+    check_install_rejects_missing_or_well_known_name()
+    check_upgrade_keeps_legacy_name()
     check_reconcile_flag(docs)
     print("PASS: break-glass separation")
 
