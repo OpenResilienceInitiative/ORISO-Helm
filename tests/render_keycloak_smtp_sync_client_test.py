@@ -18,6 +18,7 @@ BASE = [
     "--set-string", "global.secrets.redisdefaultPass=test-redis-password",
     "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
     "--set", "global.domainName=predev.oriso.internal",
+    "--set-string", "global.keycloak.realm=render-realm",
 ]
 SECRET_NAME = "keycloak-smtp-sync-client"
 FIXTURE_SECRET = "render-only-smtp-sync-client-secret-canary"
@@ -46,10 +47,67 @@ def check_secret(docs):
         assert "keycloakSmtpSyncClientSecret" in result.stderr, result.stderr
 
 
+LONG_RUNNING = ("Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "CronJob")
+
+
+def check_no_long_running_master_admin(docs):
+    names = {(doc["kind"], doc["metadata"]["name"]) for doc in docs}
+    assert ("Deployment", "keycloak-reconcile-smtp") not in names
+    assert ("Service", "keycloak-reconcile-smtp") not in names
+    for doc in docs:
+        # Only the Keycloak server itself owns its bootstrap admin.
+        if doc["kind"] in LONG_RUNNING and doc["metadata"]["name"] != "keycloak":
+            text = json.dumps(doc)
+            assert "KEYCLOAK_ADMIN" not in text and "keycloak-secret-env" not in text, doc["metadata"]["name"]
+
+
+def check_sync_pod(pod, realm):
+    assert pod["restartPolicy"] == "Never"
+    assert pod["automountServiceAccountToken"] is False
+    container = pod["containers"][0]
+    assert container["command"] == ["python3", "-B", "/scripts/keycloak-reconcile-smtp.py"]
+    env = {entry["name"]: entry for entry in container["env"]}
+    assert not any(name.startswith("KEYCLOAK_ADMIN") for name in env)
+    assert "SMTP_RECONCILE_URL" not in env
+    assert env["KEYCLOAK_REALM"]["value"] == realm != "master"
+    assert env["SMTP_SYNC_CLIENT_ID"]["value"] == "smtp-sync"
+    assert env["SMTP_SYNC_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"] == {
+        "name": SECRET_NAME, "key": "KEYCLOAK_SMTP_SYNC_CLIENT_SECRET"}
+    # Reading Admin Settings keeps using the technical client; it never writes Keycloak.
+    assert env["TECHNICAL_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["name"] == "keycloak-backend-client-secrets"
+
+
+def check_jobs(docs):
+    realm = "render-realm"
+    hook = find(docs, "Job", "keycloak-reconcile-smtp")
+    annotations = hook["metadata"]["annotations"]
+    assert annotations["helm.sh/hook"] == "post-install,post-upgrade"
+    # After the service-identity reconcile (weight 15) has created the client.
+    assert int(annotations["helm.sh/hook-weight"]) > 15
+    assert hook["spec"]["activeDeadlineSeconds"] <= 600
+    check_sync_pod(hook["spec"]["template"]["spec"], realm)
+    cron = find(docs, "CronJob", "keycloak-reconcile-smtp")
+    spec = cron["spec"]
+    assert spec["schedule"] == "*/5 * * * *"
+    assert spec["concurrencyPolicy"] == "Forbid"
+    job = spec["jobTemplate"]["spec"]
+    assert job["activeDeadlineSeconds"] <= 240
+    assert job["ttlSecondsAfterFinished"] <= 600
+    check_sync_pod(job["template"]["spec"], realm)
+    result, changed = render("--set-string", "keycloakSmtpReconcile.schedule=*/2 * * * *")
+    assert result.returncode == 0, result.stderr
+    assert find(changed, "CronJob", "keycloak-reconcile-smtp")["spec"]["schedule"] == "*/2 * * * *"
+    # CTS no longer pushes to a helper; a token must never go to a dangling Service name.
+    cts = find(docs, "ConfigMap", "consultingtypeservice-configmap-env")
+    assert cts["data"]["SMTP_RECONCILE_URL"] == ""
+
+
 def main():
     result, docs = render()
     assert result.returncode == 0, result.stderr
     check_secret(docs)
+    check_no_long_running_master_admin(docs)
+    check_jobs(docs)
     print("PASS: SMTP sync uses a short-lived realm client without master admin credentials")
 
 

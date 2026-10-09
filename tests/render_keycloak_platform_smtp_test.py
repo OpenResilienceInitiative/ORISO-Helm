@@ -31,40 +31,24 @@ def main():
     assert result.returncode == 0, result.stderr
     job = next(doc for doc in docs if doc.get("kind") == "Job" and doc["metadata"]["name"] == "keycloak-reconcile-smtp")
     assert job["metadata"]["annotations"]["helm.sh/hook"] == "post-install,post-upgrade"
-    assert not any(doc.get("kind") == "CronJob" and doc["metadata"]["name"] == "keycloak-reconcile-smtp" for doc in docs)
-    deployment = next(doc for doc in docs if doc.get("kind") == "Deployment"
-                      and doc["metadata"]["name"] == "keycloak-reconcile-smtp")
-    assert deployment["spec"]["replicas"] == 1
-    assert deployment["spec"]["strategy"]["type"] == "Recreate"
-    service = next(doc for doc in docs if doc.get("kind") == "Service"
-                   and doc["metadata"]["name"] == "keycloak-reconcile-smtp")
-    assert service["spec"]["type"] == "ClusterIP"
-    assert service["spec"]["ports"][0]["port"] == 8080
-    assert job["spec"]["template"]["metadata"]["labels"]["app"] != service["spec"]["selector"]["app"]
+    # Helm#420: short Jobs only; the push helper Deployment/Service are gone.
+    assert any(doc.get("kind") == "CronJob" and doc["metadata"]["name"] == "keycloak-reconcile-smtp" for doc in docs)
+    assert not any(doc.get("kind") in ("Deployment", "Service") and doc["metadata"]["name"] == "keycloak-reconcile-smtp"
+                   for doc in docs)
     pod = job["spec"]["template"]["spec"]
     assert pod["automountServiceAccountToken"] is False
     container = pod["containers"][0]
     assert "@sha256:" in container["image"]
-    assert container["command"] == ["python3", "-B", "/scripts/keycloak-reconcile-smtp.py", "--trigger"]
+    assert container["command"] == ["python3", "-B", "/scripts/keycloak-reconcile-smtp.py"]
     env = {entry["name"]: entry for entry in container["env"]}
     assert not any(name.startswith("KEYCLOAK_ADMIN_") for name in env)
-    assert env["SMTP_RECONCILE_URL"]["value"] == "http://keycloak-reconcile-smtp.default:8080/smtp/reconcile"
-    server_pod = deployment["spec"]["template"]["spec"]
-    assert server_pod["terminationGracePeriodSeconds"] == 60
-    assert server_pod["automountServiceAccountToken"] is False
-    server = server_pod["containers"][0]
-    assert server["command"] == ["python3", "-B", "/scripts/keycloak-reconcile-smtp.py", "--serve"]
-    server_env = {entry["name"]: entry for entry in server["env"]}
-    assert "TECHNICAL_PASSWORD" not in server_env
-    assert server_env["KEYCLOAK_ADMIN_PASSWORD"]["valueFrom"]["secretKeyRef"] == {
-        "name": "keycloak-secret-env", "key": "KEYCLOAK_ADMIN_PASSWORD"}
     cts_deployment = next(doc for doc in docs if doc.get("kind") == "Deployment"
                           and doc["metadata"]["name"] == "consultingtypeservice")
     cts_env = {entry["name"]: entry for entry in cts_deployment["spec"]["template"]["spec"]["containers"][0]["env"]}
     assert cts_env["KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"] == {
         "name": "keycloak-backend-client-secrets", "key": "KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET"}
     assert not any(name.startswith("KEYCLOAK_ADMIN_") for name in cts_env)
-    assert not any(name.startswith("SMTP_") and name != "SMTP_RECONCILE_URL" for name in env)
+    assert not any(name.startswith("SMTP_") and not name.startswith("SMTP_SYNC_CLIENT_") for name in env)
     for name, key in (("TECHNICAL_CLIENT_SECRET", "KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET"),):
         assert env[name]["valueFrom"]["secretKeyRef"] == {"name": "keycloak-backend-client-secrets", "key": key}
     assert env["TECHNICAL_SERVICE_SUBJECT"]["valueFrom"]["configMapKeyRef"] == {
