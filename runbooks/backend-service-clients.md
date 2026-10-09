@@ -4,6 +4,8 @@ Internal service requests now use two independent confidential clients. Human ap
 
 Fresh realm imports contain the clients. Importing a realm never updates an existing realm. **Never run a full Helm install or upgrade with preparation enabled.** Only the three reviewed preparation resources may be applied. An upgrade with preparation enabled fails during rendering. The preparation job is a deliberate operator step; a routine release does not create missing clients or retire old password users silently.
 
+One exception, on purpose: the `keycloak-reconcile-service-identities` hook creates the `smtp-sync` client (ORISO-Helm#420) on every non-preparation install and upgrade when it is missing, and trims it to `realm-management` `manage-realm`. The SMTP Jobs need it to write realm mail settings without the master admin, and unlike the backend clients it replaces no existing identity, so creating it cannot lock anything out. It needs `global.secrets.keycloakSmtpSyncClientSecret`. ConsultingTypeService `feat/420-smtp-sync-ack` must ship before or with this chart; with an older CTS the Admin SMTP status stays pending (`runbooks/password-reset-runtime-config.md`).
+
 **For operators — configuration to prepare before deployment:**
 ```text
 global.keycloak.backendTechnicalClientId: backend-technical
