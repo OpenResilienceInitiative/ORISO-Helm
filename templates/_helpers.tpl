@@ -406,6 +406,42 @@ readinessProbe:
 {{- get $c "enabled" | default false -}}
 {{- end -}}
 
+{{- /*
+Application metrics (nginx, Keycloak, Synapse) scraped by the SigNoz cluster
+collector. One global switch so the Keycloak subchart can read it too;
+observability-validation.yaml requires signozCollector.enabled with it.
+*/ -}}
+{{- define "oriso.appMetrics.enabled" -}}
+{{- $observability := get (.Values.global | default dict) "observability" | default dict -}}
+{{- if get $observability "appMetrics" -}}true{{- else -}}false{{- end -}}
+{{- end -}}
+
+{{- /*
+Data store metrics (MariaDB, MongoDB, RabbitMQ via read-only monitoring users;
+Redis via its existing exporter sidecar), collected by the SigNoz cluster
+collector. Global so the Redis subchart can read it.
+*/ -}}
+{{- define "oriso.dbMetrics.enabled" -}}
+{{- $observability := get (.Values.global | default dict) "observability" | default dict -}}
+{{- if get $observability "dbMetrics" -}}true{{- else -}}false{{- end -}}
+{{- end -}}
+
+{{- /* The annotation-based pod scrape runs when either kind of metrics is on (Redis uses it too). */ -}}
+{{- define "oriso.podScrape.enabled" -}}
+{{- if or (eq (include "oriso.appMetrics.enabled" .) "true") (eq (include "oriso.dbMetrics.enabled" .) "true") -}}true{{- else -}}false{{- end -}}
+{{- end -}}
+
+{{- /*
+Pod annotations the cluster collector's prometheus receiver discovers.
+Usage: include "oriso.appMetrics.podAnnotations" (dict "job" "nginx" "port" 10254 "path" "/metrics")
+*/ -}}
+{{- define "oriso.appMetrics.podAnnotations" -}}
+oriso.io/scrape: "true"
+oriso.io/job: {{ .job | quote }}
+oriso.io/port: {{ .port | toString | quote }}
+oriso.io/path: {{ .path | quote }}
+{{- end -}}
+
 {{- define "oriso.backendServiceClientsChecksum" -}}
 {{- printf "%s\x00%s\x00%s\x00%s\x00%s\x00%s" .Values.global.keycloak.backendTechnicalClientId .Values.global.keycloak.serviceAdminClientId .Values.global.keycloak.serviceTechUserId .Values.global.keycloak.serviceAdminSubject (.Values.global.secrets.keycloakBackendTechnicalClientSecret | default "") (.Values.global.secrets.keycloakBackendAdminClientSecret | default "") | sha256sum -}}
 {{- end -}}

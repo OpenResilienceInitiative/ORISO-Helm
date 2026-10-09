@@ -13,6 +13,10 @@ spec:
     metadata:
       labels:
         app: redis
+      {{- if eq (include "oriso.dbMetrics.enabled" .) "true" }}
+      annotations:
+        {{- include "oriso.appMetrics.podAnnotations" (dict "job" "redis" "port" 9121 "path" "/metrics") | nindent 8 }}
+      {{- end }}
     spec:
       containers:
         - name: redis
