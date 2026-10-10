@@ -2,7 +2,9 @@
 """Break-glass separation (Helm#422): master bootstrap admin vs. ORISO-realm realmadmin."""
 import base64
 import json
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -111,6 +113,32 @@ def check_reconcile_flag(docs):
     assert reconcile_env(prep, "keycloak-prepare-backend-clients")["DISABLE_REALM_ADMIN"] == "false"
 
 
+def run_bootstrap(docs, user_exists):
+    container = docs[("Job", "keycloak-bootstrap-users")]["spec"]["template"]["spec"]["containers"][0]
+    env = {e["name"]: e.get("value", "secret") for e in container["env"]}
+    with tempfile.TemporaryDirectory() as tmp:
+        log, stub = os.path.join(tmp, "calls"), os.path.join(tmp, "kcadm.sh")
+        with open(stub, "w") as f:
+            f.write('#!/bin/sh\necho "$*" >> "%s"\n' % log)
+            if user_exists:
+                f.write('[ "$1" = get ] && echo \'{"id":"u-1","username":"realmadmin"}\'\n')
+            f.write("exit 0\n")
+        os.chmod(stub, 0o755)
+        script = container["command"][-1].replace("/opt/keycloak/bin/kcadm.sh", stub)
+        result = subprocess.run(["/bin/sh", "-ec", script], env={**os.environ, **env}, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        return [line.split()[0] for line in open(log)] if os.path.exists(log) else []
+
+
+def check_existing_realm_admin_untouched_without_flag(docs):
+    # A fresh release on a retained database must not change an existing realmadmin without the opt-in.
+    assert set(run_bootstrap(docs, user_exists=True)) == {"config", "get"}
+    assert "create" in run_bootstrap(docs, user_exists=False)
+    result, on = render("--set", "global.keycloak.bootstrapUsers.realmAdmin.disableExisting=true")
+    assert result.returncode == 0, result.stderr
+    assert "update" in run_bootstrap(on, user_exists=True)
+
+
 def main():
     result, docs = render()
     assert result.returncode == 0, result.stderr
@@ -120,6 +148,7 @@ def main():
     check_install_rejects_missing_or_well_known_name()
     check_upgrade_keeps_legacy_name()
     check_reconcile_flag(docs)
+    check_existing_realm_admin_untouched_without_flag(docs)
     print("PASS: break-glass separation")
 
 
