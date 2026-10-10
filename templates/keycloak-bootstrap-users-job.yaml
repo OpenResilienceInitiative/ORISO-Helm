@@ -65,6 +65,8 @@ spec:
               value: {{ $realmAdminName | quote }}
             - name: REALM_ADMIN_ATTRIBUTES
               value: {{ $realmAdminAttributes | toJson | quote }}
+            - name: DISABLE_EXISTING
+              value: {{ default false $realmAdmin.disableExisting | toString | quote }}
           command:
             - /bin/sh
             - -ec
@@ -110,6 +112,12 @@ spec:
                 fi
 
               }
+
+              # A fresh release on a retained database finds the user already there: leave it unless opted in.
+              if [ -n "$(user_id "$REALM_ADMIN_USERNAME" || true)" ] && [ "$DISABLE_EXISTING" != "true" ]; then
+                echo "$REALM_ADMIN_USERNAME exists and disableExisting is false; leaving it unchanged"
+                exit 0
+              fi
 
               ensure_user "$REALM_ADMIN_USERNAME" "$REALM_ADMIN_ATTRIBUTES"
 {{- range $role := $realmAdminRemoveRealmRoles }}

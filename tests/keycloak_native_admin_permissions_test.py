@@ -419,6 +419,8 @@ class NativeAdminPermissionsSpikeTest(unittest.TestCase):
         management = self.kc.client_uuid("realm-management")
         broad = [self.kc.admin("GET", "/clients/" + management + "/roles/" + r) for r in ("manage-users", "view-users")]
         self.kc.admin("DELETE", "/users/" + self.kc.service_account("backend-admin") + "/role-mappings/clients/" + management, broad)
+        self.addCleanup(self.kc.admin, "POST",
+                        "/users/" + self.kc.service_account("backend-admin") + "/role-mappings/clients/" + management, broad)
         self.expect(403, "backend-admin", "PUT", "/users/" + platform, {"firstName": "blocked"})
         self.expect(403, "backend-admin", "POST", "/users/" + human + "/role-mappings/realm", [self.kc.role("tenant-admin")])
         self.expect(403, "backend-admin", "PUT", "/users/" + human + "/groups/" + self.group("/protected-admins/platform-admins"))

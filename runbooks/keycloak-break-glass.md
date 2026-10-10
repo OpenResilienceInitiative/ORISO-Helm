@@ -64,12 +64,12 @@ kc delete users/<id> -r "$REALM"
 
 **For operators — fallback: enable the shipped `realmadmin` for a session, then disable it again:**
 ```text
-UID=$(kc get users -r "$REALM" -q exact=true -q username=realmadmin --fields id --format csv --noquotes)
-kc update users/$UID -r "$REALM" -s enabled=true
+RA_ID=$(kc get users -r "$REALM" -q exact=true -q username=realmadmin --fields id --format csv --noquotes)
+kc update "users/$RA_ID" -r "$REALM" -s enabled=true
 kc set-password -r "$REALM" --username realmadmin --new-password '<generated>' --temporary
 # when done (always):
-kc update users/$UID -r "$REALM" -s enabled=false
-kc create users/$UID/logout -r "$REALM"
+kc update "users/$RA_ID" -r "$REALM" -s enabled=false
+kc create "users/$RA_ID/logout" -r "$REALM"
 ```
 If `global.keycloak.bootstrapUsers.realmAdmin.disableExisting` is true, the next install or upgrade disables it again
 anyway.
