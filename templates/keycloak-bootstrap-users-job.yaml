@@ -1,13 +1,27 @@
 {{- $bootstrapUsers := default (dict) .Values.global.keycloak.bootstrapUsers -}}
+{{- $realmAdmin := default (dict) $bootstrapUsers.realmAdmin -}}
+{{- $realmAdminName := default "realmadmin" $realmAdmin.username -}}
+{{- /* Helm#422: the installer names the master bootstrap admin; upgrades keep the existing name. */ -}}
+{{- $masterAdminName := lower (default "" .Values.global.secrets.keycloakAdminUsername) -}}
+{{- if not $masterAdminName -}}
+{{- fail "global.secrets.keycloakAdminUsername is required: choose the master bootstrap admin name, e.g. bootstrap-admin (runbooks/keycloak-break-glass.md)" -}}
+{{- end -}}
+{{- if .Release.IsInstall -}}
+{{- if has $masterAdminName (list "admin" "realmadmin" "keycloak" "root") -}}
+{{- fail "global.secrets.keycloakAdminUsername must not be a well-known name (admin, realmadmin, keycloak, root) (runbooks/keycloak-break-glass.md)" -}}
+{{- end -}}
+{{- if eq $masterAdminName (lower $realmAdminName) -}}
+{{- fail "global.secrets.keycloakAdminUsername must differ from bootstrapUsers.realmAdmin.username (runbooks/keycloak-break-glass.md)" -}}
+{{- end -}}
+{{- end -}}
 {{- $bootstrapEnabled := true -}}
 {{- if hasKey $bootstrapUsers "enabled" -}}
 {{- $bootstrapEnabled = $bootstrapUsers.enabled -}}
 {{- end -}}
 {{- if $bootstrapEnabled }}
 {{- $kc := index .Values "online-counseling-keycloak" -}}
-{{- $realmAdmin := default (dict) $bootstrapUsers.realmAdmin -}}
-{{- $realmAdminAttributes := default (dict "tenantId" (list "0") "userName" (list "realmadmin") "userId" (list "7c5df021-536b-4f42-bb3c-37b1e4d9864d")) $realmAdmin.attributes -}}
-{{- $realmAdminRealmRoles := default (list "default-roles-online-beratung" "offline_access" "user" "user-admin" "agency-admin" "topic-admin" "single-tenant-admin" "USER_ADMIN" "restricted-agency-admin" "technical" "uma_authorization" "tenant-admin") $realmAdmin.realmRoles -}}
+{{- $realmAdminAttributes := default (dict "tenantId" (list "0") "userName" (list $realmAdminName) "userId" (list "7c5df021-536b-4f42-bb3c-37b1e4d9864d")) $realmAdmin.attributes -}}
+{{- $realmAdminRealmRoles := default (list "default-roles-online-beratung" "offline_access" "user" "user-admin" "agency-admin" "topic-admin" "single-tenant-admin" "USER_ADMIN" "restricted-agency-admin" "uma_authorization" "tenant-admin") $realmAdmin.realmRoles -}}
 {{- $realmAdminRemoveRealmRoles := default (list "consultant") $realmAdmin.removeRealmRoles -}}
 {{- $realmAdminClientRoles := default (dict "realm-management" (list "manage-identity-providers" "realm-admin" "query-groups" "view-users" "view-events" "query-realms" "manage-authorization" "manage-events" "view-identity-providers" "manage-users" "view-realm" "impersonation" "query-users" "manage-clients" "manage-realm" "create-client" "view-authorization" "query-clients" "view-clients") "broker" (list "read-token") "account" (list "view-groups" "manage-account" "delete-account" "view-profile" "view-consent" "manage-account-links" "manage-consent" "view-applications")) $realmAdmin.clientRoles -}}
 apiVersion: batch/v1
@@ -46,18 +60,13 @@ spec:
                 secretKeyRef:
                   name: keycloak-secret-env
                   key: KEYCLOAK_ADMIN_PASSWORD
+            # ORISO-realm break-glass user: shaped but disabled, no password (Helm#422).
             - name: REALM_ADMIN_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-secret-env
-                  key: KEYCLOAK_ADMIN
-            - name: REALM_ADMIN_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: keycloak-secret-env
-                  key: KEYCLOAK_ADMIN_PASSWORD
+              value: {{ $realmAdminName | quote }}
             - name: REALM_ADMIN_ATTRIBUTES
               value: {{ $realmAdminAttributes | toJson | quote }}
+            - name: DISABLE_EXISTING
+              value: {{ default false $realmAdmin.disableExisting | toString | quote }}
           command:
             - /bin/sh
             - -ec
@@ -82,14 +91,13 @@ spec:
 
               ensure_user() {
                 username="$1"
-                password="$2"
-                attributes_json="$3"
+                attributes_json="$2"
 
                 uid="$(user_id "$username" || true)"
                 cat >/tmp/keycloak-user.json <<EOF
               {
                 "username": "${username}",
-                "enabled": true,
+                "enabled": false,
                 "emailVerified": true,
                 "attributes": ${attributes_json},
                 "requiredActions": []
@@ -103,10 +111,15 @@ spec:
                   "$KCADM" update "users/${uid}" -r "$KEYCLOAK_REALM" -f /tmp/keycloak-user.json
                 fi
 
-                "$KCADM" set-password -r "$KEYCLOAK_REALM" --username "$username" --new-password "$password" --temporary=false
               }
 
-              ensure_user "$REALM_ADMIN_USERNAME" "$REALM_ADMIN_PASSWORD" "$REALM_ADMIN_ATTRIBUTES"
+              # A fresh release on a retained database finds the user already there: leave it unless opted in.
+              if [ -n "$(user_id "$REALM_ADMIN_USERNAME" || true)" ] && [ "$DISABLE_EXISTING" != "true" ]; then
+                echo "$REALM_ADMIN_USERNAME exists and disableExisting is false; leaving it unchanged"
+                exit 0
+              fi
+
+              ensure_user "$REALM_ADMIN_USERNAME" "$REALM_ADMIN_ATTRIBUTES"
 {{- range $role := $realmAdminRemoveRealmRoles }}
               "$KCADM" remove-roles -r "$KEYCLOAK_REALM" --uusername "$REALM_ADMIN_USERNAME" --rolename {{ $role | quote }} || true
 {{- end }}
