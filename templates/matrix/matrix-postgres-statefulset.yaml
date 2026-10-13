@@ -91,3 +91,21 @@ spec:
     type: RollingUpdate
     rollingUpdate:
       partition: 0
+---
+# Headless Service named by serviceName above and by matrix.postgresHost (Synapse DB host).
+apiVersion: v1
+kind: Service
+metadata:
+  name: matrix-postgres-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: matrix-postgres
+spec:
+  clusterIP: None
+  selector:
+    app: matrix-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
