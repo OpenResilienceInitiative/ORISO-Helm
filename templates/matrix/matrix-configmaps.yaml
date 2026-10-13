@@ -57,17 +57,9 @@ data:
             compress: false
 
     # KDG epic #282 task 4: Synapse uses the chart's Postgres StatefulSet, not sqlite3.
+    # The database block (it carries the password) is NOT in this ConfigMap: it lives in
+    # the matrix-postgres-secret Secret and is loaded as a second --config-path file.
     # No data migration here (no production users); a real cutover is separate work.
-    database:
-      name: psycopg2
-      args:
-        user: {{ .Values.postgres.postgresUser | quote }}
-        password: {{ .Values.postgres.postgresPassword | quote }}
-        database: {{ .Values.postgres.postgresDB | quote }}
-        host: matrix-postgres-service
-        port: 5432
-        cp_min: 5
-        cp_max: 10
 
     redis:
       enabled: true

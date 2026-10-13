@@ -164,6 +164,8 @@ matrix:
   initImage: "busybox:1.38.0"
   replicas: 1
   postgresReplicas: 1
+  # In-cluster Service name of the Synapse PostgreSQL StatefulSet (rendered into the DB secret).
+  postgresHost: "matrix-postgres-service"
   synapseServerName: "your-server.local"
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"

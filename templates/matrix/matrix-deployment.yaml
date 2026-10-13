@@ -39,6 +39,14 @@ spec:
       - name: synapse
         image: {{ include "oriso.immutableImage" (list "matrix.image" .Values.matrix.image) | quote }}
         imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+        # start.py adds the default /data/homeserver.yaml only when no --config-path is
+        # given, so the DB secret file is passed explicitly as a second config (merged by Synapse).
+        args:
+          - run
+          - --config-path
+          - /data/homeserver.yaml
+          - --config-path
+          - /secrets/synapse/homeserver-database.yaml
         env:
           - name: SYNAPSE_SERVER_NAME
             valueFrom:
@@ -87,10 +95,19 @@ spec:
           - mountPath: /data/homeserver.yaml
             name: homeserver-config
             subPath: homeserver.yaml
+          - mountPath: /secrets/synapse
+            name: homeserver-database-secret
+            readOnly: true
       volumes:
         - name: synapse-data
           persistentVolumeClaim:
             claimName: matrix-synapse-data
         - name: homeserver-config
           configMap:
-            name: matrix-homeserver-oidc 
+            name: matrix-homeserver-oidc
+        - name: homeserver-database-secret
+          secret:
+            secretName: matrix-postgres-secret
+            items:
+              - key: homeserver-database.yaml
+                path: homeserver-database.yaml
