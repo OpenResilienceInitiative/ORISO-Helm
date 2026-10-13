@@ -1,0 +1,26 @@
+# Follows Admin panel SMTP changes. Each run is a short pod; nothing holding a
+# Keycloak credential stays up between runs.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: keycloak-reconcile-smtp
+  namespace: {{ .Release.Namespace }}
+spec:
+  schedule: {{ required "keycloakSmtpReconcile.schedule is required" .Values.keycloakSmtpReconcile.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 240
+      ttlSecondsAfterFinished: 600
+      template:
+        metadata:
+          labels:
+            app: keycloak-reconcile-smtp-schedule
+          annotations:
+            checksum/script: {{ .Files.Get "files/keycloak-reconcile-smtp.py" | sha256sum | quote }}
+        spec:
+          {{- include "oriso.keycloakSmtpReconcilePod" . | nindent 10 }}

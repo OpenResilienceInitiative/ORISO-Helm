@@ -3,6 +3,7 @@
 {{- fail "keycloakSmtpReconcile.image must use an immutable sha256 digest" -}}
 {{- end -}}
 {{- $migration := .Values.global.keycloak.backendServiceClients -}}
+{{- $realmAdmin := default (dict) (default (dict) .Values.global.keycloak.bootstrapUsers).realmAdmin -}}
 {{- if and $migration.prepareOnly .Release.IsUpgrade -}}
 {{- fail "backendServiceClients.prepareOnly is for the isolated render/show-only preparation Job; never use it in a Helm upgrade" -}}
 {{- end -}}
@@ -99,6 +100,21 @@ spec:
               value: {{ $migration.legacyTechnicalUsername | quote }}
             - name: LEGACY_ADMIN_USERNAME
               value: {{ $migration.legacyAdminUsername | quote }}
+            # Helm#422: opt-in disabling of the ORISO-realm break-glass user.
+            - name: REALM_ADMIN_USERNAME
+              value: {{ default "realmadmin" $realmAdmin.username | quote }}
+            - name: DISABLE_REALM_ADMIN
+              value: {{ and (not $migration.prepareOnly) (default false $realmAdmin.disableExisting) | toString | quote }}
+            {{- if not $migration.prepareOnly }}
+            # Ensures the SMTP sync realm client on existing realms (Helm#420).
+            - name: SMTP_SYNC_CLIENT_ID
+              value: {{ include "oriso.smtpSyncClientId" . | quote }}
+            - name: SMTP_SYNC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-smtp-sync-client
+                  key: KEYCLOAK_SMTP_SYNC_CLIENT_SECRET
+            {{- end }}
           volumeMounts:
             - name: scripts
               mountPath: /scripts

@@ -22,7 +22,8 @@ jobs:
   validate:
     name: Render, unit, and guardrail tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Three throwaway Keycloak containers add a few minutes.
+    timeout-minutes: 25
     env:
       PYTHONDONTWRITEBYTECODE: "1"
 
@@ -114,6 +115,19 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           [ ${#failed[@]} -eq 0 ]
+
+      - name: Run real-Keycloak tests (Docker)
+        # SMTP sync client, realmadmin break-glass, native admin permissions.
+        # A missing Docker, a skipped test or zero tests fails the step.
+        env:
+          ORISO_REQUIRE_KEYCLOAK_DOCKER: "1"
+        run: |
+          python - <<'EOF'
+          import sys, unittest
+          suite = unittest.defaultTestLoader.discover("tests", pattern="keycloak_*_test.py")
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          sys.exit(0 if result.wasSuccessful() and result.testsRun and not result.skipped else 1)
+          EOF
 
       - name: Run shell guardrails
         shell: bash
