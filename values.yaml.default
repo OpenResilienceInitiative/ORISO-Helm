@@ -164,8 +164,10 @@ matrix:
   initImage: "busybox:1.38.0"
   replicas: 1
   postgresReplicas: 1
-  # In-cluster Service name of the Synapse PostgreSQL StatefulSet (rendered into the DB secret).
-  postgresHost: "matrix-postgres-service"
+  # In-cluster Service name of the PostgreSQL StatefulSet (Service metadata.name and serviceName).
+  postgresServiceName: "matrix-postgres-service"
+  # Host Synapse and the PITR backup job connect to. Empty = postgresServiceName.
+  postgresHost: ""
   synapseServerName: "your-server.local"
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"

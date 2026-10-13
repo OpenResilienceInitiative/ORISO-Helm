@@ -162,7 +162,7 @@ data:
     \"Creating Base Backup for PITR\"\necho \"Started at: $(date)\"\necho \"==========================================\"\n\nBACKUP_DIR=\"/backup/pitr_base\"\nTIMESTAMP=$(date
     +%Y%m%d_%H%M%S)\nBACKUP_NAME=\"base_backup_${TIMESTAMP}\"\n\nmkdir -p \"${BACKUP_DIR}\"\n\necho
     \"\U0001F4E6 Creating base backup: ${BACKUP_NAME}\"\n\npg_basebackup \\\n  -h
-    matrix-postgres-service \\\n  -U ${POSTGRES_USER} \\\n  -D \"${BACKUP_DIR}/${BACKUP_NAME}\"
+    {{ .Values.matrix.postgresHost | default .Values.matrix.postgresServiceName }} \\\n  -U ${POSTGRES_USER} \\\n  -D \"${BACKUP_DIR}/${BACKUP_NAME}\"
     \\\n  -Ft \\\n  -z \\\n  -Xs \\\n  -P \\\n  -v\n\necho \"\"\necho \"✅ Base backup
     created: ${BACKUP_DIR}/${BACKUP_NAME}\"\necho \"Backup size: $(du -sh ${BACKUP_DIR}/${BACKUP_NAME}
     | cut -f1)\"\n\n# Create metadata\ncat > \"${BACKUP_DIR}/${BACKUP_NAME}/backup.metadata\"

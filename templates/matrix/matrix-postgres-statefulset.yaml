@@ -13,7 +13,7 @@ spec:
   selector:
     matchLabels:
       app: matrix-postgres
-  serviceName: matrix-postgres-service
+  serviceName: {{ .Values.matrix.postgresServiceName }}
   template:
     metadata:
       labels:
@@ -92,11 +92,11 @@ spec:
     rollingUpdate:
       partition: 0
 ---
-# Headless Service named by serviceName above and by matrix.postgresHost (Synapse DB host).
+# Headless Service named by matrix.postgresServiceName (also the StatefulSet serviceName).
 apiVersion: v1
 kind: Service
 metadata:
-  name: matrix-postgres-service
+  name: {{ .Values.matrix.postgresServiceName }}
   namespace: {{ .Release.Namespace }}
   labels:
     app: matrix-postgres
