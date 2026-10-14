@@ -16,6 +16,12 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- if and $collectorEnabled (not $signozEnabled) -}}
 {{- fail "signozCollector.enabled=true requires signoz.enabled=true" -}}
 {{- end -}}
+{{- if and (eq (include "oriso.appMetrics.enabled" .) "true") (not $collectorEnabled) -}}
+{{- fail "global.observability.appMetrics=true requires signozCollector.enabled=true: the cluster collector scrapes the application metrics" -}}
+{{- end -}}
+{{- if and (eq (include "oriso.dbMetrics.enabled" .) "true") (not $collectorEnabled) -}}
+{{- fail "global.observability.dbMetrics=true requires signozCollector.enabled=true: the cluster collector reads the data store metrics" -}}
+{{- end -}}
 {{- if $collectorEnabled -}}
 {{- $globalObservability := get .Values.global "observability" | default dict -}}
 {{- if eq (get $collector "clusterName" | default "") "" -}}
