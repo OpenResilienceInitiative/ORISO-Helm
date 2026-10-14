@@ -36,6 +36,16 @@ global:
     autoEnableWithSignoz: true
     deploymentEnvironment: "pre-dev"   # environment tag on exported signals
     otlpCollectorHost: "" # optional external collector host:port when signoz.enabled=false
+    # Prometheus metrics of ingress-nginx, Keycloak and Synapse, scraped by the
+    # SigNoz cluster collector. Requires signozCollector.enabled=true. Opens
+    # cluster-internal metrics ports (nginx 10254, Keycloak 9000, Synapse 9000);
+    # none of them is routed by an ingress.
+    appMetrics: false
+    # Status metrics of MariaDB, MongoDB and RabbitMQ (via read-only monitoring
+    # users the chart creates and keeps, passwords generated into the Secret
+    # oriso-db-monitoring) and of Redis (its redis-exporter sidecar). Requires
+    # signozCollector.enabled=true. No row data leaves the data stores.
+    dbMetrics: false
 
   acmedomainName: "acme.your-domain.example.com"
  #adminDomainName: "admin.your-domain.example.com"
@@ -562,6 +572,12 @@ signozCollector:
     limits:
       cpu: 500m
       memory: 512Mi
+
+# Data store monitoring (global.observability.dbMetrics). The reconcile job uses
+# the stores' own images for MariaDB and MongoDB and this curl image for the
+# RabbitMQ management API.
+dbMonitoring:
+  curlImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Health Dashboard
 healthDashboard:
