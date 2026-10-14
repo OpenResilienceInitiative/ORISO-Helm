@@ -43,6 +43,7 @@ class NativeRealm:
             "realm-management": {"id": "management", "clientId": "realm-management"}
         }
         self.users = {}
+        self.native_service_accounts = {}
         self.policies = {}
         self.roles = {
             r: {"id": r, "name": r} for g in MAPPING["groups"] for r in g["roles"]
@@ -62,11 +63,15 @@ class NativeRealm:
         ):
             self.groups[path] = {"id": "group-" + str(n), "path": path, "roles": []}
         self.writes = 0
+        self.requests = 0
+        self.service_account_reads = 0
+        self.lazy_service_account_creations = 0
         self.readback_fault = False
         self.default_role = None
         self.ignore_role_write = False
 
     def handle(self, method, path, body):
+        self.requests += 1
         url = urlparse(path)
         parts = [unquote(p) for p in url.path.split("/")[4:]]
         q = parse_qs(url.query)
@@ -97,6 +102,7 @@ class NativeRealm:
                     "clientRoles": [],
                     "groups": [],
                 }
+                self.native_service_accounts[cid] = self.users[cid]["id"]
                 return 201, None
             rows = list(self.clients.values())
             if "clientId" in q:
@@ -175,6 +181,13 @@ class NativeRealm:
         if parts[:1] == ["clients"] and len(parts) > 2:
             c = next(c for c in self.clients.values() if c["id"] == parts[1])
             if parts[2:] == ["service-account-user"]:
+                self.service_account_reads += 1
+                cid = c["clientId"]
+                if cid not in self.native_service_accounts:
+                    # Native Keycloak can create/link an account through this GET.
+                    self.writes += 1
+                    self.lazy_service_account_creations += 1
+                    self.native_service_accounts[cid] = self.users[cid]["id"]
                 return 200, self.users[c["clientId"]]
             if parts[2:4] == ["authz", "resource-server"]:
                 tail = parts[4:]
@@ -315,6 +328,40 @@ class HttpReconciliationTest(unittest.TestCase):
         result = self.run_cli("--apply")
         self.assertNotEqual(0, result.returncode)
         self.assertEqual(0, self.realm.writes)
+
+    def test_unconfirmed_apply_never_reaches_missing_native_service_account(self):
+        prepared = self.run_cli("--apply", "--confirm-isolated-realm")
+        self.assertEqual(0, prepared.returncode, prepared.stderr)
+        self.assertGreater(self.realm.service_account_reads, 0)
+        # The managed receipt still exists, but the native association is absent.
+        del self.realm.native_service_accounts["backend-mail"]
+        before = json.dumps(
+            [self.realm.clients, self.realm.users, self.realm.native_service_accounts],
+            sort_keys=True,
+        )
+        self.realm.writes = 0
+        self.realm.requests = 0
+        self.realm.service_account_reads = 0
+
+        result = self.run_cli("--apply")
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(0, self.realm.lazy_service_account_creations)
+        self.assertEqual(0, self.realm.service_account_reads)
+        self.assertEqual(0, self.realm.writes)
+        self.assertEqual(0, self.realm.requests)
+        self.assertIn("Apply requires explicit confirmation", result.stderr)
+        self.assertEqual(
+            before,
+            json.dumps(
+                [
+                    self.realm.clients,
+                    self.realm.users,
+                    self.realm.native_service_accounts,
+                ],
+                sort_keys=True,
+            ),
+        )
 
     def test_foreign_all_users_permission_is_refused_without_writes(self):
         self.realm.enabled = True

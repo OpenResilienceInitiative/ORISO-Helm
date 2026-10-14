@@ -510,13 +510,13 @@ def main():
     migration = migration_module()
     mapping = json.loads(args.mapping.read_text())
     migration.validate_mapping(mapping)
-    admin = migration.Admin(args.url, args.realm, token)
-    snapshot = inspect(admin, actors, mapping, verify_service_accounts=args.apply)
-    existing = permission_inventory(admin, snapshot["permission_client"])
     if args.apply and not args.confirm_isolated_realm:
         raise ReconcileError(
             "Apply requires explicit confirmation of an isolated realm copy"
         )
+    admin = migration.Admin(args.url, args.realm, token)
+    snapshot = inspect(admin, actors, mapping, verify_service_accounts=args.apply)
+    existing = permission_inventory(admin, snapshot["permission_client"])
     changes = reconcile(admin, actors, mapping, snapshot) if args.apply else 0
     print(
         json.dumps(
