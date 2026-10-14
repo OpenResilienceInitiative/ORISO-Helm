@@ -538,7 +538,8 @@ nginxController:
 ipAnonymizer:
   enabled: false
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:latest"
+  # Built and released by OpenResilienceInitiative/ORISO-IpAnonymizer.
+  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:2.0.12"
 
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
