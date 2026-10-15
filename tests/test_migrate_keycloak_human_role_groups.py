@@ -438,9 +438,16 @@ class MigrationCliTest(unittest.TestCase):
             "/human-roles/user",
             "/human-roles/consultant",
         }
+        before_groups = set(self.realm.users["conflicting-human"]["groups"])
+        before_direct = set(self.realm.users["conflicting-human"]["direct"])
         code, report = self.run_cli(apply=True)
         self.assertEqual(code, 2, report)
+        entry = {user["id"]: user for user in report["users"]}["conflicting-human"]
+        self.assertEqual("failed", entry["status"], report)
+        self.assertIn("Conflicting role-group membership", entry["error"])
         self.assertEqual(self.realm.writes, [])
+        self.assertEqual(before_groups, self.realm.users["conflicting-human"]["groups"])
+        self.assertEqual(before_direct, self.realm.users["conflicting-human"]["direct"])
 
     def test_explicit_protected_variants_preserve_distinct_existing_role_sets(self):
         self.realm.user(

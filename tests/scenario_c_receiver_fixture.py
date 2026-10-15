@@ -508,6 +508,7 @@ def run_receivers(receivers, fixture, java_home=None, expected_tests=5):
         )
         environment = {**os.environ, "ORISO_TASK_TOKEN_FIXTURE": str(fixture)}
         if java_home:
+            java_home = java_home.resolve()
             environment["JAVA_HOME"] = str(java_home)
             environment["PATH"] = (
                 str(java_home / "bin") + os.pathsep + environment["PATH"]
@@ -520,7 +521,7 @@ def run_receivers(receivers, fixture, java_home=None, expected_tests=5):
             "verify",
         ]
         # Raw logs stay inside the same private temporary lifetime as synthetic tokens.
-        log = fixture.parent / (receiver.name + "-maven.log")
+        log = fixture.parent / f"{receiver.name}-{uuid.uuid4().hex}-maven.log"
         descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         started = time.time()
         with os.fdopen(descriptor, "w") as output:
