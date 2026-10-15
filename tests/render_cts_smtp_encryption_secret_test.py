@@ -68,3 +68,9 @@ def test_key_is_in_secret_and_deployment_imports_it():
         "key": "SETTINGS_SMTP_PASSWORD_ENCRYPTION_SECRET",
         "name": "consultingtypeservice-secret",
     }
+
+
+if __name__ == "__main__":
+    test_missing_or_invalid_key_fails_at_render()
+    test_key_is_in_secret_and_deployment_imports_it()
+    print("PASS: CTS SMTP encryption key render contracts")

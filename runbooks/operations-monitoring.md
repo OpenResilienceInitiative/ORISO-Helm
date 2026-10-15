@@ -359,7 +359,7 @@ Here deleting on time is part of the promise, not an optional cleanup:
 | Kubernetes changes | Kubernetes audit log (if the provider offers it) | `exec`, reading Secrets, RBAC changes, new ServiceAccounts | review weekly; unknown actor → P1 | Keep a list of everyone holding a kubeconfig, with its expiry (section 7) |
 | Rate limit hits | ingress 429 responses on public entry paths | > 10× normal | P3 | Abuse or a misbehaving client |
 | Vulnerable images | Trivy or a similar scan of the running image tags | new critical CVE with a fix available | P2 | Plan a patch release |
-| Unexpected images | running images not pinned to a release tag (`:latest`, `:dev`) | any in production | P2 | Today `ip-anonymizer:latest` is the exception; give it a pinned tag and a CI build |
+| Unexpected images | running images not pinned to a release tag (`:latest`, `:dev`) | any in production | P2 | All ORISO images are pinned to a release tag, the ip-anonymizer included since 2.0.12 (built by ORISO-IpAnonymizer). Only Storybook uses `:dev`, as a development surface |
 
 ---
 

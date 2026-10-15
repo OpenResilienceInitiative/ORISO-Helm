@@ -39,11 +39,12 @@ def resource(docs, kind, name):
     raise AssertionError(f"{kind}/{name} was not rendered")
 
 
-def assert_post_install_upgrade_job(docs, name):
+def assert_bootstrap_hook_job(docs, name):
+    # Which hook runs these Jobs is owned by render_bootstrap_hooks_install_only_test.py:
+    # 95d2d79 made them install-only on the same day this contract asked for
+    # post-upgrade too. This contract never ran in CI, so the two disagreed unseen.
     job = resource(docs, "Job", name)
     annotations = job["metadata"].get("annotations", {})
-    hooks = {hook.strip() for hook in annotations.get("helm.sh/hook", "").split(",")}
-    assert {"post-install", "post-upgrade"}.issubset(hooks)
     assert annotations.get("helm.sh/hook-delete-policy") == "before-hook-creation,hook-succeeded"
     return job
 
@@ -53,14 +54,14 @@ def container_script(job):
     return command[-1]
 
 
-def test_seed_jobs_are_upgrade_safe_and_wait_for_liquibase():
+def test_seed_jobs_are_non_destructive_and_wait_for_liquibase():
     docs = render_chart()
 
-    tenant_job = assert_post_install_upgrade_job(docs, "tenant-bootstrap")
-    topic_job = assert_post_install_upgrade_job(docs, "topic-bootstrap")
-    assert_post_install_upgrade_job(docs, "keycloak-bootstrap-users")
-    assert_post_install_upgrade_job(docs, "matrixrtc-bootstrap-token")
-    assert_post_install_upgrade_job(docs, "create-mongo-users")
+    tenant_job = assert_bootstrap_hook_job(docs, "tenant-bootstrap")
+    topic_job = assert_bootstrap_hook_job(docs, "topic-bootstrap")
+    assert_bootstrap_hook_job(docs, "keycloak-bootstrap-users")
+    assert_bootstrap_hook_job(docs, "matrixrtc-bootstrap-token")
+    assert_bootstrap_hook_job(docs, "create-mongo-users")
 
     for script in (container_script(tenant_job), container_script(topic_job)):
         assert "DATABASECHANGELOGLOCK" in script
@@ -73,5 +74,10 @@ def test_seed_jobs_are_upgrade_safe_and_wait_for_liquibase():
         assert "INSERT IGNORE" in sql
         assert "DELETE FROM" not in sql.upper()
         assert "TRUNCATE" not in sql.upper()
-        assert "MAX(`id`)" in sql
-        assert "SETVAL(`sequence_" in sql
+        # The sequence calls are owned by render_bootstrap_sequence_setval_test.py;
+        # b3857c0 replaced the MAX(`id`) form this contract expected.
+
+
+if __name__ == "__main__":
+    test_seed_jobs_are_non_destructive_and_wait_for_liquibase()
+    print("PASS: bootstrap jobs are non-destructive and wait for Liquibase")
