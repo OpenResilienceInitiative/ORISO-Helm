@@ -1046,10 +1046,16 @@ def main(argv: list[str] | None = None) -> int:
         payload = build_test_rule(alerts, args.rule)
         result = _unwrap(client.request("POST", "/api/v1/testRule", payload))
         count = result.get("alertCount") if isinstance(result, dict) else None
+        if not count:
+            print(
+                f"NOT SENT: the {args.rule!r} query returned no series in "
+                f"{args.environment} (alertCount={count}), so nothing reached "
+                f"{args.channel_name!r}"
+            )
+            return 2
         print(
             f"PASS: test notification for {args.rule!r} in {args.environment} "
-            f"sent to {args.channel_name!r} (alertCount={count}; 0 means the "
-            "query returned no series, so nothing was sent)"
+            f"sent to {args.channel_name!r} (alertCount={count})"
         )
         return 0
 

@@ -36,6 +36,7 @@ class State:
         }
         self.channel_writes = 0
         self.test_rules: list[dict[str, Any]] = []
+        self.test_rule_alert_count = 1
         self.dashboards: dict[str, dict[str, Any]] = {}
         self.rules: dict[str, dict[str, Any]] = {}
         self.queries = 0
@@ -107,7 +108,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send(405, {"error": "channel writes are not allowed"})
         elif self.path == "/api/v1/testRule":
             self.state.test_rules.append(body)
-            self._send(200, {"alertCount": 1, "message": "notification sent"})
+            self._send(
+                200,
+                {
+                    "alertCount": self.state.test_rule_alert_count,
+                    "message": "notification sent",
+                },
+            )
         elif self.path == "/api/v2/dashboards":
             identifier = f"dashboard-{len(self.state.dashboards) + 1}"
             self.state.dashboards[identifier] = {"id": identifier, **body}
@@ -230,6 +237,13 @@ class HttpFlowTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "created by hand"):
             self._main("--mode", "provision")
         self.assertEqual(self._counts(), (0, 0, 0, 0))
+
+    def test_test_rule_without_series_reports_not_sent(self) -> None:
+        self.state.test_rule_alert_count = 0
+        code, printed = self._main("--mode", "test-rule", "--rule", "unencrypted-room")
+        self.assertEqual(code, 2)
+        self.assertIn("NOT SENT", printed)
+        self.assertNotIn("PASS", printed)
 
     def test_test_rule_sends_one_notification_without_storing_a_rule(self) -> None:
         code, printed = self._main("--mode", "test-rule", "--rule", "unencrypted-room")
