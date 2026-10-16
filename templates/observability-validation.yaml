@@ -22,6 +22,14 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- if and (eq (include "oriso.dbMetrics.enabled" .) "true") (not $collectorEnabled) -}}
 {{- fail "global.observability.dbMetrics=true requires signozCollector.enabled=true: the cluster collector reads the data store metrics" -}}
 {{- end -}}
+{{- $webVitals := get (get .Values.global "observability" | default dict) "webVitals" | default dict -}}
+{{- if and $signozEnabled (get $webVitals "enabled" | default false) -}}
+{{- $collectorEnvs := get (get $signoz "otelCollector" | default dict) "additionalEnvs" | default dict -}}
+{{- $environment := get (get .Values.global "observability" | default dict) "deploymentEnvironment" | default "" -}}
+{{- if ne (get $collectorEnvs "ORISO_DEPLOYMENT_ENVIRONMENT" | default "") $environment -}}
+{{- fail (printf "signoz.otelCollector.additionalEnvs.ORISO_DEPLOYMENT_ENVIRONMENT must equal global.observability.deploymentEnvironment (%q) when global.observability.webVitals.enabled=true" $environment) -}}
+{{- end -}}
+{{- end -}}
 {{- if $collectorEnabled -}}
 {{- $globalObservability := get .Values.global "observability" | default dict -}}
 {{- if eq (get $collector "clusterName" | default "") "" -}}

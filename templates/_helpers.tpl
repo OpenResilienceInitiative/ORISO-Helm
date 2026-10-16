@@ -445,3 +445,45 @@ oriso.io/path: {{ .path | quote }}
 {{- define "oriso.backendServiceClientsChecksum" -}}
 {{- printf "%s\x00%s\x00%s\x00%s\x00%s\x00%s" .Values.global.keycloak.backendTechnicalClientId .Values.global.keycloak.serviceAdminClientId .Values.global.keycloak.serviceTechUserId .Values.global.keycloak.serviceAdminSubject (.Values.global.secrets.keycloakBackendTechnicalClientSecret | default "") (.Values.global.secrets.keycloakBackendAdminClientSecret | default "") | sha256sum -}}
 {{- end -}}
+
+{{/*
+Trace resource attributes and sampling for the Spring Boot services.
+Argument: (dict "root" $ "image" "<image reference>"). Renders nothing unless
+OTLP export is on. Spring Boot reads OTEL_RESOURCE_ATTRIBUTES itself, and the
+sampling env var binds to management.tracing.sampling.probability.
+*/}}
+{{- define "oriso.springTelemetryEnv" -}}
+{{- if eq (include "oriso.observabilityEnabled" .root) "true" -}}
+{{- $o := get .root.Values.global "observability" | default dict -}}
+{{- $ref := toString .image -}}
+{{- $version := "unknown" -}}
+{{- if contains "@" $ref -}}
+{{- $version = trunc 19 (last (splitList "@" $ref)) -}}
+{{- else if contains ":" (last (splitList "/" $ref)) -}}
+{{- $version = last (splitList ":" $ref) -}}
+{{- end }}
+- name: OTEL_RESOURCE_ATTRIBUTES
+  value: {{ printf "deployment.environment=%s,service.version=%s" (get $o "deploymentEnvironment" | default "unknown") $version | quote }}
+{{- with get $o "tracingSamplingProbability" }}
+- name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+  value: {{ . | toString | quote }}
+{{- end }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Browser Web Vitals ingest URL, or "" when browser telemetry is off.
+*/}}
+{{- define "oriso.webVitalsUrl" -}}
+{{- $o := get .Values.global "observability" | default dict -}}
+{{- $wv := get $o "webVitals" | default dict -}}
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- if and (get $wv "enabled" | default false) (get $signoz "enabled" | default false) -}}
+{{- printf "https://%s/signoz-rum/v1/metrics" (include "oriso.domainName" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "oriso.webVitalsIntervalMillis" -}}
+{{- $o := get .Values.global "observability" | default dict -}}
+{{- get (get $o "webVitals" | default dict) "exportIntervalMillis" | default 60000 | toString -}}
+{{- end -}}

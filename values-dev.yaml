@@ -9,6 +9,16 @@
 # this generic dev overlay does not opt in. See docs/infrastructure-report-2026-07.md §7.
 
 global:
+  # Telemetry to the bundled SigNoz (https://dev.oriso.org/signoz). Every trace
+  # is kept on Dev; the cluster collector also scrapes nginx, Keycloak, Synapse
+  # and the data stores.
+  observability:
+    deploymentEnvironment: "dev"
+    tracingSamplingProbability: "1.0"
+    appMetrics: true
+    dbMetrics: true
+    webVitals:
+      enabled: true
   # Existing ORISO Dev product identity. The operator must separately supply
   # global.emailLegalOrganisationName before this chart can be deployed.
   emailBrandingName: "ORISO"
@@ -19,6 +29,20 @@ global:
   initializeDummyData: true
   matrix:
     matrixServerName: "matrix.oriso.org"
+
+signoz:
+  enabled: true
+  signoz:
+    env:
+      signoz_global_external__url: "https://dev.oriso.org/signoz"
+  otelCollector:
+    additionalEnvs:
+      ORISO_DEPLOYMENT_ENVIRONMENT: "dev"
+
+# Node agent (pod logs, host and kubelet metrics) and cluster collector.
+signozCollector:
+  enabled: true
+  clusterName: "oriso-dev"
 
 healthDashboard:
   ingress:
