@@ -13,6 +13,15 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- $collector := get .Values "signozCollector" | default dict -}}
 {{- $collectorEnabled := get $collector "enabled" | default false -}}
 {{- $signozEnabled := get $signoz "enabled" | default false -}}
+{{- $managed := get $signoz "orisoObservability" | default dict -}}
+{{- if get $managed "enabled" | default false -}}
+{{- if not $signozEnabled -}}
+{{- fail "signoz.orisoObservability.enabled=true requires signoz.enabled=true" -}}
+{{- end -}}
+{{- if not $collectorEnabled -}}
+{{- fail "signoz.orisoObservability.enabled=true requires signozCollector.enabled=true" -}}
+{{- end -}}
+{{- end -}}
 {{- if and $collectorEnabled (not $signozEnabled) -}}
 {{- fail "signozCollector.enabled=true requires signoz.enabled=true" -}}
 {{- end -}}
