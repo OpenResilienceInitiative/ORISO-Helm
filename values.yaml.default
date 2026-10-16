@@ -637,6 +637,11 @@ signoz:
                 - keep_keys(attributes, ["service.name"])
                 - set(attributes["deployment.environment"], "${env:ORISO_DEPLOYMENT_ENVIRONMENT}")
                 - set(attributes["oriso.signal.source"], "browser")
+            # Only the attributes Frontend and Admin record, values capped.
+            - context: datapoint
+              statements:
+                - keep_keys(attributes, ["url.path_template", "outcome", "transport", "stage", "cause", "category"])
+                - truncate_all(attributes, 120)
       service:
         pipelines:
           metrics/rum:

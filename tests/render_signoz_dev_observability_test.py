@@ -79,6 +79,9 @@ def assert_dev(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     resource = config["processors"]["transform/rum"]["metric_statements"][0]
     assert resource["context"] == "resource"
     assert resource["statements"][0] == 'keep_keys(attributes, ["service.name"])'
+    datapoint = config["processors"]["transform/rum"]["metric_statements"][1]
+    assert datapoint["context"] == "datapoint"
+    assert datapoint["statements"][0].startswith('keep_keys(attributes, ["url.path_template"')
     collector_env = env(docs[("Deployment", "caritas-signoz-otel-collector")])
     assert collector_env["ORISO_DEPLOYMENT_ENVIRONMENT"] == "dev"
     collector = docs[("Deployment", "caritas-signoz-otel-collector")]
