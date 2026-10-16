@@ -1,0 +1,96 @@
+{
+  "artifactType": "signoz-dashboard-build-specification",
+  "title": "ORISO Platform Management and Refactoring Quality",
+  "version": 1,
+  "variables": ["deployment.environment", "service.name", "service.version"],
+  "panels": [
+    {
+      "id": "live-chat-outcome",
+      "managementQuestion": "Can clients create an enquiry and can an eligible consultant see it?",
+      "owner": "UserService",
+      "signals": ["oriso.live_chat.queue.visibility", "oriso.live_chat.routing.decisions"],
+      "signalStatus": "blocked-on-emitter",
+      "beforeAfter": {
+        "baseline": "No causal live-chat success or failure signal exists; empty queues cannot distinguish no demand from a defect.",
+        "target": "Synthetic and real aggregate outcomes separate no demand, no eligible consultant, relation failure, and readback mismatch."
+      }
+    },
+    {
+      "id": "provisioning-integrity",
+      "managementQuestion": "Do newly created organisations, counselling centres, relations, and users survive authoritative readback?",
+      "owner": "Admin and UserService",
+      "signals": ["oriso.admin.provisioning.operations"],
+      "signalStatus": "blocked-on-emitter",
+      "beforeAfter": {
+        "baseline": "Generic HTTP failures do not expose the failed provisioning stage or rollback result.",
+        "target": "Every create workflow records stage, success, authoritative readback, and compensation outcome without form values or identities."
+      }
+    },
+    {
+      "id": "e2ee-posture",
+      "managementQuestion": "Are all new rooms encrypted and are clients able to decrypt their events?",
+      "owner": "UserService and Frontend",
+      "signals": ["oriso.matrix.room.creation", "decryption_failure"],
+      "signalStatus": "partial",
+      "beforeAfter": {
+        "baseline": "Client decryption failures are counted, but successful encrypted-room creation is not measured end to end.",
+        "target": "100% of successful room creations report encryption enabled; unencrypted creation is zero and blocks the gate."
+      }
+    },
+    {
+      "id": "service-slo",
+      "managementQuestion": "Which service currently drives user-visible latency or errors?",
+      "owner": "Platform",
+      "signals": ["http.server.request.duration", "service.error.rate", "service.operation.rate"],
+      "signalStatus": "live",
+      "beforeAfter": {
+        "baseline": "APM is available, but HTTP status classes and expected authentication failures are not yet separated in the management scorecard.",
+        "target": "Per-environment availability, p95 and p99 latency, and server-error SLOs are owned per service and exclude expected 4xx outcomes."
+      }
+    },
+    {
+      "id": "replica-safety",
+      "managementQuestion": "Can requests move between replicas without losing correctness or duplicating jobs?",
+      "owner": "Each stateless-target service",
+      "signals": ["oriso.runtime.local_state.components", "oriso.scheduler.executions", "oriso.replica.conformance"],
+      "signalStatus": "blocked-on-emitter",
+      "beforeAfter": {
+        "baseline": "Workload kind Deployment is currently used as a proxy for statelessness despite known UserService local caches, maps, and schedulers.",
+        "target": "Critical local state count is zero, scheduled side effects are leader-safe or idempotent, and a multi-replica conformance test is green."
+      }
+    },
+    {
+      "id": "stateful-platform-health",
+      "managementQuestion": "Are durable stores healthy, recoverable, and below capacity risk?",
+      "owner": "Platform",
+      "signals": ["mysql.*", "redis.*", "mongodb.*", "clickhouse.*", "k8s.pod.*"],
+      "signalStatus": "partial",
+      "beforeAfter": {
+        "baseline": "Kubernetes and ClickHouse metrics exist; recovery objectives and complete Redis, Mongo, and Postgres saturation panels are not yet unified.",
+        "target": "Every stateful platform has availability, saturation, storage growth, backup age, and restore-test evidence in one scorecard."
+      }
+    },
+    {
+      "id": "deployment-drift",
+      "managementQuestion": "Are PreDev and Dev running the reviewed commits and effective safety configuration?",
+      "owner": "Platform",
+      "signals": ["service.runtime.identity"],
+      "signalStatus": "blocked-on-emitter",
+      "beforeAfter": {
+        "baseline": "Runtime truth requires manual Kubernetes image and config inspection and has already shown stale Admin and UserService images.",
+        "target": "Every signal carries immutable commit, image digest, environment, E2EE flag, and availability-store configuration; drift is visible automatically."
+      }
+    },
+    {
+      "id": "telemetry-pipeline-health",
+      "managementQuestion": "Is missing data a product success, an idle system, or a broken telemetry pipeline?",
+      "owner": "Platform",
+      "signals": ["otelcol_receiver_accepted_metric_points", "otelcol_exporter_send_failed_metric_points", "telemetry-ingestion-lag"],
+      "signalStatus": "partial",
+      "beforeAfter": {
+        "baseline": "PreDev ingests metrics while Dev has no recent metrics; the dashboard cannot yet distinguish disabled exporters from collector failure at a glance.",
+        "target": "Environment heartbeat, accepted and rejected points, export failures, and last-seen timestamps make every telemetry gap explainable."
+      }
+    }
+  ]
+}
