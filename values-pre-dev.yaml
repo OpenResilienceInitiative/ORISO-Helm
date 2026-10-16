@@ -1,10 +1,10 @@
-# Pre-Dev overlay for the ORISO chart: values-dev.yaml PLUS environment deltas only.
+# Pre-Dev overlay for the ORISO chart.
 #
-# Pre-Dev is the team's test environment and must behave like Dev. This file is
-# values-dev.yaml with the few things that are genuinely Pre-Dev's own (host,
-# Matrix identity, SigNoz, no chart-managed Storybook, no dummy data). Keep every
-# other value identical to values-dev.yaml. A new value added to values-dev.yaml
-# must be added here too, or this file drifts again.
+# Pre-Dev is the team's test environment and has to behave like Dev. This file is a
+# FULL copy of values-dev.yaml with only what is genuinely Pre-Dev's own changed:
+# host and URLs, Matrix identity, SigNoz, SMTP identity, no chart-managed Storybook,
+# no dummy data, and the closed mail-locale gate required by the repo tests.
+# Helm has no include, so a value added to values-dev.yaml must be added here too.
 #
 # Apply it INSTEAD of values-dev.yaml:
 #   helm upgrade --install caritas ./ -n caritas --create-namespace \
@@ -45,17 +45,10 @@ tenantService:
 consultingTypeService:
   liquibaseContexts: "seed"
 userService:
-  # Operator SMTP transport for the mails above. Credentials (smtpUser/
-  # smtpPassword) live in the persistent secret values, never here. Identity
-  # matches what was wired by hand on Pre-Dev on 2026-07-28 (PR #169 context).
-  smtpHost: "mail.dreambau.com"
-  smtpPort: 587
-  smtpSecure: false
-  smtpFrom: "ORISO Platform <monty.burns@oriso.org>"
   springProfilesActive: "dev"
-  # Dev mailbox QA explicitly exercises all seven App mail languages. This is
-  # not human language approval and must not be copied to production values.
-  emailAllowUnreviewedLocales: true
+  # Deliberate delta from Dev: tests/render_pending_mail_locale_optin_test.py requires the
+  # unreviewed-locale gate to stay closed in every environment except Dev.
+  emailAllowUnreviewedLocales: false
 
   # ADR-018 Global Support Access stays off here. Release 1 is exercised on Pre-Dev only; dev is
   # the stable QA environment and must not gain a new privileged access path ahead of it.
