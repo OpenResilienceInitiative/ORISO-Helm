@@ -164,6 +164,11 @@ matrix:
   initImage: "busybox:1.38.0"
   replicas: 1
   postgresReplicas: 1
+  database:
+    # Synapse database: "sqlite3" (/data/homeserver.db on the matrix-synapse-data PVC)
+    # or "postgres" (the matrix-postgres StatefulSet). Switching moves no data; an
+    # existing install follows runbooks/matrix-sqlite-to-postgres.md.
+    engine: "sqlite3"
   # In-cluster Service name of the PostgreSQL StatefulSet (Service metadata.name and serviceName).
   postgresServiceName: "matrix-postgres-service"
   # Host Synapse and the PITR backup job connect to. Empty = postgresServiceName.
