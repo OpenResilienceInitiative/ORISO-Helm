@@ -175,14 +175,23 @@ the bundled SigNoz chart is enabled, use its in-cluster collector service.
 {{- end -}}
 {{- end -}}
 
-{{- define "oriso.signozServiceName" -}}
+{{- /* The vendored chart's signoz.fullname: names the SigNoz StatefulSet and Service. */ -}}
+{{- define "oriso.signozFullname" -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
-{{- default (printf "%s-signoz" .Release.Name) (get $signoz "orisoServiceNameOverride" | default "") -}}
+{{- $name := get $signoz "nameOverride" | default "signoz" -}}
+{{- get $signoz "fullnameOverride" | default (contains $name .Release.Name | ternary .Release.Name (printf "%s-%s" .Release.Name $name)) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "oriso.signozServiceName" -}}
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- default (include "oriso.signozFullname" .) (get $signoz "orisoServiceNameOverride" | default "") -}}
+{{- end -}}
+
+{{- /* The vendored chart's otelCollector.fullname. */ -}}
 {{- define "oriso.signozOtelCollectorServiceName" -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
-{{- default (printf "%s-signoz-otel-collector" .Release.Name) (get $signoz "orisoOtelCollectorServiceNameOverride" | default "") -}}
+{{- $collector := printf "%s-%s" (include "oriso.signozFullname" .) (dig "otelCollector" "name" "otel-collector" $signoz) | trunc 63 | trimSuffix "-" -}}
+{{- default $collector (get $signoz "orisoOtelCollectorServiceNameOverride" | default "") -}}
 {{- end -}}
 
 {{- define "oriso.signozExternalUrl" -}}

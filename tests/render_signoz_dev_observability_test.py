@@ -493,6 +493,32 @@ def assert_read_write_once_pod_rejected() -> None:
         os.unlink(handle.name)
 
 
+def assert_backends_follow_signoz_names() -> None:
+    # The ORISO ingresses and OTLP endpoints target the Services the vendored chart really names.
+    for overlay, ui, collector in (
+        ({}, "caritas-signoz", "caritas-signoz-otel-collector"),
+        ({"signoz": {"fullnameOverride": "telemetry", "otelCollector": {"name": "collector"}}}, "telemetry", "telemetry-collector"),
+        ({"signoz": {"nameOverride": "obs"}}, "caritas-obs", "caritas-obs-otel-collector"),
+    ):
+        docs = render_dev_with(overlay)
+        services = {name for kind, name in docs if kind == "Service"}
+        assert {ui, collector} <= services, (overlay, sorted(s for s in services if "signoz" in s or "obs" in s or "tele" in s))
+        backends = {
+            path["backend"]["service"]["name"]
+            for kind, doc in docs.items() if kind[0] == "Ingress" and kind[1] in (f"{ui}-ingress", f"{ui}-rum-ingress")
+            for rule in doc["spec"]["rules"] for path in rule["http"]["paths"]
+        }
+        assert {ui, collector} <= backends, (overlay, backends)
+        endpoints = {
+            value["value"].split("//")[-1].split(":")[0].split(".")[0]
+            for kind, doc in docs.items() if kind[0] in ("Deployment", "StatefulSet")
+            for container in doc["spec"]["template"]["spec"].get("containers", [])
+            for value in container.get("env", []) or []
+            if isinstance(value.get("value"), str) and ":4318" in value["value"]
+        }
+        assert endpoints and endpoints <= services, (overlay, endpoints)
+
+
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
@@ -507,6 +533,7 @@ def main() -> None:
     assert_sqlite_replicas()
     assert_rum_port_and_source_class()
     assert_read_write_once_pod_rejected()
+    assert_backends_follow_signoz_names()
     print("PASS: SigNoz on Dev keeps its data, bounds the collector, and labels every signal")
 
 

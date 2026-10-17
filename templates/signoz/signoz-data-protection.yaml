@@ -23,8 +23,7 @@ reclaims with Delete, so users, API keys and dashboards were lost.
 {{- /* Job names and label values may have 63 characters; the suffix stays readable. */ -}}
 {{- $retainName := printf "%s-retain" ($name | trunc 56 | trimSuffix "-") -}}
 {{- /* The StatefulSet names, with the override rules of the vendored charts (signoz.fullname, common.names.fullname). */ -}}
-{{- $signozName := get $signoz "nameOverride" | default "signoz" -}}
-{{- $signozSts := get $signoz "fullnameOverride" | default (contains $signozName .Release.Name | ternary .Release.Name (printf "%s-%s" .Release.Name $signozName)) | trunc 63 | trimSuffix "-" -}}
+{{- $signozSts := include "oriso.signozFullname" . -}}
 {{- $chName := include "oriso.signozClickhouseFullname" . -}}
 {{- /* The claims holding signoz.db, derived like the SigNoz chart's StatefulSet: one per replica, or the
 shared existingClaim; none with PostgreSQL or without persistence. The backup copies ordinal 0's. */ -}}
