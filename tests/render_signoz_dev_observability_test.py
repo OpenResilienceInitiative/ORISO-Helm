@@ -157,6 +157,15 @@ def assert_review_findings() -> None:
     for service in JAVA_SERVICES:
         assert env(docs[("Deployment", service)])["MANAGEMENT_TRACING_SAMPLING_PROBABILITY"] == "0", service
 
+    # E2E runs are selectable by their baggage field on Dev only.
+    dev = by_key(render("values-dev.yaml"))
+    for service in JAVA_SERVICES:
+        values = env(dev[("Deployment", service)])
+        assert values["MANAGEMENT_TRACING_BAGGAGE_REMOTEFIELDS"] == "test.run.id", service
+        assert values["MANAGEMENT_TRACING_BAGGAGE_TAGFIELDS"] == "test.run.id", service
+    docs = render_dev_with({"global": {"observability": {"testRunBaggage": False}}})
+    assert "MANAGEMENT_TRACING_BAGGAGE_TAGFIELDS" not in env(docs[("Deployment", "userservice")])
+
     # The backup reads the claim the SigNoz StatefulSet really mounts.
     docs = render_dev_with({"signoz": {"signoz": {"persistence": {"existingClaim": "own-signoz-db"}}}})
     assert backup_source(docs) == "own-signoz-db"

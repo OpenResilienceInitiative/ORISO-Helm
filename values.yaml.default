@@ -49,6 +49,10 @@ global:
     # Trace sampling for the Spring Boot services (0.0-1.0). Empty keeps each
     # service's own default (Spring Boot: 0.1, i.e. 9 of 10 traces dropped).
     tracingSamplingProbability: ""
+    # Copy the W3C baggage field `test.run.id` (sent by ORISO-E2E) onto every
+    # span, so one test run can be selected at once. Test environments only:
+    # any caller can set baggage.
+    testRunBaggage: false
     # Browser Web Vitals from Frontend and Admin, posted to
     # https://<domainName>/signoz-rum/v1/metrics (unauthenticated, size- and
     # rate-limited, OTLP metrics only). Requires signoz.enabled=true.

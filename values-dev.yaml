@@ -15,6 +15,7 @@ global:
   observability:
     deploymentEnvironment: "dev"
     tracingSamplingProbability: "1.0"
+    testRunBaggage: true
     appMetrics: true
     dbMetrics: true
     webVitals:

@@ -470,6 +470,12 @@ sampling env var binds to management.tracing.sampling.probability.
 - name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
   value: {{ $sampling | toString | quote }}
 {{- end }}
+{{- if get $o "testRunBaggage" }}
+- name: MANAGEMENT_TRACING_BAGGAGE_REMOTEFIELDS
+  value: "test.run.id"
+- name: MANAGEMENT_TRACING_BAGGAGE_TAGFIELDS
+  value: "test.run.id"
+{{- end }}
 {{- end -}}
 {{- end -}}
 
