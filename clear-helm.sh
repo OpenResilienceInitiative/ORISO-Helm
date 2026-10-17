@@ -52,12 +52,24 @@ is_observability_claim() {
   return 1
 }
 
+# Labels the vendored charts put on every claim they create, whatever the
+# volume template is called (custom ClickHouse templates, ZooKeeper data log).
+is_observability_label() {
+  local name="$1" chi="$2"
+  [ -n "$chi" ] && return 0
+  case "$name" in
+    signoz|clickhouse|zookeeper) return 0 ;;
+  esac
+  return 1
+}
+
 is_kept() {
-  local claim="$1" keep_annotation="$2"
+  local claim="$1" keep_annotation="$2" name_label="$3" chi_label="$4"
   if [ "$INCLUDE_OBSERVABILITY" = true ]; then
     return 1
   fi
   [ "$keep_annotation" = "keep" ] && return 0
+  is_observability_label "$name_label" "$chi_label" && return 0
   is_observability_claim "$claim"
 }
 
@@ -96,10 +108,10 @@ echo "Deleting PVCs in namespace ${NAMESPACE}..."
 kept_claims=()
 deleted_claims=()
 claims=$(kubectl get pvc -n "$NAMESPACE" \
-  -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.helm\.sh/resource-policy}{"\n"}{end}')
-while IFS='|' read -r claim keep_annotation; do
+  -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.helm\.sh/resource-policy}{"|"}{.metadata.labels.app\.kubernetes\.io/name}{"|"}{.metadata.labels.clickhouse\.altinity\.com/chi}{"\n"}{end}')
+while IFS='|' read -r claim keep_annotation name_label chi_label; do
   [ -n "$claim" ] || continue
-  if is_kept "$claim" "$keep_annotation"; then
+  if is_kept "$claim" "$keep_annotation" "$name_label" "$chi_label"; then
     echo "Keeping PVC ${claim}"
     kept_claims+=("$claim")
   else

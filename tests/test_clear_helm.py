@@ -26,6 +26,9 @@ PVCS = "\n".join(
         "operator-kept-claim|keep",
         # Named in the release values (existingClaim), so any name is kept.
         "own-signoz-db|",
+        # Custom volume templates: recognised by the labels the charts set.
+        "data-log-caritas-zookeeper-0||zookeeper|",
+        "logs-chi-caritas-clickhouse-cluster-0-0-0|||caritas-clickhouse",
     ]
 )
 
@@ -42,6 +45,8 @@ PVS = "\n".join(
         "pv-zookeeper-1|Released|caritas|data-caritas-zookeeper-1",
         "pv-operator-kept|Released|caritas|operator-kept-claim",
         "pv-own-signoz|Released|caritas|own-signoz-db",
+        "pv-zookeeper-log|Released|caritas|data-log-caritas-zookeeper-0",
+        "pv-clickhouse-logs|Released|caritas|logs-chi-caritas-clickhouse-cluster-0-0-0",
         "pv-other-namespace|Released|monitoring|data-prometheus-0",
         "pv-no-claim|Available||",
         "pv-bound|Bound|caritas|data-caritas-redis-0",
@@ -119,9 +124,12 @@ class ClearHelmTest(unittest.TestCase):
             "data-caritas-zookeeper-1",
             "operator-kept-claim",
             "own-signoz-db",
+            "data-log-caritas-zookeeper-0",
+            "logs-chi-caritas-clickhouse-cluster-0-0-0",
         ):
             self.assertIn(f"Keeping PVC {claim}", result.stdout)
-        for volume in ("pv-signoz", "pv-zookeeper-1", "pv-operator-kept", "pv-own-signoz"):
+        for volume in ("pv-signoz", "pv-zookeeper-1", "pv-operator-kept", "pv-own-signoz",
+                       "pv-zookeeper-log", "pv-clickhouse-logs"):
             self.assertIn(f"Keeping PV {volume}", result.stdout)
 
     def test_dry_run_deletes_nothing_but_lists_freed_volumes(self) -> None:
@@ -142,7 +150,7 @@ class ClearHelmTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         claims = [line.split("|")[0] for line in PVCS.splitlines()]
         volumes = ["pv-mariadb", "pv-mongodb", "pv-signoz", "pv-clickhouse", "pv-zookeeper-1", "pv-operator-kept",
-                   "pv-own-signoz"]
+                   "pv-own-signoz", "pv-zookeeper-log", "pv-clickhouse-logs"]
         self.assertEqual(
             deletes,
             ["helm uninstall caritas -n caritas"]
