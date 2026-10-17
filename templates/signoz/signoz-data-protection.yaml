@@ -261,6 +261,14 @@ spec:
               memory: 64Mi
 {{- end }}
 {{- if and (get $backup "enabled" | default false) $sqliteClaim }}
+{{- /* A second pod can never mount a ReadWriteOncePod claim beside SigNoz, so the backup would stay Pending. */ -}}
+{{- $sqliteModes := get $persistence "accessModes" | default list -}}
+{{- if get $persistence "existingClaim" -}}
+{{- $sqliteModes = dig "spec" "accessModes" $sqliteModes (lookup "v1" "PersistentVolumeClaim" .Release.Namespace $sqliteClaim) -}}
+{{- end -}}
+{{- if has "ReadWriteOncePod" $sqliteModes -}}
+{{- fail "signoz.orisoDataProtection.backup needs the SQLite claim to allow a second pod: ReadWriteOncePod blocks it. Use ReadWriteOnce or set backup.enabled=false" -}}
+{{- end -}}
 {{- /* The backup claim uses the class of the SigNoz claim (global first, "-" = none, as in the
 SigNoz chart), else the class the SQLite claim really has (an existingClaim may carry one without
 any configured); a bound backup claim keeps its class, which Kubernetes does not allow to change. */ -}}

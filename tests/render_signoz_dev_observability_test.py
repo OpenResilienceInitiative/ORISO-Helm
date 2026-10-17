@@ -472,6 +472,27 @@ def assert_rum_port_and_source_class() -> None:
     assert backup_claim_class(docs) == "fast", "a configured class wins"
 
 
+def assert_read_write_once_pod_rejected() -> None:
+    # The backup pod mounts the SQLite claim beside SigNoz, which ReadWriteOncePod forbids.
+    rwop = {"accessModes": ["ReadWriteOncePod"]}
+    error = render_dev_fails({"signoz": {"signoz": {"persistence": rwop}}})
+    assert "ReadWriteOncePod blocks it" in error, error
+    render_dev_with({"signoz": {"signoz": {"persistence": rwop}, "orisoDataProtection": {"backup": {"enabled": False}}}})
+    # An existingClaim is checked by what the cluster says about it.
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+        yaml.safe_dump({"signoz": {"signoz": {"persistence": {"existingClaim": "own-db"}}}}, handle)
+    marker = '{{- $sqliteModes = dig "spec" "accessModes" $sqliteModes (lookup "v1" "PersistentVolumeClaim" .Release.Namespace $sqliteClaim) -}}'
+    try:
+        render_with_cluster_state("values-dev.yaml", handle.name, release="caritas", replace={
+            marker: '{{- $sqliteModes = list "ReadWriteOncePod" -}}'})
+    except AssertionError as error:
+        assert "ReadWriteOncePod blocks it" in str(error), error
+    else:
+        raise AssertionError("a ReadWriteOncePod existingClaim rendered a backup")
+    finally:
+        os.unlink(handle.name)
+
+
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
@@ -485,6 +506,7 @@ def main() -> None:
     assert_web_vitals_need_signoz()
     assert_sqlite_replicas()
     assert_rum_port_and_source_class()
+    assert_read_write_once_pod_rejected()
     print("PASS: SigNoz on Dev keeps its data, bounds the collector, and labels every signal")
 
 
