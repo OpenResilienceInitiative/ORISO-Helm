@@ -30,6 +30,10 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- if not (dig "otelCollector" "ports" "otlp-rum" "enabled" false $signoz) -}}
 {{- fail "global.observability.webVitals.enabled=true requires signoz.otelCollector.ports.otlp-rum.enabled=true: the RUM ingress sends browser metrics to that collector port" -}}
 {{- end -}}
+{{- $rumPort := dig "otelCollector" "ports" "otlp-rum" "servicePort" 4319 $signoz -}}
+{{- if not (and (or (kindIs "float64" $rumPort) (kindIs "int" $rumPort) (kindIs "int64" $rumPort)) (eq (float64 $rumPort) (float64 (int $rumPort))) (ge (int $rumPort) 1) (le (int $rumPort) 65535)) -}}
+{{- fail (printf "signoz.otelCollector.ports.otlp-rum.servicePort must be a port number from 1 to 65535 (got %v): the collector Service and the RUM ingress backend both need it" $rumPort) -}}
+{{- end -}}
 {{- $collectorEnvs := get (get $signoz "otelCollector" | default dict) "additionalEnvs" | default dict -}}
 {{- $environment := get (get .Values.global "observability" | default dict) "deploymentEnvironment" | default "" -}}
 {{- if ne (get $collectorEnvs "ORISO_DEPLOYMENT_ENVIRONMENT" | default "") $environment -}}

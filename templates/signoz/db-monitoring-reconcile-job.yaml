@@ -168,7 +168,8 @@ spec:
               [ -n "$ready" ] || { echo "RabbitMQ not ready after 5 minutes" >&2; exit 1; }
               # Vhost permissions are separate records a PUT keeps. Deleting the
               # user drops them all; PUT then recreates it with the monitoring
-              # tag only and no vhost permission.
+              # tag, and every vhost gets empty patterns: queue metrics need a
+              # permission record, empty patterns grant no AMQP right.
               code=$(curl -sS -o /dev/null -w '%{http_code}' -u "$RABBITMQ_ADMIN_USER:$RABBITMQ_ADMIN_PASS" \
                 -X DELETE "$API/users/oriso-monitor")
               case "$code" in
@@ -179,6 +180,16 @@ spec:
                 -H "content-type: application/json" \
                 -d "{\"password\":\"${MONITOR_PASSWORD}\",\"tags\":\"monitoring\"}" \
                 "$API/users/oriso-monitor"
+              vhosts=$(curl -fsS -u "$RABBITMQ_ADMIN_USER:$RABBITMQ_ADMIN_PASS" "$API/vhosts?columns=name" \
+                | tr ',' '\n' | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')
+              [ -n "$vhosts" ] || { echo "RabbitMQ: no vhost listed" >&2; exit 1; }
+              printf '%s\n' "$vhosts" | while IFS= read -r vhost; do
+                encoded=$(printf '%s' "$vhost" | sed 's/%/%25/g; s#/#%2F#g')
+                curl -fsS -o /dev/null -u "$RABBITMQ_ADMIN_USER:$RABBITMQ_ADMIN_PASS" -X PUT \
+                  -H "content-type: application/json" \
+                  -d '{"configure":"","write":"","read":""}' \
+                  "$API/permissions/$encoded/oriso-monitor"
+              done
               echo "RABBITMQ_MONITOR_RECONCILED"
       containers:
         - name: done

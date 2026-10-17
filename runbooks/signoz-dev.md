@@ -62,13 +62,16 @@ print(len(drift), *drift, sep="\n")' | tee /root/observability-drift.out
 ```
 
 Stop unless the first line is `0`; otherwise add the listed paths' files with
-`-f` first. The upgrade commands check it themselves:
+`-f` first. The upgrade commands check it themselves, and the live upgrade
+also needs a successful server-side dry run, whose output you read first:
 
 ```bash
+rm -f /root/observability-dry.ok
 test "$(head -n 1 /root/observability-drift.out)" = 0 && \
 helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
-  --dry-run=server > /root/observability-dry.out   # read the diff first
-test "$(head -n 1 /root/observability-drift.out)" = 0 && \
+  --dry-run=server > /root/observability-dry.out && touch /root/observability-dry.ok
+# read /root/observability-dry.out, then:
+test "$(head -n 1 /root/observability-drift.out)" = 0 && test -f /root/observability-dry.ok && \
 helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
   --wait --wait-for-jobs --timeout 15m
 ```

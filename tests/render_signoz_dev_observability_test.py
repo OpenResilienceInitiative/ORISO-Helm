@@ -265,6 +265,9 @@ def assert_second_review_findings() -> None:
     rabbit = next((c.get("args") or c["command"])[-1] for c in job["spec"]["template"]["spec"]["initContainers"]
                   if "oriso-monitor" in str(c))
     assert rabbit.index('-X DELETE "$API/users/oriso-monitor"') < rabbit.index("-X PUT"), "delete before recreate"
+    # Queue metrics need a permission record per vhost; it must grant no AMQP right.
+    assert rabbit.index('"$API/users/oriso-monitor"\n') < rabbit.index('"$API/permissions/$encoded/oriso-monitor"'), rabbit
+    assert """-d '{"configure":"","write":"","read":""}'""" in rabbit, rabbit
 
     # The public browser receiver keeps only values Frontend and Admin send.
     config = yaml.safe_load(next(iter(docs[("ConfigMap", "caritas-signoz-otel-collector")]["data"].values())))
@@ -463,6 +466,9 @@ def assert_rum_port_and_source_class() -> None:
     backend = ingress["spec"]["rules"][0]["http"]["paths"][0]["backend"]["service"]
     ports = docs[("Service", backend["name"])]["spec"]["ports"]
     assert backend["port"]["number"] in [port["port"] for port in ports if port["name"] == "otlp-rum"], (backend, ports)
+    for bad in ("otlp-rum", 4319.5, 0, 70000):
+        error = render_dev_fails({"signoz": {"otelCollector": {"ports": {"otlp-rum": {"servicePort": bad}}}}})
+        assert "servicePort must be a port number" in error, (bad, error)
     # With no class configured, the backup claim takes the class the SQLite claim really has.
     marker = '{{- $sourceClaim := lookup "v1" "PersistentVolumeClaim" .Release.Namespace $sqliteClaim -}}'
     state = '{{- $sourceClaim := dict "spec" (dict "storageClassName" "pre-provisioned") -}}'
