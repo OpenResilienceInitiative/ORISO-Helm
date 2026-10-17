@@ -31,12 +31,18 @@ PVCS = "\n".join(
         # Custom volume templates: recognised by the labels the charts set.
         "data-log-caritas-zookeeper-0||zookeeper|",
         "logs-chi-caritas-clickhouse-cluster-0-0-0|||caritas-clickhouse",
+        # SigNoz on PostgreSQL: its StatefulSet claim and an own claim from the values.
+        "pgdata-caritas-postgresql-0||postgres|",
+        "own-signoz-postgres|",
+        # Same name label elsewhere is not enough.
+        "matrix-postgres-pvc||postgres|",
     ]
 )
 
 RELEASE_VALUES = json.dumps({"signoz": {
     "signoz": {"persistence": {"existingClaim": "own-signoz-db"}},
     "clickhouse": {"zookeeper": {"persistence": {"dataLogDir": {"existingClaim": "own-zookeeper-log"}}}},
+    "postgresql": {"persistence": {"existingClaim": "own-signoz-postgres"}},
 }})
 
 
@@ -120,6 +126,7 @@ class ClearHelmTest(unittest.TestCase):
                 "helm uninstall caritas -n caritas",
                 "kubectl delete pvc data-caritas-mariadb-0 -n caritas",
                 "kubectl delete pvc data-caritas-mongodb-0 -n caritas",
+                "kubectl delete pvc matrix-postgres-pvc -n caritas",
                 "kubectl delete pv pv-mariadb --ignore-not-found",
                 "kubectl delete pv pv-mongodb --ignore-not-found",
             ],
@@ -133,6 +140,8 @@ class ClearHelmTest(unittest.TestCase):
             "own-zookeeper-log",
             "data-log-caritas-zookeeper-0",
             "logs-chi-caritas-clickhouse-cluster-0-0-0",
+            "pgdata-caritas-postgresql-0",
+            "own-signoz-postgres",
         ):
             self.assertIn(f"Keeping PVC {claim}", result.stdout)
         for volume in ("pv-signoz", "pv-zookeeper-1", "pv-operator-kept", "pv-own-signoz",

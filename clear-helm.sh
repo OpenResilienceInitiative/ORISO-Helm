@@ -55,10 +55,12 @@ is_observability_claim() {
 # Labels the vendored charts put on every claim they create, whatever the
 # volume template is called (custom ClickHouse templates, ZooKeeper data log).
 is_observability_label() {
-  local name="$1" chi="$2"
+  local claim="$1" name="$2" chi="$3"
   [ -n "$chi" ] && return 0
   case "$name" in
     signoz|clickhouse|zookeeper) return 0 ;;
+    # SigNoz's own PostgreSQL store (signoz.postgresql.enabled).
+    postgres) [[ "$claim" == pgdata-* ]] && return 0 ;;
   esac
   return 1
 }
@@ -69,7 +71,7 @@ is_kept() {
     return 1
   fi
   [ "$keep_annotation" = "keep" ] && return 0
-  is_observability_label "$name_label" "$chi_label" && return 0
+  is_observability_label "$claim" "$name_label" "$chi_label" && return 0
   is_observability_claim "$claim"
 }
 
@@ -92,7 +94,8 @@ ch = s.get("clickhouse") or {}
 zk = (ch.get("zookeeper") or {}).get("persistence") or {}
 names = [(s.get("signoz") or {}).get("persistence", {}).get("existingClaim"),
          (ch.get("persistence") or {}).get("existingClaim"),
-         zk.get("existingClaim"), (zk.get("dataLogDir") or {}).get("existingClaim")]
+         zk.get("existingClaim"), (zk.get("dataLogDir") or {}).get("existingClaim"),
+         ((s.get("postgresql") or {}).get("persistence") or {}).get("existingClaim")]
 names += [c.split("/")[-1] for c in (s.get("orisoDataProtection") or {}).get("claims") or []]
 print("\n".join(n for n in names if n))' "$values")
   while IFS= read -r claim; do
