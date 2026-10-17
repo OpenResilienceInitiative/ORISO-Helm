@@ -31,27 +31,48 @@ reclaims with Delete, so users, API keys and dashboards were lost.
 {{- $sqliteClaim = printf "signoz-db-%s-0" $signozSts -}}
 {{- end -}}
 {{- end -}}
-{{- /* ClickHouse and ZooKeeper claims, derived like their charts: existingClaim wins, none without persistence. */ -}}
-{{- $chPersistence := dig "clickhouse" "persistence" dict $signoz -}}
-{{- $zkPersistence := dig "clickhouse" "zookeeper" "persistence" dict $signoz -}}
+{{- /* All claims as <namespace>/<claim>, derived like the vendored charts: every
+ClickHouse shard and replica and every ZooKeeper member, in the namespace
+each chart uses; existingClaim wins, none without persistence. */ -}}
+{{- $clickhouse := get $signoz "clickhouse" | default dict -}}
+{{- $zookeeper := get $clickhouse "zookeeper" | default dict -}}
+{{- $chPersistence := get $clickhouse "persistence" | default dict -}}
+{{- $zkPersistence := get $zookeeper "persistence" | default dict -}}
+{{- $chNamespace := get $clickhouse "namespace" | default .Release.Namespace -}}
+{{- $zkNamespace := get $zookeeper "namespaceOverride" | default .Release.Namespace -}}
+{{- $layout := get $clickhouse "layout" | default dict -}}
 {{- $defaultClaims := list -}}
 {{- if $sqliteClaim -}}
-{{- $defaultClaims = append $defaultClaims $sqliteClaim -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" .Release.Namespace $sqliteClaim) -}}
 {{- end -}}
 {{- if get $chPersistence "existingClaim" -}}
-{{- $defaultClaims = append $defaultClaims (get $chPersistence "existingClaim") -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" $chNamespace (get $chPersistence "existingClaim")) -}}
 {{- else if (hasKey $chPersistence "enabled" | ternary (get $chPersistence "enabled") true) -}}
-{{- $defaultClaims = append $defaultClaims (printf "data-volumeclaim-template-chi-%s-cluster-0-0-0" $chName) -}}
+{{- range $shard := until (int (get $layout "shardsCount" | default 1)) -}}
+{{- range $replica := until (int (get $layout "replicasCount" | default 1)) -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/data-volumeclaim-template-chi-%s-%s-%d-%d-0" $chNamespace $chName (get $clickhouse "cluster" | default "cluster") $shard $replica) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- if (hasKey $zkPersistence "enabled" | ternary (get $zkPersistence "enabled") true) -}}
-{{- $defaultClaims = append $defaultClaims (get $zkPersistence "existingClaim" | default (printf "data-%s-zookeeper-0" .Release.Name)) -}}
+{{- if get $zkPersistence "existingClaim" -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" $zkNamespace (get $zkPersistence "existingClaim")) -}}
+{{- else -}}
+{{- range $member := until (int (get $zookeeper "replicaCount" | default 1)) -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/data-%s-zookeeper-%d" $zkNamespace $.Release.Name $member) -}}
 {{- end -}}
-{{- $claims := get $dp "claims" | default $defaultClaims -}}
+{{- end -}}
+{{- end -}}
+{{- /* An explicit claims list names claims in the release namespace unless given as <namespace>/<claim>. */ -}}
+{{- $claims := list -}}
+{{- range $claim := get $dp "claims" | default $defaultClaims -}}
+{{- $claims = append $claims (contains "/" $claim | ternary $claim (printf "%s/%s" $.Release.Namespace $claim)) -}}
+{{- end -}}
 {{- $image := required "signoz.orisoDataProtection.image is required" (get $dp "image") -}}
 {{- $backup := get $dp "backup" | default dict -}}
 {{- $pending := list -}}
-{{- range $claim := $claims -}}
-{{- $pvc := lookup "v1" "PersistentVolumeClaim" $.Release.Namespace $claim -}}
+{{- range $entry := $claims -}}
+{{- $pvc := lookup "v1" "PersistentVolumeClaim" (index (splitList "/" $entry) 0) (index (splitList "/" $entry) 1) -}}
 {{- $pvName := dig "spec" "volumeName" "" $pvc -}}
 {{- if $pvName -}}
 {{- $pv := lookup "v1" "PersistentVolume" "" $pvName -}}

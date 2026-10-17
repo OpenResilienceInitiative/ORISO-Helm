@@ -202,19 +202,33 @@ def retain_claims(docs: dict[tuple[str, str], dict[str, Any]]) -> list[str]:
 
 
 def assert_second_review_findings() -> None:
-    # The retain hook protects the claims the vendored charts really mount.
+    # The retain hook protects the claims the vendored charts really mount:
+    # every shard, replica and ZooKeeper member, in each chart's namespace.
     assert retain_claims(render_dev_with({})) == [
-        "signoz-db-caritas-signoz-0",
-        "data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0",
-        "data-caritas-zookeeper-0",
+        "caritas/signoz-db-caritas-signoz-0",
+        "caritas/data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0",
+        "caritas/data-caritas-zookeeper-0",
     ]
     docs = render_dev_with({"signoz": {"clickhouse": {
         "persistence": {"existingClaim": "own-clickhouse"},
         "zookeeper": {"persistence": {"existingClaim": "own-zookeeper"}},
     }}})
-    assert retain_claims(docs)[1:] == ["own-clickhouse", "own-zookeeper"]
+    assert retain_claims(docs)[1:] == ["caritas/own-clickhouse", "caritas/own-zookeeper"]
     docs = render_dev_with({"signoz": {"clickhouse": {"persistence": {"enabled": False}}}})
     assert not any("clickhouse" in claim for claim in retain_claims(docs))
+    docs = render_dev_with({"signoz": {"clickhouse": {
+        "namespace": "telemetry",
+        "layout": {"shardsCount": 2, "replicasCount": 2},
+        "zookeeper": {"replicaCount": 3, "namespaceOverride": "coordination"},
+    }}})
+    chi = "data-volumeclaim-template-chi-caritas-clickhouse-cluster"
+    assert retain_claims(docs)[1:] == [
+        f"telemetry/{chi}-0-0-0", f"telemetry/{chi}-0-1-0", f"telemetry/{chi}-1-0-0", f"telemetry/{chi}-1-1-0",
+        "coordination/data-caritas-zookeeper-0", "coordination/data-caritas-zookeeper-1",
+        "coordination/data-caritas-zookeeper-2",
+    ]
+    docs = render_dev_with({"signoz": {"orisoDataProtection": {"claims": ["kept-here", "other/kept-there"]}}})
+    assert retain_claims(docs) == ["caritas/kept-here", "other/kept-there"]
 
     # The backup lands next to the SigNoz pod even with a renamed component.
     docs = render_dev_with({"signoz": {"signoz": {"name": "observer"}}})

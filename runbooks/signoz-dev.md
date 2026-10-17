@@ -39,17 +39,23 @@ The command does not use `--reuse-values` on purpose: the chart directory's
 own `values.yaml` carries the live settings, and the release's user-supplied
 values are exactly `secrets.yaml` (checked on revision 41, 2026-10-17). If a
 later revision was upgraded with extra `-f` files, pass them too. Without them,
-their settings fall back to `values.yaml`. Before the upgrade, this lists the
-user-supplied value paths that `secrets.yaml` does not contain. It prints paths
-only, never values, and the expected output is `0`:
+their settings fall back to `values.yaml`.
+
+Before the upgrade, this lists every user-supplied value path that
+`secrets.yaml` either lacks or sets to a different value. It compares values
+without printing them. The expected output is `0`:
 
 ```bash
 helm get values caritas -n caritas -o json | python3 -c '
 import json, sys, yaml
-def paths(d, p=""):
-    return set().union(*[paths(v, f"{p}.{k}") if isinstance(v, dict) and v else {f"{p}.{k}"} for k, v in d.items()]) if d else set()
-extra = paths(json.load(sys.stdin)) - paths(yaml.safe_load(open("secrets.yaml")) or {})
-print(len(extra), *sorted(extra), sep="\n")'
+def leaves(d, p=""):
+    out = {}
+    for k, v in (d or {}).items():
+        out.update(leaves(v, f"{p}.{k}") if isinstance(v, dict) and v else {f"{p}.{k}": v})
+    return out
+live, file = leaves(json.load(sys.stdin)), leaves(yaml.safe_load(open("secrets.yaml")))
+drift = sorted(p for p in live if p not in file or live[p] != file[p])
+print(len(drift), *drift, sep="\n")'
 ```
 
 The first rollout restarts Keycloak, Synapse (`Recreate`, a short Matrix gap),
