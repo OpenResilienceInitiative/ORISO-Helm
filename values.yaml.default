@@ -641,11 +641,22 @@ signoz:
                 - keep_keys(attributes, ["service.name"])
                 - set(attributes["deployment.environment"], "${env:ORISO_DEPLOYMENT_ENVIRONMENT}")
                 - set(attributes["oriso.signal.source"], "browser")
-            # Only the attributes Frontend and Admin record, values capped.
+            # Only the attributes Frontend and Admin record, and only values
+            # they can send: the receiver is public, so any other value
+            # becomes "other" and cannot grow the number of series. The page
+            # is cut to its section (/sessions, /admin/users). A new route or
+            # metric value shows as "other" until it is listed here.
             - context: datapoint
               statements:
                 - keep_keys(attributes, ["url.path_template", "outcome", "transport", "stage", "cause", "category"])
                 - truncate_all(attributes, 120)
+                - replace_pattern(attributes["url.path_template"], "^(/admin/[^/]*|/[^/]*).*$", "$$1")
+                - set(attributes["url.path_template"], "other") where attributes["url.path_template"] != nil and not IsMatch(attributes["url.path_template"], "^/(|sessions|registration|profile|groups|notifications|login|booking|invite|drafts|dpa-sign|password-reset|account-invite|tools|themen|overview|calendar|admin|admin/(users|agency|agencies|login|tenants|theme-settings|links|logs|access-denied|settings|tenant-onboarding|password-reset|topics|statistic|statistics|profil|profile|counsellor-onboarding|global-settings|dashboard|consultants))$")
+                - set(attributes["outcome"], "other") where attributes["outcome"] != nil and not IsMatch(attributes["outcome"], "^(credentials|otp_required|account_disabled|setup_incomplete|rate_limited|unavailable|retry|reload|gave_up|transient_resolved|permanent)$")
+                - set(attributes["transport"], "other") where attributes["transport"] != nil and not IsMatch(attributes["transport"], "^(bad_request|unauthorized|network|unexpected)$")
+                - set(attributes["stage"], "other") where attributes["stage"] != nil and not IsMatch(attributes["stage"], "^(password|otp)$")
+                - set(attributes["cause"], "other") where attributes["cause"] != nil and not IsMatch(attributes["cause"], "^(MEGOLM_UNKNOWN_INBOUND_SESSION_ID|MEGOLM_KEY_WITHHELD|MEGOLM_KEY_WITHHELD_FOR_UNVERIFIED_DEVICE|OLM_UNKNOWN_MESSAGE_INDEX|HISTORICAL_MESSAGE_NO_KEY_BACKUP|HISTORICAL_MESSAGE_BACKUP_UNCONFIGURED|HISTORICAL_MESSAGE_WORKING_BACKUP|HISTORICAL_MESSAGE_USER_NOT_JOINED|SENDER_IDENTITY_PREVIOUSLY_VERIFIED|UNSIGNED_SENDER_DEVICE|UNKNOWN_SENDER_DEVICE|UNKNOWN_ERROR)$")
+                - set(attributes["category"], "other") where attributes["category"] != nil and not IsMatch(attributes["category"], "^(withheld|bug)$")
       service:
         pipelines:
           metrics/rum:

@@ -32,7 +32,24 @@ python3 scripts/observability_overlay.py values-dev.yaml > /root/observability-d
 helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
   --dry-run=server > /root/observability-dry.out   # read the diff first
 helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
-  --wait-for-jobs --timeout 15m
+  --wait --wait-for-jobs --timeout 15m
+```
+
+The command does not use `--reuse-values` on purpose: the chart directory's
+own `values.yaml` carries the live settings, and the release's user-supplied
+values are exactly `secrets.yaml` (checked on revision 41, 2026-10-17). If a
+later revision was upgraded with extra `-f` files, pass them too. Without them,
+their settings fall back to `values.yaml`. Before the upgrade, this lists the
+user-supplied value paths that `secrets.yaml` does not contain. It prints paths
+only, never values, and the expected output is `0`:
+
+```bash
+helm get values caritas -n caritas -o json | python3 -c '
+import json, sys, yaml
+def paths(d, p=""):
+    return set().union(*[paths(v, f"{p}.{k}") if isinstance(v, dict) and v else {f"{p}.{k}"} for k, v in d.items()]) if d else set()
+extra = paths(json.load(sys.stdin)) - paths(yaml.safe_load(open("secrets.yaml")) or {})
+print(len(extra), *sorted(extra), sep="\n")'
 ```
 
 The first rollout restarts Keycloak, Synapse (`Recreate`, a short Matrix gap),

@@ -487,7 +487,7 @@ Browser Web Vitals ingest URL, or "" when browser telemetry is off.
 {{- $wv := get $o "webVitals" | default dict -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
 {{- if and (get $wv "enabled" | default false) (get $signoz "enabled" | default false) -}}
-{{- printf "https://%s/signoz-rum/v1/metrics" (include "oriso.domainName" .) -}}
+{{- printf "%s/signoz-rum/v1/metrics" (include "oriso.publicOrigin" .) -}}
 {{- end -}}
 {{- end -}}
 

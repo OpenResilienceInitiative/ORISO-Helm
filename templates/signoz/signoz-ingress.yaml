@@ -64,14 +64,16 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/rewrite-target: /v1/metrics
     nginx.ingress.kubernetes.io/proxy-body-size: "32k"
     nginx.ingress.kubernetes.io/limit-rps: "10"
     # Compressed bodies would slip past the size limit; the browser exporter
-    # does not compress.
+    # does not compress. The rewrite stays in this location: the
+    # rewrite-target annotation would switch every path of the host to
+    # case-insensitive regex matching.
     nginx.ingress.kubernetes.io/configuration-snippet: |
       if ($request_method != POST) { return 405; }
       if ($http_content_encoding != "") { return 415; }
+      rewrite ^/signoz-rum/v1/metrics$ /v1/metrics break;
 spec:
   ingressClassName: {{ get $orisoIngress "ingressClassName" | default "nginx" | quote }}
   tls:

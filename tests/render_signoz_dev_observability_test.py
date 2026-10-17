@@ -109,7 +109,9 @@ def assert_dev(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     assert (path["path"], path["pathType"]) == ("/signoz-rum/v1/metrics", "Exact")
     assert path["backend"]["service"] == {"name": "caritas-signoz-otel-collector", "port": {"number": 4319}}
     annotations = ingress["metadata"]["annotations"]
-    assert annotations["nginx.ingress.kubernetes.io/rewrite-target"] == "/v1/metrics"
+    # rewrite-target would turn every path of the host into a regex location.
+    assert "nginx.ingress.kubernetes.io/rewrite-target" not in annotations
+    assert "rewrite ^/signoz-rum/v1/metrics$ /v1/metrics break;" in annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
     assert annotations["nginx.ingress.kubernetes.io/proxy-body-size"] == "32k"
     assert "nginx.ingress.kubernetes.io/limit-rps" in annotations
     assert "$http_content_encoding" in annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
@@ -182,10 +184,72 @@ def assert_review_findings() -> None:
     assert config.index("k8s.cronjob.name\"])") < config.index("k8s.job.name\"])"), "CronJob name before the generated Job name"
 
 
+def render_dev_fails(overlay: dict[str, Any]) -> str:
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+        yaml.safe_dump(overlay, handle)
+    try:
+        render("values-dev.yaml", handle.name)
+    except AssertionError as error:
+        return str(error)
+    finally:
+        os.unlink(handle.name)
+    raise AssertionError(f"render succeeded with {overlay}")
+
+
+def retain_claims(docs: dict[tuple[str, str], dict[str, Any]]) -> list[str]:
+    config = docs[("ConfigMap", "caritas-signoz-data-protection")]
+    return config["metadata"]["annotations"]["oriso.org/retain-claims"].split(",")
+
+
+def assert_second_review_findings() -> None:
+    # The retain hook protects the claims the vendored charts really mount.
+    assert retain_claims(render_dev_with({})) == [
+        "signoz-db-caritas-signoz-0",
+        "data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0",
+        "data-caritas-zookeeper-0",
+    ]
+    docs = render_dev_with({"signoz": {"clickhouse": {
+        "persistence": {"existingClaim": "own-clickhouse"},
+        "zookeeper": {"persistence": {"existingClaim": "own-zookeeper"}},
+    }}})
+    assert retain_claims(docs)[1:] == ["own-clickhouse", "own-zookeeper"]
+    docs = render_dev_with({"signoz": {"clickhouse": {"persistence": {"enabled": False}}}})
+    assert not any("clickhouse" in claim for claim in retain_claims(docs))
+
+    # The backup lands next to the SigNoz pod even with a renamed component.
+    docs = render_dev_with({"signoz": {"signoz": {"name": "observer"}}})
+    pod = docs[("CronJob", "caritas-signoz-data-protection-backup")]["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+    selector = pod["affinity"]["podAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][0]["labelSelector"]
+    assert selector["matchLabels"]["app.kubernetes.io/component"] == "observer"
+
+    # Without TLS the browsers get an http ingest URL.
+    docs = render_dev_with({"global": {"enableTls": False}})
+    assert docs[("ConfigMap", "frontend-configmap")]["data"]["REACT_APP_OTEL_METRICS_URL"] == (
+        "http://dev.oriso.org/signoz-rum/v1/metrics")
+
+    # The DB monitoring hook fails at render time without images, and names
+    # the store that never became ready.
+    error = render_dev_fails({"online-counseling-mariadb": {"imageName": ""}})
+    assert "online-counseling-mariadb.imageName is required for dbMetrics" in error, error
+    job = next(doc for (kind, name), doc in render_dev_with({}).items()
+               if kind == "Job" and "db-monitoring-reconcile" in name)
+    script = str(job["spec"]["template"]["spec"])
+    for store in ("MariaDB", "MongoDB", "RabbitMQ"):
+        assert f"{store} not ready after 5 minutes" in script, store
+
+    # The public browser receiver keeps only values Frontend and Admin send.
+    config = yaml.safe_load(next(iter(docs[("ConfigMap", "caritas-signoz-otel-collector")]["data"].values())))
+    statements = config["processors"]["transform/rum"]["metric_statements"][1]["statements"]
+    assert any(line.startswith('replace_pattern(attributes["url.path_template"]') for line in statements)
+    for key in ("url.path_template", "outcome", "transport", "stage", "cause", "category"):
+        assert any(line.startswith(f'set(attributes["{key}"], "other") where') for line in statements), key
+
+
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
     assert_review_findings()
+    assert_second_review_findings()
     print("PASS: SigNoz on Dev keeps its data, bounds the collector, and labels every signal")
 
 
