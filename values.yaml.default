@@ -36,6 +36,29 @@ global:
     autoEnableWithSignoz: true
     deploymentEnvironment: "pre-dev"   # environment tag on exported signals
     otlpCollectorHost: "" # optional external collector host:port when signoz.enabled=false
+    # Prometheus metrics of ingress-nginx, Keycloak and Synapse, scraped by the
+    # SigNoz cluster collector. Requires signozCollector.enabled=true. Opens
+    # cluster-internal metrics ports (nginx 10254, Keycloak 9000, Synapse 9000);
+    # none of them is routed by an ingress.
+    appMetrics: false
+    # Status metrics of MariaDB, MongoDB and RabbitMQ (via read-only monitoring
+    # users the chart creates and keeps, passwords generated into the Secret
+    # oriso-db-monitoring) and of Redis (its redis-exporter sidecar). Requires
+    # signozCollector.enabled=true. No row data leaves the data stores.
+    dbMetrics: false
+    # Trace sampling for the Spring Boot services (0.0-1.0). Empty keeps each
+    # service's own default (Spring Boot: 0.1, i.e. 9 of 10 traces dropped).
+    tracingSamplingProbability: ""
+    # Copy the W3C baggage field `test.run.id` (sent by ORISO-E2E) onto every
+    # span, so one test run can be selected at once. Test environments only:
+    # any caller can set baggage.
+    testRunBaggage: false
+    # Browser Web Vitals from Frontend and Admin, posted to
+    # https://<domainName>/signoz-rum/v1/metrics (unauthenticated, size- and
+    # rate-limited, OTLP metrics only). Requires signoz.enabled=true.
+    webVitals:
+      enabled: false
+      exportIntervalMillis: 60000
 
   acmedomainName: "acme.your-domain.example.com"
  #adminDomainName: "admin.your-domain.example.com"
@@ -549,6 +572,112 @@ signoz:
   clickhouse:
     persistence:
       size: 20Gi
+  # Data protection (templates/signoz/signoz-data-protection.yaml): volumes
+  # switched to reclaim Retain after every upgrade, daily signoz.db backup.
+  orisoDataProtection:
+    enabled: true
+    image: "docker.io/library/python:3.13-alpine@sha256:79e7a9b9ff1cbceff819f856fb374477792a5967759d94df266de7b7b4120e6f"
+    backup:
+      enabled: true
+      schedule: "30 2 * * *"
+      keep: 14
+      size: 1Gi
+  # Collector hardening: drop data instead of being OOM-killed under load, and
+  # accept OTLP only (no ORISO component sends Jaeger or HTTP log formats).
+  # Browser Web Vitals arrive on their own receiver (otlp/rum, port 4319) and
+  # pipeline, which keeps only the known browser metrics from Frontend and
+  # Admin and replaces their resource attributes.
+  otelCollector:
+    additionalEnvs:
+      # Stamped onto browser metrics; must equal global.observability.deploymentEnvironment.
+      ORISO_DEPLOYMENT_ENVIRONMENT: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 1Gi
+    ports:
+      jaeger-thrift:
+        enabled: false
+      jaeger-grpc:
+        enabled: false
+      logsheroku:
+        enabled: false
+      logsjson:
+        enabled: false
+      otlp-rum:
+        enabled: true
+        containerPort: 4319
+        servicePort: 4319
+        nodePort: ""
+        protocol: TCP
+    config:
+      receivers:
+        jaeger: null
+        httplogreceiver/heroku: null
+        httplogreceiver/json: null
+        otlp/rum:
+          protocols:
+            http:
+              endpoint: 0.0.0.0:4319
+              max_request_body_size: 65536
+      processors:
+        memory_limiter:
+          check_interval: 1s
+          limit_percentage: 80
+          spike_limit_percentage: 20
+        filter/rum:
+          error_mode: ignore
+          metrics:
+            metric:
+              - 'not IsMatch(name, "^(lcp|cls|inp|ttfb|fcp|login_failure|chunk_load_failure|decryption_failure)$")'
+              - 'resource.attributes["service.name"] != "frontend" and resource.attributes["service.name"] != "admin"'
+        transform/rum:
+          error_mode: ignore
+          metric_statements:
+            - context: resource
+              statements:
+                - keep_keys(attributes, ["service.name"])
+                - set(attributes["deployment.environment"], "${env:ORISO_DEPLOYMENT_ENVIRONMENT}")
+                - set(attributes["oriso.signal.source"], "browser")
+            # Only the attributes Frontend and Admin record, and only values
+            # they can send: the receiver is public, so any other value
+            # becomes "other" and cannot grow the number of series. The page
+            # is cut to its section (/sessions, /admin/users). A new route or
+            # metric value shows as "other" until it is listed here.
+            - context: datapoint
+              statements:
+                - keep_keys(attributes, ["url.path_template", "outcome", "transport", "stage", "cause", "category"])
+                # Numbers and booleans would pass the string checks below unchanged.
+                - set(attributes["url.path_template"], "other") where attributes["url.path_template"] != nil and not IsString(attributes["url.path_template"])
+                - set(attributes["outcome"], "other") where attributes["outcome"] != nil and not IsString(attributes["outcome"])
+                - set(attributes["transport"], "other") where attributes["transport"] != nil and not IsString(attributes["transport"])
+                - set(attributes["stage"], "other") where attributes["stage"] != nil and not IsString(attributes["stage"])
+                - set(attributes["cause"], "other") where attributes["cause"] != nil and not IsString(attributes["cause"])
+                - set(attributes["category"], "other") where attributes["category"] != nil and not IsString(attributes["category"])
+                - truncate_all(attributes, 120)
+                - replace_pattern(attributes["url.path_template"], "^(/admin/[^/]*|/[^/]*).*$", "$$1")
+                - set(attributes["url.path_template"], "other") where attributes["url.path_template"] != nil and not IsMatch(attributes["url.path_template"], "^/(|sessions|registration|profile|groups|notifications|login|booking|invite|drafts|dpa-sign|password-reset|account-invite|tools|themen|overview|calendar|admin|admin/(users|agency|agencies|login|tenants|theme-settings|links|logs|access-denied|settings|tenant-onboarding|password-reset|topics|statistic|statistics|profil|profile|counsellor-onboarding|global-settings|dashboard|consultants))$")
+                - set(attributes["outcome"], "other") where attributes["outcome"] != nil and not IsMatch(attributes["outcome"], "^(credentials|otp_required|account_disabled|setup_incomplete|rate_limited|unavailable|retry|reload|gave_up|transient_resolved|permanent)$")
+                - set(attributes["transport"], "other") where attributes["transport"] != nil and not IsMatch(attributes["transport"], "^(bad_request|unauthorized|network|unexpected)$")
+                - set(attributes["stage"], "other") where attributes["stage"] != nil and not IsMatch(attributes["stage"], "^(password|otp)$")
+                - set(attributes["cause"], "other") where attributes["cause"] != nil and not IsMatch(attributes["cause"], "^(MEGOLM_UNKNOWN_INBOUND_SESSION_ID|MEGOLM_KEY_WITHHELD|MEGOLM_KEY_WITHHELD_FOR_UNVERIFIED_DEVICE|OLM_UNKNOWN_MESSAGE_INDEX|HISTORICAL_MESSAGE_NO_KEY_BACKUP|HISTORICAL_MESSAGE_BACKUP_UNCONFIGURED|HISTORICAL_MESSAGE_WORKING_BACKUP|HISTORICAL_MESSAGE_USER_NOT_JOINED|SENDER_IDENTITY_PREVIOUSLY_VERIFIED|UNSIGNED_SENDER_DEVICE|UNKNOWN_SENDER_DEVICE|UNKNOWN_ERROR)$")
+                - set(attributes["category"], "other") where attributes["category"] != nil and not IsMatch(attributes["category"], "^(withheld|bug)$")
+      service:
+        pipelines:
+          metrics/rum:
+            receivers: [otlp/rum]
+            processors: [memory_limiter, filter/rum, transform/rum, batch]
+            exporters: [metadataexporter, signozclickhousemetrics, signozmeter]
+          traces:
+            receivers: [otlp]
+            processors: [memory_limiter, signozspanmetrics/delta, batch]
+          metrics:
+            processors: [memory_limiter, batch]
+          logs:
+            receivers: [otlp]
+            processors: [memory_limiter, batch]
 
 # SigNoz collection agents — node DaemonSet (pod logs, host/kubelet metrics)
 # plus one cluster collector (workload objects, k8s events). Requires
@@ -569,6 +698,12 @@ signozCollector:
     limits:
       cpu: 500m
       memory: 512Mi
+
+# Data store monitoring (global.observability.dbMetrics). The reconcile job uses
+# the stores' own images for MariaDB and MongoDB and this curl image for the
+# RabbitMQ management API.
+dbMonitoring:
+  curlImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Health Dashboard
 healthDashboard:
