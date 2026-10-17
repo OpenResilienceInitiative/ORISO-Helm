@@ -89,9 +89,10 @@ if helm status "$RELEASE" -n "$NAMESPACE" >/dev/null 2>&1; then
 import json, sys
 s = json.loads(sys.argv[1]).get("signoz") or {}
 ch = s.get("clickhouse") or {}
+zk = (ch.get("zookeeper") or {}).get("persistence") or {}
 names = [(s.get("signoz") or {}).get("persistence", {}).get("existingClaim"),
          (ch.get("persistence") or {}).get("existingClaim"),
-         ((ch.get("zookeeper") or {}).get("persistence") or {}).get("existingClaim")]
+         zk.get("existingClaim"), (zk.get("dataLogDir") or {}).get("existingClaim")]
 names += [c.split("/")[-1] for c in (s.get("orisoDataProtection") or {}).get("claims") or []]
 print("\n".join(n for n in names if n))' "$values")
   while IFS= read -r claim; do
@@ -99,8 +100,8 @@ print("\n".join(n for n in names if n))' "$values")
   done <<<"$named"
   run helm uninstall "$RELEASE" -n "$NAMESPACE"
 else
-  echo "Helm release '${RELEASE}' not found in namespace '${NAMESPACE}';" \
-    "claims named only in its values cannot be recognised."
+  echo "Helm release '${RELEASE}' not found in namespace '${NAMESPACE}':" \
+    "claims named only in its values are kept only if an earlier run marked them."
 fi
 
 # 2. Delete the PVCs in the namespace, except the kept ones
@@ -114,6 +115,11 @@ while IFS='|' read -r claim keep_annotation name_label chi_label; do
   if is_kept "$claim" "$keep_annotation" "$name_label" "$chi_label"; then
     echo "Keeping PVC ${claim}"
     kept_claims+=("$claim")
+    # Marked, so a later run still keeps it when the release and its values
+    # are already gone.
+    if [ "$keep_annotation" != "keep" ]; then
+      run kubectl annotate pvc "$claim" -n "$NAMESPACE" helm.sh/resource-policy=keep --overwrite
+    fi
   else
     run kubectl delete pvc "$claim" -n "$NAMESPACE"
     deleted_claims+=("$claim")
