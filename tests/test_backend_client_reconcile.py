@@ -236,6 +236,17 @@ class ReconcileClientsTest(unittest.TestCase):
         self.assertEqual(self.mutations(),[])
         self.assertNotIn('smtp-sync',self.clients)
 
+    def test_native_admin_permissions_leave_an_existing_smtp_sync_binding_alone(self):
+        # Changing the live binding is the boundary decision (Helm#367/#423), not this hook's.
+        self.prepare();self.assertEqual(self.run_helper().returncode,0)
+        existing=copy.deepcopy((self.clients['smtp-sync'],self.role_maps['sa-smtp-sync'],self.scope_maps['smtp-sync']))
+        self.events.clear();self.admin_permissions=True
+        result=self.run_helper()
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('SMTP_SYNC_FGAP_ESCALATION',result.stdout+result.stderr)
+        self.assertEqual(self.mutations(),[])
+        self.assertEqual((self.clients['smtp-sync'],self.role_maps['sa-smtp-sync'],self.scope_maps['smtp-sync']),existing)
+
     def test_smtp_sync_surplus_roles_are_removed(self):
         self.prepare();self.assertEqual(self.run_helper().returncode,0)
         self.role_maps['sa-smtp-sync']['clientMappings']['realm-management']['mappings'].append({'id':'realm-admin','name':'realm-admin'})
