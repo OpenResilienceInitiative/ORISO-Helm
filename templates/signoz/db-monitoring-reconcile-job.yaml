@@ -166,7 +166,15 @@ spec:
                 echo "waiting for RabbitMQ management API ($i/60)"; sleep 5
               done
               [ -n "$ready" ] || { echo "RabbitMQ not ready after 5 minutes" >&2; exit 1; }
-              # PUT replaces the user: password and tags converge; no vhost permissions are granted.
+              # Vhost permissions are separate records a PUT keeps. Deleting the
+              # user drops them all; PUT then recreates it with the monitoring
+              # tag only and no vhost permission.
+              code=$(curl -sS -o /dev/null -w '%{http_code}' -u "$RABBITMQ_ADMIN_USER:$RABBITMQ_ADMIN_PASS" \
+                -X DELETE "$API/users/oriso-monitor")
+              case "$code" in
+                204|404) ;;
+                *) echo "RabbitMQ: deleting oriso-monitor failed with HTTP $code" >&2; exit 1 ;;
+              esac
               curl -fsS -o /dev/null -u "$RABBITMQ_ADMIN_USER:$RABBITMQ_ADMIN_PASS" -X PUT \
                 -H "content-type: application/json" \
                 -d "{\"password\":\"${MONITOR_PASSWORD}\",\"tags\":\"monitoring\"}" \

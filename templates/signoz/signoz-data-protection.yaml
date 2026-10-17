@@ -47,6 +47,20 @@ each chart uses; existingClaim wins, none without persistence. */ -}}
 {{- if $sqliteClaim -}}
 {{- $defaultClaims = append $defaultClaims (printf "%s/%s" .Release.Namespace $sqliteClaim) -}}
 {{- end -}}
+{{- /* SigNoz on PostgreSQL keeps users, dashboards and alerts there instead of signoz.db. */ -}}
+{{- $postgres := get $signoz "postgresql" | default dict -}}
+{{- $pgPersistence := get $postgres "persistence" | default dict -}}
+{{- if and (get $postgres "enabled") (hasKey $pgPersistence "enabled" | ternary (get $pgPersistence "enabled") true) -}}
+{{- if get $pgPersistence "existingClaim" -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" .Release.Namespace (get $pgPersistence "existingClaim")) -}}
+{{- else -}}
+{{- $pgName := get $postgres "nameOverride" | default "postgresql" -}}
+{{- $pgFullname := get $postgres "fullnameOverride" | default (contains $pgName .Release.Name | ternary .Release.Name (printf "%s-%s" .Release.Name $pgName)) | trunc 63 | trimSuffix "-" -}}
+{{- range $member := until (int (get $postgres "replicaCount" | default 1)) -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/pgdata-%s-%d" $.Release.Namespace $pgFullname $member) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if get $chPersistence "existingClaim" -}}
 {{- $defaultClaims = append $defaultClaims (printf "%s/%s" $chNamespace (get $chPersistence "existingClaim")) -}}
 {{- else if (hasKey $chPersistence "enabled" | ternary (get $chPersistence "enabled") true) -}}

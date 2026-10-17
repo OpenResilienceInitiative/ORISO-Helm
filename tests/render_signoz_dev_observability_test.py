@@ -231,6 +231,12 @@ def assert_second_review_findings() -> None:
     assert retain_claims(docs)[-2:] == ["caritas/data-log-caritas-zookeeper-0", "caritas/data-log-caritas-zookeeper-1"]
     docs = render_dev_with({"signoz": {"clickhouse": {"zookeeper": {"persistence": {"dataLogDir": {"existingClaim": "own-log"}}}}}})
     assert retain_claims(docs)[-1] == "caritas/own-log"
+    docs = render_dev_with({"signoz": {"postgresql": {"enabled": True, "replicaCount": 2}}})
+    claims = retain_claims(docs)
+    assert claims[:2] == ["caritas/pgdata-caritas-postgresql-0", "caritas/pgdata-caritas-postgresql-1"], claims
+    assert not any("signoz-db" in claim for claim in claims), "no SQLite claim with PostgreSQL"
+    docs = render_dev_with({"signoz": {"postgresql": {"enabled": True, "persistence": {"existingClaim": "own-pg"}}}})
+    assert retain_claims(docs)[0] == "caritas/own-pg"
     docs = render_dev_with({"signoz": {"orisoDataProtection": {"claims": ["kept-here", "other/kept-there"]}}})
     assert retain_claims(docs) == ["caritas/kept-here", "other/kept-there"]
 
@@ -254,6 +260,10 @@ def assert_second_review_findings() -> None:
     script = str(job["spec"]["template"]["spec"])
     for store in ("MariaDB", "MongoDB", "RabbitMQ"):
         assert f"{store} not ready after 5 minutes" in script, store
+    # Old vhost permissions of the monitoring user go before it is recreated.
+    rabbit = next((c.get("args") or c["command"])[-1] for c in job["spec"]["template"]["spec"]["initContainers"]
+                  if "oriso-monitor" in str(c))
+    assert rabbit.index('-X DELETE "$API/users/oriso-monitor"') < rabbit.index("-X PUT"), "delete before recreate"
 
     # The public browser receiver keeps only values Frontend and Admin send.
     config = yaml.safe_load(next(iter(docs[("ConfigMap", "caritas-signoz-otel-collector")]["data"].values())))
