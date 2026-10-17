@@ -33,13 +33,15 @@ python3 scripts/observability_overlay.py values-dev.yaml > /root/observability-d
 
 The upgrade below does not use `--reuse-values` on purpose: the chart directory's
 own `values.yaml` carries the live settings, and the release's user-supplied
-values are exactly `secrets.yaml` (checked on revision 41, 2026-10-17). If a
-later revision was upgraded with extra `-f` files, pass them too. Without them,
-their settings fall back to `values.yaml`.
+values are exactly `secrets.yaml` (checked on revision 41, 2026-10-17), plus
+the observability overlay once this rollout has run. If a later revision was
+upgraded with extra `-f` files, pass them too. Without them, their settings
+fall back to `values.yaml`.
 
-So, right before the upgrade, list every user-supplied value path that
-`secrets.yaml` either lacks or sets to a different value. It compares values
-without printing them:
+So, right before the upgrade, list every user-supplied value path that the
+planned `-f` files (`secrets.yaml`, then the overlay) would drop or change.
+Paths the new overlay sets are the intended change and only count when it
+drops them. It compares values without printing them:
 
 ```bash
 helm get values caritas -n caritas -o json | python3 -c '
@@ -49,8 +51,13 @@ def leaves(d, p=""):
     for k, v in (d or {}).items():
         out.update(leaves(v, f"{p}.{k}") if isinstance(v, dict) and v else {f"{p}.{k}": v})
     return out
-live, file = leaves(json.load(sys.stdin)), leaves(yaml.safe_load(open("secrets.yaml")))
-drift = sorted(p for p in live if p not in file or live[p] != file[p])
+files = ["secrets.yaml", "/root/observability-dev.yaml"]
+planned = {}
+for name in files:
+    planned.update(leaves(yaml.safe_load(open(name))))
+overlay = leaves(yaml.safe_load(open(files[-1])))
+live = leaves(json.load(sys.stdin))
+drift = sorted(p for p in live if p not in planned or (p not in overlay and live[p] != planned[p]))
 print(len(drift), *drift, sep="\n")' | tee /root/observability-drift.out
 ```
 

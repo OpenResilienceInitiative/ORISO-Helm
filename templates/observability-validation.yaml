@@ -23,6 +23,9 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- fail "global.observability.dbMetrics=true requires signozCollector.enabled=true: the cluster collector reads the data store metrics" -}}
 {{- end -}}
 {{- $webVitals := get (get .Values.global "observability" | default dict) "webVitals" | default dict -}}
+{{- if and (get $webVitals "enabled" | default false) (not $signozEnabled) -}}
+{{- fail "global.observability.webVitals.enabled=true requires signoz.enabled=true: the browser metrics go to the bundled SigNoz collector through the RUM ingress" -}}
+{{- end -}}
 {{- if and $signozEnabled (get $webVitals "enabled" | default false) -}}
 {{- $collectorEnvs := get (get $signoz "otelCollector" | default dict) "additionalEnvs" | default dict -}}
 {{- $environment := get (get .Values.global "observability" | default dict) "deploymentEnvironment" | default "" -}}

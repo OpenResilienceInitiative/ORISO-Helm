@@ -419,6 +419,20 @@ def assert_retain_hook_and_tolerations() -> None:
     assert "tolerations" not in cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]
 
 
+def assert_web_vitals_need_signoz() -> None:
+    # Without the bundled SigNoz the browser would get an empty metrics URL; the chart refuses instead.
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+        yaml.safe_dump({"global": {"observability": {"webVitals": {"enabled": True}}}, "signoz": {"enabled": False}}, handle)
+    try:
+        render(handle.name)
+    except AssertionError as error:
+        assert "webVitals.enabled=true requires signoz.enabled=true" in str(error), error
+    else:
+        raise AssertionError("web vitals rendered without SigNoz")
+    finally:
+        os.unlink(handle.name)
+
+
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
@@ -429,6 +443,7 @@ def main() -> None:
     assert_name_override_findings()
     assert_retain_hook_and_tolerations()
     assert_backup_storage_class()
+    assert_web_vitals_need_signoz()
     print("PASS: SigNoz on Dev keeps its data, bounds the collector, and labels every signal")
 
 
