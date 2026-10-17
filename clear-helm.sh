@@ -39,9 +39,13 @@ OBSERVABILITY_CLAIMS=(
   "${RELEASE}-signoz-data-protection-backup"
 )
 
+# Claims the release's values name explicitly (existingClaim, the data
+# protection list) can have any name; they are read before the uninstall.
+RELEASE_CLAIMS=()
+
 is_observability_claim() {
   local pattern
-  for pattern in "${OBSERVABILITY_CLAIMS[@]}"; do
+  for pattern in "${OBSERVABILITY_CLAIMS[@]}" ${RELEASE_CLAIMS[@]+"${RELEASE_CLAIMS[@]}"}; do
     # shellcheck disable=SC2053 # the pattern is meant to match as a glob
     [[ "$1" == $pattern ]] && return 0
   done
@@ -68,9 +72,23 @@ run() {
 # 1. Remove only the Helm release
 echo "Uninstalling Helm release '${RELEASE}'..."
 if helm status "$RELEASE" -n "$NAMESPACE" >/dev/null 2>&1; then
+  values=$(helm get values "$RELEASE" -n "$NAMESPACE" --all -o json)
+  named=$(python3 -c '
+import json, sys
+s = json.loads(sys.argv[1]).get("signoz") or {}
+ch = s.get("clickhouse") or {}
+names = [(s.get("signoz") or {}).get("persistence", {}).get("existingClaim"),
+         (ch.get("persistence") or {}).get("existingClaim"),
+         ((ch.get("zookeeper") or {}).get("persistence") or {}).get("existingClaim")]
+names += [c.split("/")[-1] for c in (s.get("orisoDataProtection") or {}).get("claims") or []]
+print("\n".join(n for n in names if n))' "$values")
+  while IFS= read -r claim; do
+    if [ -n "$claim" ]; then RELEASE_CLAIMS+=("$claim"); fi
+  done <<<"$named"
   run helm uninstall "$RELEASE" -n "$NAMESPACE"
 else
-  echo "Helm release '${RELEASE}' not found in namespace '${NAMESPACE}'."
+  echo "Helm release '${RELEASE}' not found in namespace '${NAMESPACE}';" \
+    "claims named only in its values cannot be recognised."
 fi
 
 # 2. Delete the PVCs in the namespace, except the kept ones

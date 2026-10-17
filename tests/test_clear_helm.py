@@ -24,8 +24,13 @@ PVCS = "\n".join(
         "data-caritas-zookeeper-1|",
         "caritas-signoz-data-protection-backup|keep",
         "operator-kept-claim|keep",
+        # Named in the release values (existingClaim), so any name is kept.
+        "own-signoz-db|",
     ]
 )
+
+RELEASE_VALUES = '{"signoz": {"signoz": {"persistence": {"existingClaim": "own-signoz-db"}}}}'
+
 
 PVS = "\n".join(
     [
@@ -36,6 +41,7 @@ PVS = "\n".join(
         "pv-clickhouse|Bound|caritas|data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0",
         "pv-zookeeper-1|Released|caritas|data-caritas-zookeeper-1",
         "pv-operator-kept|Released|caritas|operator-kept-claim",
+        "pv-own-signoz|Released|caritas|own-signoz-db",
         "pv-other-namespace|Released|monitoring|data-prometheus-0",
         "pv-no-claim|Available||",
         "pv-bound|Bound|caritas|data-caritas-redis-0",
@@ -50,11 +56,12 @@ class ClearHelmTest(unittest.TestCase):
         self.log = self.bin / "calls.log"
         (self.bin / "pvcs.txt").write_text(PVCS + "\n")
         (self.bin / "pvs.txt").write_text(PVS + "\n")
+        (self.bin / "values.json").write_text(RELEASE_VALUES)
         self._stub(
             "helm",
             """
             echo "helm $*" >> "$STUB_DIR/calls.log"
-            [ "$1" = status ] && exit 0
+            [ "$1 $2" = "get values" ] && cat "$STUB_DIR/values.json"
             exit 0
             """,
         )
@@ -111,9 +118,10 @@ class ClearHelmTest(unittest.TestCase):
             "data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-1-0",
             "data-caritas-zookeeper-1",
             "operator-kept-claim",
+            "own-signoz-db",
         ):
             self.assertIn(f"Keeping PVC {claim}", result.stdout)
-        for volume in ("pv-signoz", "pv-zookeeper-1", "pv-operator-kept"):
+        for volume in ("pv-signoz", "pv-zookeeper-1", "pv-operator-kept", "pv-own-signoz"):
             self.assertIn(f"Keeping PV {volume}", result.stdout)
 
     def test_dry_run_deletes_nothing_but_lists_freed_volumes(self) -> None:
@@ -133,7 +141,8 @@ class ClearHelmTest(unittest.TestCase):
         result, deletes = self._run("--include-observability")
         self.assertEqual(result.returncode, 0, result.stderr)
         claims = [line.split("|")[0] for line in PVCS.splitlines()]
-        volumes = ["pv-mariadb", "pv-mongodb", "pv-signoz", "pv-clickhouse", "pv-zookeeper-1", "pv-operator-kept"]
+        volumes = ["pv-mariadb", "pv-mongodb", "pv-signoz", "pv-clickhouse", "pv-zookeeper-1", "pv-operator-kept",
+                   "pv-own-signoz"]
         self.assertEqual(
             deletes,
             ["helm uninstall caritas -n caritas"]
@@ -165,9 +174,13 @@ class ClearHelmTest(unittest.TestCase):
             esac
             """,
         )
-        result, deletes = self._run()
+        result, _ = self._run()
         self.assertNotEqual(result.returncode, 0)
-        self.assertFalse([call for call in deletes if call.startswith("kubectl delete pv ")], deletes)
+        calls = self.log.read_text().splitlines()
+        queries = [i for i, call in enumerate(calls) if call.startswith("kubectl get pv ")]
+        self.assertTrue(queries, calls)
+        after = calls[queries[0] + 1:]
+        self.assertFalse([c for c in after if " delete " in c or " uninstall " in c], calls)
 
     def test_unknown_argument_is_refused(self) -> None:
         result, deletes = self._run("--yes")
