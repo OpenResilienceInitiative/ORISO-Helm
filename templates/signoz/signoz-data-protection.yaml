@@ -92,6 +92,9 @@ metadata:
 data:
   backup.py: |
     import glob, gzip, os, shutil, sqlite3, time
+    # Leftovers of an interrupted run never look like a finished backup.
+    for stale in glob.glob("/backup/.signoz-*"):
+        os.remove(stale)
     src = sqlite3.connect("file:/signoz/signoz.db?mode=ro", uri=True)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     tmp = f"/backup/.signoz-{stamp}.db"
@@ -103,8 +106,12 @@ data:
     if ok != "ok":
         os.remove(tmp)
         raise SystemExit(f"integrity_check failed: {ok}")
-    with open(tmp, "rb") as f, gzip.open(f"/backup/signoz-{stamp}.db.gz", "wb") as g:
+    part = f"/backup/.signoz-{stamp}.db.gz.part"
+    with open(tmp, "rb") as f, gzip.open(part, "wb") as g:
         shutil.copyfileobj(f, g)
+    with open(part, "rb") as f:
+        os.fsync(f.fileno())
+    os.replace(part, f"/backup/signoz-{stamp}.db.gz")
     os.remove(tmp)
     keep = int(os.environ["KEEP"])
     for old in sorted(glob.glob("/backup/signoz-*.db.gz"))[:-keep]:

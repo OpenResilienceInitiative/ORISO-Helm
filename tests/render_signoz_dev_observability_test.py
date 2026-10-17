@@ -259,11 +259,41 @@ def assert_second_review_findings() -> None:
         assert any(line.startswith(f'set(attributes["{key}"], "other") where') for line in statements), key
 
 
+def assert_backup_is_atomic() -> None:
+    # Run the rendered backup script on a real SQLite file in a scratch dir.
+    import gzip
+    import sqlite3
+    config = by_key(render("values-dev.yaml"))[("ConfigMap", "caritas-signoz-data-protection")]
+    with tempfile.TemporaryDirectory() as root:
+        signoz, backup = os.path.join(root, "signoz"), os.path.join(root, "backup")
+        os.makedirs(signoz)
+        os.makedirs(backup)
+        db = sqlite3.connect(os.path.join(signoz, "signoz.db"))
+        db.execute("create table users (name text)")
+        db.execute("insert into users values ('admin')")
+        db.commit()
+        db.close()
+        stale = os.path.join(backup, ".signoz-20261017T000000Z.db.gz.part")
+        with open(stale, "wb") as handle:
+            handle.write(b"truncated")
+        script = config["data"]["backup.py"].replace("/signoz/", signoz + "/").replace("/backup", backup)
+        result = subprocess.run(["python3", "-c", script], env={**os.environ, "KEEP": "14"},
+                                capture_output=True, text=True, check=False)
+        assert result.returncode == 0, result.stderr
+        files = sorted(os.listdir(backup))
+        assert len(files) == 1 and files[0].startswith("signoz-") and files[0].endswith(".db.gz"), files
+        restored = os.path.join(root, "restored.db")
+        with gzip.open(os.path.join(backup, files[0]), "rb") as source, open(restored, "wb") as target:
+            target.write(source.read())
+        assert sqlite3.connect(restored).execute("select name from users").fetchall() == [("admin",)]
+
+
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
     assert_review_findings()
     assert_second_review_findings()
+    assert_backup_is_atomic()
     print("PASS: SigNoz on Dev keeps its data, bounds the collector, and labels every signal")
 
 
