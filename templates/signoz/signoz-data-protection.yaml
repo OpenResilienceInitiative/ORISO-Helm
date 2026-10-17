@@ -278,7 +278,9 @@ any configured); a bound backup claim keeps its class, which Kubernetes does not
 {{- end -}}
 {{- $existingBackup := lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "%s-backup" $name) -}}
 {{- if $existingBackup -}}
-{{- $backupClass = dig "spec" "storageClassName" "" $existingBackup -}}
+{{- /* Keep the field exactly: an explicit "" must stay "", an absent field stays absent. */ -}}
+{{- $backupSpec := get $existingBackup "spec" | default dict -}}
+{{- $backupClass = hasKey $backupSpec "storageClassName" | ternary (get $backupSpec "storageClassName" | default "-") "" -}}
 {{- end }}
 ---
 apiVersion: v1

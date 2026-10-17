@@ -397,6 +397,11 @@ def assert_backup_storage_class() -> None:
     finally:
         os.unlink(handle.name)
     assert backup_claim_class(docs) == "local-path"
+    # An explicit empty class stays explicit; an absent one stays absent. Both are immutable.
+    for existing, expected in (('(dict "storageClassName" "")', ""), ("dict", None)):
+        docs = by_key(render_with_cluster_state("values-dev.yaml", release="caritas", replace={
+            marker: f'{{{{- $existingBackup := dict "spec" {existing} -}}}}'}))
+        assert backup_claim_class(docs) == expected, (existing, backup_claim_class(docs))
 
 
 def assert_retain_hook_and_tolerations() -> None:
