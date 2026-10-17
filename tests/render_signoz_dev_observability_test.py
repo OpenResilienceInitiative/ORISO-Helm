@@ -227,6 +227,10 @@ def assert_second_review_findings() -> None:
         "coordination/data-caritas-zookeeper-0", "coordination/data-caritas-zookeeper-1",
         "coordination/data-caritas-zookeeper-2",
     ]
+    docs = render_dev_with({"signoz": {"clickhouse": {"zookeeper": {"replicaCount": 2, "dataLogDir": "/bitnami/zookeeper/log"}}}})
+    assert retain_claims(docs)[-2:] == ["caritas/data-log-caritas-zookeeper-0", "caritas/data-log-caritas-zookeeper-1"]
+    docs = render_dev_with({"signoz": {"clickhouse": {"zookeeper": {"persistence": {"dataLogDir": {"existingClaim": "own-log"}}}}}})
+    assert retain_claims(docs)[-1] == "caritas/own-log"
     docs = render_dev_with({"signoz": {"orisoDataProtection": {"claims": ["kept-here", "other/kept-there"]}}})
     assert retain_claims(docs) == ["caritas/kept-here", "other/kept-there"]
 
@@ -256,7 +260,10 @@ def assert_second_review_findings() -> None:
     statements = config["processors"]["transform/rum"]["metric_statements"][1]["statements"]
     assert any(line.startswith('replace_pattern(attributes["url.path_template"]') for line in statements)
     for key in ("url.path_template", "outcome", "transport", "stage", "cause", "category"):
-        assert any(line.startswith(f'set(attributes["{key}"], "other") where') for line in statements), key
+        assert any(line.startswith(f'set(attributes["{key}"], "other") where') and "IsMatch" in line
+                   for line in statements), key
+        not_string = next(i for i, line in enumerate(statements) if f'not IsString(attributes["{key}"])' in line)
+        assert not_string < next(i for i, line in enumerate(statements) if "IsMatch" in line), key
 
 
 def assert_backup_is_atomic() -> None:

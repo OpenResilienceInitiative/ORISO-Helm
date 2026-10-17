@@ -62,6 +62,15 @@ each chart uses; existingClaim wins, none without persistence. */ -}}
 {{- $defaultClaims = append $defaultClaims (printf "%s/data-%s-zookeeper-%d" $zkNamespace $.Release.Name $member) -}}
 {{- end -}}
 {{- end -}}
+{{- /* The dedicated transaction log, when ZooKeeper has one. */ -}}
+{{- $zkLog := get $zkPersistence "dataLogDir" | default dict -}}
+{{- if get $zkLog "existingClaim" -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" $zkNamespace (get $zkLog "existingClaim")) -}}
+{{- else if get $zookeeper "dataLogDir" -}}
+{{- range $member := until (int (get $zookeeper "replicaCount" | default 1)) -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/data-log-%s-zookeeper-%d" $zkNamespace $.Release.Name $member) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- /* An explicit claims list names claims in the release namespace unless given as <namespace>/<claim>. */ -}}
 {{- $claims := list -}}

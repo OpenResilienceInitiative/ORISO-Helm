@@ -649,6 +649,13 @@ signoz:
             - context: datapoint
               statements:
                 - keep_keys(attributes, ["url.path_template", "outcome", "transport", "stage", "cause", "category"])
+                # Numbers and booleans would pass the string checks below unchanged.
+                - set(attributes["url.path_template"], "other") where attributes["url.path_template"] != nil and not IsString(attributes["url.path_template"])
+                - set(attributes["outcome"], "other") where attributes["outcome"] != nil and not IsString(attributes["outcome"])
+                - set(attributes["transport"], "other") where attributes["transport"] != nil and not IsString(attributes["transport"])
+                - set(attributes["stage"], "other") where attributes["stage"] != nil and not IsString(attributes["stage"])
+                - set(attributes["cause"], "other") where attributes["cause"] != nil and not IsString(attributes["cause"])
+                - set(attributes["category"], "other") where attributes["category"] != nil and not IsString(attributes["category"])
                 - truncate_all(attributes, 120)
                 - replace_pattern(attributes["url.path_template"], "^(/admin/[^/]*|/[^/]*).*$", "$$1")
                 - set(attributes["url.path_template"], "other") where attributes["url.path_template"] != nil and not IsMatch(attributes["url.path_template"], "^/(|sessions|registration|profile|groups|notifications|login|booking|invite|drafts|dpa-sign|password-reset|account-invite|tools|themen|overview|calendar|admin|admin/(users|agency|agencies|login|tenants|theme-settings|links|logs|access-denied|settings|tenant-onboarding|password-reset|topics|statistic|statistics|profil|profile|counsellor-onboarding|global-settings|dashboard|consultants))$")
