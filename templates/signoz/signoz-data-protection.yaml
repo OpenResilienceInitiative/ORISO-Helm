@@ -255,6 +255,13 @@ spec:
               memory: 64Mi
 {{- end }}
 {{- if and (get $backup "enabled" | default false) $sqliteClaim }}
+{{- /* The backup claim uses the class of the SigNoz claim (global first, "-" = none, as in the
+SigNoz chart); a bound claim keeps its class, which Kubernetes does not allow to change. */ -}}
+{{- $backupClass := get (get .Values "global" | default dict) "storageClass" | default (get $persistence "storageClass") | default "" -}}
+{{- $existingBackup := lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "%s-backup" $name) -}}
+{{- if $existingBackup -}}
+{{- $backupClass = dig "spec" "storageClassName" "" $existingBackup -}}
+{{- end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -269,6 +276,11 @@ spec:
   resources:
     requests:
       storage: {{ get $backup "size" | default "1Gi" }}
+  {{- if eq $backupClass "-" }}
+  storageClassName: ""
+  {{- else if $backupClass }}
+  storageClassName: {{ $backupClass | quote }}
+  {{- end }}
 ---
 apiVersion: batch/v1
 kind: CronJob

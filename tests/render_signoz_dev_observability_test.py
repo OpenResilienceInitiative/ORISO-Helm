@@ -350,8 +350,8 @@ def assert_name_override_findings() -> None:
     assert statefulset_claims(docs, "caritas-postgresql") == ["caritas-pgdata"]
 
 
-def render_with_pending_volume(*overlays: str, release: str) -> list[dict[str, Any]]:
-    # Offline, lookup finds no volumes and the retain hook renders nothing; a chart copy pretends one is pending.
+def render_with_cluster_state(*overlays: str, release: str, replace: dict[str, str]) -> list[dict[str, Any]]:
+    # Offline, lookup sees an empty cluster; a chart copy replaces a lookup line with the given state.
     template = "templates/signoz/signoz-data-protection.yaml"
     with tempfile.TemporaryDirectory() as tmp:
         chart = os.path.join(tmp, "chart")
@@ -359,11 +359,44 @@ def render_with_pending_volume(*overlays: str, release: str) -> list[dict[str, A
         path = os.path.join(chart, template)
         with open(path, encoding="utf-8") as handle:
             source = handle.read()
-        marker = "{{- $pending := list -}}"
-        assert source.count(marker) == 1
+        for marker, state in replace.items():
+            assert source.count(marker) == 1, marker
+            source = source.replace(marker, state)
         with open(path, "w", encoding="utf-8") as handle:
-            handle.write(source.replace(marker, '{{- $pending := list "pv-test" -}}'))
+            handle.write(source)
         return render(*overlays, release=release, chart=chart)
+
+
+def render_with_pending_volume(*overlays: str, release: str) -> list[dict[str, Any]]:
+    return render_with_cluster_state(*overlays, release=release, replace={
+        "{{- $pending := list -}}": '{{- $pending := list "pv-test" -}}'})
+
+
+def backup_claim_class(docs: dict[tuple[str, str], dict[str, Any]]) -> str | None:
+    return docs[("PersistentVolumeClaim", "caritas-signoz-data-protection-backup")]["spec"].get("storageClassName")
+
+
+def assert_backup_storage_class() -> None:
+    # The backup claim follows the SigNoz claim's storage class, so it binds where no default class exists.
+    assert backup_claim_class(render_dev_with({})) is None
+    docs = render_dev_with({"global": {"storageClass": "fast"}})
+    assert backup_claim_class(docs) == "fast"
+    sqlite = docs[("StatefulSet", "caritas-signoz")]["spec"]["volumeClaimTemplates"][0]["spec"]
+    assert sqlite["storageClassName"] == "fast"
+    assert backup_claim_class(render_dev_with({"signoz": {"signoz": {"persistence": {"storageClass": "ssd"}}}})) == "ssd"
+    docs = render_dev_with({"global": {"storageClass": "-"}})
+    assert backup_claim_class(docs) == ""
+    assert docs[("StatefulSet", "caritas-signoz")]["spec"]["volumeClaimTemplates"][0]["spec"]["storageClassName"] == ""
+    # An existing claim keeps its class: storageClassName cannot change on a bound claim.
+    marker = '{{- $existingBackup := lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "%s-backup" $name) -}}'
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+        yaml.safe_dump({"global": {"storageClass": "fast"}}, handle)
+    try:
+        docs = by_key(render_with_cluster_state("values-dev.yaml", handle.name, release="caritas", replace={
+            marker: '{{- $existingBackup := dict "spec" (dict "storageClassName" "local-path") -}}'}))
+    finally:
+        os.unlink(handle.name)
+    assert backup_claim_class(docs) == "local-path"
 
 
 def assert_retain_hook_and_tolerations() -> None:
@@ -395,6 +428,7 @@ def main() -> None:
     assert_long_release_name()
     assert_name_override_findings()
     assert_retain_hook_and_tolerations()
+    assert_backup_storage_class()
     print("PASS: SigNoz on Dev keeps its data, bounds the collector, and labels every signal")
 
 
