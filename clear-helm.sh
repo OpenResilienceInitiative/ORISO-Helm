@@ -30,24 +30,31 @@ for arg in "$@"; do
 done
 
 # Claims the observability stack reuses on reinstall (see
-# templates/signoz/signoz-data-protection.yaml).
+# templates/signoz/signoz-data-protection.yaml), as patterns so every
+# replica, shard and ZooKeeper member is covered, not only the first.
 OBSERVABILITY_CLAIMS=(
-  "signoz-db-${RELEASE}-signoz-0"
-  "data-volumeclaim-template-chi-${RELEASE}-clickhouse-cluster-0-0-0"
-  "data-${RELEASE}-zookeeper-0"
+  "signoz-db-${RELEASE}-signoz-[0-9]*"
+  "data-volumeclaim-template-chi-${RELEASE}-clickhouse-*"
+  "data-${RELEASE}-zookeeper-[0-9]*"
   "${RELEASE}-signoz-data-protection-backup"
 )
 
+is_observability_claim() {
+  local pattern
+  for pattern in "${OBSERVABILITY_CLAIMS[@]}"; do
+    # shellcheck disable=SC2053 # the pattern is meant to match as a glob
+    [[ "$1" == $pattern ]] && return 0
+  done
+  return 1
+}
+
 is_kept() {
-  local claim="$1" keep_annotation="$2" kept
+  local claim="$1" keep_annotation="$2"
   if [ "$INCLUDE_OBSERVABILITY" = true ]; then
     return 1
   fi
   [ "$keep_annotation" = "keep" ] && return 0
-  for kept in "${OBSERVABILITY_CLAIMS[@]}"; do
-    [ "$claim" = "$kept" ] && return 0
-  done
-  return 1
+  is_observability_claim "$claim"
 }
 
 run() {
@@ -69,6 +76,7 @@ fi
 # 2. Delete the PVCs in the namespace, except the kept ones
 echo "Deleting PVCs in namespace ${NAMESPACE}..."
 kept_claims=()
+deleted_claims=()
 claims=$(kubectl get pvc -n "$NAMESPACE" \
   -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.helm\.sh/resource-policy}{"\n"}{end}')
 while IFS='|' read -r claim keep_annotation; do
@@ -78,27 +86,38 @@ while IFS='|' read -r claim keep_annotation; do
     kept_claims+=("$claim")
   else
     run kubectl delete pvc "$claim" -n "$NAMESPACE"
+    deleted_claims+=("$claim")
   fi
 done <<<"$claims"
 
-# 3. Delete unbound PVs that belonged to this namespace, except kept claims'
+# 3. Delete unbound PVs that belonged to this namespace, except kept claims'.
+# A PV still bound to a claim deleted above counts as unbound, so the dry run
+# lists the volumes the real run frees and deletes.
 echo "Deleting unattached PersistentVolumes of namespace ${NAMESPACE}..."
 volumes=$(kubectl get pv \
   -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.phase}{"|"}{.spec.claimRef.namespace}{"|"}{.spec.claimRef.name}{"\n"}{end}')
 while IFS='|' read -r volume phase claim_namespace claim; do
   [ -n "$volume" ] || continue
-  [ "$phase" != "Bound" ] || continue
   [ "$claim_namespace" = "$NAMESPACE" ] || continue
+  if [ "$phase" = "Bound" ]; then
+    freed=false
+    for deleted in ${deleted_claims[@]+"${deleted_claims[@]}"}; do
+      [ "$claim" = "$deleted" ] && freed=true
+    done
+    [ "$freed" = true ] || continue
+  fi
   keep=false
-  for kept in "${OBSERVABILITY_CLAIMS[@]}" ${kept_claims[@]+"${kept_claims[@]}"}; do
-    if [ "$INCLUDE_OBSERVABILITY" != true ] && [ "$claim" = "$kept" ]; then
-      keep=true
-    fi
-  done
+  if [ "$INCLUDE_OBSERVABILITY" != true ]; then
+    is_observability_claim "$claim" && keep=true
+    for kept in ${kept_claims[@]+"${kept_claims[@]}"}; do
+      [ "$claim" = "$kept" ] && keep=true
+    done
+  fi
   if [ "$keep" = true ]; then
     echo "Keeping PV ${volume} (claim ${claim})"
   else
-    run kubectl delete pv "$volume"
+    # The provisioner may remove a freed volume itself in the meantime.
+    run kubectl delete pv "$volume" --ignore-not-found
   fi
 done <<<"$volumes"
 

@@ -16,9 +16,12 @@ SCRIPT = ROOT / "clear-helm.sh"
 PVCS = "\n".join(
     [
         "data-caritas-mariadb-0|",
+        "data-caritas-mongodb-0|",
         "signoz-db-caritas-signoz-0|",
         "data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0|",
+        "data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-1-0|",
         "data-caritas-zookeeper-0|",
+        "data-caritas-zookeeper-1|",
         "caritas-signoz-data-protection-backup|keep",
         "operator-kept-claim|keep",
     ]
@@ -27,8 +30,12 @@ PVCS = "\n".join(
 PVS = "\n".join(
     [
         "pv-mariadb|Released|caritas|data-caritas-mariadb-0",
+        # Still bound: the real run frees it by deleting its claim first.
+        "pv-mongodb|Bound|caritas|data-caritas-mongodb-0",
         "pv-signoz|Released|caritas|signoz-db-caritas-signoz-0",
         "pv-clickhouse|Bound|caritas|data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0",
+        "pv-zookeeper-1|Released|caritas|data-caritas-zookeeper-1",
+        "pv-operator-kept|Released|caritas|operator-kept-claim",
         "pv-other-namespace|Released|monitoring|data-prometheus-0",
         "pv-no-claim|Available||",
         "pv-bound|Bound|caritas|data-caritas-redis-0",
@@ -94,39 +101,44 @@ class ClearHelmTest(unittest.TestCase):
             [
                 "helm uninstall caritas -n caritas",
                 "kubectl delete pvc data-caritas-mariadb-0 -n caritas",
-                "kubectl delete pv pv-mariadb",
+                "kubectl delete pvc data-caritas-mongodb-0 -n caritas",
+                "kubectl delete pv pv-mariadb --ignore-not-found",
+                "kubectl delete pv pv-mongodb --ignore-not-found",
             ],
         )
-        self.assertIn("Keeping PVC signoz-db-caritas-signoz-0", result.stdout)
-        self.assertIn("Keeping PVC operator-kept-claim", result.stdout)
-        self.assertIn("Keeping PV pv-signoz", result.stdout)
+        for claim in (
+            "signoz-db-caritas-signoz-0",
+            "data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-1-0",
+            "data-caritas-zookeeper-1",
+            "operator-kept-claim",
+        ):
+            self.assertIn(f"Keeping PVC {claim}", result.stdout)
+        for volume in ("pv-signoz", "pv-zookeeper-1", "pv-operator-kept"):
+            self.assertIn(f"Keeping PV {volume}", result.stdout)
 
-    def test_dry_run_deletes_nothing(self) -> None:
+    def test_dry_run_deletes_nothing_but_lists_freed_volumes(self) -> None:
         result, deletes = self._run("--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(deletes, [])
-        self.assertIn(
+        for line in (
             "[dry-run] kubectl delete pvc data-caritas-mariadb-0 -n caritas",
-            result.stdout,
-        )
-        self.assertIn("Dry run: nothing was deleted.", result.stdout)
+            "[dry-run] kubectl delete pv pv-mariadb --ignore-not-found",
+            "[dry-run] kubectl delete pv pv-mongodb --ignore-not-found",
+            "Dry run: nothing was deleted.",
+        ):
+            self.assertIn(line, result.stdout)
+        self.assertNotIn("pv-bound", result.stdout)
 
     def test_include_observability_deletes_everything_of_the_namespace(self) -> None:
         result, deletes = self._run("--include-observability")
         self.assertEqual(result.returncode, 0, result.stderr)
+        claims = [line.split("|")[0] for line in PVCS.splitlines()]
+        volumes = ["pv-mariadb", "pv-mongodb", "pv-signoz", "pv-clickhouse", "pv-zookeeper-1", "pv-operator-kept"]
         self.assertEqual(
             deletes,
-            [
-                "helm uninstall caritas -n caritas",
-                "kubectl delete pvc data-caritas-mariadb-0 -n caritas",
-                "kubectl delete pvc signoz-db-caritas-signoz-0 -n caritas",
-                "kubectl delete pvc data-volumeclaim-template-chi-caritas-clickhouse-cluster-0-0-0 -n caritas",
-                "kubectl delete pvc data-caritas-zookeeper-0 -n caritas",
-                "kubectl delete pvc caritas-signoz-data-protection-backup -n caritas",
-                "kubectl delete pvc operator-kept-claim -n caritas",
-                "kubectl delete pv pv-mariadb",
-                "kubectl delete pv pv-signoz",
-            ],
+            ["helm uninstall caritas -n caritas"]
+            + [f"kubectl delete pvc {claim} -n caritas" for claim in claims]
+            + [f"kubectl delete pv {volume} --ignore-not-found" for volume in volumes],
         )
 
     def test_failing_kubectl_stops_before_deleting(self) -> None:
@@ -141,6 +153,21 @@ class ClearHelmTest(unittest.TestCase):
         result, deletes = self._run()
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(deletes, ["helm uninstall caritas -n caritas"])
+
+    def test_failing_pv_query_deletes_no_volume(self) -> None:
+        self._stub(
+            "kubectl",
+            """
+            echo "kubectl $*" >> "$STUB_DIR/calls.log"
+            case "$1 $2" in
+              "get pvc") cat "$STUB_DIR/pvcs.txt" ;;
+              "get pv") cat "$STUB_DIR/pvs.txt"; exit 1 ;;
+            esac
+            """,
+        )
+        result, deletes = self._run()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse([call for call in deletes if call.startswith("kubectl delete pv ")], deletes)
 
     def test_unknown_argument_is_refused(self) -> None:
         result, deletes = self._run("--yes")
