@@ -5,6 +5,7 @@ trace identity and sampling, browser Web Vitals (ORISO SigNoz plan, session 1)."
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 from typing import Any
@@ -15,8 +16,8 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JAVA_SERVICES = ("userservice", "agencyservice", "tenantservice", "consultingtypeservice")
 
 
-def render(*overlays: str, release: str = "caritas") -> list[dict[str, Any]]:
-    command = ["helm", "template", release, CHART_DIR, "--namespace", "caritas"]
+def render(*overlays: str, release: str = "caritas", chart: str = CHART_DIR) -> list[dict[str, Any]]:
+    command = ["helm", "template", release, chart, "--namespace", "caritas"]
     for values in (
         "values.yaml.default",
         "tests/fixtures/values-render-domain.yaml",
@@ -308,9 +309,9 @@ def assert_backup_is_atomic() -> None:
 def assert_long_release_name() -> None:
     # A 23+ character release name must not push the CronJob past 52 characters.
     docs = render("values-dev.yaml", release="observability-staging-eu1")
-    cron = next(doc for doc in docs if doc["kind"] == "CronJob" and "data-protection" in doc["metadata"]["name"])
+    cron = next(doc for doc in docs if doc["kind"] == "CronJob" and doc["metadata"]["name"].startswith("observability-staging-eu1-signoz-data"))
     name = cron["metadata"]["name"]
-    assert len(name) <= 52 and not name.endswith("-"), name
+    assert len(name) <= 52 and name.endswith("-backup"), name
     labels = cron["spec"]["jobTemplate"]["spec"]["template"]["metadata"]["labels"]
     assert labels["app"] == name, labels
 
@@ -349,6 +350,42 @@ def assert_name_override_findings() -> None:
     assert statefulset_claims(docs, "caritas-postgresql") == ["caritas-pgdata"]
 
 
+def render_with_pending_volume(*overlays: str, release: str) -> list[dict[str, Any]]:
+    # Offline, lookup finds no volumes and the retain hook renders nothing; a chart copy pretends one is pending.
+    template = "templates/signoz/signoz-data-protection.yaml"
+    with tempfile.TemporaryDirectory() as tmp:
+        chart = os.path.join(tmp, "chart")
+        shutil.copytree(CHART_DIR, chart, ignore=shutil.ignore_patterns(".git"))
+        path = os.path.join(chart, template)
+        with open(path, encoding="utf-8") as handle:
+            source = handle.read()
+        marker = "{{- $pending := list -}}"
+        assert source.count(marker) == 1
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(source.replace(marker, '{{- $pending := list "pv-test" -}}'))
+        return render(*overlays, release=release, chart=chart)
+
+
+def assert_retain_hook_and_tolerations() -> None:
+    # A 34+ character release name must keep the retain Job and its pod label within 63 characters.
+    docs = render_with_pending_volume("values-dev.yaml", release="observability-staging-eu1-cluster-a")
+    job = next(doc for doc in docs if doc["kind"] == "Job" and "retain" in doc["metadata"]["name"])
+    name = job["metadata"]["name"]
+    assert len(name) <= 63 and name.endswith("-retain"), name
+    assert job["spec"]["template"]["metadata"]["labels"]["app"] == name
+    accounts = {doc["metadata"]["name"] for doc in docs if doc["kind"] == "ServiceAccount"}
+    assert job["spec"]["template"]["spec"]["serviceAccountName"] in accounts
+    # The backup pod follows SigNoz onto a tainted node, so it carries SigNoz's tolerations.
+    toleration = {"key": "dedicated", "operator": "Equal", "value": "observability", "effect": "NoSchedule"}
+    docs = render_dev_with({"signoz": {"signoz": {"tolerations": [toleration]}}})
+    cron = next(doc for kind, doc in docs.items() if kind[0] == "CronJob" and "data-protection" in kind[1])
+    assert cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]["tolerations"] == [toleration]
+    signoz = docs[("StatefulSet", "caritas-signoz")]
+    assert signoz["spec"]["template"]["spec"]["tolerations"] == [toleration]
+    cron = next(doc for kind, doc in render_dev_with({}).items() if kind[0] == "CronJob" and "data-protection" in kind[1])
+    assert "tolerations" not in cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+
+
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
@@ -357,6 +394,7 @@ def main() -> None:
     assert_backup_is_atomic()
     assert_long_release_name()
     assert_name_override_findings()
+    assert_retain_hook_and_tolerations()
     print("PASS: SigNoz on Dev keeps its data, bounds the collector, and labels every signal")
 
 

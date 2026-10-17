@@ -19,7 +19,9 @@ reclaims with Delete, so users, API keys and dashboards were lost.
 {{- if and (get $signoz "enabled" | default false) (get $dp "enabled" | default false) -}}
 {{- $name := printf "%s-signoz-data-protection" .Release.Name -}}
 {{- /* CronJob names may have 52 characters: the controller appends 11 for each Job. */ -}}
-{{- $cronName := printf "%s-backup" $name | trunc 52 | trimSuffix "-" -}}
+{{- $cronName := printf "%s-backup" ($name | trunc 45 | trimSuffix "-") -}}
+{{- /* Job names and label values may have 63 characters; the suffix stays readable. */ -}}
+{{- $retainName := printf "%s-retain" ($name | trunc 56 | trimSuffix "-") -}}
 {{- /* The StatefulSet names, with the override rules of the vendored charts (signoz.fullname, common.names.fullname). */ -}}
 {{- $signozName := get $signoz "nameOverride" | default "signoz" -}}
 {{- $signozSts := get $signoz "fullnameOverride" | default (contains $signozName .Release.Name | ternary .Release.Name (printf "%s-%s" .Release.Name $signozName)) | trunc 63 | trimSuffix "-" -}}
@@ -154,7 +156,7 @@ data:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ $name }}-retain
+  name: {{ $retainName }}
   namespace: {{ .Release.Namespace }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
@@ -191,13 +193,13 @@ roleRef:
   name: {{ printf "%s-retain-%s" $name .Release.Namespace }}
 subjects:
   - kind: ServiceAccount
-    name: {{ $name }}-retain
+    name: {{ $retainName }}
     namespace: {{ .Release.Namespace }}
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ $name }}-retain
+  name: {{ $retainName }}
   namespace: {{ .Release.Namespace }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
@@ -209,10 +211,10 @@ spec:
   template:
     metadata:
       labels:
-        app: {{ $name }}-retain
+        app: {{ $retainName }}
     spec:
       restartPolicy: Never
-      serviceAccountName: {{ $name }}-retain
+      serviceAccountName: {{ $retainName }}
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
@@ -298,6 +300,11 @@ spec:
                     matchLabels:
                       app.kubernetes.io/component: {{ get $signozValues "name" | default "signoz" }}
                       app.kubernetes.io/instance: {{ .Release.Name }}
+          {{- /* The affinity puts the pod on the SigNoz node, so it needs the taints SigNoz tolerates there. */}}
+          {{- with get $signozValues "tolerations" }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           # signoz.db and its WAL belong to root, like the SigNoz container.
           securityContext:
             runAsUser: 0
