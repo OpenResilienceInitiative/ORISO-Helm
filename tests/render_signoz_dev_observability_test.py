@@ -15,8 +15,8 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JAVA_SERVICES = ("userservice", "agencyservice", "tenantservice", "consultingtypeservice")
 
 
-def render(*overlays: str) -> list[dict[str, Any]]:
-    command = ["helm", "template", "caritas", CHART_DIR, "--namespace", "caritas"]
+def render(*overlays: str, release: str = "caritas") -> list[dict[str, Any]]:
+    command = ["helm", "template", release, CHART_DIR, "--namespace", "caritas"]
     for values in (
         "values.yaml.default",
         "tests/fixtures/values-render-domain.yaml",
@@ -295,12 +295,23 @@ def assert_backup_is_atomic() -> None:
         assert sqlite3.connect(restored).execute("select name from users").fetchall() == [("admin",)]
 
 
+def assert_long_release_name() -> None:
+    # A 23+ character release name must not push the CronJob past 52 characters.
+    docs = render("values-dev.yaml", release="observability-staging-eu1")
+    cron = next(doc for doc in docs if doc["kind"] == "CronJob" and "data-protection" in doc["metadata"]["name"])
+    name = cron["metadata"]["name"]
+    assert len(name) <= 52 and not name.endswith("-"), name
+    labels = cron["spec"]["jobTemplate"]["spec"]["template"]["metadata"]["labels"]
+    assert labels["app"] == name, labels
+
+
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
     assert_review_findings()
     assert_second_review_findings()
     assert_backup_is_atomic()
+    assert_long_release_name()
     print("PASS: SigNoz on Dev keeps its data, bounds the collector, and labels every signal")
 
 

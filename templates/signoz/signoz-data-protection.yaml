@@ -18,6 +18,8 @@ reclaims with Delete, so users, API keys and dashboards were lost.
 {{- $dp := get $signoz "orisoDataProtection" | default dict -}}
 {{- if and (get $signoz "enabled" | default false) (get $dp "enabled" | default false) -}}
 {{- $name := printf "%s-signoz-data-protection" .Release.Name -}}
+{{- /* CronJob names may have 52 characters: the controller appends 11 for each Job. */ -}}
+{{- $cronName := printf "%s-backup" $name | trunc 52 | trimSuffix "-" -}}
 {{- $signozSts := include "oriso.signozServiceName" . -}}
 {{- $chName := include "oriso.signozClickhouseFullname" . -}}
 {{- /* The claim holding signoz.db, derived like the SigNoz chart's StatefulSet; none with PostgreSQL or without persistence. */ -}}
@@ -248,7 +250,7 @@ spec:
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: {{ $name }}-backup
+  name: {{ $cronName }}
   namespace: {{ .Release.Namespace }}
 spec:
   schedule: {{ get $backup "schedule" | default "30 2 * * *" | quote }}
@@ -263,7 +265,7 @@ spec:
       template:
         metadata:
           labels:
-            app: {{ $name }}-backup
+            app: {{ $cronName }}
         spec:
           restartPolicy: Never
           automountServiceAccountToken: false
