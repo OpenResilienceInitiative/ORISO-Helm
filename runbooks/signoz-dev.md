@@ -29,21 +29,17 @@ ssh dev-server
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 cd /root/ORISO-Helm && git fetch origin && git checkout <merged dev commit>
 python3 scripts/observability_overlay.py values-dev.yaml > /root/observability-dev.yaml
-helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
-  --dry-run=server > /root/observability-dry.out   # read the diff first
-helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
-  --wait --wait-for-jobs --timeout 15m
 ```
 
-The command does not use `--reuse-values` on purpose: the chart directory's
+The upgrade below does not use `--reuse-values` on purpose: the chart directory's
 own `values.yaml` carries the live settings, and the release's user-supplied
 values are exactly `secrets.yaml` (checked on revision 41, 2026-10-17). If a
 later revision was upgraded with extra `-f` files, pass them too. Without them,
 their settings fall back to `values.yaml`.
 
-Before the upgrade, this lists every user-supplied value path that
+So, right before the upgrade, list every user-supplied value path that
 `secrets.yaml` either lacks or sets to a different value. It compares values
-without printing them. The expected output is `0`:
+without printing them:
 
 ```bash
 helm get values caritas -n caritas -o json | python3 -c '
@@ -55,7 +51,19 @@ def leaves(d, p=""):
     return out
 live, file = leaves(json.load(sys.stdin)), leaves(yaml.safe_load(open("secrets.yaml")))
 drift = sorted(p for p in live if p not in file or live[p] != file[p])
-print(len(drift), *drift, sep="\n")'
+print(len(drift), *drift, sep="\n")' | tee /root/observability-drift.out
+```
+
+Stop unless the first line is `0`; otherwise add the listed paths' files with
+`-f` first. The upgrade commands check it themselves:
+
+```bash
+test "$(head -n 1 /root/observability-drift.out)" = 0 && \
+helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
+  --dry-run=server > /root/observability-dry.out   # read the diff first
+test "$(head -n 1 /root/observability-drift.out)" = 0 && \
+helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
+  --wait --wait-for-jobs --timeout 15m
 ```
 
 The first rollout restarts Keycloak, Synapse (`Recreate`, a short Matrix gap),
