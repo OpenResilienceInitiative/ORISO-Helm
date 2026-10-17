@@ -61,6 +61,11 @@ print(len(drift), *drift, sep="\n")'
 The first rollout restarts Keycloak, Synapse (`Recreate`, a short Matrix gap),
 Redis, the four Java services, Frontend and Admin. Announce it.
 
+The retain hook only sees volumes that exist when Helm renders. After an
+upgrade that adds ClickHouse shards or replicas, ZooKeeper or PostgreSQL
+members, run the same `helm upgrade` once more, so the new volumes are switched
+to `Retain` too.
+
 ## Proof
 
 ClickHouse, from the Dev master (heredoc, because quoting over ssh breaks):
