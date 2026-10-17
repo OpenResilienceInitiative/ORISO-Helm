@@ -262,8 +262,13 @@ spec:
 {{- end }}
 {{- if and (get $backup "enabled" | default false) $sqliteClaim }}
 {{- /* The backup claim uses the class of the SigNoz claim (global first, "-" = none, as in the
-SigNoz chart); a bound claim keeps its class, which Kubernetes does not allow to change. */ -}}
+SigNoz chart), else the class the SQLite claim really has (an existingClaim may carry one without
+any configured); a bound backup claim keeps its class, which Kubernetes does not allow to change. */ -}}
 {{- $backupClass := get (get .Values "global" | default dict) "storageClass" | default (get $persistence "storageClass") | default "" -}}
+{{- if not $backupClass -}}
+{{- $sourceClaim := lookup "v1" "PersistentVolumeClaim" .Release.Namespace $sqliteClaim -}}
+{{- $backupClass = dig "spec" "storageClassName" "" $sourceClaim -}}
+{{- end -}}
 {{- $existingBackup := lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "%s-backup" $name) -}}
 {{- if $existingBackup -}}
 {{- $backupClass = dig "spec" "storageClassName" "" $existingBackup -}}

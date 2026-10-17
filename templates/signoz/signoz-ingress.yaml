@@ -90,5 +90,5 @@ spec:
               service:
                 name: {{ include "oriso.signozOtelCollectorServiceName" . }}
                 port:
-                  number: 4319
+                  number: {{ dig "otelCollector" "ports" "otlp-rum" "servicePort" 4319 (get .Values "signoz" | default dict) }}
 {{- end }}

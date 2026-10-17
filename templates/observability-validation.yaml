@@ -27,6 +27,9 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- fail "global.observability.webVitals.enabled=true requires signoz.enabled=true: the browser metrics go to the bundled SigNoz collector through the RUM ingress" -}}
 {{- end -}}
 {{- if and $signozEnabled (get $webVitals "enabled" | default false) -}}
+{{- if not (dig "otelCollector" "ports" "otlp-rum" "enabled" false $signoz) -}}
+{{- fail "global.observability.webVitals.enabled=true requires signoz.otelCollector.ports.otlp-rum.enabled=true: the RUM ingress sends browser metrics to that collector port" -}}
+{{- end -}}
 {{- $collectorEnvs := get (get $signoz "otelCollector" | default dict) "additionalEnvs" | default dict -}}
 {{- $environment := get (get .Values.global "observability" | default dict) "deploymentEnvironment" | default "" -}}
 {{- if ne (get $collectorEnvs "ORISO_DEPLOYMENT_ENVIRONMENT" | default "") $environment -}}

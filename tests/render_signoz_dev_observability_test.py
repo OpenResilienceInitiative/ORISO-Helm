@@ -449,6 +449,29 @@ def assert_sqlite_replicas() -> None:
     assert retain_claims(docs)[0] == "caritas/shared-db" and "caritas/shared-db" not in retain_claims(docs)[1:]
 
 
+def assert_rum_port_and_source_class() -> None:
+    # The RUM ingress needs the collector's RUM port and targets the port the Service really exposes.
+    error = render_dev_fails({"signoz": {"otelCollector": {"ports": {"otlp-rum": {"enabled": False}}}}})
+    assert "requires signoz.otelCollector.ports.otlp-rum.enabled=true" in error, error
+    docs = render_dev_with({"signoz": {"otelCollector": {"ports": {"otlp-rum": {"servicePort": 4400}}}}})
+    ingress = next(doc for kind, doc in docs.items() if kind[0] == "Ingress" and "rum" in kind[1])
+    backend = ingress["spec"]["rules"][0]["http"]["paths"][0]["backend"]["service"]
+    ports = docs[("Service", backend["name"])]["spec"]["ports"]
+    assert backend["port"]["number"] in [port["port"] for port in ports if port["name"] == "otlp-rum"], (backend, ports)
+    # With no class configured, the backup claim takes the class the SQLite claim really has.
+    marker = '{{- $sourceClaim := lookup "v1" "PersistentVolumeClaim" .Release.Namespace $sqliteClaim -}}'
+    state = '{{- $sourceClaim := dict "spec" (dict "storageClassName" "pre-provisioned") -}}'
+    docs = by_key(render_with_cluster_state("values-dev.yaml", release="caritas", replace={marker: state}))
+    assert backup_claim_class(docs) == "pre-provisioned"
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+        yaml.safe_dump({"global": {"storageClass": "fast"}}, handle)
+    try:
+        docs = by_key(render_with_cluster_state("values-dev.yaml", handle.name, release="caritas", replace={marker: state}))
+    finally:
+        os.unlink(handle.name)
+    assert backup_claim_class(docs) == "fast", "a configured class wins"
+
+
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
@@ -461,6 +484,7 @@ def main() -> None:
     assert_backup_storage_class()
     assert_web_vitals_need_signoz()
     assert_sqlite_replicas()
+    assert_rum_port_and_source_class()
     print("PASS: SigNoz on Dev keeps its data, bounds the collector, and labels every signal")
 
 
