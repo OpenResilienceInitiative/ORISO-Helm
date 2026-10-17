@@ -20,7 +20,9 @@ reclaims with Delete, so users, API keys and dashboards were lost.
 {{- $name := printf "%s-signoz-data-protection" .Release.Name -}}
 {{- /* CronJob names may have 52 characters: the controller appends 11 for each Job. */ -}}
 {{- $cronName := printf "%s-backup" $name | trunc 52 | trimSuffix "-" -}}
-{{- $signozSts := include "oriso.signozServiceName" . -}}
+{{- /* The StatefulSet names, with the override rules of the vendored charts (signoz.fullname, common.names.fullname). */ -}}
+{{- $signozName := get $signoz "nameOverride" | default "signoz" -}}
+{{- $signozSts := get $signoz "fullnameOverride" | default (contains $signozName .Release.Name | ternary .Release.Name (printf "%s-%s" .Release.Name $signozName)) | trunc 63 | trimSuffix "-" -}}
 {{- $chName := include "oriso.signozClickhouseFullname" . -}}
 {{- /* The claim holding signoz.db, derived like the SigNoz chart's StatefulSet; none with PostgreSQL or without persistence. */ -}}
 {{- $signozValues := get $signoz "signoz" | default dict -}}
@@ -42,6 +44,10 @@ each chart uses; existingClaim wins, none without persistence. */ -}}
 {{- $zkPersistence := get $zookeeper "persistence" | default dict -}}
 {{- $chNamespace := get $clickhouse "namespace" | default .Release.Namespace -}}
 {{- $zkNamespace := get $zookeeper "namespaceOverride" | default .Release.Namespace -}}
+{{- $zkName := get $zookeeper "nameOverride" | default "zookeeper" -}}
+{{- $zkFullname := get $zookeeper "fullnameOverride" | default (contains $zkName .Release.Name | ternary .Release.Name (printf "%s-%s" .Release.Name $zkName)) | trunc 63 | trimSuffix "-" -}}
+{{- /* PostgreSQL and ZooKeeper render existingClaim with tpl in their own chart context; do the same. */ -}}
+{{- $zkRoot := dict "Values" $zookeeper "Release" .Release "Chart" (dict "Name" "zookeeper") "Capabilities" .Capabilities "Template" .Template -}}
 {{- $layout := get $clickhouse "layout" | default dict -}}
 {{- $defaultClaims := list -}}
 {{- if $sqliteClaim -}}
@@ -52,7 +58,8 @@ each chart uses; existingClaim wins, none without persistence. */ -}}
 {{- $pgPersistence := get $postgres "persistence" | default dict -}}
 {{- if and (get $postgres "enabled") (hasKey $pgPersistence "enabled" | ternary (get $pgPersistence "enabled") true) -}}
 {{- if get $pgPersistence "existingClaim" -}}
-{{- $defaultClaims = append $defaultClaims (printf "%s/%s" .Release.Namespace (get $pgPersistence "existingClaim")) -}}
+{{- $pgRoot := dict "Values" $postgres "Release" .Release "Chart" (dict "Name" "postgresql") "Capabilities" .Capabilities "Template" .Template -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" .Release.Namespace (tpl (get $pgPersistence "existingClaim") $pgRoot)) -}}
 {{- else -}}
 {{- $pgName := get $postgres "nameOverride" | default "postgresql" -}}
 {{- $pgFullname := get $postgres "fullnameOverride" | default (contains $pgName .Release.Name | ternary .Release.Name (printf "%s-%s" .Release.Name $pgName)) | trunc 63 | trimSuffix "-" -}}
@@ -72,19 +79,19 @@ each chart uses; existingClaim wins, none without persistence. */ -}}
 {{- end -}}
 {{- if (hasKey $zkPersistence "enabled" | ternary (get $zkPersistence "enabled") true) -}}
 {{- if get $zkPersistence "existingClaim" -}}
-{{- $defaultClaims = append $defaultClaims (printf "%s/%s" $zkNamespace (get $zkPersistence "existingClaim")) -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" $zkNamespace (tpl (get $zkPersistence "existingClaim") $zkRoot)) -}}
 {{- else -}}
 {{- range $member := until (int (get $zookeeper "replicaCount" | default 1)) -}}
-{{- $defaultClaims = append $defaultClaims (printf "%s/data-%s-zookeeper-%d" $zkNamespace $.Release.Name $member) -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/data-%s-%d" $zkNamespace $zkFullname $member) -}}
 {{- end -}}
 {{- end -}}
 {{- /* The dedicated transaction log, when ZooKeeper has one. */ -}}
 {{- $zkLog := get $zkPersistence "dataLogDir" | default dict -}}
 {{- if get $zkLog "existingClaim" -}}
-{{- $defaultClaims = append $defaultClaims (printf "%s/%s" $zkNamespace (get $zkLog "existingClaim")) -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" $zkNamespace (tpl (get $zkLog "existingClaim") $zkRoot)) -}}
 {{- else if get $zookeeper "dataLogDir" -}}
 {{- range $member := until (int (get $zookeeper "replicaCount" | default 1)) -}}
-{{- $defaultClaims = append $defaultClaims (printf "%s/data-log-%s-zookeeper-%d" $zkNamespace $.Release.Name $member) -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/data-log-%s-%d" $zkNamespace $zkFullname $member) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

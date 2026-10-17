@@ -315,6 +315,40 @@ def assert_long_release_name() -> None:
     assert labels["app"] == name, labels
 
 
+def statefulset_claims(docs: dict[tuple[str, str], dict[str, Any]], name: str) -> list[str]:
+    # The claims a rendered StatefulSet mounts: its own volumes and its templates' claims for member 0.
+    workload = docs[("StatefulSet", name)]
+    pod = workload["spec"]["template"]["spec"]
+    mounted = [v["persistentVolumeClaim"]["claimName"] for v in pod.get("volumes", []) if "persistentVolumeClaim" in v]
+    templated = [f"{t['metadata']['name']}-{name}-0" for t in workload["spec"].get("volumeClaimTemplates", [])]
+    return mounted + templated
+
+
+def assert_name_override_findings() -> None:
+    # The retain hook derives every claim like the vendored StatefulSets, overrides and tpl included.
+    docs = render_dev_with({"signoz": {"fullnameOverride": "telemetry", "clickhouse": {"zookeeper": {
+        "fullnameOverride": "coord", "dataLogDir": "/bitnami/zookeeper/log"}}}})
+    claims = retain_claims(docs)
+    assert "caritas/signoz-db-telemetry-0" in claims, claims
+    assert statefulset_claims(docs, "telemetry") == ["signoz-db-telemetry-0"]
+    assert {"caritas/data-coord-0", "caritas/data-log-coord-0"} <= set(claims), claims
+    assert set(statefulset_claims(docs, "coord")) == {"data-coord-0", "data-log-coord-0"}
+    docs = render_dev_with({"signoz": {"nameOverride": "obs", "clickhouse": {"zookeeper": {"nameOverride": "zk"}}}})
+    claims = retain_claims(docs)
+    assert {"caritas/signoz-db-caritas-obs-0", "caritas/data-caritas-zk-0"} <= set(claims), claims
+    assert statefulset_claims(docs, "caritas-zk") == ["data-caritas-zk-0"]
+    docs = render_dev_with({"signoz": {
+        "postgresql": {"enabled": True, "persistence": {"existingClaim": "{{ .Release.Name }}-pgdata"}},
+        "clickhouse": {"zookeeper": {"persistence": {
+            "existingClaim": "{{ .Release.Name }}-zk", "dataLogDir": {"existingClaim": "{{ .Release.Name }}-zk-log"}}}},
+    }})
+    claims = retain_claims(docs)
+    assert {"caritas/caritas-pgdata", "caritas/caritas-zk", "caritas/caritas-zk-log"} <= set(claims), claims
+    assert not any("{{" in claim for claim in claims), claims
+    assert set(statefulset_claims(docs, "caritas-zookeeper")) == {"caritas-zk", "caritas-zk-log"}
+    assert statefulset_claims(docs, "caritas-postgresql") == ["caritas-pgdata"]
+
+
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
@@ -322,6 +356,7 @@ def main() -> None:
     assert_second_review_findings()
     assert_backup_is_atomic()
     assert_long_release_name()
+    assert_name_override_findings()
     print("PASS: SigNoz on Dev keeps its data, bounds the collector, and labels every signal")
 
 
