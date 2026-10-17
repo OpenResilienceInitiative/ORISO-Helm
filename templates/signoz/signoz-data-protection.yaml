@@ -20,7 +20,21 @@ reclaims with Delete, so users, API keys and dashboards were lost.
 {{- $name := printf "%s-signoz-data-protection" .Release.Name -}}
 {{- $signozSts := include "oriso.signozServiceName" . -}}
 {{- $chName := include "oriso.signozClickhouseFullname" . -}}
-{{- $defaultClaims := list (printf "signoz-db-%s-0" $signozSts) (printf "data-volumeclaim-template-chi-%s-cluster-0-0-0" $chName) (printf "data-%s-zookeeper-0" .Release.Name) -}}
+{{- /* The claim holding signoz.db, derived like the SigNoz chart's StatefulSet; none with PostgreSQL or without persistence. */ -}}
+{{- $signozValues := get $signoz "signoz" | default dict -}}
+{{- $persistence := get $signozValues "persistence" | default dict -}}
+{{- $sqliteClaim := "" -}}
+{{- if not (dig "postgresql" "enabled" false $signoz) -}}
+{{- if get $persistence "existingClaim" -}}
+{{- $sqliteClaim = get $persistence "existingClaim" -}}
+{{- else if (hasKey $persistence "enabled" | ternary (get $persistence "enabled") true) -}}
+{{- $sqliteClaim = printf "signoz-db-%s-0" $signozSts -}}
+{{- end -}}
+{{- end -}}
+{{- $defaultClaims := list (printf "data-volumeclaim-template-chi-%s-cluster-0-0-0" $chName) (printf "data-%s-zookeeper-0" .Release.Name) -}}
+{{- if $sqliteClaim -}}
+{{- $defaultClaims = prepend $defaultClaims $sqliteClaim -}}
+{{- end -}}
 {{- $claims := get $dp "claims" | default $defaultClaims -}}
 {{- $image := required "signoz.orisoDataProtection.image is required" (get $dp "image") -}}
 {{- $backup := get $dp "backup" | default dict -}}
@@ -164,7 +178,7 @@ spec:
             limits:
               memory: 64Mi
 {{- end }}
-{{- if get $backup "enabled" | default false }}
+{{- if and (get $backup "enabled" | default false) $sqliteClaim }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -247,7 +261,7 @@ spec:
                 name: {{ $name }}
             - name: signoz-db
               persistentVolumeClaim:
-                claimName: {{ printf "signoz-db-%s-0" $signozSts }}
+                claimName: {{ $sqliteClaim }}
             - name: backup
               persistentVolumeClaim:
                 claimName: {{ $name }}-backup

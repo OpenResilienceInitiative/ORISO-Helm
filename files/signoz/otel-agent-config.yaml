@@ -96,6 +96,18 @@ processors:
     - set(resource.attributes["service.name"], resource.attributes["k8s.statefulset.name"])
       where resource.attributes["service.name"] == nil and resource.attributes["k8s.statefulset.name"]
       != nil
+    - set(resource.attributes["service.name"], resource.attributes["k8s.cronjob.name"])
+      where resource.attributes["service.name"] == nil and resource.attributes["k8s.cronjob.name"]
+      != nil
+    - set(resource.attributes["service.name"], resource.attributes["k8s.job.name"])
+      where resource.attributes["service.name"] == nil and resource.attributes["k8s.job.name"]
+      != nil
+    - set(resource.attributes["service.name"], resource.attributes["k8s.daemonset.name"])
+      where resource.attributes["service.name"] == nil and resource.attributes["k8s.daemonset.name"]
+      != nil
+    - set(resource.attributes["service.name"], resource.attributes["k8s.pod.name"])
+      where resource.attributes["service.name"] == nil and resource.attributes["k8s.pod.name"]
+      != nil
     - set(log.body, "[ORISO log body suppressed by privacy policy]")
     - keep_keys(log.attributes, ["trace.id", "span.id", "log.level", "log.logger",
       "service.name"])

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 from typing import Any
 
 import yaml
@@ -133,9 +134,49 @@ def assert_default_off(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     assert frontend["REACT_APP_OTEL_METRICS_URL"] == "" and frontend["REACT_APP_OBSERVABILITY_ENABLED"] == "false"
 
 
+def render_dev_with(overlay: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
+        yaml.safe_dump(overlay, handle)
+    try:
+        return by_key(render("values-dev.yaml", handle.name))
+    finally:
+        os.unlink(handle.name)
+
+
+def backup_source(docs: dict[tuple[str, str], dict[str, Any]]) -> str | None:
+    cron = docs.get(("CronJob", "caritas-signoz-data-protection-backup"))
+    if cron is None:
+        return None
+    volumes = cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]["volumes"]
+    return {v["name"]: v.get("persistentVolumeClaim", {}).get("claimName") for v in volumes}["signoz-db"]
+
+
+def assert_review_findings() -> None:
+    # A numeric 0.0 must disable sampling, not fall back to Spring's default.
+    docs = render_dev_with({"global": {"observability": {"tracingSamplingProbability": 0.0}}})
+    for service in JAVA_SERVICES:
+        assert env(docs[("Deployment", service)])["MANAGEMENT_TRACING_SAMPLING_PROBABILITY"] == "0", service
+
+    # The backup reads the claim the SigNoz StatefulSet really mounts.
+    docs = render_dev_with({"signoz": {"signoz": {"persistence": {"existingClaim": "own-signoz-db"}}}})
+    assert backup_source(docs) == "own-signoz-db"
+    docs = render_dev_with({"signoz": {"signoz": {"persistence": {"enabled": False}}}})
+    assert backup_source(docs) is None, "no SQLite claim, no backup"
+
+    # Plain-text logs of Jobs, CronJobs, DaemonSets and bare Pods get a service name too.
+    agent = [doc for (kind, _), doc in render_dev_with({}).items()
+             if kind == "ConfigMap" and "privacy policy" in str(doc.get("data", {}))]
+    assert agent, "agent config not rendered"
+    config = str(agent[0]["data"])
+    for attribute in ("k8s.cronjob.name", "k8s.job.name", "k8s.daemonset.name", "k8s.pod.name"):
+        assert f'set(resource.attributes["service.name"], resource.attributes["{attribute}"])' in config, attribute
+    assert config.index("k8s.cronjob.name\"])") < config.index("k8s.job.name\"])"), "CronJob name before the generated Job name"
+
+
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
+    assert_review_findings()
     print("PASS: SigNoz on Dev keeps its data, bounds the collector, and labels every signal")
 
 

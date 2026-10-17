@@ -464,9 +464,11 @@ sampling env var binds to management.tracing.sampling.probability.
 {{- end }}
 - name: OTEL_RESOURCE_ATTRIBUTES
   value: {{ printf "deployment.environment=%s,service.version=%s" (get $o "deploymentEnvironment" | default "unknown") $version | quote }}
-{{- with get $o "tracingSamplingProbability" }}
+{{- /* toString, not `with`: a numeric 0.0 must still disable sampling. */ -}}
+{{- $sampling := get $o "tracingSamplingProbability" -}}
+{{- if and (hasKey $o "tracingSamplingProbability") (ne (toString $sampling) "") (ne (toString $sampling) "<nil>") }}
 - name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
-  value: {{ . | toString | quote }}
+  value: {{ $sampling | toString | quote }}
 {{- end }}
 {{- end -}}
 {{- end -}}
