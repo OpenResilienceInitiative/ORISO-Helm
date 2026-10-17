@@ -26,15 +26,21 @@ reclaims with Delete, so users, API keys and dashboards were lost.
 {{- $signozName := get $signoz "nameOverride" | default "signoz" -}}
 {{- $signozSts := get $signoz "fullnameOverride" | default (contains $signozName .Release.Name | ternary .Release.Name (printf "%s-%s" .Release.Name $signozName)) | trunc 63 | trimSuffix "-" -}}
 {{- $chName := include "oriso.signozClickhouseFullname" . -}}
-{{- /* The claim holding signoz.db, derived like the SigNoz chart's StatefulSet; none with PostgreSQL or without persistence. */ -}}
+{{- /* The claims holding signoz.db, derived like the SigNoz chart's StatefulSet: one per replica, or the
+shared existingClaim; none with PostgreSQL or without persistence. The backup copies ordinal 0's. */ -}}
 {{- $signozValues := get $signoz "signoz" | default dict -}}
 {{- $persistence := get $signozValues "persistence" | default dict -}}
 {{- $sqliteClaim := "" -}}
+{{- $sqliteClaims := list -}}
 {{- if not (dig "postgresql" "enabled" false $signoz) -}}
 {{- if get $persistence "existingClaim" -}}
 {{- $sqliteClaim = get $persistence "existingClaim" -}}
+{{- $sqliteClaims = list $sqliteClaim -}}
 {{- else if (hasKey $persistence "enabled" | ternary (get $persistence "enabled") true) -}}
 {{- $sqliteClaim = printf "signoz-db-%s-0" $signozSts -}}
+{{- range $member := until (int (get $signozValues "replicaCount" | default 1)) -}}
+{{- $sqliteClaims = append $sqliteClaims (printf "signoz-db-%s-%d" $signozSts $member) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- /* All claims as <namespace>/<claim>, derived like the vendored charts: every
@@ -52,8 +58,8 @@ each chart uses; existingClaim wins, none without persistence. */ -}}
 {{- $zkRoot := dict "Values" $zookeeper "Release" .Release "Chart" (dict "Name" "zookeeper") "Capabilities" .Capabilities "Template" .Template -}}
 {{- $layout := get $clickhouse "layout" | default dict -}}
 {{- $defaultClaims := list -}}
-{{- if $sqliteClaim -}}
-{{- $defaultClaims = append $defaultClaims (printf "%s/%s" .Release.Namespace $sqliteClaim) -}}
+{{- range $claim := $sqliteClaims -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" $.Release.Namespace $claim) -}}
 {{- end -}}
 {{- /* SigNoz on PostgreSQL keeps users, dashboards and alerts there instead of signoz.db. */ -}}
 {{- $postgres := get $signoz "postgresql" | default dict -}}
@@ -312,6 +318,8 @@ spec:
                     matchLabels:
                       app.kubernetes.io/component: {{ get $signozValues "name" | default "signoz" }}
                       app.kubernetes.io/instance: {{ .Release.Name }}
+                      # The pod that has ordinal 0's ReadWriteOnce claim attached.
+                      statefulset.kubernetes.io/pod-name: {{ printf "%s-0" $signozSts }}
           {{- /* The affinity puts the pod on the SigNoz node, so it needs the taints SigNoz tolerates there. */}}
           {{- with get $signozValues "tolerations" }}
           tolerations:

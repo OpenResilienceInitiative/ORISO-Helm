@@ -433,6 +433,22 @@ def assert_web_vitals_need_signoz() -> None:
         os.unlink(handle.name)
 
 
+def assert_sqlite_replicas() -> None:
+    # Every SigNoz replica's SQLite claim is retained; the backup mounts ordinal 0's and runs beside that pod.
+    docs = render_dev_with({"signoz": {"signoz": {"replicaCount": 3}}})
+    claims = retain_claims(docs)
+    assert claims[:3] == [f"caritas/signoz-db-caritas-signoz-{n}" for n in range(3)], claims
+    assert docs[("StatefulSet", "caritas-signoz")]["spec"]["replicas"] == 3
+    cron = docs[("CronJob", "caritas-signoz-data-protection-backup")]
+    pod = cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+    selector = pod["affinity"]["podAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][0]["labelSelector"]
+    assert selector["matchLabels"]["statefulset.kubernetes.io/pod-name"] == "caritas-signoz-0", selector
+    mounted = [v["persistentVolumeClaim"]["claimName"] for v in pod["volumes"] if "persistentVolumeClaim" in v]
+    assert "signoz-db-caritas-signoz-0" in mounted, mounted
+    docs = render_dev_with({"signoz": {"signoz": {"replicaCount": 2, "persistence": {"existingClaim": "shared-db"}}}})
+    assert retain_claims(docs)[0] == "caritas/shared-db" and "caritas/shared-db" not in retain_claims(docs)[1:]
+
+
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
@@ -444,6 +460,7 @@ def main() -> None:
     assert_retain_hook_and_tolerations()
     assert_backup_storage_class()
     assert_web_vitals_need_signoz()
+    assert_sqlite_replicas()
     print("PASS: SigNoz on Dev keeps its data, bounds the collector, and labels every signal")
 
 
