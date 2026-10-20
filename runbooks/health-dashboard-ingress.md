@@ -40,7 +40,7 @@ secret-management process:
   `auth` key in the effective ingress namespace.
 - Set `healthDashboard.ingress.htpasswd` to the nginx-compatible htpasswd entry
   in private, gitignored `secrets.yaml`. Load it after the environment overlay
-  (`-f values.yaml -f values-pre-dev.yaml -f secrets.yaml`) so Helm renders the
+  (`-f values.yaml -f values-dev.yaml -f values-pre-dev.yaml -f secrets.yaml`) so Helm renders the
   named Secret in the effective ingress namespace during the same upgrade.
 
 Do not put credentials or htpasswd data in tracked values, Git, logs or review

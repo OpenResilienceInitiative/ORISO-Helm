@@ -1,104 +1,63 @@
-# Pre-Dev overlay for the ORISO chart.
+# Pre-Dev overlay for the ORISO chart. Load it AFTER values-dev.yaml.
 #
-# Pre-Dev is the team's test environment and has to behave like Dev. This file is a
-# FULL copy of values-dev.yaml with only what is genuinely Pre-Dev's own changed:
-# host and URLs, Matrix identity, SigNoz, SMTP identity, no chart-managed Storybook,
-# no dummy data, and the closed mail-locale gate required by the repo tests.
-# Helm has no include, so a value added to values-dev.yaml must be added here too.
+# Pre-Dev is the team's test environment and has to behave like Dev. This file holds
+# ONLY what is Pre-Dev's own; everything else comes from values-dev.yaml, so a setting
+# added to Dev reaches Pre-Dev on the next upgrade without editing this file.
 #
-# Apply it INSTEAD of values-dev.yaml:
 #   helm upgrade --install caritas ./ -n caritas --create-namespace \
-#     -f values.yaml -f values-pre-dev.yaml -f secrets.yaml
+#     -f values.yaml -f values-dev.yaml -f values-pre-dev.yaml -f secrets.yaml
+#
+# Deliberate deltas from Dev: host and public URLs, Matrix identity, SigNoz labels,
+# no chart-managed Storybook, no dummy data, the closed mail-locale gate required by
+# tests/render_pending_mail_locale_optin_test.py, and the Spring profile (see below).
 
 global:
-  # Existing ORISO Pre-Dev product identity. The operator must separately supply
-  # global.emailLegalOrganisationName before this chart can be deployed.
-  emailBrandingName: "ORISO"
   # Public host of the Pre-Dev environment (main-ingress serves App, /admin, /auth
   # and /_matrix on it). Every public URL and mail link derives from it.
   domainName: "predev.oriso.org"
   observability:
     deploymentEnvironment: "pre-dev"
-  # Deliberate delta from Dev: Pre-Dev keeps its existing database; do not seed dummy data.
+  # Pre-Dev keeps its existing database; do not seed dummy data.
   initializeDummyData: false
   matrix:
     matrixServerName: "predev.oriso.org"
 
-healthDashboard:
-  ingress:
-    enabled: true
-    # Before upgrading, provision this Secret with an nginx htpasswd `auth` key in
-    # healthDashboard.namespace (release namespace when unset), OR supply
-    # healthDashboard.ingress.htpasswd in private secrets.yaml (loaded last)
-    # so Helm creates it. See runbooks/health-dashboard-ingress.md.
-    authSecret: "health-dashboard-basic-auth"
+signoz:
+  signoz:
+    env:
+      # observability-validation.yaml requires it in sync with global.domainName.
+      signoz_global_external__url: "https://predev.oriso.org/signoz"
+  otelCollector:
+    additionalEnvs:
+      ORISO_DEPLOYMENT_ENVIRONMENT: "pre-dev"
+
+signozCollector:
+  clusterName: "oriso-predev"
 
 storybook:
-  # Deliberate delta from Dev: the two Pre-Dev Storybooks are deployed outside the chart.
+  # The two Pre-Dev Storybooks are deployed outside the chart (predev-sync).
   enabled: false
 
-# Spring "dev" profile for the backend services (verbose errors, dev wiring).
+# Spring profile: Pre-Dev runs "prod" today. Dev runs "dev" (verbose errors, dev
+# wiring). Pre-Dev is reachable from the internet, so switching to "dev" is a team
+# decision; to follow Dev, delete the three springProfilesActive lines below.
 agencyService:
-  springProfilesActive: "dev"
-  liquibaseContexts: "seed"
+  springProfilesActive: "prod"
 tenantService:
-  springProfilesActive: "dev"
-  liquibaseContexts: "seed"
-consultingTypeService:
-  liquibaseContexts: "seed"
+  springProfilesActive: "prod"
 userService:
-  springProfilesActive: "dev"
-  # Deliberate delta from Dev: tests/render_pending_mail_locale_optin_test.py requires the
-  # unreviewed-locale gate to stay closed in every environment except Dev.
+  springProfilesActive: "prod"
+  # tests/render_pending_mail_locale_optin_test.py requires the unreviewed-locale
+  # gate to stay closed in every environment except Dev.
   emailAllowUnreviewedLocales: false
-
-  # ADR-018 Global Support Access stays off here. Release 1 is exercised on Pre-Dev only; dev is
-  # the stable QA environment and must not gain a new privileged access path ahead of it.
-  supportAccess:
-    enabled: "false"
-  # OTP is enabled by default in dev to match the platform security posture.
-  # This is login posture only — not encryption.
-  otpAllowedForUsers: "true"
-  otpAllowedForConsultants: "true"
-  otpAllowedForSingleTenantAdmins: "true"
-  otpAllowedForTenantSuperAdmins: "true"
-  otpAllowedForRestrictedAgencyAdmins: "true"
-
-  # Confirmed against the live dev ingress: this environment serves the App at
-  # the host root and the Admin panel under /admin on the same host
-  # (main-ingress: predev.oriso.org/ -> frontend, predev.oriso.org/admin -> admin).
-  # UserService appends "/password-reset/confirm?token=…" to each base URL, so
-  # these produce https://predev.oriso.org/password-reset/confirm and
-  # https://predev.oriso.org/admin/password-reset/confirm.
-  # Leaving any of them unset makes the feature fail closed: password reset
-  # sends no email at all, Magic Link emails a broken link.
+  # UserService appends "/password-reset/confirm?token=…" to each base URL.
   magicLinkFrontendBaseUrl: "https://predev.oriso.org"
   passwordResetFrontendBaseUrl: "https://predev.oriso.org"
   passwordResetAdminFrontendBaseUrl: "https://predev.oriso.org/admin"
 
-  # SMTP transport for Magic Link and password-reset mail. The credentials
-  # belong in the persistent secret values, never in this file.
-  smtpHost: "mail.dreambau.com"
-  smtpPort: 587
-  smtpSecure: false
-  smtpFrom: "ORISO Platform <monty.burns@oriso.org>"
-
-# Matrix federation identity (ADR-005 canonical server_name). Fixed across
-# environments; values.yaml.default ships a placeholder ("your-server.local").
+# Matrix federation identity (ADR-005 canonical server_name).
 matrix:
   synapseServerName: "predev.oriso.org"
   matrixServerName: "predev.oriso.org"
 matrixrtcAuth:
   membershipReaderUserId: "@matrixrtc-auth:predev.oriso.org"
-
-# --- Pre-Dev deltas: SigNoz ---
-signoz:
-  enabled: true
-  signoz:
-    env:
-      # observability-validation.yaml requires it in sync with global.domainName.
-      signoz_global_external__url: "https://predev.oriso.org/signoz"
-
-signozCollector:
-  enabled: true
-  clusterName: "oriso-predev"
