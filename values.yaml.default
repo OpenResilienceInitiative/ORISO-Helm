@@ -582,11 +582,8 @@ signoz:
       schedule: "30 2 * * *"
       keep: 14
       size: 1Gi
-  # Collector hardening: drop data instead of being OOM-killed under load, and
-  # accept OTLP only (no ORISO component sends Jaeger or HTTP log formats).
-  # Browser Web Vitals arrive on their own receiver (otlp/rum, port 4319) and
-  # pipeline, which keeps only the known browser metrics from Frontend and
-  # Admin and replaces their resource attributes.
+  # Collector resources and exposed protocols. The ORISO collector policy lives
+  # in charts/signoz/files/oriso-otel-collector-policy.yaml.
   otelCollector:
     additionalEnvs:
       # Stamped onto browser metrics; must equal global.observability.deploymentEnvironment.
@@ -612,72 +609,6 @@ signoz:
         servicePort: 4319
         nodePort: ""
         protocol: TCP
-    config:
-      receivers:
-        jaeger: null
-        httplogreceiver/heroku: null
-        httplogreceiver/json: null
-        otlp/rum:
-          protocols:
-            http:
-              endpoint: 0.0.0.0:4319
-              max_request_body_size: 65536
-      processors:
-        memory_limiter:
-          check_interval: 1s
-          limit_percentage: 80
-          spike_limit_percentage: 20
-        filter/rum:
-          error_mode: ignore
-          metrics:
-            metric:
-              - 'not IsMatch(name, "^(lcp|cls|inp|ttfb|fcp|login_failure|chunk_load_failure|decryption_failure)$")'
-              - 'resource.attributes["service.name"] != "frontend" and resource.attributes["service.name"] != "admin"'
-        transform/rum:
-          error_mode: ignore
-          metric_statements:
-            - context: resource
-              statements:
-                - keep_keys(attributes, ["service.name"])
-                - set(attributes["deployment.environment"], "${env:ORISO_DEPLOYMENT_ENVIRONMENT}")
-                - set(attributes["oriso.signal.source"], "browser")
-            # Only the attributes Frontend and Admin record, and only values
-            # they can send: the receiver is public, so any other value
-            # becomes "other" and cannot grow the number of series. The page
-            # is cut to its section (/sessions, /admin/users). A new route or
-            # metric value shows as "other" until it is listed here.
-            - context: datapoint
-              statements:
-                - keep_keys(attributes, ["url.path_template", "outcome", "transport", "stage", "cause", "category"])
-                # Numbers and booleans would pass the string checks below unchanged.
-                - set(attributes["url.path_template"], "other") where attributes["url.path_template"] != nil and not IsString(attributes["url.path_template"])
-                - set(attributes["outcome"], "other") where attributes["outcome"] != nil and not IsString(attributes["outcome"])
-                - set(attributes["transport"], "other") where attributes["transport"] != nil and not IsString(attributes["transport"])
-                - set(attributes["stage"], "other") where attributes["stage"] != nil and not IsString(attributes["stage"])
-                - set(attributes["cause"], "other") where attributes["cause"] != nil and not IsString(attributes["cause"])
-                - set(attributes["category"], "other") where attributes["category"] != nil and not IsString(attributes["category"])
-                - truncate_all(attributes, 120)
-                - replace_pattern(attributes["url.path_template"], "^(/admin/[^/]*|/[^/]*).*$", "$$1")
-                - set(attributes["url.path_template"], "other") where attributes["url.path_template"] != nil and not IsMatch(attributes["url.path_template"], "^/(|sessions|registration|profile|groups|notifications|login|booking|invite|drafts|dpa-sign|password-reset|account-invite|tools|themen|overview|calendar|admin|admin/(users|agency|agencies|login|tenants|theme-settings|links|logs|access-denied|settings|tenant-onboarding|password-reset|topics|statistic|statistics|profil|profile|counsellor-onboarding|global-settings|dashboard|consultants))$")
-                - set(attributes["outcome"], "other") where attributes["outcome"] != nil and not IsMatch(attributes["outcome"], "^(credentials|otp_required|account_disabled|setup_incomplete|rate_limited|unavailable|retry|reload|gave_up|transient_resolved|permanent)$")
-                - set(attributes["transport"], "other") where attributes["transport"] != nil and not IsMatch(attributes["transport"], "^(bad_request|unauthorized|network|unexpected)$")
-                - set(attributes["stage"], "other") where attributes["stage"] != nil and not IsMatch(attributes["stage"], "^(password|otp)$")
-                - set(attributes["cause"], "other") where attributes["cause"] != nil and not IsMatch(attributes["cause"], "^(MEGOLM_UNKNOWN_INBOUND_SESSION_ID|MEGOLM_KEY_WITHHELD|MEGOLM_KEY_WITHHELD_FOR_UNVERIFIED_DEVICE|OLM_UNKNOWN_MESSAGE_INDEX|HISTORICAL_MESSAGE_NO_KEY_BACKUP|HISTORICAL_MESSAGE_BACKUP_UNCONFIGURED|HISTORICAL_MESSAGE_WORKING_BACKUP|HISTORICAL_MESSAGE_USER_NOT_JOINED|SENDER_IDENTITY_PREVIOUSLY_VERIFIED|UNSIGNED_SENDER_DEVICE|UNKNOWN_SENDER_DEVICE|UNKNOWN_ERROR)$")
-                - set(attributes["category"], "other") where attributes["category"] != nil and not IsMatch(attributes["category"], "^(withheld|bug)$")
-      service:
-        pipelines:
-          metrics/rum:
-            receivers: [otlp/rum]
-            processors: [memory_limiter, filter/rum, transform/rum, batch]
-            exporters: [metadataexporter, signozclickhousemetrics, signozmeter]
-          traces:
-            receivers: [otlp]
-            processors: [memory_limiter, signozspanmetrics/delta, batch]
-          metrics:
-            processors: [memory_limiter, batch]
-          logs:
-            receivers: [otlp]
-            processors: [memory_limiter, batch]
 
 # SigNoz collection agents — node DaemonSet (pod logs, host/kubelet metrics)
 # plus one cluster collector (workload objects, k8s events). Requires

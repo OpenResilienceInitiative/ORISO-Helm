@@ -6,6 +6,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from observability_overlay import CHART_DIR, overlay  # noqa: E402
@@ -30,10 +32,11 @@ class ObservabilityOverlayTest(unittest.TestCase):
         self.assertTrue(self.values["dbMonitoring"]["curlImage"].startswith("docker.io/curlimages/curl@sha256:"))
         self.assertTrue(self.values["signoz"]["orisoDataProtection"]["enabled"])
 
-    def test_explicit_null_survives_to_delete_upstream_keys(self) -> None:
-        receivers = self.values["signoz"]["otelCollector"]["config"]["receivers"]
-        self.assertIn("jaeger", receivers)
-        self.assertIsNone(receivers["jaeger"])
+    def test_static_collector_policy_is_not_an_overlay_value(self) -> None:
+        self.assertNotIn("config", self.values["signoz"]["otelCollector"])
+        policy_path = CHART_DIR / "charts/signoz/files/oriso-otel-collector-policy.yaml"
+        policy = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+        self.assertIn("otlp/rum", policy["receivers"])
 
 
 if __name__ == "__main__":
