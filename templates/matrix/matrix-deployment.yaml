@@ -10,16 +10,20 @@ spec:
   selector:
     matchLabels:
       app: matrix-synapse
+  # matrix-synapse-data is ReadWriteOnce: a rolling update deadlocks with a
+  # Multi-Attach error when the new pod lands on another node, because the old
+  # pod keeps the volume until the new one is ready. Stop first, then start.
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 25%
-      maxUnavailable: 25%
+    type: Recreate
   template:
     metadata:
       labels:
         app: matrix-synapse
-    spec:       
+      {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
+      annotations:
+        {{- include "oriso.appMetrics.podAnnotations" (dict "job" "synapse" "port" 9000 "path" "/_synapse/metrics") | nindent 8 }}
+      {{- end }}
+    spec:
       initContainers:
         - name: fix-permissions
           image: {{ include "oriso.immutableImage" (list "matrix.initImage" .Values.matrix.initImage) | quote }}
@@ -60,6 +64,11 @@ spec:
             protocol: TCP
           - containerPort: 8009
             protocol: TCP
+          {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
+          - name: metrics
+            containerPort: 9000
+            protocol: TCP
+          {{- end }}
         livenessProbe:
           httpGet:
             path: /_matrix/client/versions
