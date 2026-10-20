@@ -5,14 +5,16 @@ metadata:
   namespace: {{ .Release.Namespace }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
+    # After keycloak-reconcile-service-identities (15) has ensured the smtp-sync client.
     "helm.sh/hook-weight": "16"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 3
+  # Pod retries cover Admin Settings or Keycloak still starting after install.
+  backoffLimit: 6
   activeDeadlineSeconds: 600
   template:
     metadata:
       labels:
         app: keycloak-reconcile-smtp-hook
     spec:
-      {{- include "oriso.keycloakSmtpReconcilePod" (dict "root" . "mode" "trigger") | nindent 6 }}
+      {{- include "oriso.keycloakSmtpReconcilePod" . | nindent 6 }}

@@ -7,6 +7,7 @@ global:
   secrets:
     keycloakBackendTechnicalClientSecret: "render-only-technical-client-secret-canary"
     keycloakBackendAdminClientSecret: "render-only-admin-client-secret-canary"
+    keycloakSmtpSyncClientSecret: "render-only-smtp-sync-client-secret-canary"
     liquibaseUser: render-only-not-a-real-secret
     liquibasePassword: render-only-not-a-real-secret
     rabbitmqUsername: render-only-not-a-real-secret

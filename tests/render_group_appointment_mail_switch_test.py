@@ -48,3 +48,8 @@ def test_group_appointment_mail_is_disabled_by_default_and_wired() -> None:
             "name": "userservice-configmap-env",
             "key": "GROUP_APPOINTMENT_MAIL_ENABLED",
         }
+
+
+if __name__ == "__main__":
+    test_group_appointment_mail_is_disabled_by_default_and_wired()
+    print("PASS: group appointment mail switch is opt-in and wired")
