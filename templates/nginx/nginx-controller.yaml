@@ -20,6 +20,10 @@ spec:
         app.kubernetes.io/name: ingress-nginx
         app.kubernetes.io/component: controller
         app.kubernetes.io/instance: ingress-nginx
+      {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
+      annotations:
+        {{- include "oriso.appMetrics.podAnnotations" (dict "job" "ingress-nginx" "port" 10254 "path" "/metrics") | nindent 8 }}
+      {{- end }}
     spec:
       serviceAccountName: ingress-nginx
       containers:
@@ -32,11 +36,20 @@ spec:
             - --controller-class=k8s.io/ingress-nginx
             - --publish-service=$(POD_NAMESPACE)/ingress-nginx
             - --configmap=$(POD_NAMESPACE)/ingress-nginx-controller
+            {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
+            # Per-ingress request counts, status codes and latency; labels carry the
+            # ingress path pattern, never the client IP or the request query string.
+            - --enable-metrics=true
+            {{- end }}
           ports:
             - name: http
               containerPort: 80
             - name: https
               containerPort: 443
+            {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
+            - name: metrics
+              containerPort: 10254
+            {{- end }}
           env:
             - name: POD_NAME
               valueFrom:

@@ -22,6 +22,16 @@ def storybook_resources(docs: list[dict]) -> dict[tuple[str, str], dict]:
     }
 
 
+def without_generated_secrets(docs: list[dict]) -> list[dict]:
+    """oriso-db-monitoring gets random passwords on each offline render."""
+    return [
+        {**doc, "data": None}
+        if (doc.get("kind"), doc.get("metadata", {}).get("name")) == ("Secret", "oriso-db-monitoring")
+        else doc
+        for doc in docs
+    ]
+
+
 def render_override(storybook: dict) -> list[dict]:
     with tempfile.TemporaryDirectory(prefix="storybook-auth-realm-") as directory:
         override = Path(directory) / "override.yaml"
@@ -41,7 +51,11 @@ class StorybookAuthRealmTest(unittest.TestCase):
         self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-realm"], "ORISO Storybook")
         self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-type"], "basic")
         self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-secret"], "storybook-basic-auth")
-        self.assertEqual(docs, self.dev, "Ignoring a realm override must not change any resources")
+        self.assertEqual(
+            without_generated_secrets(docs),
+            without_generated_secrets(self.dev),
+            "Ignoring a realm override must not change any resources",
+        )
 
     def test_unsafe_overrides_cannot_disable_auth(self) -> None:
         for realm in ("off", "OFF", "$host", "$http_x_auth_realm"):

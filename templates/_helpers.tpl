@@ -175,14 +175,23 @@ the bundled SigNoz chart is enabled, use its in-cluster collector service.
 {{- end -}}
 {{- end -}}
 
-{{- define "oriso.signozServiceName" -}}
+{{- /* The vendored chart's signoz.fullname: names the SigNoz StatefulSet and Service. */ -}}
+{{- define "oriso.signozFullname" -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
-{{- default (printf "%s-signoz" .Release.Name) (get $signoz "orisoServiceNameOverride" | default "") -}}
+{{- $name := get $signoz "nameOverride" | default "signoz" -}}
+{{- get $signoz "fullnameOverride" | default (contains $name .Release.Name | ternary .Release.Name (printf "%s-%s" .Release.Name $name)) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "oriso.signozServiceName" -}}
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- default (include "oriso.signozFullname" .) (get $signoz "orisoServiceNameOverride" | default "") -}}
+{{- end -}}
+
+{{- /* The vendored chart's otelCollector.fullname. */ -}}
 {{- define "oriso.signozOtelCollectorServiceName" -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
-{{- default (printf "%s-signoz-otel-collector" .Release.Name) (get $signoz "orisoOtelCollectorServiceNameOverride" | default "") -}}
+{{- $collector := printf "%s-%s" (include "oriso.signozFullname" .) (dig "otelCollector" "name" "otel-collector" $signoz) | trunc 63 | trimSuffix "-" -}}
+{{- default $collector (get $signoz "orisoOtelCollectorServiceNameOverride" | default "") -}}
 {{- end -}}
 
 {{- define "oriso.signozExternalUrl" -}}
@@ -406,6 +415,92 @@ readinessProbe:
 {{- get $c "enabled" | default false -}}
 {{- end -}}
 
+{{- /*
+Application metrics (nginx, Keycloak, Synapse) scraped by the SigNoz cluster
+collector. One global switch so the Keycloak subchart can read it too;
+observability-validation.yaml requires signozCollector.enabled with it.
+*/ -}}
+{{- define "oriso.appMetrics.enabled" -}}
+{{- $observability := get (.Values.global | default dict) "observability" | default dict -}}
+{{- if get $observability "appMetrics" -}}true{{- else -}}false{{- end -}}
+{{- end -}}
+
+{{- /*
+Data store metrics (MariaDB, MongoDB, RabbitMQ via read-only monitoring users;
+Redis via its existing exporter sidecar), collected by the SigNoz cluster
+collector. Global so the Redis subchart can read it.
+*/ -}}
+{{- define "oriso.dbMetrics.enabled" -}}
+{{- $observability := get (.Values.global | default dict) "observability" | default dict -}}
+{{- if get $observability "dbMetrics" -}}true{{- else -}}false{{- end -}}
+{{- end -}}
+
+{{- /* The annotation-based pod scrape runs when either kind of metrics is on (Redis uses it too). */ -}}
+{{- define "oriso.podScrape.enabled" -}}
+{{- if or (eq (include "oriso.appMetrics.enabled" .) "true") (eq (include "oriso.dbMetrics.enabled" .) "true") -}}true{{- else -}}false{{- end -}}
+{{- end -}}
+
+{{- /*
+Pod annotations the cluster collector's prometheus receiver discovers.
+Usage: include "oriso.appMetrics.podAnnotations" (dict "job" "nginx" "port" 10254 "path" "/metrics")
+*/ -}}
+{{- define "oriso.appMetrics.podAnnotations" -}}
+oriso.io/scrape: "true"
+oriso.io/job: {{ .job | quote }}
+oriso.io/port: {{ .port | toString | quote }}
+oriso.io/path: {{ .path | quote }}
+{{- end -}}
+
 {{- define "oriso.backendServiceClientsChecksum" -}}
 {{- printf "%s\x00%s\x00%s\x00%s\x00%s\x00%s" .Values.global.keycloak.backendTechnicalClientId .Values.global.keycloak.serviceAdminClientId .Values.global.keycloak.serviceTechUserId .Values.global.keycloak.serviceAdminSubject (.Values.global.secrets.keycloakBackendTechnicalClientSecret | default "") (.Values.global.secrets.keycloakBackendAdminClientSecret | default "") | sha256sum -}}
+{{- end -}}
+
+{{/*
+Trace resource attributes and sampling for the Spring Boot services.
+Argument: (dict "root" $ "image" "<image reference>"). Renders nothing unless
+OTLP export is on. Spring Boot reads OTEL_RESOURCE_ATTRIBUTES itself, and the
+sampling env var binds to management.tracing.sampling.probability.
+*/}}
+{{- define "oriso.springTelemetryEnv" -}}
+{{- if eq (include "oriso.observabilityEnabled" .root) "true" -}}
+{{- $o := get .root.Values.global "observability" | default dict -}}
+{{- $ref := toString .image -}}
+{{- $version := "unknown" -}}
+{{- if contains "@" $ref -}}
+{{- $version = trunc 19 (last (splitList "@" $ref)) -}}
+{{- else if contains ":" (last (splitList "/" $ref)) -}}
+{{- $version = last (splitList ":" $ref) -}}
+{{- end }}
+- name: OTEL_RESOURCE_ATTRIBUTES
+  value: {{ printf "deployment.environment=%s,service.version=%s" (get $o "deploymentEnvironment" | default "unknown") $version | quote }}
+{{- /* toString, not `with`: a numeric 0.0 must still disable sampling. */ -}}
+{{- $sampling := get $o "tracingSamplingProbability" -}}
+{{- if and (hasKey $o "tracingSamplingProbability") (ne (toString $sampling) "") (ne (toString $sampling) "<nil>") }}
+- name: MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+  value: {{ $sampling | toString | quote }}
+{{- end }}
+{{- if get $o "testRunBaggage" }}
+- name: MANAGEMENT_TRACING_BAGGAGE_REMOTEFIELDS
+  value: "test.run.id"
+- name: MANAGEMENT_TRACING_BAGGAGE_TAGFIELDS
+  value: "test.run.id"
+{{- end }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Browser Web Vitals ingest URL, or "" when browser telemetry is off.
+*/}}
+{{- define "oriso.webVitalsUrl" -}}
+{{- $o := get .Values.global "observability" | default dict -}}
+{{- $wv := get $o "webVitals" | default dict -}}
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- if and (get $wv "enabled" | default false) (get $signoz "enabled" | default false) -}}
+{{- printf "%s/signoz-rum/v1/metrics" (include "oriso.publicOrigin" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "oriso.webVitalsIntervalMillis" -}}
+{{- $o := get .Values.global "observability" | default dict -}}
+{{- get (get $o "webVitals" | default dict) "exportIntervalMillis" | default 60000 | toString -}}
 {{- end -}}

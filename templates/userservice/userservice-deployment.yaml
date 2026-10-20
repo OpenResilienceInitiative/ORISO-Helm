@@ -42,6 +42,7 @@ spec:
           image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            {{- include "oriso.springTelemetryEnv" (dict "root" $ "image" (include "oriso.immutableImage" (list "userService.image" .Values.userService.image))) | nindent 12 }}
             - name: MATRIXRTC_LIFECYCLE_ENABLED
               valueFrom:
                 configMapKeyRef:

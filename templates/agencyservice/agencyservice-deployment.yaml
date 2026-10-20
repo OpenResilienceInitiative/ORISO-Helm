@@ -30,6 +30,7 @@ spec:
           image: {{ include "oriso.immutableImage" (list "agencyService.image" .Values.agencyService.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            {{- include "oriso.springTelemetryEnv" (dict "root" $ "image" (include "oriso.immutableImage" (list "agencyService.image" .Values.agencyService.image))) | nindent 12 }}
             - name: CSRF_COOKIE_PROPERTY
               valueFrom:
                 configMapKeyRef:
