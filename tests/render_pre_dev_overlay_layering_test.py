@@ -48,7 +48,7 @@ def main() -> None:
     text, docs = render_stack()
 
     # "predev.oriso.org" contains "dev.oriso.org", so match Dev's host only.
-    leaked = re.findall(r"(?<!pre)dev\.oriso\.org|matrix\.oriso\.org", text)
+    leaked = re.findall(r"(?<![\w.-])(?:dev|matrix)\.oriso\.org", text)
     assert not leaked, f"Dev host leaked into the Pre-Dev render ({len(leaked)} hits)"
 
     user = configmap(docs, "userservice-configmap-env")

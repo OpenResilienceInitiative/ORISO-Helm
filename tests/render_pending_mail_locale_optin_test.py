@@ -22,6 +22,9 @@ def render(overlay: str | None, opt_in: bool | str | None = None) -> tuple[dict,
         "-f", os.path.join(CHART_DIR, "secrets.yaml.default"),
         "-f", os.path.join(CHART_DIR, "tests/fixtures/render-required-secrets.yaml"),
     ]
+    if overlay == "pre-dev":
+        # Pre-Dev is deployed as an overlay on top of Dev.
+        args += ["-f", os.path.join(CHART_DIR, "values-dev.yaml")]
     if overlay:
         args += ["-f", os.path.join(CHART_DIR, f"values-{overlay}.yaml")]
     if opt_in is not None:

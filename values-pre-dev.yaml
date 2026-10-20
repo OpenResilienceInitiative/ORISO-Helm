@@ -55,6 +55,15 @@ userService:
   passwordResetFrontendBaseUrl: "https://predev.oriso.org"
   passwordResetAdminFrontendBaseUrl: "https://predev.oriso.org/admin"
 
+  # NOTE — statisticsMessageCountHmacSecret is deliberately NOT set here.
+  # It is a mandatory boot config (ConsultantIdentityHasher exits 1 on a blank
+  # value), but it is a credential, so it lives in the persistent secret values
+  # alongside serviceEncryptionAppkey and the SMTP credentials — see the entry
+  # under `userService:` in secrets.yaml.default. The chart marks it `required`,
+  # so rendering this overlay without those secret values fails loudly at deploy
+  # time instead of shipping an empty key. The value must exist in the Pre-Dev
+  # secret values file or the UserService rollout CrashLoops.
+
 # Matrix federation identity (ADR-005 canonical server_name).
 matrix:
   synapseServerName: "predev.oriso.org"

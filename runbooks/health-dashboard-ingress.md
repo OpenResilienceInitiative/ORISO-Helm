@@ -8,14 +8,14 @@ renders do not establish that any environment has received this change.
 ## Configuration and upgrade impact
 
 The HealthDashboard Deployment and internal Service continue to render.
-Its external Ingress is enabled by default, including with the Dev, PreDev and
-production overlays. Review the authentication configuration before upgrading.
-Setting `healthDashboard.ingress.enabled: false` removes the chart-managed
-`/health` route.
+Its external Ingress is disabled by default. A later upgrade using the new base
+values removes the chart-managed `/health` route unless the environment
+explicitly enables it. Existing customized values should be reviewed before
+upgrading. PreDev and production overlays do not opt in.
 
 Every enabled ingress requires Basic Authentication; there is no separate switch
 to disable authentication. The Basic Auth realm is fixed as
-`HealthDashboard Authentication`. Configure the Secret name:
+`HealthDashboard Authentication`. Configuration contains only an existing Secret name:
 
 ```yaml
 healthDashboard:
@@ -24,8 +24,8 @@ healthDashboard:
     authSecret: health-dashboard-basic-auth
 ```
 
-The Dev and PreDev overlays use this name. The name alone does not provision the
-Secret. Leading/trailing whitespace is trimmed; a missing,
+The Dev overlay opts in using this name. It does not provision the Secret or
+prove that the Secret exists. Leading/trailing whitespace is trimmed; a missing,
 empty or whitespace-only name stops Helm rendering. Namespace-qualified names
 containing `/` are also rejected. The trimmed name must follow Kubernetes
 Secret-name rules: at most 253 lowercase ASCII letters, digits, hyphens and dots,
@@ -33,27 +33,17 @@ with each nonempty dot-separated segment beginning and ending in a letter or
 digit. Numeric starts and segments longer than 63 characters are valid within
 the 253-character total limit. Invalid names stop Helm rendering.
 
-Before upgrading, choose one of these options through the normal
-secret-management process:
-
-- Provision the named Secret with an nginx-compatible htpasswd file under the
-  `auth` key in the effective ingress namespace.
-- Set `healthDashboard.ingress.htpasswd` to the nginx-compatible htpasswd entry
-  in private, gitignored `secrets.yaml`. Load it after the environment overlay
-  (`-f values.yaml -f values-dev.yaml -f values-pre-dev.yaml -f secrets.yaml`) so Helm renders the
-  named Secret in the effective ingress namespace during the same upgrade.
-
-Do not put credentials or htpasswd data in tracked values, Git, logs or review
-evidence, and do not reuse or rotate Storybook/Redis credentials as part of this
-change.
+Before an authorized rollout, the operator must provision the named Secret
+through the normal secret-management process. It must contain an
+nginx-compatible htpasswd file under the `auth` key. Do not put credentials or
+htpasswd data in chart values, Git, logs or review evidence, and do not reuse or
+rotate Storybook/Redis credentials as part of this change.
 
 The Secret must be in the **effective ingress namespace**:
 `healthDashboard.namespace` when nonempty, otherwise the Helm release namespace.
 The Ingress, Service and Deployment use that same namespace. Supply a local
-Secret name, never a `namespace/name` reference. Without `htpasswd`, a live Helm
-render checks for the Secret when the namespace already exists and fails if it
-is missing. Offline `helm template` does not verify existence. Neither path
-validates Secret contents or ingress-controller configuration. A missing,
+Secret name, never a `namespace/name` reference. Helm rendering does not check
+Secret existence, contents or ingress-controller configuration. A missing,
 malformed or wrong-namespace Secret can make the route unavailable.
 
 ## Local verification
