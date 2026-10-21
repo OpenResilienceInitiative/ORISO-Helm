@@ -16,6 +16,7 @@ import sys
 import tempfile
 import unittest
 import uuid
+import re
 import threading
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -175,7 +176,7 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             registry = installer.registry(
                 ROOT / "files/scenario-c-task-identities.json"
             )
-            observation = {"reason": reason, "mapperMismatches": []}
+            observation = {"reason": reason, "mapperMismatches": [], "pendingShape": []}
             for client in self.admin("GET", "/clients"):
                 if client["clientId"] not in {
                     "backend-setup",
@@ -190,6 +191,21 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
                     for actor in registry.values()
                     if actor["clientId"] == client["clientId"]
                 )
+                attributes = client.get('attributes', {})
+                if 'oriso-c.pending-receipt' in attributes:
+                    expected = installer.pending_receipt(registry, json.loads(self.mapping.read_text()),
+                                                         self.admin('GET', ''), actor['key'])
+                    observation['pendingShape'].append({
+                        'pendingMarkerMatches': attributes.get('oriso-c.pending-receipt') == expected,
+                        'nativeSecretTimestampPresent': 'client.secret.creation.time' in attributes,
+                        'nativeSecretTimestampValid': installer.native_secret_timestamp_valid(
+                            attributes.get('client.secret.creation.time')),
+                        'unknownAttributeCount': len(set(attributes) - {'oriso-c.pending-receipt', 'client.secret.creation.time'}),
+                        'inactiveFlagsMatch': all(client.get(field, False) is False for field in
+                            ('enabled', 'publicClient', 'bearerOnly', 'authorizationServicesEnabled',
+                             'consentRequired', 'standardFlowEnabled', 'directAccessGrantsEnabled',
+                             'implicitFlowEnabled', 'fullScopeAllowed')),
+                    })
                 desired = {row["name"]: row for row in installer.token_mappers(actor)}
                 actual = self.admin(
                     "GET", "/clients/" + client["id"] + "/protocol-mappers/models"
@@ -301,9 +317,19 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             user = self.admin('GET', '/users?username=service-account-backend-setup&exact=true')
             self.assertEqual(1, len(user), 'Original POST has no read-only native subject')
             pair = (client['id'], user[0]['id'])
+            stamp = client.get('attributes', {}).get('client.secret.creation.time')
+            self.assertTrue(isinstance(stamp, str) and re.fullmatch(r'[1-9][0-9]{0,9}', stamp)
+                            is not None and int(stamp) <= 2147483647,
+                            'Native POST secret timestamp must be present and valid')
+            type(self).external_review_observations['nativeSecretTimestampPresentAndValid'] = True
+            credential = self.admin('GET', '/clients/' + client['id'] + '/client-secret').get('value')
+            self.assertTrue(isinstance(credential, str) and bool(credential), 'Native POST has no client credential')
             if phase == 'after-post':
                 original_pair = pair
+                original_stamp, original_credential = stamp, credential
             self.assertEqual(original_pair, pair)
+            self.assertTrue(stamp == original_stamp and credential == original_credential,
+                            'Recovery changed native secret timestamp or credential')
             self.assertFalse(client['enabled'])
             marker = 'oriso-c.pending-receipt' if phase != 'after-final-put' else 'oriso-c.prepared-subject'
             self.assertIn(marker, client['attributes'])
@@ -330,6 +356,11 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
         self.assertTrue(self.admin("GET", "")["adminPermissionsEnabled"])
         completed = self.admin('GET', '/clients?clientId=backend-setup')[0]
         self.assertEqual(original_pair, (completed['id'], completed['attributes']['oriso-c.prepared-subject']))
+        final_credential = self.admin('GET', '/clients/' + completed['id'] + '/client-secret').get('value')
+        self.assertTrue(completed['attributes'].get('client.secret.creation.time') == original_stamp
+                        and final_credential == original_credential,
+                        'Completion changed native secret timestamp or credential')
+        type(self).external_review_observations['nativeSecretTimestampAndCredentialPreserved'] = True
         # The actual upgrade helper must inspect retired clients without
         # re-enabling, rotating or requiring any of their credentials.
         retired = {}

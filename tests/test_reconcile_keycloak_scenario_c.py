@@ -73,6 +73,7 @@ class NativeRealm:
         self.fail_after_client_post = False
         self.fail_before_subject_receipt = False
         self.drift_on_native_subject_read = False
+        self.native_secret_timestamp = False
 
     def handle(self, method, path, body):
         self.requests += 1
@@ -133,6 +134,9 @@ class NativeRealm:
                     "groups": [],
                 }
                 self.native_service_accounts[cid] = self.users[cid]["id"]
+                if self.native_secret_timestamp:
+                    self.clients[cid]['attributes']['client.secret.creation.time'] = '1792616400'
+                    self.clients[cid]['secret'] = 'synthetic-auto-generated-client-credential'
                 if self.fail_after_client_post:
                     self.fail_after_client_post = False
                     return 503, None
@@ -401,6 +405,33 @@ class HttpReconciliationTest(unittest.TestCase):
         self.assertIs(client, self.realm.clients['backend-setup'])
         self.assertEqual(subject, client['attributes']['oriso-c.prepared-subject'])
         self.assertNotIn('oriso-c.pending-receipt', client['attributes'])
+
+    def test_native_creation_timestamp_and_credential_survive_owned_pending_finalization(self):
+        self.realm.native_secret_timestamp = True
+        client, subject = self.pending_after_failure()
+        stamp, secret = client['attributes']['client.secret.creation.time'], client['secret']
+        plan = self.run_cli()
+        self.assertEqual(0, plan.returncode, plan.stderr)
+        resumed = self.run_cli('--apply', '--confirm-isolated-realm')
+        self.assertEqual(0, resumed.returncode, resumed.stderr)
+        self.assertEqual(subject, client['attributes']['oriso-c.prepared-subject'])
+        self.assertEqual(stamp, client['attributes']['client.secret.creation.time'])
+        self.assertTrue(secret == client['secret'], 'Pending recovery rotated native credential')
+
+    def test_pending_native_timestamp_is_strict_and_unknown_attributes_refuse(self):
+        client, _ = self.pending_after_failure()
+        attrs = dict(client['attributes'])
+        for value in (None, True, 1792616400, '', '0', '-1', '01', '2147483648', '1.5', 'unknown'):
+            with self.subTest(value=value):
+                client['attributes'] = {**attrs, 'client.secret.creation.time': value}
+                writes = self.realm.writes
+                result = self.run_cli('--apply', '--confirm-isolated-realm')
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(writes, self.realm.writes)
+        client['attributes'] = {**attrs, 'unknown-metadata': 'not-authorized'}
+        writes = self.realm.writes
+        self.assertNotEqual(0, self.run_cli('--apply', '--confirm-isolated-realm').returncode)
+        self.assertEqual(writes, self.realm.writes)
 
     def test_failed_final_receipt_put_keeps_pending_and_native_subject_for_retry(self):
         client, subject = self.pending_after_failure('fail_before_subject_receipt')

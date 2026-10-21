@@ -10,6 +10,7 @@ import importlib.util
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import sys
 from urllib.parse import quote, urlencode, urlparse
@@ -78,11 +79,26 @@ def pending_receipt(actors, mapping, realm, key):
     })
 
 
+def native_secret_timestamp_valid(value):
+    # Pinned26.6.3 KeycloakModelUtils.generateSecret adds this native metadata.
+    # It conveys no preparation authority and must survive without rotation.
+    return (isinstance(value, str) and re.fullmatch(r"[1-9][0-9]{0,9}", value) is not None
+            and int(value) <= 2147483647)
+
+
+def pending_attributes_valid(attributes, receipt):
+    return (isinstance(attributes, dict)
+            and attributes.get("oriso-c.pending-receipt") == receipt
+            and not set(attributes) - {"oriso-c.pending-receipt", "client.secret.creation.time"}
+            and ("client.secret.creation.time" not in attributes
+                 or native_secret_timestamp_valid(attributes["client.secret.creation.time"])))
+
+
 def inspect_pending(admin, client_id, actor, receipt, baseline):
     """Read-only ownership/shape gate; never calls the lazy native subject API."""
     client = admin.request("GET", "/clients/" + quote(client_id, safe=""))
     if (client.get("clientId") != actor["clientId"]
-            or client.get("attributes") != {"oriso-c.pending-receipt": receipt}
+            or not pending_attributes_valid(client.get("attributes"), receipt)
             or client.get("protocol") != "openid-connect"
             or client.get("enabled") is not False
             or client.get("publicClient") is not False
@@ -117,8 +133,10 @@ def finalize_pending(admin, client_id, actor, receipt, baseline, before):
             or actual.get("username") != "service-account-" + actor["clientId"]
             or inspect_pending(admin, client_id, actor, receipt, baseline) != before):
         raise ReconcileError("Pending native subject or stable shape changed before receipt")
-    admin.request("PUT", "/clients/" + quote(client_id, safe=""), {
-        "attributes": {"oriso-c.preparation": "v1", "oriso-c.prepared-subject": actual["id"]}})
+    attributes = dict(before["client"]["attributes"])
+    attributes.pop("oriso-c.pending-receipt")
+    attributes.update({"oriso-c.preparation": "v1", "oriso-c.prepared-subject": actual["id"]})
+    admin.request("PUT", "/clients/" + quote(client_id, safe=""), {"attributes": attributes})
     return actual["id"]
 
 
