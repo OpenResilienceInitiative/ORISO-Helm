@@ -583,7 +583,7 @@ class HttpReconciliationTest(unittest.TestCase):
         report = json.loads(first.stdout)
         self.assertTrue(report["applied"])
         self.assertGreater(report["changes"], 0)
-        self.assertEqual(7, report["native_policy_count"])
+        self.assertEqual(9, report["native_policy_count"])
         self.assertEqual(5, len(self.realm.users))
         self.assertTrue(
             all(
@@ -648,6 +648,23 @@ class HttpReconciliationTest(unittest.TestCase):
         self.assertEqual(
             ["oriso-c-is-provisioner"],
             self.realm.policies["oriso-c-pending"]["policies"],
+        )
+
+    def test_ordinary_group_visibility_is_separate_from_creator_membership(self):
+        result = self.run_cli("--apply", "--confirm-isolated-realm")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("oriso-c-human-view", self.realm.policies)
+        view = self.realm.policies["oriso-c-human-view"]
+        join = self.realm.policies["oriso-c-human-join"]
+        self.assertEqual(["view"], view["scopes"])
+        self.assertEqual(["manage-membership"], join["scopes"])
+        self.assertEqual(view["resources"], join["resources"])
+        self.assertEqual(["oriso-c-is-human-reader"], view["policies"])
+        self.assertEqual(["oriso-c-is-provisioner"], join["policies"])
+        self.assertEqual(
+            {self.realm.users["backend-account-create"]["id"],
+             self.realm.users["backend-account-admin"]["id"]},
+            set(self.realm.policies["oriso-c-is-human-reader"]["users"]),
         )
 
     def test_disabled_actor_token_contract_is_prepared_with_exact_roles_and_audiences(

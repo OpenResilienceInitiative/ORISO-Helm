@@ -347,7 +347,7 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
         type(self).external_review_observations['ownedPendingCrashRecoverySameNativeSubject'] = True
         first = self.cli("--apply", "--confirm-isolated-realm")
         self.assertGreater(first["changes"], 0)
-        self.assertEqual(7, first["native_policy_count"])
+        self.assertEqual(9, first["native_policy_count"])
         self.assertEqual(0, self.cli("--apply", "--confirm-isolated-realm")["changes"])
         actors = [
             c
@@ -583,6 +583,16 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             )[0],
         )
         self.assert_phase_status("creator-delete-refused", 403, self.native(creator, "DELETE", "/users/" + pending)[0])
+        ordinary_before = self.admin("GET", "/users/" + human + "/groups")
+        self.assert_phase_status(
+            "maintainer-ordinary-create-refused", 403,
+            self.native(maintainer, "POST", "/users", {
+                "username": "maintainer-ordinary", "enabled": False,
+                "groups": ["/human-roles/consultant"],
+            })[0],
+        )
+        self.assertEqual([], self.admin("GET", "/users?username=maintainer-ordinary&exact=true"))
+        self.assertEqual(ordinary_before, self.admin("GET", "/users/" + human + "/groups"))
         self.assert_phase_status("maintainer-human-read", 200, self.native(maintainer, "GET", "/users/" + human)[0])
         self.assert_phase_status(
             "maintainer-human-update", 204,

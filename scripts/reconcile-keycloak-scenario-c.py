@@ -427,11 +427,13 @@ def inspect(admin, actors, mapping, verify_service_accounts=False, exact_grants=
 POLICY_NAMES = {
     "oriso-c-is-provisioner",
     "oriso-c-is-maintainer",
+    "oriso-c-is-human-reader",
     "oriso-c-deny-everyone",
 }
 PERMISSION_NAMES = {
     "oriso-c-pending",
     "oriso-c-human-join",
+    "oriso-c-human-view",
     "oriso-c-human-members",
     "oriso-c-protected",
 }
@@ -488,6 +490,10 @@ def desired_policies(snapshot, mapping, receivers_only=False):
             "users": [subjects["ACCOUNT_CREATE"]],
         },
         {"name": "oriso-c-is-maintainer", "users": [subjects["ACCOUNT_ADMIN"]]},
+        {
+            "name": "oriso-c-is-human-reader",
+            "users": [subjects["ACCOUNT_CREATE"], subjects["ACCOUNT_ADMIN"]],
+        },
         {"name": "oriso-c-deny-everyone", "users": []},
     ]
     permissions = [
@@ -506,8 +512,14 @@ def desired_policies(snapshot, mapping, receivers_only=False):
         {
             "name": "oriso-c-human-join",
             "resources": ordinary,
-            "scopes": ["view", "manage-membership"],
+            "scopes": ["manage-membership"],
             "policies": ["oriso-c-is-provisioner"],
+        },
+        {
+            "name": "oriso-c-human-view",
+            "resources": ordinary,
+            "scopes": ["view"],
+            "policies": ["oriso-c-is-human-reader"],
         },
         {
             "name": "oriso-c-human-members",
@@ -665,7 +677,7 @@ def reconcile(admin, actors, mapping, snapshot, receivers_only=False):
             raise ReconcileError(
                 "Native policy readback does not match intended boundary"
             )
-    if len(found) != 7:
+    if set(found) != POLICY_NAMES | PERMISSION_NAMES:
         raise ReconcileError("Native policy set did not converge")
     if receivers_only:
         # Write receipts only after all native permissions were read back as
@@ -790,7 +802,7 @@ def main():
                 "actor_count": 5,
                 "applied": args.apply,
                 "changes": changes,
-                "native_policy_count": 7 if args.apply else len(existing),
+                "native_policy_count": len(POLICY_NAMES | PERMISSION_NAMES) if args.apply else len(existing),
                 "runtime_cutover": False,
                 "policy_model": "RECEIVER_ONLY" if args.receivers_only or snapshot.get("receiver_policy_prepared") else "NATIVE_PREPARATION",
                 "native_model_verified": args.apply,
