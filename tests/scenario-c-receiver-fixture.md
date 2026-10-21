@@ -11,7 +11,7 @@ It imports no old fourteen-client registry, chart reconciler, account provider o
 | SETUP | backend-setup | tenantservice, agencyservice, consultingtypeservice, userservice |
 | ACCOUNT_CREATE | backend-account-create | userservice |
 | ACCOUNT_ADMIN | backend-account-admin | userservice, oriso-otp |
-| MAIL | backend-mail | tenantservice, agencyservice, consultingtypeservice, userservice |
+| MAIL | backend-mail | tenantservice, agencyservice, consultingtypeservice, userservice, oriso-task-commands |
 | RUNTIME | backend-runtime | tenantservice, agencyservice, appointmentservice |
 
 The role unions are the five-actor contract selected in Helm423. Before and after generating faults, the runner checks actual effective realm and client grants and group memberships. There are no baseline-role, native administration or group grants on these synthetic service accounts. Native fine-grained administration permissions are not configured by this fixture.

@@ -70,13 +70,13 @@ ACTORS = (
         "ACCOUNT_CREATE",
         "backend-account-create",
         ("account-provisioning", "account-read"),
-        ("userservice",),
+        ("userservice", "oriso-account-lifecycle"),
     ),
     (
         "ACCOUNT_ADMIN",
         "backend-account-admin",
         ("account-maintenance", "account-read", "otp-config-admin", "session-exchange"),
-        ("userservice", "oriso-otp"),
+        ("userservice", "oriso-account-lifecycle", "oriso-otp"),
     ),
     (
         "MAIL",
@@ -87,7 +87,7 @@ ACTORS = (
             "notification-dispatch",
             "notifications-technical",
         ),
-        ("tenantservice", "agencyservice", "consultingtypeservice", "userservice"),
+        ("tenantservice", "agencyservice", "consultingtypeservice", "userservice", "oriso-task-commands"),
     ),
     (
         "RUNTIME",

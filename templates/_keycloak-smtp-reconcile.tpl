@@ -1,9 +1,10 @@
 {{- /* Must match the smtp-sync client in charts/keycloak/keycloak-resources/realm.json. */ -}}
 {{- define "oriso.smtpSyncClientId" -}}smtp-sync{{- end -}}
 
-{{- /* Short-lived SMTP sync pod: reads Admin Settings with the technical client,
-writes the realm with the smtp-sync realm client. No master admin credential. */ -}}
+{{- /* Short-lived SMTP sync pod. C uses the sole MAIL actor and bounded resource;
+the default legacy path keeps its established credentials. */ -}}
 {{- define "oriso.keycloakSmtpReconcilePod" -}}
+{{- include "oriso.scenarioC.validate" . -}}
 {{- $image := required "keycloakSmtpReconcile.image is required and must use an immutable digest" .Values.keycloakSmtpReconcile.image -}}
 {{- if not (regexMatch "^[^[:space:]]+@sha256:[a-f0-9]{64}$" $image) -}}
 {{- fail "keycloakSmtpReconcile.image must use an immutable sha256 digest" -}}
@@ -49,6 +50,28 @@ containers:
           configMapKeyRef:
             name: userservice-configmap-env
             key: CONSULTING_TYPE_SERVICE_API_URL
+      {{- if eq (include "oriso.scenarioC.enabled" .) "true" }}
+      - name: TASK_IDENTITY_MODEL
+        value: FIVE_ACTORS
+      - name: TASK_IDENTITY_ISSUER
+        value: {{ printf "%s/realms/%s" (trimSuffix "/" .Values.global.keycloak.authServerUrl) .Values.global.keycloak.realm | quote }}
+      - name: KEYCLOAK_REALM_INTERNAL_ID
+        value: {{ .Values.global.taskIdentities.realmId | quote }}
+      - name: IDENTITY_MAIL_CLIENT_ID
+        value: {{ .Values.global.taskIdentities.actors.MAIL.clientId | quote }}
+      - name: IDENTITY_MAIL_SERVICE_SUBJECT
+        value: {{ .Values.global.taskIdentities.actors.MAIL.serviceSubject | quote }}
+      - name: IDENTITY_MAIL_CLIENT_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: {{ .Values.global.taskIdentities.actors.MAIL.secretRef.name | quote }}
+            key: {{ .Values.global.taskIdentities.actors.MAIL.secretRef.key | quote }}
+      - name: ORISO_TASK_CONTEXT_KEY
+        valueFrom:
+          secretKeyRef:
+            name: {{ .Values.global.taskIdentities.contextKeySecretRef.name | quote }}
+            key: {{ .Values.global.taskIdentities.contextKeySecretRef.key | quote }}
+      {{- else }}
       - name: TECHNICAL_CLIENT_ID
         valueFrom:
           configMapKeyRef:
@@ -71,6 +94,7 @@ containers:
           secretKeyRef:
             name: keycloak-smtp-sync-client
             key: KEYCLOAK_SMTP_SYNC_CLIENT_SECRET
+      {{- end }}
     command: ["python3", "-B", "/scripts/keycloak-reconcile-smtp.py"]
     volumeMounts:
       - name: reconcile-script

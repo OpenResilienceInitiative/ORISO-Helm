@@ -15,6 +15,7 @@ import os
 import socket
 import sys
 import time
+import uuid
 from email.utils import parseaddr
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
@@ -213,6 +214,11 @@ def smtp_transport(snapshot):
 
 
 def configuration(env):
+    model = env.get("TASK_IDENTITY_MODEL", "LEGACY")
+    if model == "FIVE_ACTORS":
+        return mail_configuration(env)
+    if model != "LEGACY":
+        raise ReconcileError("SMTP_RECONCILE_CONFIGURATION_INVALID: identity model")
     names = ("KEYCLOAK_URL", "KEYCLOAK_REALM", "CONSULTING_TYPE_SERVICE_URL", "POD_NAMESPACE",
              "TECHNICAL_SERVICE_SUBJECT", "TECHNICAL_CLIENT_ID", "TECHNICAL_CLIENT_SECRET",
              "SMTP_SYNC_CLIENT_ID", "SMTP_SYNC_CLIENT_SECRET")
@@ -224,6 +230,130 @@ def configuration(env):
     config["CONSULTING_TYPE_SERVICE_URL"] = base_url(
         config["CONSULTING_TYPE_SERVICE_URL"], "consultingtypeservice", config["POD_NAMESPACE"])
     return config
+
+
+MAIL_AUDIENCES = {"tenantservice", "agencyservice", "consultingtypeservice", "userservice",
+                  "oriso-task-commands"}
+MAIL_ROLES = {"smtp-sync", "system-email-delivery", "notification-dispatch", "notifications-technical"}
+SMTP_FIELDS = ("globalSmtpEnabled", "globalFeatureSystemNotificationEmailsEnabled", "globalSmtpHost",
+               "globalSmtpPort", "globalSmtpFrom", "globalSmtpUsername", "globalSmtpPassword",
+               "globalSmtpSecure")
+
+
+def mail_configuration(env):
+    names = ("KEYCLOAK_URL", "KEYCLOAK_REALM", "CONSULTING_TYPE_SERVICE_URL", "POD_NAMESPACE",
+             "TASK_IDENTITY_ISSUER",
+             "KEYCLOAK_REALM_INTERNAL_ID", "IDENTITY_MAIL_CLIENT_ID", "IDENTITY_MAIL_CLIENT_SECRET",
+             "IDENTITY_MAIL_SERVICE_SUBJECT", "ORISO_TASK_CONTEXT_KEY")
+    config = {name: required(env, name) for name in names}
+    if (config["KEYCLOAK_REALM"] == "master" or config["IDENTITY_MAIL_CLIENT_ID"] != "backend-mail"
+            or any("${" in value or any(ord(c) < 32 or ord(c) == 127 for c in value)
+                   for value in config.values())):
+        raise ReconcileError("SMTP_RECONCILE_CONFIGURATION_INVALID: MAIL binding")
+    config["KEYCLOAK_URL"] = base_url(config["KEYCLOAK_URL"], "keycloak", config["POD_NAMESPACE"])
+    config["TASK_IDENTITY_ISSUER"] = base_url(
+        config["TASK_IDENTITY_ISSUER"], "keycloak", config["POD_NAMESPACE"])
+    config["CONSULTING_TYPE_SERVICE_URL"] = base_url(
+        config["CONSULTING_TYPE_SERVICE_URL"], "consultingtypeservice", config["POD_NAMESPACE"])
+    try:
+        key = base64.b64decode(config["ORISO_TASK_CONTEXT_KEY"], validate=True)
+    except (ValueError, UnicodeError):
+        raise ReconcileError("SMTP_RECONCILE_CONFIGURATION_INVALID: context key") from None
+    if (len(key) < 32 or hmac.compare_digest(key, config["IDENTITY_MAIL_CLIENT_SECRET"].encode())
+            or hmac.compare_digest(config["ORISO_TASK_CONTEXT_KEY"].encode(),
+                                   config["IDENTITY_MAIL_CLIENT_SECRET"].encode())):
+        raise ReconcileError("SMTP_RECONCILE_CONFIGURATION_INVALID: context key")
+    config["context_key"] = key
+    config["TASK_IDENTITY_MODEL"] = "FIVE_ACTORS"
+    return config
+
+
+def mail_login(http, config):
+    token = http.service_login(config["KEYCLOAK_URL"], config["KEYCLOAK_REALM"],
+                               config["IDENTITY_MAIL_CLIENT_ID"], config["IDENTITY_MAIL_CLIENT_SECRET"],
+                               "MAIL_AUTHENTICATION_FAILED")
+    # Fresh trusted issuer response; both receivers independently verify JWT signature and model grants.
+    try:
+        claims = decode_claims(token)
+        audience = claims.get("aud")
+        roles = claims.get("realm_access", {}).get("roles")
+        expiry = claims.get("exp")
+        not_before = claims.get("nbf", 0)
+        valid = (claims.get("iss") == config["TASK_IDENTITY_ISSUER"]
+                 and claims.get("azp") == config["IDENTITY_MAIL_CLIENT_ID"]
+                 and claims.get("sub") == config["IDENTITY_MAIL_SERVICE_SUBJECT"]
+                 and isinstance(audience, list) and len(audience) == len(MAIL_AUDIENCES)
+                 and set(audience) == MAIL_AUDIENCES
+                 and isinstance(roles, list) and len(roles) == len(MAIL_ROLES) and set(roles) == MAIL_ROLES
+                 and not claims.get("resource_access")
+                 and isinstance(expiry, (int, float)) and not isinstance(expiry, bool)
+                 and math.isfinite(expiry) and expiry > time.time()
+                 and isinstance(not_before, (int, float)) and not isinstance(not_before, bool)
+                 and math.isfinite(not_before) and not_before <= time.time())
+    except (ValueError, UnicodeError, AttributeError, TypeError):
+        valid = False
+    if not valid:
+        raise ReconcileError("SMTP_RECONCILE_MAIL_IDENTITY_MISMATCH")
+    return token
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+def smtp_proof(config, body):
+    key = config["context_key"]
+    now = int(time.time())
+    claims = {
+        "iss": "oriso-smtp-sync", "aud": "oriso-smtp-control", "purpose": "SMTP_SYNC",
+        "operation": "SMTP_APPLY", "method": "PUT", "actor": "MAIL",
+        "realm": config["KEYCLOAK_REALM"], "target": config["KEYCLOAK_REALM_INTERNAL_ID"],
+        "taskClient": config["IDENTITY_MAIL_CLIENT_ID"],
+        "taskSubject": config["IDENTITY_MAIL_SERVICE_SUBJECT"],
+        "payloadDigest": hmac.new(key, b"payload\n" + canonical(body), hashlib.sha256).hexdigest(),
+        "jti": str(uuid.uuid4()), "nonce": uuid.uuid4().hex, "iat": now, "exp": now + 60,
+    }
+    payload = base64.urlsafe_b64encode(canonical(claims)).decode().rstrip("=")
+    signature = hmac.new(key, ("proof\n" + payload).encode(), hashlib.sha256).digest()
+    return payload + "." + base64.urlsafe_b64encode(signature).decode().rstrip("=")
+
+
+def apply_mail_snapshot(http, config, token, snapshot, revision):
+    if not isinstance(snapshot, dict) or "revision" in snapshot:
+        raise ReconcileError("SMTP_RECONCILE_SOURCE_UNAVAILABLE: invalid snapshot")
+    body = {name: snapshot.get(name) for name in SMTP_FIELDS}
+    body["revision"] = revision
+    wire = canonical(body)
+    # The bounded receiver validates syntax. Password/user strings are opaque:
+    # only actual emptiness disables them, never trimming or normalization.
+    complete = (snapshot.get("globalSmtpEnabled") is True
+                and snapshot.get("globalFeatureSystemNotificationEmailsEnabled") is True
+                and isinstance(snapshot.get("globalSmtpSecure"), bool)
+                and all(isinstance(snapshot.get(name), str) and snapshot[name].strip()
+                        for name in ("globalSmtpHost", "globalSmtpFrom"))
+                and snapshot.get("globalSmtpPort") is not None
+                and all(isinstance(snapshot.get(name), str) and len(snapshot[name]) > 0
+                        for name in ("globalSmtpUsername", "globalSmtpPassword")))
+    expected_status = "APPLIED" if complete else "DISABLED_OR_INCOMPLETE"
+    url = (config["KEYCLOAK_URL"] + "/realms/" + quote(config["KEYCLOAK_REALM"], safe="")
+           + "/oriso-smtp-control/v1/smtp")
+    # An unknown response cannot prove this body's fingerprint. Reissue the identical
+    # revision/body, with fresh proof, and require its known idempotent success.
+    for attempt in range(2):
+        try:
+            response = http.request("PUT", url, wire,
+                                    {"Authorization": "Bearer " + token, "Content-Type": "application/json",
+                                     "Cache-Control": "no-store",
+                                     "X-ORISO-Task-Context": smtp_proof(config, body)},
+                                    "KEYCLOAK_UPDATE_FAILED")
+            break
+        except ReconcileError as error:
+            if attempt or error.status not in (502, 503, 504):
+                raise
+    if (not isinstance(response, dict) or type(response.get("revision")) is not int
+            or response.get("revision") != revision or response.get("status") != expected_status):
+        raise ReconcileError("SMTP_RECONCILE_KEYCLOAK_RESPONSE_MISMATCH")
+    return expected_status
 
 
 def technical_login(http, config):
@@ -329,6 +459,16 @@ def apply_snapshot(http, config, snapshot):
 def reconcile(env):
     config = configuration(env)
     http = HttpClient()
+    if config.get("TASK_IDENTITY_MODEL") == "FIVE_ACTORS":
+        token = mail_login(http, config)
+        snapshot, revision = read_snapshot(http, config, token)
+        status = apply_mail_snapshot(http, config, token, snapshot, revision)
+        print("SMTP_RECONCILE_APPLIED: bounded current Admin Settings")
+        acknowledged = acknowledge(http, config, token, revision, status)
+        if acknowledged not in ("SMTP_RECONCILE_ACKNOWLEDGED", "SMTP_RECONCILE_NOTHING_SAVED"):
+            raise ReconcileError("SMTP_RECONCILE_ACK_FAILED")
+        print(acknowledged)
+        return
     technical_token = technical_login(http, config)
     snapshot, revision = read_snapshot(http, config, technical_token)
     status, written = apply_snapshot(http, config, snapshot)

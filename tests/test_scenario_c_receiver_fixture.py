@@ -2,6 +2,7 @@
 """Public CLI gate rejects stale, skipped and absent native receiver executions."""
 
 import json
+import importlib.util
 from pathlib import Path
 import subprocess
 import sys
@@ -14,6 +15,23 @@ SCRIPT = ROOT / "tests/scenario_c_receiver_fixture.py"
 
 
 class ReceiverReportGateTest(unittest.TestCase):
+    def test_native_fixture_roles_and_audiences_match_installer_registry(self):
+        spec = importlib.util.spec_from_file_location(
+            "current_receiver_fixture", SCRIPT
+        )
+        fixture = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixture)
+        registry = json.loads(
+            (ROOT / "files/scenario-c-task-identities.json").read_text()
+        )
+        expected = {actor["key"]: actor for actor in registry["actors"]}
+        self.assertEqual(set(expected), {actor[0] for actor in fixture.ACTORS})
+        for key, client, roles, audiences in fixture.ACTORS:
+            with self.subTest(actor=key):
+                self.assertEqual(expected[key]["clientId"], client)
+                self.assertEqual(set(expected[key]["roles"]), set(roles))
+                self.assertEqual(set(expected[key]["bearerAudiences"]), set(audiences))
+
     def test_fresh_five_case_failsafe_report_is_required(self):
         with tempfile.TemporaryDirectory() as directory:
             receiver = Path(directory)
