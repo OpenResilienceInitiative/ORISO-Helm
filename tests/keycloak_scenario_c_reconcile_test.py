@@ -515,6 +515,13 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             5, len({self.admin("GET", "/users/" + uid)["id"] for uid in account_ids})
         )
 
+    def assert_phase_status(self, phase, expected, actual):
+        if type(expected) is not int or type(actual) is not int or not (100 <= expected <= 599 and 100 <= actual <= 599):
+            raise AssertionError("Only HTTP statuses may enter phase evidence")
+        type(self).external_review_observations.setdefault("permissionPhases", {})[phase] = {
+            "expected": expected, "actual": actual}
+        self.assertEqual(expected, actual)
+
     def test_real_actor_tokens_keep_group_commit_and_protected_denials(self):
         self.prepare()
         human = self.user("existing-consultant", ["/human-roles/consultant"])
@@ -564,21 +571,21 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             [], self.admin("GET", "/users?username=maintainer-pending&exact=true")
         )
         pending = self.admin("GET", "/users?username=owned-pending&exact=true")[0]["id"]
-        self.assertEqual(200, self.native(creator, "GET", "/users/" + pending)[0])
+        self.assert_phase_status("creator-pending-read", 200, self.native(creator, "GET", "/users/" + pending)[0])
         self.assertFalse(self.native(creator, "GET", "/users/" + pending)[1]["enabled"])
         consultant_group = self.admin("GET", "/group-by-path/human-roles/consultant")[
             "id"
         ]
-        self.assertEqual(
-            204,
+        self.assert_phase_status(
+            "creator-ordinary-group-commit", 204,
             self.native(
                 creator, "PUT", "/users/" + pending + "/groups/" + consultant_group
             )[0],
         )
-        self.assertEqual(403, self.native(creator, "DELETE", "/users/" + pending)[0])
-        self.assertEqual(200, self.native(maintainer, "GET", "/users/" + human)[0])
-        self.assertEqual(
-            204,
+        self.assert_phase_status("creator-delete-refused", 403, self.native(creator, "DELETE", "/users/" + pending)[0])
+        self.assert_phase_status("maintainer-human-read", 200, self.native(maintainer, "GET", "/users/" + human)[0])
+        self.assert_phase_status(
+            "maintainer-human-update", 204,
             self.native(
                 maintainer, "PUT", "/users/" + human, {"firstName": "Maintained"}
             )[0],
@@ -587,17 +594,18 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             "Maintained",
             self.native(maintainer, "GET", "/users/" + human)[1]["firstName"],
         )
-        self.assertEqual(
-            403,
+        self.assert_phase_status(
+            "creator-other-human-update-refused", 403,
             self.native(creator, "PUT", "/users/" + human, {"firstName": "Forbidden"})[
                 0
             ],
         )
-        self.assertEqual(
-            200, self.native(maintainer, "GET", "/users/" + centre_admin)[0]
+        self.assert_phase_status(
+            "maintainer-centre-admin-read", 200, self.native(maintainer, "GET", "/users/" + centre_admin)[0]
         )
-        for token in (creator, maintainer, mail):
-            self.assertEqual(403, self.native(token, "GET", "/users/" + protected)[0])
+        for actor, token in (("creator", creator), ("maintainer", maintainer), ("mail", mail)):
+            self.assert_phase_status("protected-read-refused-" + actor,
+                                     403, self.native(token, "GET", "/users/" + protected)[0])
             self.assertEqual(
                 403,
                 self.native(
@@ -607,7 +615,7 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             self.assertEqual(
                 403, self.native(token, "PUT", "", {"registrationAllowed": True})[0]
             )
-        self.assertEqual(403, self.native(mail, "GET", "/users/" + human)[0])
+        self.assert_phase_status("mail-human-read-refused", 403, self.native(mail, "GET", "/users/" + human)[0])
         self.assertEqual(
             403,
             self.native(
