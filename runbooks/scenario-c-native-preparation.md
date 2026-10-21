@@ -9,8 +9,13 @@ or [Helm423](https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/423).
 The registry is `files/scenario-c-task-identities.json`. The five actor clients
 are `backend-setup`, `backend-account-create`, `backend-account-admin`,
 `backend-mail` and `backend-runtime`. A purpose identifies an operation, not a
-sixth credential. Roles match the selected C contract. Runtime audience mappers,
-secret distribution and caller wiring remain a coordinated later change.
+sixth credential. Roles and bearer audiences match the selected C contract.
+Preparation installs direct subject, realm-role and fixed audience mappers,
+with the exact realm-role scope union and no inherited default or optional
+client scopes. It reads those settings back before reporting convergence.
+Unknown mappers, broader role scopes and inherited scopes cause refusal before
+any preparation writes. Secret distribution and complete caller activation
+remain coordinated source and installation gates.
 
 ## Prepare a reviewed realm copy
 
@@ -106,3 +111,25 @@ The native test imports the rendered Helm realm into a fresh pinned Keycloak
 preserves existing ordinary/protected humans, and verifies allowed/denied calls
 with real actor tokens. Enabling clients and setting synthetic secrets happens
 only inside the isolated permission fixture. It is not runtime cutover proof.
+
+
+## Receiver-only preparation (source completion work)
+
+The measured native group permissions permit changes that the account workflow must refuse. Once bounded account receivers/callers have been installed and verified together, runtime activation must remove those stock Admin paths. The additional preparation mode below makes all seven managed native policies refuse account subjects. It keeps all five clients disabled and does not activate the runtime, rotate secrets or retire old consumers.
+
+**For operators — isolated copy only, before any separately reviewed cutover:**
+```text
+scripts/reconcile-keycloak-scenario-c.py --url https://<copy>/auth \
+  --realm <reviewed-realm> --mapping <reviewed-human-role-groups.json> \
+  --apply --confirm-isolated-realm --receivers-only
+```
+
+Run the same command twice: the second report must show no changes. A native receipt on each managed client prevents the older preparation command from restoring the unsafe paths. Unknown actor/role/group/native permission state is still refused. This receipt is preparation metadata, not proof that a receiver or a legitimate maintenance/OTP caller works.
+
+The source has process/HTTP regression tests for the policy change, second-run convergence and downgrade refusal. Real native denial plus intended lifecycle/maintenance/OTP acceptance remains a separate required gate. Existing native preparation/spike results describe the previous permission model and are preserved separately.
+
+The additional native token test enables only the five disposable fixture
+clients after disabled preparation has converged twice. It checks each native
+subject, issuer, client, exact realm-role union and exact audience union, and
+refuses unexpected client roles. This verifies prepared token claims; it does
+not enable actors on Dev or Staging or prove the combined account workflows.

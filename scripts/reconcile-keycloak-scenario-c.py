@@ -49,6 +49,13 @@ EXPECTED_ROLES = {
         "appointment-participant-cleanup",
     },
 }
+EXPECTED_AUDIENCES = {
+    "SETUP": {"tenantservice", "agencyservice", "consultingtypeservice", "userservice"},
+    "ACCOUNT_CREATE": {"userservice", "oriso-account-lifecycle"},
+    "ACCOUNT_ADMIN": {"userservice", "oriso-account-lifecycle", "oriso-otp"},
+    "MAIL": {"tenantservice", "agencyservice", "consultingtypeservice", "userservice", "oriso-task-commands"},
+    "RUNTIME": {"tenantservice", "agencyservice", "appointmentservice"},
+}
 
 
 class ReconcileError(Exception):
@@ -69,6 +76,123 @@ def group(admin, path):
     if not isinstance(value, dict) or not value.get("id") or value.get("path") != path:
         raise ReconcileError("Reviewed group path has no exact native match")
     return value
+
+
+def token_mappers(actor):
+    """Direct mappers avoid inherited scopes or an automatic audience resolver.
+
+    The subject mapper is pinned to Keycloak26.6.3 SubMapper.PROVIDER_ID;
+    https://github.com/keycloak/keycloak/blob/26.6.3/services/src/main/java/org/keycloak/protocol/oidc/mappers/SubMapper.java
+    """
+    values = [
+        {
+            "name": "oriso-c-subject",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-sub-mapper",
+            "config": {"access.token.claim": "true", "introspection.token.claim": "true"},
+        },
+        {
+            "name": "oriso-c-realm-roles",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-usermodel-realm-role-mapper",
+            "config": {
+                "claim.name": "realm_access.roles",
+                "multivalued": "true",
+                "jsonType.label": "String",
+                "access.token.claim": "true",
+                "id.token.claim": "false",
+                "userinfo.token.claim": "false",
+                "introspection.token.claim": "true",
+                "usermodel.realmRoleMapping.rolePrefix": "",
+            },
+        },
+    ]
+    return values + [
+        {
+            "name": "oriso-c-audience-" + audience,
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-audience-mapper",
+            "config": {
+                "included.custom.audience": audience,
+                "access.token.claim": "true",
+                "id.token.claim": "false",
+                "userinfo.token.claim": "false",
+                "introspection.token.claim": "true",
+            },
+        }
+        for audience in sorted(actor["bearerAudiences"])
+    ]
+
+
+def native_scope_baseline(admin, kind):
+    scopes = {scope["id"] for scope in admin.request("GET", "/default-" + kind + "-client-scopes")}
+    if kind == "default":
+        # Pinned ClientManager.enableServiceAccount also adds this scope even
+        # when it is absent from the realm's default-default scope list.
+        service = [scope for scope in admin.paged("/client-scopes") if scope.get("name") == "service_account"]
+        if len(service) > 1 or any(scope.get("protocol") != "openid-connect" for scope in service):
+            raise ReconcileError("Native service-account scope is ambiguous")
+        scopes.update(scope["id"] for scope in service)
+    return scopes
+
+
+def inspect_token_scope(admin, client_id, actor, exact=False, prepare_native_scopes=False):
+    path = "/clients/" + quote(client_id, safe="")
+    for kind in ("default", "optional"):
+        scopes = admin.request("GET", path + "/" + kind + "-client-scopes")
+        if scopes and (not prepare_native_scopes or not {scope["id"] for scope in scopes}.issubset(native_scope_baseline(admin, kind))):
+            raise ReconcileError("Actor must not inherit default or optional client scopes")
+    grants = admin.request("GET", path + "/scope-mappings")
+    assigned = {role["name"] for role in grants.get("realmMappings", [])}
+    if grants.get("clientMappings") or not assigned.issubset(set(actor["roles"])):
+        raise ReconcileError("Actor token scope has undeclared grants")
+    desired = {value["name"]: value for value in token_mappers(actor)}
+    mappers = admin.request("GET", path + "/protocol-mappers/models")
+    names = [value.get("name") for value in mappers]
+    if len(names) != len(set(names)) or any(
+        value.get("name") not in desired
+        or any(value.get(field) != desired[value["name"]][field] for field in ("protocol", "protocolMapper", "config"))
+        for value in mappers
+    ):
+        raise ReconcileError("Actor token mapper is not an exact reviewed mapper")
+    if exact and (assigned != set(actor["roles"]) or set(names) != set(desired)):
+        raise ReconcileError("Actor token scope did not converge to the exact contract")
+    return assigned, set(names)
+
+
+def reconcile_token_scope(admin, client_id, actor):
+    path = "/clients/" + quote(client_id, safe="")
+    client = admin.request("GET", path)
+    attributes = client.get("attributes", {})
+    preparing = attributes.get("oriso-c.token-contract") is None
+    assigned, existing = inspect_token_scope(admin, client_id, actor, prepare_native_scopes=preparing)
+    changes = 0
+    if preparing:
+        # Keycloak adds realm defaults even when creation supplied empty scope
+        # arrays. Only known native defaults on our disabled managed client may
+        # be removed during this one-time preparation; later drift is refused.
+        for kind in ("default", "optional"):
+            base = path + "/" + kind + "-client-scopes"
+            for scope in admin.request("GET", base):
+                admin.request("DELETE", base + "/" + quote(scope["id"], safe=""))
+                changes += 1
+    missing = set(actor["roles"]) - assigned
+    if missing:
+        admin.request("POST", path + "/scope-mappings/realm", [
+            admin.request("GET", "/roles/" + quote(name, safe="")) for name in sorted(missing)
+        ])
+        changes += 1
+    for mapper in token_mappers(actor):
+        if mapper["name"] not in existing:
+            admin.request("POST", path + "/protocol-mappers/models", mapper)
+            changes += 1
+    inspect_token_scope(admin, client_id, actor, exact=True)
+    if preparing:
+        admin.request("PUT", path, {"attributes": {**attributes, "oriso-c.token-contract": "exact-v1"}})
+        changes += 1
+    if admin.request("GET", path).get("attributes", {}).get("oriso-c.token-contract") != "exact-v1":
+        raise ReconcileError("Actor token preparation receipt did not converge")
+    return changes
 
 
 def inspect(admin, actors, mapping, verify_service_accounts=False, exact_grants=False):
@@ -124,6 +248,7 @@ def inspect(admin, actors, mapping, verify_service_accounts=False, exact_grants=
             )
     clients = {}
     subjects = {}
+    receiver_policy_prepared = False
     for key, actor in actors.items():
         cid = actor["clientId"]
         found = admin.paged("/clients", {"clientId": cid})
@@ -133,7 +258,8 @@ def inspect(admin, actors, mapping, verify_service_accounts=False, exact_grants=
             continue
         client = admin.request("GET", "/clients/" + quote(found[0]["id"], safe=""))
         if (
-            client.get("enabled") is not False
+            client.get("protocol") != "openid-connect"
+            or client.get("enabled") is not False
             or client.get("publicClient") is not False
             or client.get("serviceAccountsEnabled") is not True
             or client.get("standardFlowEnabled") is not False
@@ -142,11 +268,21 @@ def inspect(admin, actors, mapping, verify_service_accounts=False, exact_grants=
         ):
             raise ReconcileError("Existing actor client is active or has unsafe grants")
         attrs = client.get("attributes", {})
+        policy = attrs.get("oriso-c.native-policy")
+        if policy not in (None, "receiver-only-v1"):
+            raise ReconcileError("Unknown managed native policy preparation")
+        receiver_policy_prepared |= policy == "receiver-only-v1"
         uid = attrs.get("oriso-c.prepared-subject")
         if attrs.get("oriso-c.preparation") != "v1" or not uid:
             raise ReconcileError(
                 "Existing actor has no managed subject receipt; adoption is not authorized"
             )
+        token_contract = attrs.get("oriso-c.token-contract")
+        if token_contract not in (None, "exact-v1"):
+            raise ReconcileError("Unknown managed actor token preparation")
+        if exact_grants and token_contract != "exact-v1":
+            raise ReconcileError("Actor token preparation receipt is missing")
+        inspect_token_scope(admin, client["id"], actor, exact=exact_grants, prepare_native_scopes=token_contract is None and not exact_grants)
         user = admin.request("GET", "/users/" + quote(uid, safe=""))
         if user.get("id") != uid or user.get("username") != "service-account-" + cid:
             raise ReconcileError(
@@ -189,6 +325,7 @@ def inspect(admin, actors, mapping, verify_service_accounts=False, exact_grants=
         "realm": realm_state,
         "baseline_roles": baseline,
         "permission_client": permission_client[0]["id"] if permission_client else None,
+        "receiver_policy_prepared": receiver_policy_prepared,
     }
 
 
@@ -239,7 +376,7 @@ def permission_inventory(admin, client):
     return found
 
 
-def desired_policies(snapshot, mapping):
+def desired_policies(snapshot, mapping, receivers_only=False):
     groups, subjects = snapshot["groups"], snapshot["subjects"]
     ordinary = [
         groups["/human-roles"],
@@ -301,6 +438,13 @@ def desired_policies(snapshot, mapping):
             "policies": ["oriso-c-deny-everyone"],
         },
     ]
+    if receivers_only:
+        # Removing the native paths is necessary even when the bounded receiver
+        # refuses them: direct stock Admin calls never pass through its guard.
+        for policy in users:
+            policy["users"] = []
+        for permission in permissions:
+            permission["policies"] = ["oriso-c-deny-everyone"]
     return [("policy/user", {**common, **p}) for p in users] + [
         ("permission/scope", {**common, "resourceType": "Groups", **p})
         for p in permissions
@@ -330,13 +474,18 @@ def policy_matches(admin, base, route, actual, desired, ids):
     )
 
 
-def reconcile(admin, actors, mapping, snapshot):
+def reconcile(admin, actors, mapping, snapshot, receivers_only=False):
+    if snapshot.get("receiver_policy_prepared") and not receivers_only:
+        raise ReconcileError(
+            "Receiver-only preparation cannot restore native account permissions"
+        )
     changes = 0
     if not snapshot["realm"].get("adminPermissionsEnabled"):
         # Do not re-import realm exports: native re-import may conflict with FGAP resources.
         admin.request("PUT", "", {"adminPermissionsEnabled": True})
         changes += 1
     for key, actor in actors.items():
+        cid = snapshot["clients"].get(key)
         if key not in snapshot["clients"]:
             admin.request(
                 "POST",
@@ -400,6 +549,7 @@ def reconcile(admin, actors, mapping, snapshot):
         if not any(g["id"] == group_id for g in admin.paged(path + "/groups")):
             admin.request("PUT", path + "/groups/" + quote(group_id, safe=""))
             changes += 1
+        changes += reconcile_token_scope(admin, cid, actor)
     snapshot = inspect(
         admin, actors, mapping, verify_service_accounts=True, exact_grants=True
     )
@@ -408,7 +558,7 @@ def reconcile(admin, actors, mapping, snapshot):
         raise ReconcileError("Native authorization client was not created")
     base = authorization_base(client)
     found = permission_inventory(admin, client)
-    for route, desired in desired_policies(snapshot, mapping):
+    for route, desired in desired_policies(snapshot, mapping, receivers_only):
         actual = found.get(desired["name"])
         if not policy_matches(admin, base, route, actual, desired, found):
             body = dict(desired)
@@ -432,6 +582,22 @@ def reconcile(admin, actors, mapping, snapshot):
             )
     if len(found) != 7:
         raise ReconcileError("Native policy set did not converge")
+    if receivers_only:
+        # Write receipts only after all native permissions were read back as
+        # denied. A partially written receipt still prevents an unsafe downgrade.
+        for key in actors:
+            path = "/clients/" + quote(snapshot["clients"][key], safe="")
+            current = admin.request("GET", path)
+            attributes = current.get("attributes", {})
+            if attributes.get("oriso-c.native-policy") != "receiver-only-v1":
+                admin.request(
+                    "PUT",
+                    path,
+                    {"attributes": {**attributes, "oriso-c.native-policy": "receiver-only-v1"}},
+                )
+                changes += 1
+            if admin.request("GET", path).get("attributes", {}).get("oriso-c.native-policy") != "receiver-only-v1":
+                raise ReconcileError("Receiver-only preparation receipt did not converge")
     return changes
 
 
@@ -444,12 +610,17 @@ def registry(path):
         raise ReconcileError("Exactly five scenario C actors are required")
     for actor in actors:
         key = actor["key"]
+        audiences = actor.get("bearerAudiences")
         if (
             actor.get("clientId") != "backend-" + key.lower().replace("_", "-")
             or set(actor.get("purposes", [])) != EXPECTED_PURPOSES[key]
             or len(actor.get("purposes", [])) != len(EXPECTED_PURPOSES[key])
             or set(actor.get("roles", [])) != EXPECTED_ROLES[key]
             or len(actor.get("roles", [])) != len(EXPECTED_ROLES[key])
+            or not isinstance(audiences, list)
+            or any(not isinstance(audience, str) for audience in audiences)
+            or set(audiences) != EXPECTED_AUDIENCES[key]
+            or len(audiences) != len(EXPECTED_AUDIENCES[key])
         ):
             raise ReconcileError("Actor contract does not match selected scenario C")
     return {actor["key"]: actor for actor in actors}
@@ -466,6 +637,11 @@ def main():
     parser.add_argument("--mapping", type=Path)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm-isolated-realm", action="store_true")
+    parser.add_argument(
+        "--receivers-only",
+        action="store_true",
+        help="Prepare disabled actors without native account paths; does not enable receivers or runtime",
+    )
     args = parser.parse_args()
     actors = registry(args.registry)
     if args.validate_only:
@@ -517,7 +693,11 @@ def main():
     admin = migration.Admin(args.url, args.realm, token)
     snapshot = inspect(admin, actors, mapping, verify_service_accounts=args.apply)
     existing = permission_inventory(admin, snapshot["permission_client"])
-    changes = reconcile(admin, actors, mapping, snapshot) if args.apply else 0
+    changes = (
+        reconcile(admin, actors, mapping, snapshot, args.receivers_only)
+        if args.apply
+        else 0
+    )
     print(
         json.dumps(
             {
@@ -526,6 +706,7 @@ def main():
                 "changes": changes,
                 "native_policy_count": 7 if args.apply else len(existing),
                 "runtime_cutover": False,
+                "policy_model": "RECEIVER_ONLY" if args.receivers_only or snapshot.get("receiver_policy_prepared") else "NATIVE_PREPARATION",
                 "native_model_verified": args.apply,
                 "native_service_accounts_verified": args.apply,
                 "missing_actor_count_before": 5 - len(snapshot["clients"]),

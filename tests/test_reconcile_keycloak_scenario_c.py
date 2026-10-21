@@ -69,6 +69,7 @@ class NativeRealm:
         self.readback_fault = False
         self.default_role = None
         self.ignore_role_write = False
+        self.native_initial_scopes = False
 
     def handle(self, method, path, body):
         self.requests += 1
@@ -90,10 +91,18 @@ class NativeRealm:
                 "adminPermissionsEnabled": self.enabled,
                 "defaultRole": {"name": self.default_role} if self.default_role else {},
             }
+        if parts in (["default-default-client-scopes"], ["default-optional-client-scopes"]):
+            names = ["roles", "profile"] if parts[0] == "default-default-client-scopes" else ["offline_access"]
+            return 200, [{"id": name, "name": name} for name in names]
+        if parts == ["client-scopes"]:
+            return 200, [{"id": "service_account", "name": "service_account", "protocol": "openid-connect"}]
         if parts == ["clients"]:
             if method == "POST":
                 cid = body["clientId"]
                 self.clients[cid] = {**body, "id": cid + "-uuid"}
+                if self.native_initial_scopes:
+                    self.clients[cid]["defaultClientScopes"] = ["roles", "profile", "service_account"]
+                    self.clients[cid]["optionalClientScopes"] = ["offline_access"]
                 self.users[cid] = {
                     "id": cid + "-subject",
                     "username": "service-account-" + cid,
@@ -180,6 +189,39 @@ class NativeRealm:
                 return 204, None
         if parts[:1] == ["clients"] and len(parts) > 2:
             c = next(c for c in self.clients.values() if c["id"] == parts[1])
+            tail = parts[2:]
+            if tail == ["protocol-mappers", "models"]:
+                if method == "POST":
+                    c.setdefault("protocolMappers", []).append(
+                        {"id": body["name"], **body}
+                    )
+                    return 201, None
+                values = json.loads(json.dumps(c.get("protocolMappers", [])))
+                # Pinned AbstractOIDCProtocolMapper.getEffectiveModel returns
+                # explicit UserInfo/introspection defaults through this API.
+                for value in values:
+                    config = value.get("config", {})
+                    if "id.token.claim" in config:
+                        config.setdefault("userinfo.token.claim", config["id.token.claim"])
+                    if "access.token.claim" in config:
+                        config.setdefault("introspection.token.claim", config["access.token.claim"])
+                return 200, values
+            if tail[:1] in (["default-client-scopes"], ["optional-client-scopes"]):
+                field = "defaultClientScopes" if tail[0].startswith("default") else "optionalClientScopes"
+                if method == "DELETE":
+                    c[field].remove(tail[1])
+                    return 204, None
+                return 200, [{"id": name, "name": name} for name in c.get(field, [])]
+            if tail == ["scope-mappings"]:
+                return 200, {
+                    "realmMappings": [self.roles[r] for r in c.get("scopeRoles", [])],
+                    "clientMappings": c.get("scopeClientMappings", {}),
+                }
+            if tail == ["scope-mappings", "realm"]:
+                if method == "POST":
+                    c["scopeRoles"] = sorted({*c.get("scopeRoles", []), *(r["name"] for r in body)})
+                    return 204, None
+                return 200, [self.roles[r] for r in c.get("scopeRoles", [])]
             if parts[2:] == ["service-account-user"]:
                 self.service_account_reads += 1
                 cid = c["clientId"]
@@ -314,6 +356,99 @@ class HttpReconciliationTest(unittest.TestCase):
         self.assertEqual(0, json.loads(second.stdout)["changes"])
         self.assertEqual(writes, self.realm.writes)
 
+    def test_receiver_only_preparation_removes_native_account_paths_and_converges(self):
+        prepared = self.run_cli("--apply", "--confirm-isolated-realm")
+        self.assertEqual(0, prepared.returncode, prepared.stderr)
+        fenced = self.run_cli("--apply", "--confirm-isolated-realm", "--receivers-only")
+        self.assertEqual(0, fenced.returncode, fenced.stderr)
+        self.assertEqual("RECEIVER_ONLY", json.loads(fenced.stdout)["policy_model"])
+        self.assertFalse(json.loads(fenced.stdout)["runtime_cutover"])
+        for policy in self.realm.policies.values():
+            if policy["type"] == "user":
+                self.assertEqual([], policy.get("users"), "Native account policy still authorizes a subject")
+            else:
+                self.assertEqual(["oriso-c-deny-everyone"], policy["policies"])
+        self.assertTrue(all(not client["enabled"] for client in self.realm.clients.values() if client["clientId"].startswith("backend-")))
+        writes = self.realm.writes
+        repeated = self.run_cli("--apply", "--confirm-isolated-realm", "--receivers-only")
+        self.assertEqual(0, repeated.returncode, repeated.stderr)
+        self.assertEqual(0, json.loads(repeated.stdout)["changes"])
+        self.assertEqual(writes, self.realm.writes)
+
+    def test_disabled_actor_token_contract_is_prepared_with_exact_roles_and_audiences(self):
+        first = self.run_cli("--apply", "--confirm-isolated-realm", "--receivers-only")
+        self.assertEqual(0, first.returncode, first.stderr)
+        expected = {
+            "backend-setup": ({"config-wizard", "invitation-reservations", "consultant-import"}, {"tenantservice", "agencyservice", "consultingtypeservice", "userservice"}),
+            "backend-account-create": ({"account-provisioning", "account-read"}, {"userservice", "oriso-account-lifecycle"}),
+            "backend-account-admin": ({"account-maintenance", "account-read", "otp-config-admin", "session-exchange"}, {"userservice", "oriso-account-lifecycle", "oriso-otp"}),
+            "backend-mail": ({"smtp-sync", "system-email-delivery", "notification-dispatch", "notifications-technical"}, {"tenantservice", "agencyservice", "consultingtypeservice", "userservice", "oriso-task-commands"}),
+            "backend-runtime": ({"runtime-policy", "matrix-agency", "matrix-agency-provision", "appointment-sync", "appointment-participant-cleanup"}, {"tenantservice", "agencyservice", "appointmentservice"}),
+        }
+        for client_id, (roles, audiences) in expected.items():
+            with self.subTest(client_id=client_id):
+                client = self.realm.clients[client_id]
+                self.assertFalse(client["enabled"])
+                self.assertFalse(client["fullScopeAllowed"])
+                self.assertEqual([], client["defaultClientScopes"])
+                self.assertEqual([], client["optionalClientScopes"])
+                self.assertEqual(roles, set(client.get("scopeRoles", [])))
+                mappers = client.get("protocolMappers", [])
+                self.assertEqual(len(audiences) + 2, len(mappers))
+                self.assertEqual(audiences, {m["config"]["included.custom.audience"] for m in mappers if m["protocolMapper"] == "oidc-audience-mapper"})
+                self.assertEqual(1, sum(m["protocolMapper"] == "oidc-sub-mapper" for m in mappers))
+                self.assertEqual(1, sum(m["protocolMapper"] == "oidc-usermodel-realm-role-mapper" and m["config"]["claim.name"] == "realm_access.roles" for m in mappers))
+        writes = self.realm.writes
+        repeated = self.run_cli("--apply", "--confirm-isolated-realm", "--receivers-only")
+        self.assertEqual(0, repeated.returncode, repeated.stderr)
+        self.assertEqual(0, json.loads(repeated.stdout)["changes"])
+        self.assertEqual(writes, self.realm.writes)
+
+    def test_preparation_cannot_silently_restore_native_paths_after_receiver_only(self):
+        fenced = self.run_cli("--apply", "--confirm-isolated-realm", "--receivers-only")
+        self.assertEqual(0, fenced.returncode, fenced.stderr)
+        before = self.realm.writes
+        result = self.run_cli("--apply", "--confirm-isolated-realm")
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(before, self.realm.writes)
+        self.assertNotIn("synthetic-private-installer-token", result.stdout + result.stderr)
+
+    def test_native_initial_scopes_are_removed_before_exact_token_preparation_receipt(self):
+        self.realm.native_initial_scopes = True
+        first = self.run_cli("--apply", "--confirm-isolated-realm", "--receivers-only")
+        self.assertEqual(0, first.returncode, first.stderr)
+        for client in self.realm.clients.values():
+            if not client["clientId"].startswith("backend-"):
+                continue
+            self.assertEqual([], client["defaultClientScopes"])
+            self.assertEqual([], client["optionalClientScopes"])
+            self.assertEqual("exact-v1", client["attributes"].get("oriso-c.token-contract"))
+        before = self.realm.writes
+        second = self.run_cli("--apply", "--confirm-isolated-realm", "--receivers-only")
+        self.assertEqual(0, second.returncode, second.stderr)
+        self.assertEqual(0, json.loads(second.stdout)["changes"])
+        self.assertEqual(before, self.realm.writes)
+
+    def test_unreviewed_token_sources_refuse_before_any_reconcile_write(self):
+        prepared = self.run_cli("--apply", "--confirm-isolated-realm", "--receivers-only")
+        self.assertEqual(0, prepared.returncode, prepared.stderr)
+        original = json.dumps(self.realm.clients)
+        changes = [
+            {"defaultClientScopes": ["roles"]},
+            {"optionalClientScopes": ["offline_access"]},
+            {"scopeRoles": ["tenant-admin"]},
+            {"scopeClientMappings": {"realm-management": {"mappings": [{"name": "manage-users"}]}}},
+            {"protocolMappers": [{"name": "unreviewed", "protocol": "openid-connect", "protocolMapper": "oidc-script-based-protocol-mapper", "config": {}}]},
+        ]
+        for change in changes:
+            with self.subTest(change=change):
+                self.realm.clients = json.loads(original)
+                self.realm.clients["backend-mail"].update(change)
+                before = self.realm.writes
+                result = self.run_cli("--apply", "--confirm-isolated-realm", "--receivers-only")
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(before, self.realm.writes)
+
     def test_composite_actor_role_is_refused_before_any_write(self):
         self.realm.roles["smtp-sync"] = {
             "id": "smtp-sync",
@@ -439,6 +574,20 @@ class HttpReconciliationTest(unittest.TestCase):
 
 
 class RegistryContractTest(unittest.TestCase):
+    def test_registry_rejects_changed_or_duplicate_bearer_audiences(self):
+        data = json.loads((ROOT / "files/scenario-c-task-identities.json").read_text())
+        for audiences in (
+            ["userservice"],
+            ["tenantservice", "agencyservice", "consultingtypeservice", "userservice", "oriso-task-commands", "oriso-task-commands"],
+            ["tenantservice", "agencyservice", "consultingtypeservice", "userservice", "realm-management"],
+        ):
+            with self.subTest(audiences=audiences), tempfile.TemporaryDirectory() as temp:
+                data["actors"][3]["bearerAudiences"] = audiences
+                registry = Path(temp) / "registry.json"
+                registry.write_text(json.dumps(data))
+                result = subprocess.run([sys.executable, str(SCRIPT), "--registry", str(registry), "--validate-only"], capture_output=True, text=True)
+                self.assertNotEqual(0, result.returncode)
+
     def test_registry_has_exactly_five_selected_actors_and_purpose_aliases(self):
         result = subprocess.run(
             [sys.executable, str(SCRIPT), "--validate-only"],

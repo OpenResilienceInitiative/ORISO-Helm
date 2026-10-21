@@ -14,6 +14,12 @@
         "config-wizard",
         "invitation-reservations",
         "consultant-import"
+      ],
+      "bearerAudiences": [
+        "tenantservice",
+        "agencyservice",
+        "consultingtypeservice",
+        "userservice"
       ]
     },
     {
@@ -25,6 +31,10 @@
       "roles": [
         "account-provisioning",
         "account-read"
+      ],
+      "bearerAudiences": [
+        "userservice",
+        "oriso-account-lifecycle"
       ]
     },
     {
@@ -40,6 +50,11 @@
         "account-read",
         "otp-config-admin",
         "session-exchange"
+      ],
+      "bearerAudiences": [
+        "userservice",
+        "oriso-account-lifecycle",
+        "oriso-otp"
       ]
     },
     {
@@ -55,6 +70,13 @@
         "system-email-delivery",
         "notification-dispatch",
         "notifications-technical"
+      ],
+      "bearerAudiences": [
+        "tenantservice",
+        "agencyservice",
+        "consultingtypeservice",
+        "userservice",
+        "oriso-task-commands"
       ]
     },
     {
@@ -72,6 +94,11 @@
         "matrix-agency-provision",
         "appointment-sync",
         "appointment-participant-cleanup"
+      ],
+      "bearerAudiences": [
+        "tenantservice",
+        "agencyservice",
+        "appointmentservice"
       ]
     }
   ]

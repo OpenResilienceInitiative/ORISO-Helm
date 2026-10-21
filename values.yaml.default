@@ -3,6 +3,17 @@ cert-manager:
   enabled: true
 
 global:
+  # Scenario C is opt-in. Supply actual native subject receipts and existing
+  # Secret references; never put task credentials or the shared key in values.
+  taskIdentities:
+    model: LEGACY
+    realmId: ""
+    contextKeyVersion: ""
+    humanClientIds: []
+    contextKeySecretRef: {}
+    actors: {}
+    ordinaryGroups: {}
+
   # Kubernetes service DNS suffix, supplied by the cluster operator.
   clusterDomain: "cluster.local"
   # Enable only after the lifecycle endpoint and candidate report are verified.

@@ -42,6 +42,7 @@ spec:
           image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            {{- include "oriso.scenarioC.env" (dict "root" $ "component" "userservice") | nindent 12 }}
             {{- include "oriso.springTelemetryEnv" (dict "root" $ "image" (include "oriso.immutableImage" (list "userService.image" .Values.userService.image))) | nindent 12 }}
             - name: MATRIXRTC_LIFECYCLE_ENABLED
               valueFrom:
@@ -256,21 +257,25 @@ spec:
                 configMapKeyRef:
                   name: userservice-configmap-env
                   key: KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT
+            {{- if ne (include "oriso.scenarioC.enabled" $) "true" }}
             - name: KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: keycloak-backend-client-secrets
                   key: KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET
+            {{- end }}
             - name: IDENTITY_TECHNICAL_CLIENT_ID
               valueFrom:
                 configMapKeyRef:
                   name: userservice-configmap-env
                   key: IDENTITY_TECHNICAL_CLIENT_ID
+            {{- if ne (include "oriso.scenarioC.enabled" $) "true" }}
             - name: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: keycloak-backend-client-secrets
                   key: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
+            {{- end }}
             - name: KEYCLOAK_CONFIG_APP_CLIENTID
               valueFrom:
                 configMapKeyRef:
