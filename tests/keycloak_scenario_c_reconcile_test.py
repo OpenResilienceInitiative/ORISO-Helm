@@ -200,7 +200,10 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
                         'nativeSecretTimestampPresent': 'client.secret.creation.time' in attributes,
                         'nativeSecretTimestampValid': installer.native_secret_timestamp_valid(
                             attributes.get('client.secret.creation.time')),
-                        'unknownAttributeCount': len(set(attributes) - {'oriso-c.pending-receipt', 'client.secret.creation.time'}),
+                        'unknownAttributeCount': len(set(attributes) - {'oriso-c.pending-receipt', 'client.secret.creation.time'}
+                                                     - set(installer.NATIVE_PENDING_READBACK_VALUES)),
+                        'namedNativeDefaultsMatch': all(name not in attributes or attributes[name] == value
+                            for name, value in installer.NATIVE_PENDING_READBACK_VALUES.items()),
                         'inactiveFlagsMatch': all(client.get(field, False) is False for field in
                             ('enabled', 'publicClient', 'bearerOnly', 'authorizationServicesEnabled',
                              'consentRequired', 'standardFlowEnabled', 'directAccessGrantsEnabled',
@@ -322,6 +325,11 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
                             is not None and int(stamp) <= 2147483647,
                             'Native POST secret timestamp must be present and valid')
             type(self).external_review_observations['nativeSecretTimestampPresentAndValid'] = True
+            self.assertTrue(all(client['attributes'].get(name) == value for name, value in {
+                'backchannel.logout.session.required': 'true',
+                'backchannel.logout.revoke.offline.tokens': 'false',
+                'realm_client': 'false'}.items()), 'Actual native defaults do not match pinned readback')
+            type(self).external_review_observations['namedNativeReadbackDefaultsVerified'] = True
             credential = self.admin('GET', '/clients/' + client['id'] + '/client-secret').get('value')
             self.assertTrue(isinstance(credential, str) and bool(credential), 'Native POST has no client credential')
             if phase == 'after-post':
@@ -333,6 +341,8 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             self.assertFalse(client['enabled'])
             marker = 'oriso-c.pending-receipt' if phase != 'after-final-put' else 'oriso-c.prepared-subject'
             self.assertIn(marker, client['attributes'])
+            if phase == 'after-final-put':
+                self.assertNotIn('oriso-c.pending-receipt', client['attributes'])
             self.assertFalse(self.cli()['applied'])
         type(self).external_review_observations['ownedPendingCrashRecoverySameNativeSubject'] = True
         first = self.cli("--apply", "--confirm-isolated-realm")
@@ -355,6 +365,7 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
         self.assertTrue(all(c["enabled"] is False for c in actors))
         self.assertTrue(self.admin("GET", "")["adminPermissionsEnabled"])
         completed = self.admin('GET', '/clients?clientId=backend-setup')[0]
+        self.assertNotIn('oriso-c.pending-receipt', completed['attributes'])
         self.assertEqual(original_pair, (completed['id'], completed['attributes']['oriso-c.prepared-subject']))
         final_credential = self.admin('GET', '/clients/' + completed['id'] + '/client-secret').get('value')
         self.assertTrue(completed['attributes'].get('client.secret.creation.time') == original_stamp

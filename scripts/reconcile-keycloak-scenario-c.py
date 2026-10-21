@@ -58,6 +58,11 @@ EXPECTED_AUDIENCES = {
     "MAIL": {"tenantservice", "agencyservice", "consultingtypeservice", "userservice", "oriso-task-commands"},
     "RUNTIME": {"tenantservice", "agencyservice", "appointmentservice"},
 }
+NATIVE_PENDING_READBACK_VALUES = {
+    "backchannel.logout.session.required": "true",
+    "backchannel.logout.revoke.offline.tokens": "false",
+    "realm_client": "false",
+}
 
 
 class ReconcileError(Exception):
@@ -89,7 +94,9 @@ def native_secret_timestamp_valid(value):
 def pending_attributes_valid(attributes, receipt):
     return (isinstance(attributes, dict)
             and attributes.get("oriso-c.pending-receipt") == receipt
-            and not set(attributes) - {"oriso-c.pending-receipt", "client.secret.creation.time"}
+            and not set(attributes) - {"oriso-c.pending-receipt", "client.secret.creation.time"} - set(NATIVE_PENDING_READBACK_VALUES)
+            and all(name not in attributes or attributes[name] == value
+                    for name, value in NATIVE_PENDING_READBACK_VALUES.items())
             and ("client.secret.creation.time" not in attributes
                  or native_secret_timestamp_valid(attributes["client.secret.creation.time"])))
 
@@ -134,7 +141,10 @@ def finalize_pending(admin, client_id, actor, receipt, baseline, before):
             or inspect_pending(admin, client_id, actor, receipt, baseline) != before):
         raise ReconcileError("Pending native subject or stable shape changed before receipt")
     attributes = dict(before["client"]["attributes"])
-    attributes.pop("oriso-c.pending-receipt")
+    # Native PUT merges attribute keys; null explicitly removes the pending key.
+    attributes["oriso-c.pending-receipt"] = None
+    # ModelToRepresentation injects this derived field; never persist it.
+    attributes.pop("realm_client", None)
     attributes.update({"oriso-c.preparation": "v1", "oriso-c.prepared-subject": actual["id"]})
     admin.request("PUT", "/clients/" + quote(client_id, safe=""), {"attributes": attributes})
     return actual["id"]
@@ -265,6 +275,7 @@ def reconcile_token_scope(admin, client_id, actor):
             changes += 1
     inspect_token_scope(admin, client_id, actor, exact=True)
     if preparing:
+        attributes.pop("realm_client", None)
         admin.request("PUT", path, {"attributes": {**attributes, "oriso-c.token-contract": "exact-v1"}})
         changes += 1
     if admin.request("GET", path).get("attributes", {}).get("oriso-c.token-contract") != "exact-v1":
@@ -664,6 +675,7 @@ def reconcile(admin, actors, mapping, snapshot, receivers_only=False):
             current = admin.request("GET", path)
             attributes = current.get("attributes", {})
             if attributes.get("oriso-c.native-policy") != "receiver-only-v1":
+                attributes.pop("realm_client", None)
                 admin.request(
                     "PUT",
                     path,

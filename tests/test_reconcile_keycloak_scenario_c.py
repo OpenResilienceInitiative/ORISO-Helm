@@ -72,8 +72,15 @@ class NativeRealm:
         self.native_initial_scopes = False
         self.fail_after_client_post = False
         self.fail_before_subject_receipt = False
+        self.fail_after_subject_receipt = False
         self.drift_on_native_subject_read = False
         self.native_secret_timestamp = False
+
+    def represented_client(self, client):
+        value = json.loads(json.dumps(client))
+        if self.native_secret_timestamp:
+            value.setdefault('attributes', {})['realm_client'] = 'false'
+        return value
 
     def handle(self, method, path, body):
         self.requests += 1
@@ -136,6 +143,8 @@ class NativeRealm:
                 self.native_service_accounts[cid] = self.users[cid]["id"]
                 if self.native_secret_timestamp:
                     self.clients[cid]['attributes']['client.secret.creation.time'] = '1792616400'
+                    self.clients[cid]['attributes']['backchannel.logout.session.required'] = 'true'
+                    self.clients[cid]['attributes']['backchannel.logout.revoke.offline.tokens'] = 'false'
                     self.clients[cid]['secret'] = 'synthetic-auto-generated-client-credential'
                 if self.fail_after_client_post:
                     self.fail_after_client_post = False
@@ -144,7 +153,7 @@ class NativeRealm:
             rows = list(self.clients.values())
             if "clientId" in q:
                 rows = [c for c in rows if c["clientId"] == q["clientId"][0]]
-            return 200, rows
+            return 200, [self.represented_client(client) for client in rows]
         if parts == ["users"]:
             return 200, [
                 u
@@ -315,9 +324,23 @@ class NativeRealm:
                         and body.get('attributes', {}).get('oriso-c.prepared-subject')):
                     self.fail_before_subject_receipt = False
                     return 503, None
-                c.update(body)
+                # Pinned native client PUT merges attributes; explicit null
+                # removes a key. Omission never clears a persisted attribute.
+                fields = dict(body)
+                attributes = fields.pop('attributes', None)
+                c.update(fields)
+                if attributes is not None:
+                    for name, value in attributes.items():
+                        if value is None:
+                            c.setdefault('attributes', {}).pop(name, None)
+                        else:
+                            c.setdefault('attributes', {})[name] = value
+                if (self.fail_after_subject_receipt
+                        and body.get('attributes', {}).get('oriso-c.prepared-subject')):
+                    self.fail_after_subject_receipt = False
+                    return 503, None
                 return 204, None
-            return 200, c
+            return 200, self.represented_client(c)
         return 404, None
 
 
@@ -417,6 +440,12 @@ class HttpReconciliationTest(unittest.TestCase):
         self.assertEqual(subject, client['attributes']['oriso-c.prepared-subject'])
         self.assertEqual(stamp, client['attributes']['client.secret.creation.time'])
         self.assertTrue(secret == client['secret'], 'Pending recovery rotated native credential')
+        self.assertNotIn('realm_client', client['attributes'], 'Derived native metadata was persisted')
+        self.assertEqual('true', client['attributes']['backchannel.logout.session.required'])
+        self.assertEqual('false', client['attributes']['backchannel.logout.revoke.offline.tokens'])
+        converted = self.run_cli('--apply', '--confirm-isolated-realm', '--receivers-only')
+        self.assertEqual(0, converted.returncode, converted.stderr)
+        self.assertNotIn('realm_client', client['attributes'])
 
     def test_pending_native_timestamp_is_strict_and_unknown_attributes_refuse(self):
         client, _ = self.pending_after_failure()
@@ -433,8 +462,36 @@ class HttpReconciliationTest(unittest.TestCase):
         self.assertNotEqual(0, self.run_cli('--apply', '--confirm-isolated-realm').returncode)
         self.assertEqual(writes, self.realm.writes)
 
+    def test_pending_named_native_defaults_cannot_change_values_or_types(self):
+        client, _ = self.pending_after_failure()
+        attrs = dict(client['attributes'])
+        for name in ('backchannel.logout.session.required', 'backchannel.logout.revoke.offline.tokens', 'realm_client'):
+            for value in ('unreviewed', True, None):
+                with self.subTest(name=name, value=value):
+                    client['attributes'] = {**attrs, name: value}
+                    writes = self.realm.writes
+                    result = self.run_cli('--apply', '--confirm-isolated-realm')
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertEqual(writes, self.realm.writes)
+
     def test_failed_final_receipt_put_keeps_pending_and_native_subject_for_retry(self):
         client, subject = self.pending_after_failure('fail_before_subject_receipt')
+        resumed = self.run_cli('--apply', '--confirm-isolated-realm')
+        self.assertEqual(0, resumed.returncode, resumed.stderr)
+        self.assertEqual(subject, client['attributes']['oriso-c.prepared-subject'])
+        self.assertEqual(5, len(self.realm.users))
+
+    def test_lost_final_receipt_reply_keeps_completed_subject_and_read_only_retry(self):
+        self.realm.fail_after_subject_receipt = True
+        failed = self.run_cli('--apply', '--confirm-isolated-realm')
+        self.assertNotEqual(0, failed.returncode)
+        client = self.realm.clients['backend-setup']
+        subject = self.realm.users['backend-setup']['id']
+        self.assertNotIn('oriso-c.pending-receipt', client['attributes'])
+        self.assertEqual(subject, client['attributes']['oriso-c.prepared-subject'])
+        writes, reads = self.realm.writes, self.realm.service_account_reads
+        self.assertEqual(0, self.run_cli().returncode)
+        self.assertEqual((writes, reads), (self.realm.writes, self.realm.service_account_reads))
         resumed = self.run_cli('--apply', '--confirm-isolated-realm')
         self.assertEqual(0, resumed.returncode, resumed.stderr)
         self.assertEqual(subject, client['attributes']['oriso-c.prepared-subject'])
