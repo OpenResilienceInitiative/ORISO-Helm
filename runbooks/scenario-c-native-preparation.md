@@ -75,8 +75,8 @@ these actors only, and places them in the protected technical group. Legacy
 clients/users and unrelated human accounts are preserved.
 
 Native reconciliation installs three user policies and four **Groups-only**
-scope permissions. `ACCOUNT_CREATE` and `ACCOUNT_ADMIN` reach the pending group;
-both may join ordinary role groups; only `ACCOUNT_ADMIN` manages ordinary role
+scope permissions. Only `ACCOUNT_CREATE` reaches the pending group and may join
+ordinary role groups; `ACCOUNT_ADMIN` separately manages ordinary role
 members. Protected groups deny those member operations. No Users/Roles or broad
 native administration permission is used. Unknown permissions, native
 administration grants, composite actor roles and unreviewed group children

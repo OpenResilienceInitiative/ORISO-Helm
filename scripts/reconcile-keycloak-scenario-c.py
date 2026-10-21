@@ -389,7 +389,7 @@ def desired_policies(snapshot, mapping, receivers_only=False):
     users = [
         {
             "name": "oriso-c-is-provisioner",
-            "users": [subjects["ACCOUNT_CREATE"], subjects["ACCOUNT_ADMIN"]],
+            "users": [subjects["ACCOUNT_CREATE"]],
         },
         {"name": "oriso-c-is-maintainer", "users": [subjects["ACCOUNT_ADMIN"]]},
         {"name": "oriso-c-deny-everyone", "users": []},
