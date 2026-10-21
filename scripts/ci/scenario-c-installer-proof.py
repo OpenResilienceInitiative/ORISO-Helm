@@ -131,6 +131,7 @@ def require_child(run_id, container):
         actual.get("Config", {}).get("Labels", {}).get("oriso-c-installer-run")
         != run_id
         or actual.get("HostConfig", {}).get("Memory") != 768 * 1024**2
+        or actual.get("HostConfig", {}).get("MemorySwap") != 768 * 1024**2
         or actual.get("HostConfig", {}).get("NanoCpus") != 2_000_000_000
         or "http://" + output("docker", "port", container, "8080/tcp") + "/auth" != base
     ):
@@ -306,7 +307,7 @@ def hosted(report, support_root):
         owned.plan("container", name)
         subprocess.run(
             ["docker", "run", "-d", "--name", name, "--label", label,
-             "--memory", "768m", "--cpus", "2", "-p", "127.0.0.1::8080",
+             "--memory", "768m", "--memory-swap", "768m", "--cpus", "2", "-p", "127.0.0.1::8080",
              "-e", "JAVA_OPTS_APPEND=-Xmx384m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2",
              "-e", "KC_BOOTSTRAP_ADMIN_USERNAME=" + fixture.INSTALLER[0],
              "-e", "KC_BOOTSTRAP_ADMIN_PASSWORD=" + fixture.INSTALLER[1],
