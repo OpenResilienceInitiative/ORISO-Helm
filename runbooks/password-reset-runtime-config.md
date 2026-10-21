@@ -39,11 +39,19 @@ admin value explicitly only where the Admin panel has its own host.
 
 ## Applying it per environment
 
-Dev is rendered from `values-dev.yaml` in this chart; Pre-Dev values live in
-`values-pre-dev.yaml`. Pre-Dev still runs a release rendered from the archived
-ORISO-Kubernetes chart (ORISO-Helm#110) — a `helm upgrade` from this chart
-against Pre-Dev is not allowed — so until that migration lands the live
-rollout is a scoped ConfigMap patch (mirroring ORISO-Admin#392):
+Dev is rendered from `values-dev.yaml` in this chart. Pre-Dev is rendered from
+`values-dev.yaml` with `values-pre-dev.yaml` loaded after it, which sets the
+Pre-Dev base URLs above. Apply both through the normal release flow:
+
+```bash
+helm upgrade --install caritas ./ -n caritas \
+  -f values.yaml -f values-dev.yaml -f values-pre-dev.yaml -f secrets.yaml
+```
+
+Pre-Dev previously ran a release rendered from the archived ORISO-Kubernetes
+chart (ORISO-Helm#110), where the rollout was a scoped ConfigMap patch
+(mirroring ORISO-Admin#392). Keep it only as a hotfix until the next upgrade,
+which overwrites it; the Deployment name below is the archived chart's:
 
 ```bash
 kubectl -n caritas patch configmap userservice-configmap-env --type merge -p '{"data":{"PASSWORD_RESET_FRONTEND_BASE_URL":"https://predev.oriso.org","PASSWORD_RESET_ADMIN_FRONTEND_BASE_URL":"https://predev.oriso.org/admin","ACCOUNT_INVITE_APP_FRONTEND_BASE_URL":"https://predev.oriso.org","ACCOUNT_INVITE_ADMIN_FRONTEND_BASE_URL":"https://predev.oriso.org"}}'

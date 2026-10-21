@@ -10,6 +10,23 @@
 # Deliberate deltas from Dev: host and public URLs, Matrix identity, SigNoz labels,
 # no chart-managed Storybook, no dummy data, the closed mail-locale gate required by
 # tests/render_pending_mail_locale_optin_test.py, and the Spring profile (see below).
+#
+# Inherited from Dev, and new on Pre-Dev compared with the old standalone overlay
+# (helm template of both stacks, 2026-10-21):
+#   - global.observability: every trace kept (MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+#     1.0), test.run.id baggage, Keycloak metrics (appMetrics).
+#   - dbMetrics: the db-monitoring-reconcile Job creates read-only monitoring users in
+#     MariaDB, MongoDB and RabbitMQ and keeps their passwords in Secret oriso-db-monitoring.
+#   - webVitals: Ingress caritas-signoz-rum-ingress publishes the unauthenticated
+#     https://predev.oriso.org/signoz-rum/v1/metrics endpoint for Frontend and Admin.
+# Override them here if Pre-Dev should not have them.
+#
+# values-dev.yaml now sits between values.yaml and this file, so every key it sets
+# overrides Pre-Dev's own values.yaml. Before the first upgrade with this layering,
+# compare `helm get values caritas -n caritas` on Pre-Dev with values-dev.yaml and copy
+# every Pre-Dev value that has to survive into this file. Check
+# userService.supportAccess.enabled first: Dev pins it to "false", while ADR-018
+# Release 1 is exercised on Pre-Dev.
 
 global:
   # Public host of the Pre-Dev environment (main-ingress serves App, /admin, /auth
