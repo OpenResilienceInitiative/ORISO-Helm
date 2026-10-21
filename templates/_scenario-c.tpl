@@ -95,7 +95,7 @@
   value: {{ $binding.clientId | quote }}
 - name: IDENTITY_{{ $actor }}_SERVICE_SUBJECT
   value: {{ $binding.serviceSubject | quote }}
-{{- if or (eq $component "userservice") (and (eq $component "tenantservice") (eq $actor "SETUP")) }}
+{{- if eq $component "userservice" }}
 - name: IDENTITY_{{ $actor }}_CLIENT_SECRET
   valueFrom:
     secretKeyRef: {{ $binding.secretRef | toJson }}

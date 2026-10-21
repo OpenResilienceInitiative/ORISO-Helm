@@ -158,7 +158,7 @@ class ScenarioCChartBindingsTest(unittest.TestCase):
                 expected = (
                     set(ACTORS)
                     if service == "userservice"
-                    else {"SETUP"} if service == "tenantservice" else set()
+                    else set()
                 )
                 actual = {
                     actor
