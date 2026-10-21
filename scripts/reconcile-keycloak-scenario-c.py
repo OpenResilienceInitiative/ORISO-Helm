@@ -103,7 +103,6 @@ def token_mappers(actor):
                 "id.token.claim": "false",
                 "userinfo.token.claim": "false",
                 "introspection.token.claim": "true",
-                "usermodel.realmRoleMapping.rolePrefix": "",
             },
         },
     ]
