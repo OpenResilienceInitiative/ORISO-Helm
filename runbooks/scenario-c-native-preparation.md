@@ -63,10 +63,16 @@ python3 scripts/reconcile-keycloak-scenario-c.py \
 
 Repeat the same command: the second successful run reports `changes=0`.
 Apply binds each managed client to its authoritative native service-account
-UUID before role or policy updates. Existing actors without the preparation
-receipt are refused: migration/adoption is a separate explicit gate. An
-interrupted preparation without a completed receipt needs operator inspection;
-the tool does not guess ownership from a username.
+UUID before role or policy updates. The original disabled-client POST includes
+an owned pending receipt bound to the actual realm, actor, registry and reviewed
+mapping. After an interrupted POST or subject-receipt PUT, repeat the same
+command with the same inputs. Read-only inspection must first confirm the exact
+pending shape without invoking the lazy service-account API. Confirmed apply
+then verifies the native UUID and unchanged safe shape before replacing the
+pending marker atomically with the completed receipt. A lost final PUT reply
+also converges on that same UUID. Existing actors without either exact receipt
+are refused: migration/adoption requires separate operator inspection; the tool
+does not guess ownership from a username.
 
 The tool creates disabled confidential clients with service accounts, no
 interactive/password grants and no full scopes. It assigns the exact actor

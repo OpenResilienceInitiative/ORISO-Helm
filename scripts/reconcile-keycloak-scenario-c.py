@@ -7,6 +7,7 @@ No client secrets, tokens or user profile data are printed or persisted.
 
 import argparse
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -60,6 +61,65 @@ EXPECTED_AUDIENCES = {
 
 class ReconcileError(Exception):
     pass
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def pending_receipt(actors, mapping, realm, key):
+    if not isinstance(realm.get("id"), str) or not realm["id"]:
+        raise ReconcileError("Actual realm ID is required for pending ownership")
+    return canonical({
+        "version": 1, "actor": key, "clientId": actors[key]["clientId"],
+        "realmId": realm["id"], "realm": realm["realm"],
+        "registrySha256": hashlib.sha256(canonical(actors).encode()).hexdigest(),
+        "mappingSha256": hashlib.sha256(canonical(mapping).encode()).hexdigest(),
+    })
+
+
+def inspect_pending(admin, client_id, actor, receipt, baseline):
+    """Read-only ownership/shape gate; never calls the lazy native subject API."""
+    client = admin.request("GET", "/clients/" + quote(client_id, safe=""))
+    if (client.get("clientId") != actor["clientId"]
+            or client.get("attributes") != {"oriso-c.pending-receipt": receipt}
+            or client.get("protocol") != "openid-connect"
+            or client.get("enabled") is not False
+            or client.get("publicClient") is not False
+            or client.get("serviceAccountsEnabled") is not True
+            or client.get("bearerOnly", False) is not False
+            or client.get("authorizationServicesEnabled", False) is not False
+            or client.get("consentRequired", False) is not False
+            or client.get("clientAuthenticatorType", "client-secret") != "client-secret"
+            or any(client.get(field) is not False for field in
+                   ("standardFlowEnabled", "directAccessGrantsEnabled", "implicitFlowEnabled", "fullScopeAllowed"))):
+        raise ReconcileError("Pending ownership receipt or inactive client shape does not match")
+    assigned, mappers = inspect_token_scope(admin, client_id, actor, prepare_native_scopes=True)
+    if assigned or mappers:
+        raise ReconcileError("Pending client already has custom token grants")
+    users = admin.paged("/users", {"username": "service-account-" + actor["clientId"], "exact": "true"})
+    if (len(users) != 1 or not isinstance(users[0].get("id"), str) or not users[0]["id"]
+            or users[0].get("username") != "service-account-" + actor["clientId"]):
+        raise ReconcileError("Pending service account has no exact read-only match")
+    uid = users[0]["id"]
+    path = "/users/" + quote(uid, safe="")
+    grants = admin.request("GET", path + "/role-mappings")
+    roles = admin.request("GET", path + "/role-mappings/realm/composite")
+    if (grants.get("clientMappings") or not {r["name"] for r in roles}.issubset(baseline)
+            or admin.paged(path + "/groups")):
+        raise ReconcileError("Pending service account has custom grants or membership")
+    return {"client": client, "subject": uid}
+
+
+def finalize_pending(admin, client_id, actor, receipt, baseline, before):
+    actual = admin.request("GET", "/clients/" + quote(client_id, safe="") + "/service-account-user")
+    if (actual.get("id") != before["subject"]
+            or actual.get("username") != "service-account-" + actor["clientId"]
+            or inspect_pending(admin, client_id, actor, receipt, baseline) != before):
+        raise ReconcileError("Pending native subject or stable shape changed before receipt")
+    admin.request("PUT", "/clients/" + quote(client_id, safe=""), {
+        "attributes": {"oriso-c.preparation": "v1", "oriso-c.prepared-subject": actual["id"]}})
+    return actual["id"]
 
 
 def migration_module():
@@ -247,6 +307,7 @@ def inspect(admin, actors, mapping, verify_service_accounts=False, exact_grants=
             )
     clients = {}
     subjects = {}
+    pending = {}
     receiver_policy_prepared = False
     for key, actor in actors.items():
         cid = actor["clientId"]
@@ -267,6 +328,11 @@ def inspect(admin, actors, mapping, verify_service_accounts=False, exact_grants=
         ):
             raise ReconcileError("Existing actor client is active or has unsafe grants")
         attrs = client.get("attributes", {})
+        if "oriso-c.pending-receipt" in attrs:
+            pending[key] = inspect_pending(admin, client["id"], actor,
+                pending_receipt(actors, mapping, realm_state, key), baseline)
+            clients[key] = client["id"]
+            continue
         policy = attrs.get("oriso-c.native-policy")
         if policy not in (None, "receiver-only-v1"):
             raise ReconcileError("Unknown managed native policy preparation")
@@ -321,6 +387,7 @@ def inspect(admin, actors, mapping, verify_service_accounts=False, exact_grants=
         "groups": groups,
         "clients": clients,
         "subjects": subjects,
+        "pending": pending,
         "realm": realm_state,
         "baseline_roles": baseline,
         "permission_client": permission_client[0]["id"] if permission_client else None,
@@ -479,6 +546,10 @@ def reconcile(admin, actors, mapping, snapshot, receivers_only=False):
             "Receiver-only preparation cannot restore native account permissions"
         )
     changes = 0
+    for key, before in snapshot.get("pending", {}).items():
+        snapshot["subjects"][key] = finalize_pending(admin, snapshot["clients"][key], actors[key],
+            pending_receipt(actors, mapping, snapshot["realm"], key), snapshot["baseline_roles"], before)
+        changes += 1
     if not snapshot["realm"].get("adminPermissionsEnabled"):
         # Do not re-import realm exports: native re-import may conflict with FGAP resources.
         admin.request("PUT", "", {"adminPermissionsEnabled": True})
@@ -498,32 +569,18 @@ def reconcile(admin, actors, mapping, snapshot, receivers_only=False):
                     "standardFlowEnabled": False,
                     "directAccessGrantsEnabled": False,
                     "fullScopeAllowed": False,
+                    "implicitFlowEnabled": False,
+                    "bearerOnly": False,
+                    "attributes": {"oriso-c.pending-receipt": pending_receipt(actors, mapping, snapshot["realm"], key)},
                     "defaultClientScopes": [],
                     "optionalClientScopes": [],
                 },
             )
             cid = admin.paged("/clients", {"clientId": actor["clientId"]})[0]["id"]
-            user = admin.request(
-                "GET", "/clients/" + quote(cid, safe="") + "/service-account-user"
-            )
-            if (
-                not user.get("id")
-                or user.get("username") != "service-account-" + actor["clientId"]
-            ):
-                raise ReconcileError(
-                    "Native service-account creation has no exact result"
-                )
-            admin.request(
-                "PUT",
-                "/clients/" + quote(cid, safe=""),
-                {
-                    "attributes": {
-                        "oriso-c.preparation": "v1",
-                        "oriso-c.prepared-subject": user["id"],
-                    }
-                },
-            )
-            snapshot["subjects"][key] = user["id"]
+            receipt = pending_receipt(actors, mapping, snapshot["realm"], key)
+            before = inspect_pending(admin, cid, actor, receipt, snapshot["baseline_roles"])
+            snapshot["subjects"][key] = finalize_pending(admin, cid, actor, receipt,
+                snapshot["baseline_roles"], before)
             changes += 2
         path = "/users/" + quote(snapshot["subjects"][key], safe="")
         direct = admin.request("GET", path + "/role-mappings/realm")

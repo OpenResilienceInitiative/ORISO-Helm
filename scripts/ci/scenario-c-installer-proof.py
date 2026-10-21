@@ -202,6 +202,7 @@ def cases(report, run_id=None, container=None):
     recorded["provisionerBoundary"] = (
         native.NativeScenarioCReconcileTest.provisioner_observations
     )
+    recorded["externalReviewBoundaries"] = native.NativeScenarioCReconcileTest.external_review_observations
     write(report, recorded)
     return 0 if green else 1
 
@@ -340,6 +341,7 @@ def hosted(report, support_root):
             child, run_id, receipt["commit"]
         )
         receipt["provisionerBoundary"] = child.get("provisionerBoundary", {})
+        receipt["externalReviewBoundaries"] = child.get("externalReviewBoundaries", {})
         support.free_guard()
     except Exception as error:
         receipt["runnerErrorClass"] = type(error).__name__

@@ -70,6 +70,9 @@ class NativeRealm:
         self.default_role = None
         self.ignore_role_write = False
         self.native_initial_scopes = False
+        self.fail_after_client_post = False
+        self.fail_before_subject_receipt = False
+        self.drift_on_native_subject_read = False
 
     def handle(self, method, path, body):
         self.requests += 1
@@ -87,6 +90,7 @@ class NativeRealm:
                         "clientId": "admin-permissions",
                     }
             return 200, {
+                "id": "fixture-realm-id",
                 "realm": "fixture",
                 "adminPermissionsEnabled": self.enabled,
                 "defaultRole": {"name": self.default_role} if self.default_role else {},
@@ -129,6 +133,9 @@ class NativeRealm:
                     "groups": [],
                 }
                 self.native_service_accounts[cid] = self.users[cid]["id"]
+                if self.fail_after_client_post:
+                    self.fail_after_client_post = False
+                    return 503, None
                 return 201, None
             rows = list(self.clients.values())
             if "clientId" in q:
@@ -257,6 +264,8 @@ class NativeRealm:
                 return 200, [self.roles[r] for r in c.get("scopeRoles", [])]
             if parts[2:] == ["service-account-user"]:
                 self.service_account_reads += 1
+                if self.drift_on_native_subject_read:
+                    c['enabled'] = True
                 cid = c["clientId"]
                 if cid not in self.native_service_accounts:
                     # Native Keycloak can create/link an account through this GET.
@@ -298,6 +307,10 @@ class NativeRealm:
         if parts[:1] == ["clients"] and len(parts) == 2:
             c = next(c for c in self.clients.values() if c["id"] == parts[1])
             if method == "PUT":
+                if (self.fail_before_subject_receipt
+                        and body.get('attributes', {}).get('oriso-c.prepared-subject')):
+                    self.fail_before_subject_receipt = False
+                    return 503, None
                 c.update(body)
                 return 204, None
             return 200, c
@@ -367,6 +380,86 @@ class HttpReconciliationTest(unittest.TestCase):
         self.assertNotIn(
             "synthetic-private-installer-token", result.stdout + result.stderr
         )
+
+    def pending_after_failure(self, fault='fail_after_client_post'):
+        setattr(self.realm, fault, True)
+        failed = self.run_cli('--apply', '--confirm-isolated-realm')
+        self.assertNotEqual(0, failed.returncode)
+        client = self.realm.clients['backend-setup']
+        self.assertIn('oriso-c.pending-receipt', client.get('attributes', {}))
+        return client, self.realm.users['backend-setup']['id']
+
+    def test_lost_client_post_reply_resumes_owned_pending_without_lazy_dry_run(self):
+        client, subject = self.pending_after_failure()
+        writes, reads = self.realm.writes, self.realm.service_account_reads
+        plan = self.run_cli()
+        self.assertEqual(0, plan.returncode, plan.stderr)
+        self.assertEqual((writes, reads), (self.realm.writes, self.realm.service_account_reads))
+        resumed = self.run_cli('--apply', '--confirm-isolated-realm')
+        self.assertEqual(0, resumed.returncode, resumed.stderr)
+        self.assertEqual(5, len(self.realm.users))
+        self.assertIs(client, self.realm.clients['backend-setup'])
+        self.assertEqual(subject, client['attributes']['oriso-c.prepared-subject'])
+        self.assertNotIn('oriso-c.pending-receipt', client['attributes'])
+
+    def test_failed_final_receipt_put_keeps_pending_and_native_subject_for_retry(self):
+        client, subject = self.pending_after_failure('fail_before_subject_receipt')
+        resumed = self.run_cli('--apply', '--confirm-isolated-realm')
+        self.assertEqual(0, resumed.returncode, resumed.stderr)
+        self.assertEqual(subject, client['attributes']['oriso-c.prepared-subject'])
+        self.assertEqual(5, len(self.realm.users))
+
+    def test_wrong_pending_contract_refuses_without_writes(self):
+        client, _ = self.pending_after_failure()
+        original = client['attributes']['oriso-c.pending-receipt']
+        for field in ('version', 'actor', 'clientId', 'realmId', 'realm', 'registrySha256', 'mappingSha256'):
+            with self.subTest(field=field):
+                marker = json.loads(original)
+                marker[field] = 'unreviewed'
+                client['attributes']['oriso-c.pending-receipt'] = json.dumps(marker)
+                writes = self.realm.writes
+                result = self.run_cli('--apply', '--confirm-isolated-realm')
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(writes, self.realm.writes)
+        client['attributes']['oriso-c.pending-receipt'] = original
+
+    def test_pending_custom_grants_or_active_flow_refuse_without_writes(self):
+        client, _ = self.pending_after_failure()
+        self.realm.roles['config-wizard'] = {'id': 'config-wizard', 'name': 'config-wizard'}
+        original = json.loads(json.dumps(client))
+        for field, value in (('enabled', True), ('implicitFlowEnabled', True),
+                             ('scopeRoles', ['config-wizard']),
+                             ('defaultClientScopes', ['unreviewed']),
+                             ('protocolMappers', [{'name': 'unreviewed'}])):
+            with self.subTest(field=field):
+                client.clear(); client.update(json.loads(json.dumps(original)))
+                client[field] = value
+                writes = self.realm.writes
+                result = self.run_cli('--apply', '--confirm-isolated-realm')
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(writes, self.realm.writes)
+
+    def test_pending_custom_subject_roles_or_membership_refuse_without_writes(self):
+        self.pending_after_failure()
+        user = self.realm.users['backend-setup']
+        for field, value in (('realmRoles', ['consultant']), ('groups', ['group-1']),
+                             ('clientRoles', [{'id': 'foreign', 'name': 'manage-users'}])):
+            with self.subTest(field=field):
+                user[field] = value
+                writes = self.realm.writes
+                result = self.run_cli('--apply', '--confirm-isolated-realm')
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(writes, self.realm.writes)
+                user[field] = []
+
+    def test_pending_subject_shape_drift_before_final_receipt_refuses(self):
+        self.pending_after_failure()
+        self.realm.drift_on_native_subject_read = True
+        writes = self.realm.writes
+        result = self.run_cli('--apply', '--confirm-isolated-realm')
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(writes, self.realm.writes)
+        self.assertIn('oriso-c.pending-receipt', self.realm.clients['backend-setup']['attributes'])
 
     def test_native_empty_prefix_normalization_converges_without_allowing_a_prefix(
         self,

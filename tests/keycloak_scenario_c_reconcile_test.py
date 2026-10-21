@@ -16,6 +16,11 @@ import sys
 import tempfile
 import unittest
 import uuid
+import threading
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 from urllib.parse import quote
 
 import _keycloak_container as shared
@@ -31,6 +36,7 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
     def setUpClass(cls):
         cls.cli_diagnostics = []
         cls.provisioner_observations = {}
+        cls.external_review_observations = {}
         cls.container = shared.KeycloakContainer(
             "scenario-c-policies", os.environ.get("SCENARIO_C_KEYCLOAK_URL")
         )
@@ -113,13 +119,13 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             rows.append(value)
         return sorted(rows, key=lambda client: client["id"])
 
-    def cli(self, *args):
+    def cli(self, *args, endpoint=None, expect_failure=False):
         result = subprocess.run(
             [
                 sys.executable,
                 str(SCRIPT),
                 "--url",
-                self.container.base,
+                endpoint or self.container.base,
                 "--realm",
                 self.realm,
                 "--mapping",
@@ -136,6 +142,9 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             text=True,
             timeout=60,
         )
+        if expect_failure:
+            self.assertNotEqual(0, result.returncode, 'Injected native HTTP failure was not observed')
+            return result
         if result.returncode:
             # Export only exact source-authored refusal literals and structural
             # mapper mismatches. Never retain native bodies, tokens or secrets.
@@ -242,8 +251,64 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         return json.loads(result.stdout)
 
+    @contextmanager
+    def faulting_admin(self, phase):
+        """Finite HTTP fault after native persistence, with no production flag."""
+        fixture = self
+        observed = []
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+            def request(self):
+                body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+                value = json.loads(body) if body else {}
+                post = (self.command == 'POST' and self.path.endswith('/clients')
+                        and value.get('clientId') == 'backend-setup')
+                final = (self.command == 'PUT' and value.get('attributes', {}).get('oriso-c.prepared-subject'))
+                target = (phase == 'after-post' and post) or (phase in ('before-final-put', 'after-final-put') and final)
+                if target and phase == 'before-final-put':
+                    observed.append(503)
+                    self.send_response(503); self.end_headers(); return
+                request = Request(fixture.container.base + self.path.removeprefix('/auth'),
+                                  data=body if body else None, method=self.command,
+                                  headers={key: self.headers[key] for key in ('Authorization', 'Content-Type')
+                                           if key in self.headers})
+                try:
+                    with urlopen(request, timeout=30) as response:
+                        code, payload = response.status, response.read()
+                except HTTPError as error:
+                    code, payload = error.code, error.read()
+                if target:
+                    observed.append(code)
+                    code, payload = 503, b'{}'
+                self.send_response(code); self.end_headers(); self.wfile.write(payload)
+            do_GET = do_POST = do_PUT = do_DELETE = request
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        try:
+            yield 'http://127.0.0.1:' + str(server.server_port) + '/auth', observed
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=5)
+            self.assertFalse(thread.is_alive(), 'Owned HTTP fault proxy did not stop')
+
     def test_fresh_chart_realm_installer_setup_and_second_reconcile_converge(self):
         self.assertFalse(self.cli()["applied"])
+        for phase, expected in (('after-post', 201), ('before-final-put', 503), ('after-final-put', 204)):
+            with self.faulting_admin(phase) as (endpoint, observed):
+                self.cli('--apply', '--confirm-isolated-realm', endpoint=endpoint, expect_failure=True)
+                self.assertEqual([expected], observed)
+            client = self.admin('GET', '/clients?clientId=backend-setup')[0]
+            user = self.admin('GET', '/users?username=service-account-backend-setup&exact=true')
+            self.assertEqual(1, len(user), 'Original POST has no read-only native subject')
+            pair = (client['id'], user[0]['id'])
+            if phase == 'after-post':
+                original_pair = pair
+            self.assertEqual(original_pair, pair)
+            self.assertFalse(client['enabled'])
+            marker = 'oriso-c.pending-receipt' if phase != 'after-final-put' else 'oriso-c.prepared-subject'
+            self.assertIn(marker, client['attributes'])
+            self.assertFalse(self.cli()['applied'])
+        type(self).external_review_observations['ownedPendingCrashRecoverySameNativeSubject'] = True
         first = self.cli("--apply", "--confirm-isolated-realm")
         self.assertGreater(first["changes"], 0)
         self.assertEqual(7, first["native_policy_count"])
@@ -263,6 +328,8 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
         self.assertEqual(5, len(actors))
         self.assertTrue(all(c["enabled"] is False for c in actors))
         self.assertTrue(self.admin("GET", "")["adminPermissionsEnabled"])
+        completed = self.admin('GET', '/clients?clientId=backend-setup')[0]
+        self.assertEqual(original_pair, (completed['id'], completed['attributes']['oriso-c.prepared-subject']))
         # The actual upgrade helper must inspect retired clients without
         # re-enabling, rotating or requiring any of their credentials.
         retired = {}
@@ -285,6 +352,7 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             after = (self.admin("GET", "/clients/" + cid),
                      self.admin("GET", "/clients/" + cid + "/client-secret"))
             self.assertTrue(before == after, "Inspect-only hook changed a retired client")
+        type(self).external_review_observations['retiredLegacyClientsAndCredentialsPreserved'] = True
 
     def test_five_prepared_actors_issue_exact_native_subject_role_audience_tokens(self):
         self.cli("--apply", "--confirm-isolated-realm", "--receivers-only")
@@ -504,6 +572,14 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
                 mail, "PUT", "", {"smtpServer": {"host": "mail.example.invalid"}}
             )[0],
         )
+        dual = self.user('protected-ordinary-dual-member',
+                         ['/protected-admins/platform-admins', '/human-roles/consultant'])
+        get_status = self.native(maintainer, 'GET', '/users/' + dual)[0]
+        put_status = self.native(maintainer, 'PUT', '/users/' + dual, {'firstName': 'MustRefuse'})[0]
+        type(self).external_review_observations.update(
+            dualProtectedMemberGetStatus=get_status, dualProtectedMemberPutStatus=put_status)
+        self.assertEqual(403, get_status)
+        self.assertEqual(403, put_status)
         # A grouped MAIL actor has no native SMTP authority. #57 remains open.
 
     def test_receiver_only_policies_refuse_stock_mutation_with_real_actor_tokens(self):
