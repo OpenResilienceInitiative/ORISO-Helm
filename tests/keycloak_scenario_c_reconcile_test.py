@@ -30,6 +30,7 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.cli_diagnostics = []
+        cls.provisioner_observations = {}
         cls.container = shared.KeycloakContainer(
             "scenario-c-policies", os.environ.get("SCENARIO_C_KEYCLOAK_URL")
         )
@@ -401,18 +402,34 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
                 {"username": "without-pending", "enabled": False},
             )[0],
         )
+        creator_status = self.native(
+            creator,
+            "POST",
+            "/users",
+            {
+                "username": "owned-pending",
+                "enabled": False,
+                "groups": ["/pending-provisioning"],
+            },
+        )[0]
+        maintainer_status = self.native(
+            maintainer,
+            "POST",
+            "/users",
+            {
+                "username": "maintainer-pending",
+                "enabled": False,
+                "groups": ["/pending-provisioning"],
+            },
+        )[0]
+        type(self).provisioner_observations = {
+            "creatorPendingCreateStatus": creator_status,
+            "maintainerPendingCreateStatus": maintainer_status,
+        }
+        self.assertEqual(201, creator_status)
+        self.assertEqual(403, maintainer_status)
         self.assertEqual(
-            201,
-            self.native(
-                creator,
-                "POST",
-                "/users",
-                {
-                    "username": "owned-pending",
-                    "enabled": False,
-                    "groups": ["/pending-provisioning"],
-                },
-            )[0],
+            [], self.admin("GET", "/users?username=maintainer-pending&exact=true")
         )
         pending = self.admin("GET", "/users?username=owned-pending&exact=true")[0]["id"]
         self.assertEqual(200, self.native(creator, "GET", "/users/" + pending)[0])

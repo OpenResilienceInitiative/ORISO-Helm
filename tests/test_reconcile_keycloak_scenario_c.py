@@ -448,6 +448,27 @@ class HttpReconciliationTest(unittest.TestCase):
         self.assertEqual(0, json.loads(repeated.stdout)["changes"])
         self.assertEqual(writes, self.realm.writes)
 
+    def test_only_creator_is_provisioner_while_maintenance_policy_stays_separate(self):
+        result = self.run_cli("--apply", "--confirm-isolated-realm")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(5, json.loads(result.stdout)["actor_count"])
+        creator = self.realm.users["backend-account-create"]["id"]
+        maintainer = self.realm.users["backend-account-admin"]["id"]
+        self.assertEqual(
+            [creator], self.realm.policies["oriso-c-is-provisioner"]["users"]
+        )
+        self.assertEqual(
+            [maintainer], self.realm.policies["oriso-c-is-maintainer"]["users"]
+        )
+        self.assertEqual(
+            ["oriso-c-is-maintainer"],
+            self.realm.policies["oriso-c-human-members"]["policies"],
+        )
+        self.assertEqual(
+            ["oriso-c-is-provisioner"],
+            self.realm.policies["oriso-c-pending"]["policies"],
+        )
+
     def test_disabled_actor_token_contract_is_prepared_with_exact_roles_and_audiences(
         self,
     ):

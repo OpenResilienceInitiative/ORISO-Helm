@@ -44,6 +44,33 @@ class InstallerEvidenceTest(unittest.TestCase):
             self.assertFalse(proof.accepted(cases, 6, 0))
         self.assertFalse(proof.accepted(self.complete(), 6, 1))
 
+    def runtime(self):
+        return [{"kind": "container", "name": "owned", "confirmedAbsent": True,
+                 "anonymousVolumesConfirmedAbsent": [],
+                 "runtime": {"oomKilled": False, "restartCount": 0}}]
+
+    def groups(self):
+        return [{"processGroup": 123, "confirmedAbsent": True}]
+
+    def test_exact_runtime_and_owned_group_are_required(self):
+        self.assertTrue(proof.runtime_accepted(self.runtime(), self.groups(), "owned"))
+        for state in (None, {"oomKilled": None, "restartCount": 0},
+                      {"oomKilled": True, "restartCount": 0},
+                      {"oomKilled": False, "restartCount": None},
+                      {"oomKilled": False, "restartCount": False},
+                      {"oomKilled": False, "restartCount": 1}):
+            receipt = self.runtime()
+            receipt[0]["runtime"] = state
+            self.assertFalse(proof.runtime_accepted(receipt, self.groups(), "owned"))
+
+    def test_cleanup_missing_wrong_resource_and_surviving_group_refuse(self):
+        self.assertFalse(proof.runtime_accepted([], self.groups(), "owned"))
+        self.assertFalse(proof.runtime_accepted(self.runtime(), self.groups(), "foreign"))
+        for groups in ([], self.groups() * 2, [{"processGroup": True, "confirmedAbsent": True}],
+                       [{"processGroup": 0, "confirmedAbsent": True}],
+                       [{"processGroup": 123, "confirmedAbsent": False}]):
+            self.assertFalse(proof.runtime_accepted(self.runtime(), groups, "owned"))
+
     def test_direct_cases_refuses_before_loading_native_fixture(self):
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "result.json"

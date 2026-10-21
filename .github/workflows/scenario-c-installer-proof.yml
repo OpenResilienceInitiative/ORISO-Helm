@@ -2,14 +2,14 @@ name: Scenario C installer and chart diagnostic proof
 
 on:
   push:
-    branches: [codex/367-c-chart-bindings-20261021]
+    branches: [codex/367-p1-4-provisioner-20261021]
 
 permissions:
   contents: read
 
 concurrency:
   group: scenario-c-installer-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   chart-contracts:
@@ -36,34 +36,21 @@ jobs:
         with:
           python-version: 3.12.13
       - run: python -m pip install --disable-pip-version-check -r requirements-ci.txt
-      - name: Lint and package the actual chart
-        shell: bash
-        run: |
-          set -euo pipefail
-          helm lint . -f values.yaml.default -f secrets.yaml.default \
-            -f tests/fixtures/values-render-domain.yaml \
-            -f tests/fixtures/render-required-secrets.yaml \
-            --set-string global.emailBrandingName='Render Test Platform' \
-            --set-string global.emailLegalOrganisationName='Render Test Foundation' \
-            --set-string global.secrets.redisdefaultPass=synthetic-redis \
-            --set-string userService.smtpUser=synthetic-smtp \
-            --set-string userService.smtpPassword=synthetic-password
-          helm package . --destination "$RUNNER_TEMP/oriso-chart-package"
-      - name: Run all offline unit and evidence checks
+      - name: Run all current offline, render, shell and actual chart checks
         env:
           ORISO_DOCS_SOURCE_ROOT: ${{ runner.temp }}/oriso-docs-contract
-        run: python -m unittest discover -s tests -p 'test_*.py' -q
-      - name: Run every render contract and shell guardrail
-        shell: bash
-        run: |
-          set -uo pipefail
-          failed=0
-          for test_file in tests/render_*_test.py; do
-            if ! python "$test_file"; then failed=1; fi
-          done
-          if ! bash tests/check-no-bare-ip-servername.sh; then failed=1; fi
-          if ! bash tests/guardrail_selftest.sh; then failed=1; fi
-          exit "$failed"
+        run: >-
+          python scripts/ci/scenario-c-installer-proof.py offline
+          --docs "$RUNNER_TEMP/oriso-docs-contract"
+          --report "$RUNNER_TEMP/installer-offline/receipt.json"
+      - name: Retain fresh offline outcomes and exact chart-docs source bindings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scenario-c-installer-offline-diagnostic
+          path: ${{ runner.temp }}/installer-offline/*
+          if-no-files-found: error
+          retention-days: 14
 
   native-six:
     runs-on: ubuntu-24.04
@@ -81,31 +68,34 @@ jobs:
         with:
           python-version: 3.12.13
       - run: python -m pip install --disable-pip-version-check -r requirements-ci.txt
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: OpenResilienceInitiative/ORISO-TenantService
+          ref: a8f5eec02a6de4faaa36a709f0ce4b42e8926c80
+          path: _native_support
+          persist-credentials: false
+      - name: Keep exact reviewed resource support outside the chart
+        run: mv "$GITHUB_WORKSPACE/_native_support" "$RUNNER_TEMP/installer-native-support"
       - name: Check that skips, duplicates and setup errors cannot count as green
         run: python -m unittest discover -s tests -p test_scenario_c_installer_evidence.py -q
+      - name: Exercise reviewed memory, ownership, reset and finite timeout controls
+        run: |
+          python -m unittest discover -s "$RUNNER_TEMP/installer-native-support/scripts/tests" -p test_native_context_resources.py -q
+          python tests/scenario_c_installer_resource_controls.py --support-root "$RUNNER_TEMP/installer-native-support"
       - name: Prepare the exact pinned stock Keycloak image
         run: |
           docker info > /dev/null
           docker pull quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992 > /dev/null
-      - name: Run six real installer cases in an owned 768MiB native container
-        run: python scripts/ci/scenario-c-installer-proof.py hosted --report proof-reports/native-cases.json
-      - name: Clean up only this fresh job's labelled native installer fixtures
-        if: always()
-        shell: bash
-        run: |
-          python - <<'PY'
-          import subprocess
-          names = subprocess.run([
-              "docker", "ps", "-aq", "--filter", "label=oriso-c-installer-run"
-          ], capture_output=True, text=True, check=True).stdout.split()
-          if names:
-              subprocess.run(["docker", "rm", "-fv", *names], check=True, capture_output=True)
-          PY
+      - name: Run six real installer cases under the reviewed finite resource lease
+        run: >-
+          python scripts/ci/scenario-c-installer-proof.py hosted
+          --support "$RUNNER_TEMP/installer-native-support"
+          --report "$RUNNER_TEMP/installer-native/native-cases.json"
       - name: Retain only sanitized outcomes and exact source-image receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: scenario-c-installer-native-diagnostic
-          path: proof-reports/*
+          path: ${{ runner.temp }}/installer-native/*
           if-no-files-found: error
           retention-days: 14
