@@ -254,6 +254,53 @@ def runtime_accepted(cleanup, groups, name):
     )
 
 
+def owned_memory_snapshot(owned, name, proc_root=Path("/proc"),
+                          cgroup_root=Path("/sys/fs/cgroup")):
+    """Read only this labelled container's numeric memory counters before removal."""
+    try:
+        metadata = owned.inspect("container", name)
+        if metadata is None or (metadata.get("Config", {}).get("Labels") or {}).get(
+                owned.label_key) != owned.run_id:
+            raise RuntimeError("Owned container required")
+        pid, identifier = metadata.get("State", {}).get("Pid"), metadata.get("Id", "")
+        if type(pid) is not int or pid <= 0 or not re.fullmatch("[a-f0-9]{64}", identifier):
+            raise RuntimeError("Running owned container required")
+        lines = (proc_root / str(pid) / "cgroup").read_text().splitlines()
+        if len(lines) != 1 or not lines[0].startswith("0::/"):
+            raise RuntimeError("Exact unified container cgroup required")
+        group = Path(lines[0][3:])
+        if group.name not in (identifier, "docker-" + identifier + ".scope"):
+            raise RuntimeError("Container cgroup identity mismatch")
+        directory = (cgroup_root / str(group).lstrip("/")).resolve()
+        if not directory.is_relative_to(cgroup_root.resolve()):
+            raise RuntimeError("Container cgroup escaped its root")
+        values = {}
+        for filename in ("current", "peak", "max", "events"):
+            path = directory / ("memory." + filename)
+            if path.stat().st_size > 4096:
+                raise RuntimeError("Bounded numeric counters required")
+            values[filename] = path.read_text()
+        number = lambda value: int(value.strip()) if re.fullmatch(r"[0-9]+\s*", value) else None
+        result = {"available": True, "currentBytes": number(values["current"]),
+                  "peakBytes": number(values["peak"]), "limitBytes": number(values["max"])}
+        if any(value is None for field, value in result.items() if field != "available"):
+            raise RuntimeError("Finite numeric container limits required")
+        events = {}
+        for line in values["events"].splitlines():
+            field, value = line.split()
+            if field in events or number(value) is None:
+                raise RuntimeError("Unique numeric memory events required")
+            if field in ("low", "high", "max", "oom", "oom_kill", "oom_group_kill"):
+                events[field] = number(value)
+        if not {"high", "max", "oom", "oom_kill"}.issubset(events):
+            raise RuntimeError("Required container events missing")
+        result["events"] = events
+        return result
+    except Exception as error:
+        # Never export paths, native representations or exception messages.
+        return {"available": False, "failureType": type(error).__name__}
+
+
 def hosted(report, support_root):
     if sys.platform != "linux" or os.environ.get("GITHUB_ACTIONS") != "true":
         raise RuntimeError("Native installer execution requires fresh hosted Linux")
@@ -348,6 +395,7 @@ def hosted(report, support_root):
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous)
+        receipt["ownedMemoryBeforeCleanup"] = owned_memory_snapshot(owned, name)
         try:
             receipt["cleanup"] = owned.cleanup()
         except support.resources.CleanupRefusal as error:
