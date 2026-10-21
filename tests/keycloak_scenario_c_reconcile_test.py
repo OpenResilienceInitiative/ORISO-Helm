@@ -6,6 +6,8 @@ synthetic fixture setup only, after the disabled-clients reconciliation proof.
 """
 
 import base64
+import ast
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -27,6 +29,7 @@ SCRIPT = ROOT / "scripts/reconcile-keycloak-scenario-c.py"
 class NativeScenarioCReconcileTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.cli_diagnostics = []
         cls.container = shared.KeycloakContainer(
             "scenario-c-policies", os.environ.get("SCENARIO_C_KEYCLOAK_URL")
         )
@@ -133,6 +136,36 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             timeout=60,
         )
         if result.returncode:
+            # Export only exact source-authored refusal literals and structural
+            # mapper mismatches. Never retain native bodies, tokens or secrets.
+            literals = {
+                node.args[0].value
+                for node in ast.walk(ast.parse(SCRIPT.read_text()))
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "ReconcileError"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            }
+            reason = next(
+                (
+                    text
+                    for text in literals
+                    if result.stderr.strip()
+                    == "Scenario C preparation refused: " + text
+                ),
+                "UNCLASSIFIED_REFUSAL",
+            )
+            spec = importlib.util.spec_from_file_location(
+                "installer_diagnostic", SCRIPT
+            )
+            installer = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(installer)
+            registry = installer.registry(
+                ROOT / "files/scenario-c-task-identities.json"
+            )
+            observation = {"reason": reason, "mapperMismatches": []}
             for client in self.admin("GET", "/clients"):
                 if client["clientId"] not in {
                     "backend-setup",
@@ -142,6 +175,48 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
                     "backend-runtime",
                 }:
                     continue
+                actor = next(
+                    actor
+                    for actor in registry.values()
+                    if actor["clientId"] == client["clientId"]
+                )
+                desired = {row["name"]: row for row in installer.token_mappers(actor)}
+                actual = self.admin(
+                    "GET", "/clients/" + client["id"] + "/protocol-mappers/models"
+                )
+                for mapper in actual:
+                    if mapper.get("name") not in desired:
+                        observation["mapperMismatches"].append(
+                            {"actor": actor["key"], "unknownMapper": True}
+                        )
+                        continue
+                    expected = desired[mapper["name"]]
+                    config = mapper.get("config", {})
+                    differing = [
+                        key
+                        for key in expected["config"]
+                        if config.get(key) != expected["config"][key]
+                    ]
+                    extra = sorted(set(config) - set(expected["config"]))
+                    # Config field names are not emitted unless part of the finite
+                    # source-authored public mapper key set.
+                    public = {key for row in desired.values() for key in row["config"]}
+                    if (
+                        differing
+                        or extra
+                        or mapper.get("protocolMapper") != expected["protocolMapper"]
+                    ):
+                        observation["mapperMismatches"].append(
+                            {
+                                "actor": actor["key"],
+                                "mapper": mapper["name"],
+                                "differentExpectedFields": sorted(differing),
+                                "extraKnownFields": sorted(set(extra) & public),
+                                "extraUnknownFieldCount": len(set(extra) - public),
+                                "mapperTypeMatches": mapper.get("protocolMapper")
+                                == expected["protocolMapper"],
+                            }
+                        )
                 users = self.admin(
                     "GET",
                     "/users?username=service-account-"
@@ -162,6 +237,7 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
                         for k, v in grants.get("clientMappings", {}).items()
                     },
                 )
+            type(self).cli_diagnostics.append(observation)
         self.assertEqual(0, result.returncode, result.stderr)
         return json.loads(result.stdout)
 
@@ -189,21 +265,41 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
 
     def test_five_prepared_actors_issue_exact_native_subject_role_audience_tokens(self):
         self.cli("--apply", "--confirm-isolated-realm", "--receivers-only")
-        self.assertEqual(0, self.cli("--apply", "--confirm-isolated-realm", "--receivers-only")["changes"])
-        registry = json.loads((ROOT / "files/scenario-c-task-identities.json").read_text())
+        self.assertEqual(
+            0,
+            self.cli("--apply", "--confirm-isolated-realm", "--receivers-only")[
+                "changes"
+            ],
+        )
+        registry = json.loads(
+            (ROOT / "files/scenario-c-task-identities.json").read_text()
+        )
         for actor in registry["actors"]:
             with self.subTest(actor=actor["key"]):
                 # Enabling and setting synthetic fixture credentials happen only
                 # after disabled preparation has independently converged twice.
                 token = self.actor_token(actor["clientId"].removeprefix("backend-"))
                 payload = token.split(".")[1]
-                claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
-                client = next(c for c in self.admin("GET", "/clients") if c["clientId"] == actor["clientId"])
-                user = self.admin("GET", "/clients/" + client["id"] + "/service-account-user")
-                self.assertEqual(self.container.base + "/realms/" + self.realm, claims.get("iss"))
+                claims = json.loads(
+                    base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+                )
+                client = next(
+                    c
+                    for c in self.admin("GET", "/clients")
+                    if c["clientId"] == actor["clientId"]
+                )
+                user = self.admin(
+                    "GET", "/clients/" + client["id"] + "/service-account-user"
+                )
+                self.assertEqual(
+                    self.container.base + "/realms/" + self.realm, claims.get("iss")
+                )
                 self.assertEqual(actor["clientId"], claims.get("azp"))
                 self.assertEqual(user["id"], claims.get("sub"))
-                self.assertEqual(set(actor["roles"]), set(claims.get("realm_access", {}).get("roles", [])))
+                self.assertEqual(
+                    set(actor["roles"]),
+                    set(claims.get("realm_access", {}).get("roles", [])),
+                )
                 audiences = claims.get("aud", [])
                 if isinstance(audiences, str):
                     audiences = [audiences]
@@ -375,25 +471,69 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
         self.prepare()
         converted = self.cli("--apply", "--confirm-isolated-realm", "--receivers-only")
         self.assertEqual("RECEIVER_ONLY", converted["policy_model"])
-        self.assertEqual(0, self.cli("--apply", "--confirm-isolated-realm", "--receivers-only")["changes"])
+        self.assertEqual(
+            0,
+            self.cli("--apply", "--confirm-isolated-realm", "--receivers-only")[
+                "changes"
+            ],
+        )
         ordinary = self.user("receiver-only-human", ["/human-roles/consultant"])
         pending = self.user("receiver-only-pending", ["/pending-provisioning"])
-        protected = self.user("receiver-only-protected", ["/protected-admins/platform-admins"])
+        protected = self.user(
+            "receiver-only-protected", ["/protected-admins/platform-admins"]
+        )
         self.admin("PUT", "/users/" + pending, {"enabled": False})
         group = self.admin("GET", "/group-by-path/human-roles/consultant")["id"]
-        before = {uid: self.admin("GET", "/users/" + uid) for uid in (ordinary, pending, protected)}
+        before = {
+            uid: self.admin("GET", "/users/" + uid)
+            for uid in (ordinary, pending, protected)
+        }
         for actor in ("account-create", "account-admin"):
             token = self.actor_token(actor)
             for uid in (ordinary, pending, protected):
                 for method, suffix, body in (
-                    ("PUT", "", {"enabled": True, "attributes": {"attempt-owner": ["rewritten"]}}),
-                    ("PUT", "/reset-password", {"type": "password", "value": "synthetic-policy-only-credential", "temporary": False}),
+                    (
+                        "PUT",
+                        "",
+                        {
+                            "enabled": True,
+                            "attributes": {"attempt-owner": ["rewritten"]},
+                        },
+                    ),
+                    (
+                        "PUT",
+                        "/reset-password",
+                        {
+                            "type": "password",
+                            "value": "synthetic-policy-only-credential",
+                            "temporary": False,
+                        },
+                    ),
                     ("PUT", "/groups/" + group, None),
                     ("DELETE", "", None),
                 ):
-                    with self.subTest(actor=actor, method=method, target=uid, operation=suffix):
-                        self.assertEqual(403, self.native(token, method, "/users/" + uid + suffix, body)[0])
-            self.assertEqual(403, self.native(token, "POST", "/users", {"username": "forbidden-" + actor, "enabled": False, "groups": ["pending-provisioning"]})[0])
+                    with self.subTest(
+                        actor=actor, method=method, target=uid, operation=suffix
+                    ):
+                        self.assertEqual(
+                            403,
+                            self.native(token, method, "/users/" + uid + suffix, body)[
+                                0
+                            ],
+                        )
+            self.assertEqual(
+                403,
+                self.native(
+                    token,
+                    "POST",
+                    "/users",
+                    {
+                        "username": "forbidden-" + actor,
+                        "enabled": False,
+                        "groups": ["pending-provisioning"],
+                    },
+                )[0],
+            )
         after = {uid: self.admin("GET", "/users/" + uid) for uid in before}
         self.assertEqual(before, after)
         self.assertFalse(after[pending]["enabled"])

@@ -189,6 +189,9 @@ def cases(report, run_id=None, container=None):
         ):
             suite.run(result)
     green = serialize_result(result, report, run_id, output("git", "rev-parse", "HEAD"))
+    recorded = json.loads(report.read_text())
+    recorded["cliDiagnostics"] = native.NativeScenarioCReconcileTest.cli_diagnostics
+    write(report, recorded)
     return 0 if green else 1
 
 
