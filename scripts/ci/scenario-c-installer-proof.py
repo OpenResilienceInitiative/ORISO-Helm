@@ -27,6 +27,8 @@ ROOT = Path(__file__).resolve().parents[2]
 SUPPORT_REF = "a8f5eec02a6de4faaa36a709f0ce4b42e8926c80"
 RESOURCE_SHA = "37d29adc5e8e31aac9467e1ca1c1587b2d84db6239ea79f016cd0442f7916fec"
 BOOTSTRAP_SHA = "0cf44ec7e99edaac9916f8f9dd2a17bca295e3348b8ab0fac2bb28c5a10e5949"
+CONTAINER_MIB = 1024
+LEASE_MIB = 3152
 EXPECTED = frozenset(
     {
         "test_fresh_chart_realm_installer_setup_and_second_reconcile_converge",
@@ -130,8 +132,8 @@ def require_child(run_id, container):
     if (
         actual.get("Config", {}).get("Labels", {}).get("oriso-c-installer-run")
         != run_id
-        or actual.get("HostConfig", {}).get("Memory") != 768 * 1024**2
-        or actual.get("HostConfig", {}).get("MemorySwap") != 768 * 1024**2
+        or actual.get("HostConfig", {}).get("Memory") != CONTAINER_MIB * 1024**2
+        or actual.get("HostConfig", {}).get("MemorySwap") != CONTAINER_MIB * 1024**2
         or actual.get("HostConfig", {}).get("NanoCpus") != 2_000_000_000
         or "http://" + output("docker", "port", container, "8080/tcp") + "/auth" != base
     ):
@@ -324,7 +326,7 @@ def hosted(report, support_root):
     name = "oriso-c-installer-" + run_id[:12]
     label = "oriso-c-installer-run=" + run_id
     owned = support.resources.OwnedDocker("oriso-c-installer-run", run_id)
-    lease = support.configure_memory(2896, report.parent)
+    lease = support.configure_memory(LEASE_MIB, report.parent)
     overall = time.monotonic() + 900
     receipt = {
         "commit": output("git", "rev-parse", "HEAD"),
@@ -333,7 +335,7 @@ def hosted(report, support_root):
         "resourceHelperSHA256": RESOURCE_SHA,
         "sourceCount": {role: len(values) for role, values in before.items()},
         "runId": run_id,
-        "budgetMiB": 2896,
+        "budgetMiB": LEASE_MIB,
         "plannedContainer": name,
         "plannedProcesses": ["installer-native-cases"],
         "nativeImage": fixture.IMAGE,
@@ -355,7 +357,8 @@ def hosted(report, support_root):
         owned.plan("container", name)
         subprocess.run(
             ["docker", "run", "-d", "--name", name, "--label", label,
-             "--memory", "768m", "--memory-swap", "768m", "--cpus", "2", "-p", "127.0.0.1::8080",
+             "--memory", str(CONTAINER_MIB) + "m", "--memory-swap", str(CONTAINER_MIB) + "m",
+             "--cpus", "2", "-p", "127.0.0.1::8080",
              "-e", "JAVA_OPTS_APPEND=-Xmx384m -XX:MaxMetaspaceSize=192m -XX:ActiveProcessorCount=2",
              "-e", "KC_BOOTSTRAP_ADMIN_USERNAME=" + fixture.INSTALLER[0],
              "-e", "KC_BOOTSTRAP_ADMIN_PASSWORD=" + fixture.INSTALLER[1],

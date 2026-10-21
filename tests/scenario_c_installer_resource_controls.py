@@ -27,7 +27,7 @@ class InstallerTimeoutControl(unittest.TestCase):
         spec.loader.exec_module(support)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            support.configure_memory(2896, root)
+            support.configure_memory(3152, root)
             with patch.object(support, "free_guard", return_value=90):
                 with self.assertRaises(support.FixtureError):
                     support.bounded(
