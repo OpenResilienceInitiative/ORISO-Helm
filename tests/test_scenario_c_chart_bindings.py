@@ -48,12 +48,13 @@ def bindings():
     }
 
 
-def render(config=None):
+def render(config=None, keycloak=None):
     with tempfile.TemporaryDirectory() as folder:
         values = Path(folder) / "scenario-c.yaml"
         values.write_text(
             yaml.safe_dump(
-                {"global": {"taskIdentities": config or {"model": "LEGACY"}}}
+                {"global": {"taskIdentities": config or {"model": "LEGACY"},
+                            "keycloak": keycloak or {}}}
             )
         )
         command = ["helm", "template", "scenario-c", str(ROOT)]
@@ -95,6 +96,27 @@ def container(docs, service):
 
 
 class ScenarioCChartBindingsTest(unittest.TestCase):
+    def test_legacy_service_clients_cannot_be_reviewed_as_human_clients(self):
+        variants = (
+            ('backendTechnicalClientId', 'custom-technical'),
+            ('serviceAdminClientId', 'custom-admin'),
+            (None, 'smtp-sync'),
+        )
+        for field, client_id in variants:
+            with self.subTest(field=field):
+                config = bindings()
+                config['humanClientIds'].append(client_id)
+                result, _ = render(config, {field: client_id} if field else {})
+                self.assertNotEqual(0, result.returncode, 'Service client accepted as human')
+                self.assertEqual('', result.stdout)
+
+    def test_actor_subject_cannot_alias_either_legacy_service_subject(self):
+        for field in ('serviceTechUserId', 'serviceAdminSubject'):
+            with self.subTest(field=field):
+                result, _ = render(bindings(), {field: bindings()['actors']['SETUP']['serviceSubject']})
+                self.assertNotEqual(0, result.returncode, 'Legacy service subject accepted as actor')
+                self.assertEqual('', result.stdout)
+
     def test_five_actor_legacy_hook_has_no_legacy_client_credentials(self):
         result, docs = render(bindings())
         self.assertEqual(0, result.returncode, result.stderr)

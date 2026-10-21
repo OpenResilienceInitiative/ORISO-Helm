@@ -25,8 +25,9 @@
 {{- fail "global.taskIdentities requires reviewed humanClientIds" -}}
 {{- end -}}
 {{- $humanClients := list -}}
+{{- $serviceClients := list .Values.global.keycloak.backendTechnicalClientId .Values.global.keycloak.serviceAdminClientId (include "oriso.smtpSyncClientId" .) -}}
 {{- range $client := $s.humanClientIds -}}
-{{- if or (not (kindIs "string" $client)) (not (regexMatch "^[a-zA-Z0-9_-]{1,255}$" $client)) (has $client $humanClients) (has $client (list "admin-cli" "account" "broker" "security-admin-console")) (hasPrefix "backend-" $client) -}}
+{{- if or (not (kindIs "string" $client)) (not (regexMatch "^[a-zA-Z0-9_-]{1,255}$" $client)) (has $client $humanClients) (has $client $serviceClients) (has $client (list "admin-cli" "account" "broker" "security-admin-console" "realm-management")) (hasPrefix "backend-" $client) -}}
 {{- fail "global.taskIdentities humanClientIds must be finite distinct reviewed interactive clients" -}}
 {{- end -}}
 {{- $humanClients = append $humanClients $client -}}
@@ -47,7 +48,7 @@
 {{- fail "global.taskIdentities requires five distinct canonical backend clients, separate from legacy and human clients" -}}
 {{- end -}}
 {{- $subject := default "" $binding.serviceSubject -}}
-{{- if or (not (regexMatch "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" $subject)) (has $subject $subjects) (eq $subject $.Values.global.keycloak.serviceAdminSubject) -}}
+{{- if or (not (regexMatch "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$" $subject)) (has $subject $subjects) (has $subject (list $.Values.global.keycloak.serviceAdminSubject $.Values.global.keycloak.serviceTechUserId)) -}}
 {{- fail "global.taskIdentities requires distinct actual native serviceSubject UUIDs" -}}
 {{- end -}}
 {{- include "oriso.scenarioC.secretRef" $binding.secretRef -}}
