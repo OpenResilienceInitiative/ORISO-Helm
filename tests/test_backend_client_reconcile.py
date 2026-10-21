@@ -162,6 +162,32 @@ class ReconcileClientsTest(unittest.TestCase):
             for key in ('directAccessGrantsEnabled','standardFlowEnabled','implicitFlowEnabled','fullScopeAllowed'): self.assertFalse(c[key])
         self.assertIn('sa-backend-technical',result.stdout)
         self.assertTrue(self.users['legacy-tech']['enabled']);self.assertTrue(self.users['legacy-admin']['enabled'])
+
+    def test_five_actor_hook_only_inspects_retired_legacy_clients(self):
+        self.prepare()
+        self.assertEqual(0, self.run_helper().returncode)
+        for name in ('backend-technical', 'backend-admin', 'smtp-sync'):
+            self.clients[name]['enabled'] = False
+        before = copy.deepcopy((self.clients, self.users, self.role_maps, self.scope_maps))
+        self.events.clear()
+        result = self.run_helper(TASK_IDENTITY_MODEL='FIVE_ACTORS')
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(before == (self.clients, self.users, self.role_maps, self.scope_maps),
+                        'Inspect-only hook changed legacy state')
+        self.assertEqual([], self.mutations())
+        self.assertFalse(any('/service-account-user' in path for _, path, _ in self.events))
+        self.assertEqual(1, sum(path.endswith('/protocol/openid-connect/token') for _, path, _ in self.events))
+        self.assertIn('LEGACY_SERVICE_CLIENTS_INSPECTED', result.stdout)
+
+    def test_five_actor_inspection_needs_no_legacy_secret_or_subject_and_creates_nothing(self):
+        result = self.run_helper(TASK_IDENTITY_MODEL='FIVE_ACTORS',
+                                 TECHNICAL_CLIENT_SECRET='', ADMIN_CLIENT_SECRET='',
+                                 SMTP_SYNC_CLIENT_SECRET='', TECHNICAL_SERVICE_SUBJECT='',
+                                 ADMIN_SERVICE_SUBJECT='')
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual([], self.mutations())
+        self.assertEqual({'realm-management'}, set(self.clients))
+        self.assertIn('LEGACY_SERVICE_CLIENTS_INSPECTED', result.stdout)
     def test_missing_clients_fail_before_changes_outside_prepare(self):
         result=self.run_helper();self.assertNotEqual(result.returncode,0);self.assertEqual(self.mutations(),[])
     def test_wrong_subject_fails_before_any_mutation(self):

@@ -263,6 +263,28 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
         self.assertEqual(5, len(actors))
         self.assertTrue(all(c["enabled"] is False for c in actors))
         self.assertTrue(self.admin("GET", "")["adminPermissionsEnabled"])
+        # The actual upgrade helper must inspect retired clients without
+        # re-enabling, rotating or requiring any of their credentials.
+        retired = {}
+        for client_id in ("backend-technical", "backend-admin", "smtp-sync"):
+            client = self.admin("GET", "/clients?clientId=" + client_id)[0]
+            self.admin("PUT", "/clients/" + client["id"], {"enabled": False})
+            retired[client["id"]] = (
+                self.admin("GET", "/clients/" + client["id"]),
+                self.admin("GET", "/clients/" + client["id"] + "/client-secret"),
+            )
+        env = {"KEYCLOAK_URL": self.container.base, "KEYCLOAK_REALM": self.realm,
+               "POD_NAMESPACE": "fixture", "KEYCLOAK_ADMIN_USERNAME": shared.INSTALLER[0],
+               "KEYCLOAK_ADMIN_PASSWORD": shared.INSTALLER[1],
+               "TECHNICAL_CLIENT_ID": "backend-technical", "ADMIN_CLIENT_ID": "backend-admin",
+               "HUMAN_CLIENT_ID": "app", "SMTP_SYNC_CLIENT_ID": "smtp-sync",
+               "TASK_IDENTITY_MODEL": "FIVE_ACTORS"}
+        self.assertIn("LEGACY_SERVICE_CLIENTS_INSPECTED", shared.run_script(
+            "keycloak-reconcile-service-clients.py", env))
+        for cid, before in retired.items():
+            after = (self.admin("GET", "/clients/" + cid),
+                     self.admin("GET", "/clients/" + cid + "/client-secret"))
+            self.assertTrue(before == after, "Inspect-only hook changed a retired client")
 
     def test_five_prepared_actors_issue_exact_native_subject_role_audience_tokens(self):
         self.cli("--apply", "--confirm-isolated-realm", "--receivers-only")

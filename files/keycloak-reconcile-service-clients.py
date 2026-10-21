@@ -33,6 +33,22 @@ def flag(env, name):
 
 
 def configuration(env):
+    model = env.get('TASK_IDENTITY_MODEL', 'LEGACY')
+    if model not in ('LEGACY', 'FIVE_ACTORS'):
+        raise Error('BACKEND_CLIENT_CONFIGURATION_INVALID: identity model')
+    if model == 'FIVE_ACTORS':
+        names = ('KEYCLOAK_URL', 'KEYCLOAK_REALM', 'POD_NAMESPACE', 'KEYCLOAK_ADMIN_USERNAME',
+                 'KEYCLOAK_ADMIN_PASSWORD', 'TECHNICAL_CLIENT_ID', 'ADMIN_CLIENT_ID',
+                 'HUMAN_CLIENT_ID', 'SMTP_SYNC_CLIENT_ID')
+        c = {name: required(env, name) for name in names}
+        c['KEYCLOAK_URL'] = smtp.base_url(c['KEYCLOAK_URL'], 'keycloak', c['POD_NAMESPACE'])
+        ids = [c[name] for name in ('TECHNICAL_CLIENT_ID', 'ADMIN_CLIENT_ID', 'SMTP_SYNC_CLIENT_ID')]
+        reserved = {c['HUMAN_CLIENT_ID'], 'admin-cli', 'account', 'broker', 'security-admin-console', 'realm-management'}
+        if (c['KEYCLOAK_REALM'] == 'master' or len(set(ids)) != len(ids)
+                or any(i in reserved or not re.fullmatch(r'[A-Za-z0-9_-]+', i) for i in ids)):
+            raise Error('BACKEND_CLIENT_CONFIGURATION_INVALID: inspection targets')
+        c['model'] = model
+        return c
     names = ('KEYCLOAK_URL', 'KEYCLOAK_REALM', 'POD_NAMESPACE', 'KEYCLOAK_ADMIN_USERNAME',
              'KEYCLOAK_ADMIN_PASSWORD', 'TECHNICAL_CLIENT_ID', 'ADMIN_CLIENT_ID', 'HUMAN_CLIENT_ID',
              'TECHNICAL_CLIENT_SECRET', 'ADMIN_CLIENT_SECRET', 'TECHNICAL_SERVICE_SUBJECT', 'ADMIN_SERVICE_SUBJECT',
@@ -221,6 +237,13 @@ def verify_smtp_sync_token(http, config, subject):
 
 def reconcile(config):
     api = Admin(config)
+    if config.get('model') == 'FIVE_ACTORS':
+        # An upgrade must never revive or rotate the retired legacy identities.
+        # Client metadata GETs avoid even the lazy service-account creation API.
+        for name in ('TECHNICAL_CLIENT_ID', 'ADMIN_CLIENT_ID', 'SMTP_SYNC_CLIENT_ID'):
+            api.find_client(config[name])
+        print('LEGACY_SERVICE_CLIENTS_INSPECTED')
+        return
     names = (config['TECHNICAL_CLIENT_ID'], config['ADMIN_CLIENT_ID'])
     clients = [api.find_client(name) for name in names]
     for client in clients:

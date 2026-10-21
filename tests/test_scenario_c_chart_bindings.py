@@ -95,6 +95,16 @@ def container(docs, service):
 
 
 class ScenarioCChartBindingsTest(unittest.TestCase):
+    def test_five_actor_legacy_hook_has_no_legacy_client_credentials(self):
+        result, docs = render(bindings())
+        self.assertEqual(0, result.returncode, result.stderr)
+        job = next(doc for doc in docs if doc.get('kind') == 'Job'
+                   and doc['metadata']['name'] == 'keycloak-reconcile-service-identities')
+        env = {row['name']: row for row in job['spec']['template']['spec']['containers'][0]['env']}
+        self.assertEqual('FIVE_ACTORS', env.get('TASK_IDENTITY_MODEL', {}).get('value'))
+        for name in ('TECHNICAL_CLIENT_SECRET', 'ADMIN_CLIENT_SECRET', 'SMTP_SYNC_CLIENT_SECRET'):
+            self.assertNotIn(name, env)
+
     def test_account_mutation_ingress_allows_client_intent_correlation_header(self):
         for config in ({"model": "LEGACY"}, bindings()):
             with self.subTest(model=config["model"]):
