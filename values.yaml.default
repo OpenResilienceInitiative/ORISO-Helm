@@ -13,6 +13,13 @@ global:
     contextKeySecretRef: {}
     actors: {}
     ordinaryGroups: {}
+    # Reviewed native invitation policy lives in an existing ConfigMap. It
+    # contains profiles, native group/role IDs and explicit human bindings,
+    # never credentials. Required together with both profile IDs in FIVE_ACTORS.
+    protectedInvitations: {}
+    # Independently reviewed ordinary-human operation policy, native receiver
+    # only. This must reference a different JSON key from the protected policy.
+    accountMaintenanceConfigMapRef: {}
 
   # Kubernetes service DNS suffix, supplied by the cluster operator.
   clusterDomain: "cluster.local"

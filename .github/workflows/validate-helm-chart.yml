@@ -10,6 +10,7 @@ on:
       - pre-dev
       - dev
       - main
+      - codex/367-p1-4-provisioner-20261021
 
 permissions:
   contents: read

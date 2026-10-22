@@ -37,6 +37,16 @@ def bindings():
             "/human-roles/asker": ["user"],
             "/human-roles/consultant": ["consultant"],
         },
+        "protectedInvitations": {
+            "configMapRef": {"name": "reviewed-protected-policy", "key": "policy.json"},
+            "profileIds": {
+                "TENANT_ADMIN": "reviewed-tenant-admin-v1",
+                "PLATFORM_ADMIN": "reviewed-platform-admin-v1",
+            },
+        },
+        "accountMaintenanceConfigMapRef": {
+            "name": "reviewed-ordinary-account-policy", "key": "policy.json"
+        },
         "actors": {
             actor: {
                 "clientId": "backend-" + actor.lower().replace("_", "-"),
@@ -96,6 +106,69 @@ def container(docs, service):
 
 
 class ScenarioCChartBindingsTest(unittest.TestCase):
+    def test_reviewed_ordinary_human_policy_reaches_only_the_native_receiver(self):
+        config = bindings()
+        result, docs = render(config)
+        self.assertEqual(0, result.returncode, result.stderr)
+        for service in ("userservice", "keycloak", "tenantservice", "agencyservice", "consultingtypeservice"):
+            with self.subTest(service=service):
+                env = {row["name"]: row for row in container(docs, service)["env"]}
+                if service == "keycloak":
+                    self.assertEqual(config["accountMaintenanceConfigMapRef"], env.get("ORISO_ACCOUNT_MAINTENANCE_CONFIG", {}).get("valueFrom", {}).get("configMapKeyRef"))
+                else:
+                    self.assertNotIn("ORISO_ACCOUNT_MAINTENANCE_CONFIG", env)
+
+    def test_five_actors_refuses_missing_or_aliased_ordinary_human_policy(self):
+        for reference in (None, {}, {"name": "missing-key"}, {"name": "../unsafe", "key": "policy.json"}, bindings()["protectedInvitations"]["configMapRef"]):
+            with self.subTest(reference=reference):
+                config = bindings()
+                config["accountMaintenanceConfigMapRef"] = reference
+                result, _ = render(config)
+                self.assertNotEqual(0, result.returncode, "Missing or aliased ordinary policy accepted")
+                self.assertEqual("", result.stdout)
+                self.assertIn("accountMaintenanceConfigMapRef", result.stderr)
+
+    def test_protected_native_policy_and_caller_profiles_reach_only_their_owners(self):
+        config = bindings()
+        result, docs = render(config)
+        self.assertEqual(0, result.returncode, result.stderr)
+        policy = config["protectedInvitations"]
+        for service in ("userservice", "keycloak", "tenantservice", "agencyservice", "consultingtypeservice"):
+            with self.subTest(service=service):
+                rows = container(docs, service)["env"]
+                env = {row["name"]: row for row in rows}
+                self.assertEqual(len(rows), len(env), "Duplicate protected bindings")
+                if service == "keycloak":
+                    self.assertEqual("true", env.get("ORISO_PROTECTED_INVITATIONS_ENABLED", {}).get("value"))
+                    self.assertEqual(policy["configMapRef"], env.get("ORISO_PROTECTED_INVITATIONS_CONFIG", {}).get("valueFrom", {}).get("configMapKeyRef"))
+                else:
+                    self.assertNotIn("ORISO_PROTECTED_INVITATIONS_ENABLED", env)
+                    self.assertNotIn("ORISO_PROTECTED_INVITATIONS_CONFIG", env)
+                if service == "userservice":
+                    self.assertEqual(policy["profileIds"], json.loads(env.get("ORISO_PROTECTED_INVITATION_PROFILE_IDS", {}).get("value", "{}")))
+                else:
+                    self.assertNotIn("ORISO_PROTECTED_INVITATION_PROFILE_IDS", env)
+
+    def test_five_actors_requires_exact_reviewed_protected_policy_reference(self):
+        for reference in (None, {}, {"name": "reviewed-protected-policy"}, {"name": "../unsafe", "key": "policy.json"}, {"name": "reviewed-protected-policy", "key": "policy.json", "inline": "unreviewed"}):
+            with self.subTest(reference=reference):
+                config = bindings()
+                config["protectedInvitations"]["configMapRef"] = reference
+                result, _ = render(config)
+                self.assertNotEqual(0, result.returncode, "Missing or ambiguous native policy accepted")
+                self.assertEqual("", result.stdout)
+                self.assertIn("protectedInvitations", result.stderr)
+
+    def test_five_actors_requires_exact_distinct_protected_profile_ids(self):
+        for profiles in ({}, {"TENANT_ADMIN": "tenant"}, {"TENANT_ADMIN": "same", "PLATFORM_ADMIN": "same"}, {"TENANT_ADMIN": "${UNRESOLVED}", "PLATFORM_ADMIN": "platform"}, {"TENANT_ADMIN": "tenant", "PLATFORM_ADMIN": "platform", "EXTRA": "unreviewed"}):
+            with self.subTest(profiles=profiles):
+                config = bindings()
+                config["protectedInvitations"]["profileIds"] = profiles
+                result, _ = render(config)
+                self.assertNotEqual(0, result.returncode, "Missing or ambiguous profile mapping accepted")
+                self.assertEqual("", result.stdout)
+                self.assertIn("protectedInvitations", result.stderr)
+
     def test_legacy_service_clients_cannot_be_reviewed_as_human_clients(self):
         variants = (
             ('backendTechnicalClientId', 'custom-technical'),

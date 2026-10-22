@@ -36,6 +36,30 @@
 {{- fail "global.taskIdentities requires the actual realmId and positive contextKeyVersion" -}}
 {{- end -}}
 {{- include "oriso.scenarioC.secretRef" $s.contextKeySecretRef -}}
+{{- $protected := default dict $s.protectedInvitations -}}
+{{- if or (not (kindIs "map" $protected)) (ne (len $protected) 2) (not (hasKey $protected "configMapRef")) (not (hasKey $protected "profileIds")) -}}
+{{- fail "global.taskIdentities.protectedInvitations requires reviewed configMapRef and profileIds" -}}
+{{- end -}}
+{{- $policy := default dict $protected.configMapRef -}}
+{{- if or (not (kindIs "map" $policy)) (ne (len $policy) 2) (not (regexMatch "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$" (default "" $policy.name))) (not (regexMatch "^[a-zA-Z0-9._-]+$" (default "" $policy.key))) -}}
+{{- fail "global.taskIdentities.protectedInvitations requires only a valid existing ConfigMap name and key" -}}
+{{- end -}}
+{{- $profiles := default dict $protected.profileIds -}}
+{{- if or (not (kindIs "map" $profiles)) (ne (len $profiles) 2) (not (hasKey $profiles "TENANT_ADMIN")) (not (hasKey $profiles "PLATFORM_ADMIN")) -}}
+{{- fail "global.taskIdentities.protectedInvitations requires exactly TENANT_ADMIN and PLATFORM_ADMIN profileIds" -}}
+{{- end -}}
+{{- $profileIds := list -}}
+{{- range $kind := list "TENANT_ADMIN" "PLATFORM_ADMIN" -}}
+{{- $id := get $profiles $kind -}}
+{{- if or (not (kindIs "string" $id)) (empty $id) (gt (len $id) 255) (ne $id (trim $id)) (contains "${" $id) (regexMatch "[[:cntrl:]]" $id) (has $id $profileIds) -}}
+{{- fail "global.taskIdentities.protectedInvitations profileIds must be finite distinct reviewed identifiers" -}}
+{{- end -}}
+{{- $profileIds = append $profileIds $id -}}
+{{- end -}}
+{{- $maintenance := default dict $s.accountMaintenanceConfigMapRef -}}
+{{- if or (not (kindIs "map" $maintenance)) (ne (len $maintenance) 2) (not (regexMatch "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$" (default "" $maintenance.name))) (not (regexMatch "^[a-zA-Z0-9._-]+$" (default "" $maintenance.key))) (eq (toJson $maintenance) (toJson $policy)) -}}
+{{- fail "global.taskIdentities.accountMaintenanceConfigMapRef requires only a valid existing ConfigMap name and key, separate from the protected policy" -}}
+{{- end -}}
 {{- $actors := default dict $s.actors -}}
 {{- if or (not (kindIs "map" $actors)) (ne (len $actors) 5) -}}
 {{- fail "global.taskIdentities requires exactly five actor bindings" -}}
@@ -122,10 +146,22 @@
   value: {{ $s.ordinaryGroups | toJson | quote }}
 {{- end }}
 {{- if eq $component "keycloak" }}
+- name: ORISO_ACCOUNT_MAINTENANCE_CONFIG
+  valueFrom:
+    configMapKeyRef: {{ $s.accountMaintenanceConfigMapRef | toJson }}
+- name: ORISO_PROTECTED_INVITATIONS_ENABLED
+  value: "true"
+- name: ORISO_PROTECTED_INVITATIONS_CONFIG
+  valueFrom:
+    configMapKeyRef: {{ $s.protectedInvitations.configMapRef | toJson }}
 - name: ORISO_SMTP_CONTROL_ENABLED
   value: "true"
 - name: ORISO_SMTP_CONTROL_REALM
   value: {{ $root.Values.global.keycloak.realm | quote }}
+{{- end }}
+{{- if eq $component "userservice" }}
+- name: ORISO_PROTECTED_INVITATION_PROFILE_IDS
+  value: {{ $s.protectedInvitations.profileIds | toJson | quote }}
 {{- end }}
 {{- end -}}
 {{- end -}}

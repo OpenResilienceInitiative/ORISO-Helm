@@ -139,3 +139,47 @@ clients after disabled preparation has converged twice. It checks each native
 subject, issuer, client, exact realm-role union and exact audience union, and
 refuses unexpected client roles. This verifies prepared token claims; it does
 not enable actors on Dev or Staging or prove the combined account workflows.
+
+## Bind the reviewed protected invitation policy
+
+The five-actor chart requires an existing ConfigMap holding the native protected
+invitation policy and the two profile identifiers used by UserService. The
+native policy contains installation metadata: actual realm/issuer, five actor
+subjects, human bindings, protected profiles and current native group/role IDs.
+It contains no credentials. Review it against the installed realm before
+activation; the chart does not invent human subjects or adopt existing accounts.
+
+**For operators — values pointing at independently reviewed installation data:**
+```yaml
+global:
+  taskIdentities:
+    accountMaintenanceConfigMapRef:
+      name: reviewed-ordinary-account-policy
+      key: policy.json
+    protectedInvitations:
+      configMapRef:
+        name: reviewed-protected-invitation-policy
+        key: policy.json
+      profileIds:
+        TENANT_ADMIN: reviewed-tenant-admin-v1
+        PLATFORM_ADMIN: reviewed-platform-admin-v1
+```
+
+The ConfigMap key must contain the complete JSON accepted by the installed
+Keycloak `ProtectedInvitationConfiguration`. Both profile identifiers must match
+that policy exactly. Only Keycloak receives the native policy and provider
+enablement; only UserService receives the profile-ID mapping. The other services
+receive neither. The existing shared context-key Secret remains the sole key.
+
+The separate ordinary policy reference supplies the installed native
+`GeneralPolicy` JSON to Keycloak through `ORISO_ACCOUNT_MAINTENANCE_CONFIG`.
+Its native-human checks and finite ordinary self-operation list remain separate
+from protected invitation and account-operation grants. It may use another key
+in the same ConfigMap, but it cannot alias the protected policy key. No other
+service receives this policy.
+
+Missing, ambiguous or duplicate bindings stop rendering in five-actor mode. A
+missing ConfigMap/key stops container configuration; invalid native policy stops
+the affected protected provider from becoming available. These checks do not
+assert receiver readiness or authorize cutover. Legacy mode emits none of these
+bindings. Source/native pairing and coordinated startup checks remain required.
