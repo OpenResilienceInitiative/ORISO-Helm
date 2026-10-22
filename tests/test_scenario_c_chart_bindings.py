@@ -106,6 +106,28 @@ def container(docs, service):
 
 
 class ScenarioCChartBindingsTest(unittest.TestCase):
+    def test_password_profile_catalog_uses_the_same_reviewed_policies_as_the_receiver(self):
+        config = bindings()
+        result, docs = render(config)
+        self.assertEqual(0, result.returncode, result.stderr)
+        for name, expected in (
+            ("ORISO_ACCOUNT_MAINTENANCE_CONFIG", config["accountMaintenanceConfigMapRef"]),
+            ("ORISO_PROTECTED_INVITATIONS_CONFIG", config["protectedInvitations"]["configMapRef"]),
+        ):
+            with self.subTest(policy=name):
+                for service in ("userservice", "keycloak"):
+                    env = {row["name"]: row for row in container(docs, service)["env"]}
+                    self.assertEqual(expected, env.get(name, {}).get("valueFrom", {}).get("configMapKeyRef"))
+                for service in ("tenantservice", "agencyservice", "consultingtypeservice"):
+                    env = {row["name"]: row for row in container(docs, service)["env"]}
+                    self.assertNotIn(name, env)
+        result, legacy = render()
+        self.assertEqual(0, result.returncode, result.stderr)
+        for service in ("userservice", "keycloak"):
+            env = {row["name"]: row for row in container(legacy, service)["env"]}
+            self.assertNotIn("ORISO_ACCOUNT_MAINTENANCE_CONFIG", env)
+            self.assertNotIn("ORISO_PROTECTED_INVITATIONS_CONFIG", env)
+
     def test_ordinary_role_sets_select_one_reviewed_group_independent_of_order(self):
         for roles in ((["user"], ["user"]),
                       (["consultant", "group-chat-consultant"],
@@ -120,14 +142,14 @@ class ScenarioCChartBindingsTest(unittest.TestCase):
                 self.assertEqual("", result.stdout)
                 self.assertIn("ordinaryGroups", result.stderr)
 
-    def test_reviewed_ordinary_human_policy_reaches_only_the_native_receiver(self):
+    def test_reviewed_ordinary_human_policy_reaches_only_the_caller_and_receiver(self):
         config = bindings()
         result, docs = render(config)
         self.assertEqual(0, result.returncode, result.stderr)
         for service in ("userservice", "keycloak", "tenantservice", "agencyservice", "consultingtypeservice"):
             with self.subTest(service=service):
                 env = {row["name"]: row for row in container(docs, service)["env"]}
-                if service == "keycloak":
+                if service in ("keycloak", "userservice"):
                     self.assertEqual(config["accountMaintenanceConfigMapRef"], env.get("ORISO_ACCOUNT_MAINTENANCE_CONFIG", {}).get("valueFrom", {}).get("configMapKeyRef"))
                 else:
                     self.assertNotIn("ORISO_ACCOUNT_MAINTENANCE_CONFIG", env)
@@ -154,9 +176,11 @@ class ScenarioCChartBindingsTest(unittest.TestCase):
                 self.assertEqual(len(rows), len(env), "Duplicate protected bindings")
                 if service == "keycloak":
                     self.assertEqual("true", env.get("ORISO_PROTECTED_INVITATIONS_ENABLED", {}).get("value"))
-                    self.assertEqual(policy["configMapRef"], env.get("ORISO_PROTECTED_INVITATIONS_CONFIG", {}).get("valueFrom", {}).get("configMapKeyRef"))
                 else:
                     self.assertNotIn("ORISO_PROTECTED_INVITATIONS_ENABLED", env)
+                if service in ("keycloak", "userservice"):
+                    self.assertEqual(policy["configMapRef"], env.get("ORISO_PROTECTED_INVITATIONS_CONFIG", {}).get("valueFrom", {}).get("configMapKeyRef"))
+                else:
                     self.assertNotIn("ORISO_PROTECTED_INVITATIONS_CONFIG", env)
                 if service == "userservice":
                     self.assertEqual(policy["profileIds"], json.loads(env.get("ORISO_PROTECTED_INVITATION_PROFILE_IDS", {}).get("value", "{}")))

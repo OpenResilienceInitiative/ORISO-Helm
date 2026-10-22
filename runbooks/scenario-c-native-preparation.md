@@ -167,16 +167,21 @@ global:
 
 The ConfigMap key must contain the complete JSON accepted by the installed
 Keycloak `ProtectedInvitationConfiguration`. Both profile identifiers must match
-that policy exactly. Only Keycloak receives the native policy and provider
-enablement; only UserService receives the profile-ID mapping. The other services
-receive neither. The existing shared context-key Secret remains the sole key.
+that policy exactly. UserService and Keycloak receive the same policy ConfigMap
+reference. Only Keycloak receives provider enablement; only UserService receives
+the profile-ID mapping. The other services receive neither. The existing shared
+context-key Secret remains the sole key.
 
 The separate ordinary policy reference supplies the installed native
-`GeneralPolicy` JSON to Keycloak through `ORISO_ACCOUNT_MAINTENANCE_CONFIG`.
+`GeneralPolicy` JSON to UserService and Keycloak through
+`ORISO_ACCOUNT_MAINTENANCE_CONFIG`.
 Its native-human checks and finite ordinary self-operation list remain separate
 from protected invitation and account-operation grants. It may use another key
 in the same ConfigMap, but it cannot alias the protected policy key. No other
-service receives this policy.
+service receives this policy. The UserService password caller derives its bounded
+catalog from these reviewed profile IDs and explicit versions. Native current
+profile, provenance and permission checks still apply on every request. A mounted
+policy is installation data; it does not authorize a command or prove readiness.
 
 Missing, ambiguous or duplicate bindings stop rendering in five-actor mode. A
 missing ConfigMap/key stops container configuration; invalid native policy stops

@@ -150,16 +150,16 @@
   value: {{ $root.Values.global.keycloak.realm | quote }}
 - name: ORISO_ACCOUNT_LIFECYCLE_GROUPS
   value: {{ $s.ordinaryGroups | toJson | quote }}
-{{- end }}
-{{- if eq $component "keycloak" }}
 - name: ORISO_ACCOUNT_MAINTENANCE_CONFIG
   valueFrom:
     configMapKeyRef: {{ $s.accountMaintenanceConfigMapRef | toJson }}
-- name: ORISO_PROTECTED_INVITATIONS_ENABLED
-  value: "true"
 - name: ORISO_PROTECTED_INVITATIONS_CONFIG
   valueFrom:
     configMapKeyRef: {{ $s.protectedInvitations.configMapRef | toJson }}
+{{- end }}
+{{- if eq $component "keycloak" }}
+- name: ORISO_PROTECTED_INVITATIONS_ENABLED
+  value: "true"
 - name: ORISO_SMTP_CONTROL_ENABLED
   value: "true"
 - name: ORISO_SMTP_CONTROL_REALM
