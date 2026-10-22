@@ -36,10 +36,11 @@ class KeycloakTwoFactorRealmContractTest(unittest.TestCase):
 
         self.assertEqual(
             [
-                ("direct-grant-validate-username", None, "REQUIRED"),
-                ("direct-grant-validate-password", None, "REQUIRED"),
+                ("oriso-claimed-magic-link", None, "REQUIRED"),
+                (None, "oriso-ordinary-password", "CONDITIONAL"),
                 (None, "app-otp-conditional", "CONDITIONAL"),
                 (None, "email-otp-conditional", "CONDITIONAL"),
+                ("oriso-claimed-magic-link-attach", None, "REQUIRED"),
             ],
             [
                 (
@@ -48,6 +49,22 @@ class KeycloakTwoFactorRealmContractTest(unittest.TestCase):
                     execution["requirement"],
                 )
                 for execution in executions
+            ],
+        )
+        # Only the privately claimed session exchange bypasses password validation.
+        # Ordinary and LEGACY grants retain both original required checks, and both
+        # factor subflows stay outside that conditional password-only branch.
+        ordinary = self.flow("oriso-ordinary-password")
+        self.assertFalse(ordinary["topLevel"])
+        self.assertEqual(
+            [
+                ("oriso-magic-link-ordinary-password", "REQUIRED"),
+                ("direct-grant-validate-username", "REQUIRED"),
+                ("direct-grant-validate-password", "REQUIRED"),
+            ],
+            [
+                (execution["authenticator"], execution["requirement"])
+                for execution in ordinary["authenticationExecutions"]
             ],
         )
 
