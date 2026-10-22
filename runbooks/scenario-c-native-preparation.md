@@ -183,3 +183,23 @@ missing ConfigMap/key stops container configuration; invalid native policy stops
 the affected protected provider from becoming available. These checks do not
 assert receiver readiness or authorize cutover. Legacy mode emits none of these
 bindings. Source/native pairing and coordinated startup checks remain required.
+
+The ordinary native policy's optional `adminOperations` list defaults to empty.
+It contains reviewed grants for `PLATFORM` or `TENANT_PEER`, exact installed
+`targetProfiles`, a finite `operations` list and `selfOnly: false`. This does not
+replace the separate self-operation list or protected-account policy. Configure
+only the operations required by the corresponding human role; an empty list
+does not authorize another person's account maintenance.
+
+UserService selects an ordinary role change from the existing
+`global.taskIdentities.ordinaryGroups` map. That same reviewed map is mounted as
+`ORISO_ACCOUNT_LIFECYCLE_GROUPS`; there is no second mapping or built-in group
+name. Its complete role sets must match the installed native profiles. A combined
+role and profile edit requires both operations on the current and desired
+profiles. Missing or ambiguous matches refuse the change.
+
+The chart mounts references to existing policy data. It cannot validate the
+contents of an external ConfigMap or prove that every service runs the matching
+image. Before cutover, verify the configured caller graph and the native
+receivers together on the final source revisions. Rendering this chart alone
+does not satisfy that gate.

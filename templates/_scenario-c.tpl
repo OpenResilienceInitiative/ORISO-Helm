@@ -85,6 +85,7 @@
 {{- if or (not (kindIs "map" $s.ordinaryGroups)) (empty $s.ordinaryGroups) -}}
 {{- fail "global.taskIdentities requires reviewed ordinaryGroups" -}}
 {{- end -}}
+{{- $roleSets := list -}}
 {{- range $path, $roles := $s.ordinaryGroups -}}
 {{- if or (not (regexMatch "^/human-roles/[a-z0-9-]{1,80}$" $path)) (not (kindIs "slice" $roles)) (empty $roles) -}}
 {{- fail "global.taskIdentities ordinaryGroups must use reviewed human-role paths and role lists" -}}
@@ -96,6 +97,11 @@
 {{- end -}}
 {{- $seen = append $seen $role -}}
 {{- end -}}
+{{- $roleSet := $roles | sortAlpha | toJson -}}
+{{- if has $roleSet $roleSets -}}
+{{- fail "global.taskIdentities ordinaryGroups must map distinct complete role sets to one reviewed group" -}}
+{{- end -}}
+{{- $roleSets = append $roleSets $roleSet -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

@@ -106,6 +106,20 @@ def container(docs, service):
 
 
 class ScenarioCChartBindingsTest(unittest.TestCase):
+    def test_ordinary_role_sets_select_one_reviewed_group_independent_of_order(self):
+        for roles in ((["user"], ["user"]),
+                      (["consultant", "group-chat-consultant"],
+                       ["group-chat-consultant", "consultant"])):
+            with self.subTest(roles=roles):
+                config = bindings()
+                config["ordinaryGroups"]["/human-roles/reviewed-first"] = roles[0]
+                config["ordinaryGroups"]["/human-roles/reviewed-second"] = roles[1]
+                result, _ = render(config)
+                self.assertNotEqual(0, result.returncode,
+                                    "An ordinary role set must select one reviewed group")
+                self.assertEqual("", result.stdout)
+                self.assertIn("ordinaryGroups", result.stderr)
+
     def test_reviewed_ordinary_human_policy_reaches_only_the_native_receiver(self):
         config = bindings()
         result, docs = render(config)
