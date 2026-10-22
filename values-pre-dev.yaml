@@ -52,3 +52,31 @@ userService:
   # so rendering this overlay without those secret values fails loudly at deploy
   # time instead of shipping an empty key. The value must exist in the Pre-Dev
   # secret values file or the UserService rollout CrashLoops.
+
+# ---------- What Pre-Dev actually runs --------------------------------------
+
+# The app and the call surface come from the `pre-dev` branch, not from a
+# release tag.
+#
+# `values.yaml.default` pins released versions — element-call:2.0.11 and
+# oriso-frontend:2.0.12 — which is right for Dev and Prod and wrong here.
+# Pre-Dev exists to try a change before it is released, and until now nothing
+# consumed the images that a push to `pre-dev` builds: both repositories
+# publish `ghcr.io/openresilienceinitiative/<name>:pre-dev` on every push to
+# that branch, and the cluster went on pulling the release tags. The images
+# were built and nobody pulled them.
+#
+# Moving tags, deliberately, and only here. `docs/release-documentation.md` is
+# right that a RELEASE "never resolves moving Dev/main tips at publication
+# time"; this is not a release, it is the environment that exists to see a
+# change before one. `values-dev.yaml` already does the same for Storybook.
+#
+# `oriso.imagePullPolicy` defaults to `Always`, so a moved tag is re-pulled on
+# the next rollout rather than being served from the node's cache. Nothing
+# below sets `global.imagePullPolicy`, so that default stands — if that ever
+# changes, these two lines stop meaning what they say.
+elementCall:
+  image: "ghcr.io/openresilienceinitiative/element-call:pre-dev"
+
+frontend:
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:pre-dev"
