@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""Scenario C must be an explicit all-or-nothing UserService cutover."""
+import pathlib
+import subprocess
+
+import yaml
+
+from render_public_entry_rate_limit_test import CHART_DIR, VALUES
+
+FIXTURE = pathlib.Path(CHART_DIR) / "tests/fixtures/scenario-c-activation-values.yaml"
+ACTORS = ("SETUP", "ACCOUNT_CREATE", "ACCOUNT_ADMIN", "MAIL", "RUNTIME")
+
+
+def render(*args, scenario_c=True):
+    values = [*VALUES]
+    if scenario_c:
+        values.extend(("-f", str(FIXTURE)))
+    result = subprocess.run(
+        ["helm", "template", "scenario-c", CHART_DIR, *values, *args],
+        capture_output=True,
+        text=True,
+    )
+    docs = [doc for doc in yaml.safe_load_all(result.stdout) if doc] if result.returncode == 0 else []
+    return result, {(doc["kind"], doc["metadata"]["name"]): doc for doc in docs}
+
+
+def env_by_name(deployment):
+    return {
+        item["name"]: item
+        for item in deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+
+
+def main():
+    legacy, legacy_docs = render(scenario_c=False)
+    assert legacy.returncode == 0, legacy.stderr
+    legacy_config = legacy_docs[("ConfigMap", "userservice-configmap-env")]["data"]
+    legacy_secret = legacy_docs[("Secret", "keycloak-backend-client-secrets")]["data"]
+    legacy_env = env_by_name(legacy_docs[("Deployment", "userservice")])
+    assert legacy_config["TASK_IDENTITY_MODEL"] == "LEGACY"
+    for actor in ACTORS:
+        assert f"IDENTITY_{actor}_CLIENT_ID" not in legacy_config
+        assert f"IDENTITY_{actor}_CLIENT_SECRET" not in legacy_secret
+        assert f"IDENTITY_{actor}_CLIENT_ID" not in legacy_env
+
+    enabled, docs = render()
+    assert enabled.returncode == 0, enabled.stderr
+    config = docs[("ConfigMap", "userservice-configmap-env")]["data"]
+    secret = docs[("Secret", "keycloak-backend-client-secrets")]["data"]
+    env = env_by_name(docs[("Deployment", "userservice")])
+
+    assert config["TASK_IDENTITY_MODEL"] == "FIVE_ACTORS"
+    for actor in ACTORS:
+        assert config[f"IDENTITY_{actor}_CLIENT_ID"]
+        assert config[f"IDENTITY_{actor}_SERVICE_SUBJECT"]
+        assert f"IDENTITY_{actor}_CLIENT_SECRET" in secret
+        assert env[f"IDENTITY_{actor}_CLIENT_ID"]["valueFrom"]["configMapKeyRef"] == {
+            "name": "userservice-configmap-env", "key": f"IDENTITY_{actor}_CLIENT_ID"
+        }
+        assert env[f"IDENTITY_{actor}_SERVICE_SUBJECT"]["valueFrom"]["configMapKeyRef"] == {
+            "name": "userservice-configmap-env", "key": f"IDENTITY_{actor}_SERVICE_SUBJECT"
+        }
+        assert env[f"IDENTITY_{actor}_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"] == {
+            "name": "keycloak-backend-client-secrets", "key": f"IDENTITY_{actor}_CLIENT_SECRET"
+        }
+
+    missing, _ = render("--set-string", "global.keycloak.scenarioC.setup.serviceSubject=")
+    assert missing.returncode != 0, "missing actor subject must fail rendering"
+    duplicate, _ = render(
+        "--set-string",
+        "global.keycloak.scenarioC.runtime.serviceSubject=00000000-0000-4000-8000-000000000010",
+    )
+    assert duplicate.returncode != 0, "duplicate actor subject must fail rendering"
+    reused_secret, _ = render(
+        "--set-string",
+        "global.secrets.keycloakScenarioCRuntimeClientSecret=render-only-scenario-c-setup-secret-canary",
+    )
+    assert reused_secret.returncode != 0, "reused actor secret must fail rendering"
+    bad_client, _ = render(
+        "--set-string", "global.keycloak.scenarioC.mail.clientId=backend-technical"
+    )
+    assert bad_client.returncode != 0, "non-canonical actor client must fail rendering"
+
+    print("PASS: Scenario C activation renders five complete, distinct actor bindings")
+
+
+if __name__ == "__main__":
+    main()

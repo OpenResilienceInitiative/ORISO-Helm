@@ -1,0 +1,21 @@
+# Synthetic values used only to render and verify the Scenario C activation contract.
+global:
+  keycloak:
+    scenarioC:
+      enabled: true
+      setup:
+        serviceSubject: "00000000-0000-4000-8000-000000000010"
+      accountCreate:
+        serviceSubject: "00000000-0000-4000-8000-000000000011"
+      accountAdmin:
+        serviceSubject: "00000000-0000-4000-8000-000000000012"
+      mail:
+        serviceSubject: "00000000-0000-4000-8000-000000000013"
+      runtime:
+        serviceSubject: "00000000-0000-4000-8000-000000000014"
+  secrets:
+    keycloakScenarioCSetupClientSecret: "render-only-scenario-c-setup-secret-canary"
+    keycloakScenarioCAccountCreateClientSecret: "render-only-scenario-c-account-create-secret"
+    keycloakScenarioCAccountAdminClientSecret: "render-only-scenario-c-account-admin-secret"
+    keycloakScenarioCMailClientSecret: "render-only-scenario-c-mail-client-secret-canary"
+    keycloakScenarioCRuntimeClientSecret: "render-only-scenario-c-runtime-secret-canary"
