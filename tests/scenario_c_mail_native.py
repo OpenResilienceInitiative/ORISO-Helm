@@ -125,7 +125,7 @@ def strict_report(user, started, evidence):
 def read_smtp_state(case):
     """Renew only the disposable installer's expired readback token, never a task identity."""
     status, state = case_module.call(
-        case.base, "GET", "/admin/realms/" + case_module.REALM, bearer=case.installer)
+        case.base, "GET", "/admin/realms/" + case_module.REALM, token=case.installer)
     observed = {"initialStatus": status, "renewedAfter401": False}
     if status == 401:
         renewed, response = case_module.call(
@@ -137,7 +137,7 @@ def read_smtp_state(case):
         case.installer = response["access_token"]
         observed["renewedAfter401"] = True
         status, state = case_module.call(
-            case.base, "GET", "/admin/realms/" + case_module.REALM, bearer=case.installer)
+            case.base, "GET", "/admin/realms/" + case_module.REALM, token=case.installer)
     observed["finalStatus"] = status
     if EVIDENCE is not None:
         (EVIDENCE / "installer-readback.json").write_text(json.dumps(observed, indent=2))

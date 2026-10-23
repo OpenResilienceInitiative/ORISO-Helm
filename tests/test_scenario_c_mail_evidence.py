@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import create_autospec, patch
 from types import SimpleNamespace
 import xml.etree.ElementTree as ET
 
@@ -16,9 +16,13 @@ BROKER = "realNativeFiveAudienceMailIsAcceptedByTheActualBroker(TaskPurpose)"
 JOINED = "sameNativeBrokerBearerReadsRealSavedCtsAppliesSmtpAndAcknowledgesExactRevision"
 
 
+def smtp_fixture_call(base, method, path, body=None, token=None, context=None, form=False):
+    """The actual pinned Keycloak SMTP fixture HTTP boundary signature."""
+
+
 class MailEvidenceTest(unittest.TestCase):
     def readback(self, replies):
-        fixture = SimpleNamespace(call=Mock(side_effect=replies), REALM="fixture", INSTALLER="synthetic-installer-fixture")
+        fixture = SimpleNamespace(call=create_autospec(smtp_fixture_call, side_effect=replies), REALM="fixture", INSTALLER="synthetic-installer-fixture")
         case = SimpleNamespace(base="https://native.fixture.invalid", installer="original-fixture-token")
         with patch.object(native, "case_module", fixture, create=True), patch.object(native, "EVIDENCE", None):
             value = native.read_smtp_state(case)
@@ -29,6 +33,7 @@ class MailEvidenceTest(unittest.TestCase):
         actual, fixture, _ = self.readback([(200, expected)])
         self.assertEqual(expected, actual)
         self.assertEqual(1, fixture.call.call_count)
+        self.assertEqual("original-fixture-token", fixture.call.call_args.kwargs["token"])
 
     def test_expired_disposable_installer_token_is_renewed_once_after_the_real_join(self):
         expected = {"smtpServer": {"host": "smtp.fixture.internal"}}
@@ -39,7 +44,7 @@ class MailEvidenceTest(unittest.TestCase):
         self.assertEqual("/realms/master/protocol/openid-connect/token", fixture.call.call_args_list[1].args[2])
 
     def test_forbidden_readback_cannot_renew_or_become_a_green_receipt(self):
-        fixture = SimpleNamespace(call=Mock(return_value=(403, {})), REALM="fixture")
+        fixture = SimpleNamespace(call=create_autospec(smtp_fixture_call, return_value=(403, {})), REALM="fixture")
         with patch.object(native, "case_module", fixture, create=True), patch.object(native, "EVIDENCE", None):
             with self.assertRaises(RuntimeError):
                 native.read_smtp_state(SimpleNamespace(base="https://native.fixture.invalid", installer="original-fixture-token"))
