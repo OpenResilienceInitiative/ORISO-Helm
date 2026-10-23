@@ -27,3 +27,17 @@ python3 tests/scenario_c_mail_native.py \
 ```
 
 The selected CTS tree must contain the test-only ScenarioCMailNativeServer and the User tree must contain RealMailActorNativeGate. Missing fixtures, absent provider jars, nonzero or skipped cases, stale reports, changed source inputs and failed exact acknowledgements fail the gate. The runner archives the complete four-case XML before another Maven gate can overwrite it. Source manifests and provider/image digests identify what was tested. This is local native integration proof; production packaging, deployment and received real mail remain separate acceptance.
+
+The hosted MAIL diagnostic repeats this join in a fresh Linux job against full commit references. Its four-case XML must contain the exact broker and acknowledgement cases; summary totals cannot replace missing, duplicated, skipped or failed cases. The job uses the existing reviewed memory lease, bounded process cleanup and labelled disposable containers. It retains source manifests, image/provider identities, sanitized logs and cleanup receipts. These prove the selected join; final Scenario C acceptance still requires the final common service heads and packaged image.
+
+**For developers — the hosted entry point and evidence boundary:**
+
+```text
+Workflow: .github/workflows/scenario-c-mail-native-pair.yml
+Routine actors: exactly five; no live account, grant, deployment or secret changes
+Resource support: the existing pinned Tenant native resource helper
+Memory lease: 3152 MiB, including overlapping JVMs and both native containers
+Images: pinned Keycloak and Mongo digests
+Acceptance: four exact native cases, stable source inputs, no OOM/restart, confirmed owned cleanup
+Final delivery: repin the workflow to the final composed User, CTS and Keycloak commits and rerun
+```

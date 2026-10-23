@@ -8,6 +8,7 @@ metadata:
     nginx.ingress.kubernetes.io/rewrite-target: /$1$2$3
     nginx.ingress.kubernetes.io/cors-allow-headers: Authorization, Content-Type, Cache-Control, Pragma, Expires, X-CSRF-Token, x-csrf-token, X-Requested-With, X-WHITELIST-HEADER, acceptlanguage, accept-language, x-tenant-id, X-Tenant-Id, agencyId, Idempotency-Key
     nginx.ingress.kubernetes.io/cors-allow-methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+    nginx.ingress.kubernetes.io/cors-expose-headers: X-Reason, X-ORISO-Mutation-Outcome, X-ORISO-Mutation-Operation
     nginx.ingress.kubernetes.io/enable-cors: "true"
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
     nginx.ingress.kubernetes.io/use-regex: 'true'

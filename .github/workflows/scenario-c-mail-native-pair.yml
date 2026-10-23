@@ -1,0 +1,108 @@
+name: Scenario C real MAIL broker CTS SMTP pair
+
+on:
+  pull_request:
+    branches: [dev]
+  push:
+    branches: [dev, codex/367-p1-4-provisioner-20261021]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scenario-c-mail-native-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-mail:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      USER_REF: 5203107c666d1c4479c744c1150d50c8ee6f86b7
+      CTS_REF: 903eb68cb6b28bb8f67111186649354fefd4315d
+      KEYCLOAK_REF: a9483e4b44578f10badf70c5265a37a2c1d3d26e
+      SUPPORT_REF: a8f5eec02a6de4faaa36a709f0ce4b42e8926c80
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: OpenResilienceInitiative/ORISO-UserService
+          ref: ${{ env.USER_REF }}
+          path: _mail_user
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: OpenResilienceInitiative/ORISO-ConsultingTypeService
+          ref: ${{ env.CTS_REF }}
+          path: _mail_cts
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: OpenResilienceInitiative/ORISO-Keycloak
+          ref: ${{ env.KEYCLOAK_REF }}
+          path: _mail_keycloak
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: OpenResilienceInitiative/ORISO-TenantService
+          ref: ${{ env.SUPPORT_REF }}
+          path: _mail_support
+          persist-credentials: false
+      - name: Keep exact support checkouts outside the chart and create isolated build worktrees
+        shell: bash
+        run: |
+          set -euo pipefail
+          for repo in user cts keycloak support; do
+            mv "$GITHUB_WORKSPACE/_mail_$repo" "$RUNNER_TEMP/mail-source-$repo"
+          done
+          git -C "$RUNNER_TEMP/mail-source-user" worktree add --detach "$RUNNER_TEMP/mail-user" "$USER_REF"
+          git -C "$RUNNER_TEMP/mail-source-cts" worktree add --detach "$RUNNER_TEMP/mail-cts" "$CTS_REF"
+          git -C "$RUNNER_TEMP/mail-source-keycloak" worktree add --detach "$RUNNER_TEMP/mail-keycloak" "$KEYCLOAK_REF"
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: 21.0.12+8.0.LTS
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.12.13
+      - name: Install checksum-verified Maven 3.9.14
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            https://archive.apache.org/dist/maven/maven-3/3.9.14/binaries/apache-maven-3.9.14-bin.tar.gz \
+            --output "$RUNNER_TEMP/mail-maven.tar.gz"
+          printf '%s  %s\n' \
+            d50af8ab5e6005b46a07f0ce9d3719e67cfdf898da988a84871304cd59fb1af0fef2f99dea709e6e66f21f732f905979b5c2dce6b6860406f60a70e84d9cf0b8 \
+            "$RUNNER_TEMP/mail-maven.tar.gz" | sha512sum --check
+          tar -xzf "$RUNNER_TEMP/mail-maven.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/apache-maven-3.9.14/bin" >> "$GITHUB_PATH"
+      - name: Require strict case eligibility and existing resource controls
+        run: |
+          python -m unittest discover -s tests -p test_scenario_c_mail_evidence.py -q
+          python -m unittest discover -s "$RUNNER_TEMP/mail-source-support/scripts/tests" -p test_native_context_resources.py -q
+      - name: Pull the exact native images
+        run: |
+          docker info > /dev/null
+          docker pull quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992 > /dev/null
+          docker pull mongo@sha256:d341a86584b96eb665345a8f5b35fba8695ee1d0618fd012ec4696223a3d6c62 > /dev/null
+      - name: Prove one real MAIL token through the actual broker CTS saved settings SMTP and exact acknowledgement
+        run: >-
+          python tests/scenario_c_mail_native.py
+          --keycloak "$RUNNER_TEMP/mail-keycloak"
+          --cts "$RUNNER_TEMP/mail-cts"
+          --user "$RUNNER_TEMP/mail-user"
+          --java-home "$JAVA_HOME"
+          --resource-support "$RUNNER_TEMP/mail-source-support"
+          --evidence "$RUNNER_TEMP/mail-evidence"
+      - name: Retain sanitized native outcomes immutable sources and owned cleanup
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scenario-c-mail-native-${{ github.sha }}
+          path: ${{ runner.temp }}/mail-evidence/*
+          if-no-files-found: error
+          retention-days: 14

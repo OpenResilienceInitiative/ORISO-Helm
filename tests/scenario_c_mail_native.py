@@ -23,9 +23,20 @@ ROOT = Path(__file__).resolve().parents[1]
 REDACT = []
 EVIDENCE = None
 STAGE = "arguments"
+RESOURCE_SUPPORT = None
+MEMORY_LEASE = None
+MONGO_IMAGE = "mongo@sha256:d341a86584b96eb665345a8f5b35fba8695ee1d0618fd012ec4696223a3d6c62"
+EXPECTED_CASES = frozenset([
+    "sameNativeBrokerBearerReadsRealSavedCtsAppliesSmtpAndAcknowledgesExactRevision",
+    *["realNativeFiveAudienceMailIsAcceptedByTheActualBroker(TaskPurpose)[" + str(i) + "]"
+      for i in range(1, 4)],
+])
 
 
 def ensure_headroom():
+    if MEMORY_LEASE is not None:
+        MEMORY_LEASE.check()
+        return
     if sys.platform == "darwin":
         report = subprocess.check_output(["memory_pressure", "-Q"], text=True)
         match = re.search(r"memory free percentage:\s*(\d+)%", report)
@@ -76,7 +87,11 @@ def run(command, cwd, environment, log, timeout=600):
                     raise RuntimeError("Native MAIL command exceeded finite deadline")
                 time.sleep(2)
         finally:
-            if result.poll() is None:
+            if RESOURCE_SUPPORT is not None:
+                cleanup = RESOURCE_SUPPORT.stop(result)
+                with (EVIDENCE / "process-cleanup.jsonl").open("a") as receipt:
+                    receipt.write(json.dumps(cleanup) + "\n")
+            elif result.poll() is None:
                 os.killpg(result.pid, signal.SIGTERM)
                 try:
                     result.wait(10)
@@ -94,7 +109,12 @@ def strict_report(user, started, evidence):
         raise RuntimeError("Fresh native MAIL execution XML is required")
     report = XML.parse(reports[0]).getroot()
     counts = {k: int(report.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
-    if counts != {"tests": 4, "failures": 0, "errors": 0, "skipped": 0}:
+    rows = list(report.iter("testcase"))
+    if (counts != {"tests": 4, "failures": 0, "errors": 0, "skipped": 0}
+            or len(rows) != 4 or {row.get("name") for row in rows} != EXPECTED_CASES
+            or any(row.get("classname") != "de.caritas.cob.userservice.api.config.auth.RealMailActorNativeGate"
+                   or any(row.find(marker) is not None for marker in ("failure", "error", "skipped"))
+                   for row in rows)):
         raise RuntimeError("Native MAIL must execute all four real cases without skips")
     archive = evidence / "native-xml"
     archive.mkdir(exist_ok=False)
@@ -166,23 +186,47 @@ def remaining_actors(case, fixture_module):
 
 
 def main():
-    global case_module, EVIDENCE, STAGE
+    global case_module, EVIDENCE, STAGE, RESOURCE_SUPPORT, MEMORY_LEASE
     parser = argparse.ArgumentParser()
     for name in ("keycloak", "cts", "user", "java-home", "evidence"):
         parser.add_argument("--" + name, required=True, type=Path)
+    parser.add_argument("--resource-support", type=Path)
     args = parser.parse_args()
     args.keycloak, args.cts, args.user = [p.resolve() for p in (args.keycloak, args.cts, args.user)]
     args.evidence = args.evidence.resolve()
     args.evidence.mkdir(parents=True, exist_ok=True)
     EVIDENCE = args.evidence
+    if args.resource_support is not None:
+        if sys.platform != "linux" or os.environ.get("GITHUB_ACTIONS") != "true":
+            raise RuntimeError("Joined hosted MAIL proof requires a fresh Linux GitHub job")
+        installer = load("mail_installer_resource_support", ROOT / "scripts/ci/scenario-c-installer-proof.py")
+        RESOURCE_SUPPORT = installer.load_support(args.resource_support.resolve())
+        MEMORY_LEASE = RESOURCE_SUPPORT.configure_memory(3152, args.evidence)
+        MEMORY_LEASE.check(starting=True)
+        deadline = time.monotonic() + 1500
+
+        def watch_resources(signum, frame):
+            try:
+                ensure_headroom()
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Hosted MAIL total resource lease expired")
+            except Exception:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                raise
+
+        signal.signal(signal.SIGALRM, watch_resources)
+        signal.setitimer(signal.ITIMER_REAL, 2, 2)
     for root in (args.keycloak, args.cts, args.user):
         if not root.is_dir() or not (root / ".git").is_file():
             raise RuntimeError("Explicit existing isolated Git worktree required")
     environment = {**os.environ, "JAVA_HOME": str(args.java_home.resolve()),
-                   "MAVEN_OPTS": "-Xmx512m -XX:ActiveProcessorCount=2",
+                   "MAVEN_OPTS": "-Xmx512m -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m "
+                   "-XX:MaxDirectMemorySize=32m -Xss512k -XX:ActiveProcessorCount=2",
                    "PATH": str(args.java_home.resolve() / "bin") + os.pathsep + os.environ["PATH"]}
     before = {"Helm": sources(ROOT), "Keycloak": sources(args.keycloak),
               "CTS": sources(args.cts), "User": sources(args.user)}
+    if args.resource_support is not None:
+        before["Support"] = sources(args.resource_support.resolve())
     (args.evidence / "source-before.json").write_text(json.dumps(before, indent=2))
     module = args.keycloak / "keycloak-image/smtp-control-spi"
     STAGE = "smtp-package"
@@ -214,7 +258,7 @@ def main():
         subprocess.run(["docker", "run", "-d", "--name", mongo_name,
             "--label", "oriso-smtp-run-id=" + case.run_id, "--network", case.network,
             "--memory=384m", "--memory-swap=384m", "--cpus=1", "--pids-limit=128",
-            "-p", "127.0.0.1::27017", "mongo:7.0.2", "--wiredTigerCacheSizeGB", "0.25"],
+            "-p", "127.0.0.1::27017", MONGO_IMAGE, "--wiredTigerCacheSizeGB", "0.25"],
             check=True, capture_output=True)
         mongo_port = subprocess.check_output(["docker", "port", mongo_name, "27017/tcp"], text=True).strip()
         environment["ORISO_NATIVE_MAIL_MONGO_URI"] = "mongodb://" + mongo_port + "/native_mail_" + case.run_id
@@ -242,7 +286,7 @@ def main():
                     "-XX:MaxDirectMemorySize=16m", "-Xss512k", "-XX:ActiveProcessorCount=2", "-cp", cp,
                     "de.caritas.cob.consultingtypeservice.api.controller.ScenarioCMailNativeServer",
                     str(fixture), str(ready)], cwd=args.cts, env=environment, stdin=subprocess.PIPE,
-                    stdout=output, stderr=subprocess.STDOUT)
+                    stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
             deadline = time.monotonic() + 180
             while not ready.is_file():
                 ensure_headroom()
@@ -275,11 +319,18 @@ def main():
             STAGE = "durable-readback"
             if server.wait(45):
                 raise RuntimeError("Real saved CTS exact acknowledgement readback failed")
+            if RESOURCE_SUPPORT is not None:
+                closed = RESOURCE_SUPPORT.stop(server)
+                with (EVIDENCE / "process-cleanup.jsonl").open("a") as receipt:
+                    receipt.write(json.dumps(closed) + "\n")
             server = None
             if case.admin("GET")["smtpServer"]["host"] != "smtp.fixture.internal":
                 raise RuntimeError("Actual SMTP provider state readback failed")
             after = {"Helm": sources(ROOT), "Keycloak": sources(args.keycloak),
                      "CTS": sources(args.cts), "User": sources(args.user)}
+            if args.resource_support is not None:
+                after["Support"] = sources(args.resource_support.resolve())
+            (args.evidence / "source-after.json").write_text(json.dumps(after, indent=2))
             if before != after:
                 raise RuntimeError("Native MAIL source inputs changed during execution")
             (args.evidence / "result.json").write_text(json.dumps({"counts": counts,
@@ -287,8 +338,27 @@ def main():
                 "sameBearerBrokerCtsSmtpAck": True, "exactSavedRevision": 7, "sourceInputsUnchanged": True,
                 "routineActorClients": sorted(a["clientId"] for a in actors),
                 "nativeBuiltinClient": "admin-permissions"}, indent=2))
-            print("NATIVE_MAIL_4_CASES_PASSED")
     finally:
+        if RESOURCE_SUPPORT is not None:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        owned = None
+        runtime = []
+        if RESOURCE_SUPPORT is not None and hasattr(case_module.SmtpControlPermissions, "run_id"):
+            native = case_module.SmtpControlPermissions
+            owned = RESOURCE_SUPPORT.resources.OwnedDocker("oriso-smtp-run-id", native.run_id)
+            owned.plan("network", native.network)
+            for name in (native.name, mongo_name):
+                if name is None:
+                    continue
+                owned.plan("container", name)
+                current = owned.inspect("container", name)
+                if current is not None:
+                    if current.get("Config", {}).get("Labels", {}).get(owned.label_key) != native.run_id:
+                        raise RuntimeError("Refuse foreign MAIL runtime readback")
+                    runtime.append({"name": name, "oomKilled": current["State"]["OOMKilled"],
+                                    "restartCount": current["RestartCount"], "imageId": current["Image"],
+                                    "memoryBytes": current["HostConfig"]["Memory"],
+                                    "swapBytes": current["HostConfig"]["MemorySwap"]})
         if server is not None:
             if server.stdin and not server.stdin.closed:
                 server.stdin.close()
@@ -297,6 +367,8 @@ def main():
             except subprocess.TimeoutExpired:
                 server.kill()
                 server.wait()
+            if RESOURCE_SUPPORT is not None:
+                RESOURCE_SUPPORT.stop(server)
         if case is not None:
             case.doCleanups()
         if mongo_name:
@@ -307,19 +379,32 @@ def main():
                     raise RuntimeError("Refuse Mongo cleanup: run label differs")
                 subprocess.run(["docker", "rm", "-f", "-v", mongo_name], check=True, capture_output=True)
         case_module.SmtpControlPermissions.doClassCleanups()
+        if owned is not None:
+            cleanup = owned.cleanup()
+            (args.evidence / "cleanup.json").write_text(json.dumps({"runtime": runtime, "cleanup": cleanup}, indent=2))
+            if (len(runtime) != 2
+                    or any(row["oomKilled"] is not False or row["restartCount"] != 0
+                           or row["memoryBytes"] <= 0 or row["swapBytes"] != row["memoryBytes"] for row in runtime)
+                    or len(cleanup) != 3 or any(row.get("confirmedAbsent") is not True for row in cleanup)):
+                raise RuntimeError("Joined MAIL requires healthy owned runtimes and confirmed cleanup")
         for log in args.evidence.glob("*.log"):
             sanitize(log)
         if old_jar is None:
             os.environ.pop("SMTP_CONTROL_TEST_JAR", None)
         else:
             os.environ["SMTP_CONTROL_TEST_JAR"] = old_jar
+    print("NATIVE_MAIL_4_CASES_PASSED")
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as failure:
+        if RESOURCE_SUPPORT is not None:
+            signal.setitimer(signal.ITIMER_REAL, 0)
         if EVIDENCE:
+            for log in EVIDENCE.glob("*.log"):
+                sanitize(log)
             diagnostic = {"stage": STAGE, "errorType": type(failure).__name__}
             diagnostic["locations"] = [{"file": Path(frame.filename).name,
                                         "line": frame.lineno, "function": frame.name}
