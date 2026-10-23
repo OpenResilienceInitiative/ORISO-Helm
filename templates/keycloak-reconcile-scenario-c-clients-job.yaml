@@ -6,6 +6,28 @@
 {{- if not (regexMatch "^[^[:space:]]+@sha256:[a-f0-9]{64}$" $image) -}}
 {{- fail "keycloakSmtpReconcile.image must use an immutable sha256 digest" -}}
 {{- end -}}
+{{- $scenarioSecrets := list
+  (list "SCENARIO_C_SETUP_CLIENT_SECRET" (.Values.global.secrets.keycloakScenarioCSetupClientSecret | default ""))
+  (list "SCENARIO_C_ACCOUNT_CREATE_CLIENT_SECRET" (.Values.global.secrets.keycloakScenarioCAccountCreateClientSecret | default ""))
+  (list "SCENARIO_C_ACCOUNT_ADMIN_CLIENT_SECRET" (.Values.global.secrets.keycloakScenarioCAccountAdminClientSecret | default ""))
+  (list "SCENARIO_C_MAIL_CLIENT_SECRET" (.Values.global.secrets.keycloakScenarioCMailClientSecret | default ""))
+  (list "SCENARIO_C_RUNTIME_CLIENT_SECRET" (.Values.global.secrets.keycloakScenarioCRuntimeClientSecret | default "")) -}}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keycloak-reconcile-scenario-c-clients
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-7"
+    "helm.sh/hook-delete-policy": before-hook-creation
+type: Opaque
+data:
+  {{- range $pair := $scenarioSecrets }}
+  {{ index $pair 0 }}: {{ index $pair 1 | toString | b64enc | quote }}
+  {{- end }}
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -87,12 +109,12 @@ spec:
                   key: KEYCLOAK_ADMIN_PASSWORD
             - name: SCENARIO_C_MODE
               value: {{ if $provisionOnly }}"provision"{{ else }}"enable"{{ end }}
-            {{- range $pair := list (list "SCENARIO_C_SETUP_CLIENT_SECRET" "IDENTITY_SETUP_CLIENT_SECRET") (list "SCENARIO_C_ACCOUNT_CREATE_CLIENT_SECRET" "IDENTITY_ACCOUNT_CREATE_CLIENT_SECRET") (list "SCENARIO_C_ACCOUNT_ADMIN_CLIENT_SECRET" "IDENTITY_ACCOUNT_ADMIN_CLIENT_SECRET") (list "SCENARIO_C_MAIL_CLIENT_SECRET" "IDENTITY_MAIL_CLIENT_SECRET") (list "SCENARIO_C_RUNTIME_CLIENT_SECRET" "IDENTITY_RUNTIME_CLIENT_SECRET") }}
+            {{- range $pair := $scenarioSecrets }}
             - name: {{ index $pair 0 }}
               valueFrom:
                 secretKeyRef:
-                  name: keycloak-backend-client-secrets
-                  key: {{ index $pair 1 }}
+                  name: keycloak-reconcile-scenario-c-clients
+                  key: {{ index $pair 0 }}
             {{- end }}
             {{- if $enabled }}
             {{- range $pair := list (list "SCENARIO_C_SETUP_SERVICE_SUBJECT" "setup" "serviceSubject") (list "SCENARIO_C_ACCOUNT_CREATE_SERVICE_SUBJECT" "accountCreate" "serviceSubject") (list "SCENARIO_C_ACCOUNT_ADMIN_SERVICE_SUBJECT" "accountAdmin" "serviceSubject") (list "SCENARIO_C_MAIL_SERVICE_SUBJECT" "mail" "serviceSubject") (list "SCENARIO_C_RUNTIME_SERVICE_SUBJECT" "runtime" "serviceSubject") }}

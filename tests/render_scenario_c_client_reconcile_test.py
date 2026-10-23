@@ -40,11 +40,13 @@ def main():
     assert provision.returncode == 0, provision.stderr
     job = docs[("Job", "keycloak-reconcile-scenario-c-clients")]
     assert job["metadata"]["annotations"]["helm.sh/hook"] == "pre-upgrade"
+    secret = docs[("Secret", "keycloak-reconcile-scenario-c-clients")]
+    assert secret["metadata"]["annotations"]["helm.sh/hook"] == "pre-upgrade"
     env = environment(job)
     assert env["SCENARIO_C_MODE"]["value"] == "provision"
     assert not any(name.endswith("SERVICE_SUBJECT") for name in env)
     for actor in ("SETUP", "ACCOUNT_CREATE", "ACCOUNT_ADMIN", "MAIL", "RUNTIME"):
-        assert env[f"SCENARIO_C_{actor}_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["name"] == "keycloak-backend-client-secrets"
+        assert env[f"SCENARIO_C_{actor}_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"]["name"] == "keycloak-reconcile-scenario-c-clients"
 
     enabled, docs = render()
     assert enabled.returncode == 0, enabled.stderr
