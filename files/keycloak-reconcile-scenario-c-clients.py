@@ -172,7 +172,9 @@ def reconcile(config):
     subjects = {}
     for key, client_id, secret_name, subject_name, role_names, audiences in ACTORS:
         roles = [role_cache.setdefault(name, api.ensure_role(name)) for name in role_names]
-        client = api.ensure_client(client_id, config["SCENARIO_C_MODE"] == "enable")
+        # A missing client is never created live. The enable pass must first
+        # prove the persisted subject pin matches Keycloak's generated account.
+        client = api.ensure_client(client_id, False)
         subject = api.subject(client)
         if config["SCENARIO_C_MODE"] == "enable" and subject != config[subject_name]:
             raise Error("SCENARIO_C_SUBJECT_MISMATCH: update Helm values from the provision output")
