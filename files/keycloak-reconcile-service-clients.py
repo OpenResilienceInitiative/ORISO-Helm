@@ -141,6 +141,13 @@ class Admin:
                     self.request('DELETE', 'clients/' + cid + '/' + scope_kind + '/' + quote(scope['id'], safe=''))
         self.request('PUT', 'clients/' + cid, {'secret': secret, 'enabled': True})
 
+    def realm(self):
+        realm = self.http.request('GET', self.base.rstrip('/'), None, self.headers, 'ADMIN_UNAVAILABLE', admin_api=True,
+                                  max_response_bytes=smtp.MAX_REALM_RESPONSE_BYTES)
+        if not isinstance(realm, dict):
+            raise Error('BACKEND_CLIENT_INVALID: realm')
+        return realm
+
     def retire(self, username):
         users = self.request('GET', 'users?' + urlencode({'username': username, 'exact': 'true'}))
         if not isinstance(users, list) or len(users) > 1:
@@ -233,6 +240,11 @@ def reconcile(config):
         api.validate_client(sync_client)
     if not config['prepare'] and any(api.subject(client) != config[pin] for client, pin in zip(clients, ('TECHNICAL_SERVICE_SUBJECT', 'ADMIN_SERVICE_SUBJECT'))):
         raise Error('BACKEND_CLIENT_SUBJECT_MISMATCH: set serviceTechUserId to the prepared service account; nothing changed')
+    if not config['prepare'] and api.realm().get('adminPermissionsEnabled'):
+        # With native admin permissions, manage-realm can rewrite the permission
+        # store and grant itself user management (Keycloak57 boundary result).
+        raise Error('SMTP_SYNC_FGAP_ESCALATION: smtp-sync would get manage-realm on a realm with '
+                    'adminPermissionsEnabled; needs an approved boundary first; nothing changed')
     management = api.find_client('realm-management')
     if not management:
         raise Error('BACKEND_CLIENT_INVALID: realm-management missing')
