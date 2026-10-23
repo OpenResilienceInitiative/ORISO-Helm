@@ -5,8 +5,15 @@
 {{- end -}}
 {{- $scenario := .Values.global.keycloak.scenarioC | default dict -}}
 {{- $scenarioEnabled := dig "enabled" false $scenario -}}
+{{- $scenarioProvisionOnly := dig "provisionOnly" false $scenario -}}
 {{- if not (kindIs "bool" $scenarioEnabled) -}}
 {{- fail "global.keycloak.scenarioC.enabled must be a boolean" -}}
+{{- end -}}
+{{- if not (kindIs "bool" $scenarioProvisionOnly) -}}
+{{- fail "global.keycloak.scenarioC.provisionOnly must be a boolean" -}}
+{{- end -}}
+{{- if and $scenarioEnabled $scenarioProvisionOnly -}}
+{{- fail "Scenario C enabled and provisionOnly cannot both be true" -}}
 {{- end -}}
 {{- $setupClient := dig "setup" "clientId" "" $scenario -}}
 {{- $setupSubject := dig "setup" "serviceSubject" "" $scenario -}}
@@ -18,10 +25,12 @@
 {{- $mailSubject := dig "mail" "serviceSubject" "" $scenario -}}
 {{- $runtimeClient := dig "runtime" "clientId" "" $scenario -}}
 {{- $runtimeSubject := dig "runtime" "serviceSubject" "" $scenario -}}
-{{- if $scenarioEnabled -}}
+{{- if or $scenarioEnabled $scenarioProvisionOnly -}}
 {{- if or (ne $setupClient "backend-setup") (ne $accountCreateClient "backend-account-create") (ne $accountAdminClient "backend-account-admin") (ne $mailClient "backend-mail") (ne $runtimeClient "backend-runtime") -}}
 {{- fail "Scenario C must use the five canonical backend client ids" -}}
 {{- end -}}
+{{- end -}}
+{{- if $scenarioEnabled -}}
 {{- $subjects := list $setupSubject $accountCreateSubject $accountAdminSubject $mailSubject $runtimeSubject -}}
 {{- if or (has "" $subjects) (ne (len (uniq $subjects)) 5) -}}
 {{- fail "Scenario C requires five distinct service-account subjects" -}}

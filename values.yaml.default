@@ -134,6 +134,10 @@ global:
     # their actual service-account subjects have been read back.
     scenarioC:
       enabled: false
+      # First pass only: reconcile the five disabled Keycloak clients and read
+      # their generated service-account subjects from the hook output. The
+      # second pass supplies those immutable UUIDs and sets enabled=true.
+      provisionOnly: false
       setup:
         clientId: "backend-setup"
         serviceSubject: ""

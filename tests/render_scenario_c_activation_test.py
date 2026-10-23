@@ -81,6 +81,24 @@ def main():
     )
     assert bad_client.returncode != 0, "non-canonical actor client must fail rendering"
 
+    provision, provision_docs = render(
+        "--set", "global.keycloak.scenarioC.enabled=false",
+        "--set", "global.keycloak.scenarioC.provisionOnly=true",
+        "--set-string", "global.keycloak.scenarioC.setup.serviceSubject=",
+        "--set-string", "global.keycloak.scenarioC.accountCreate.serviceSubject=",
+        "--set-string", "global.keycloak.scenarioC.accountAdmin.serviceSubject=",
+        "--set-string", "global.keycloak.scenarioC.mail.serviceSubject=",
+        "--set-string", "global.keycloak.scenarioC.runtime.serviceSubject=",
+    )
+    assert provision.returncode == 0, provision.stderr
+    provision_config = provision_docs[("ConfigMap", "userservice-configmap-env")]["data"]
+    provision_env = env_by_name(provision_docs[("Deployment", "userservice")])
+    assert provision_config["TASK_IDENTITY_MODEL"] == "LEGACY"
+    assert "IDENTITY_SETUP_CLIENT_ID" not in provision_env
+
+    conflicting, _ = render("--set", "global.keycloak.scenarioC.provisionOnly=true")
+    assert conflicting.returncode != 0, "enable and provisionOnly must be mutually exclusive"
+
     print("PASS: Scenario C activation renders five complete, distinct actor bindings")
 
 
