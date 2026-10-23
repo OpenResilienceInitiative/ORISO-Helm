@@ -1,0 +1,111 @@
+{{- $scenario := .Values.global.keycloak.scenarioC | default dict -}}
+{{- $enabled := dig "enabled" false $scenario -}}
+{{- $provisionOnly := dig "provisionOnly" false $scenario -}}
+{{- if or $enabled $provisionOnly }}
+{{- $image := required "keycloakSmtpReconcile.image must use an immutable digest" .Values.keycloakSmtpReconcile.image -}}
+{{- if not (regexMatch "^[^[:space:]]+@sha256:[a-f0-9]{64}$" $image) -}}
+{{- fail "keycloakSmtpReconcile.image must use an immutable sha256 digest" -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-reconcile-scenario-c-clients-script
+  annotations:
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-6"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+  keycloak-reconcile-scenario-c-clients.py: |
+{{ .Files.Get "files/keycloak-reconcile-scenario-c-clients.py" | indent 4 }}
+  keycloak-reconcile-service-clients.py: |
+{{ .Files.Get "files/keycloak-reconcile-service-clients.py" | indent 4 }}
+  keycloak-reconcile-smtp.py: |
+{{ .Files.Get "files/keycloak-reconcile-smtp.py" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-reconcile-scenario-c-clients
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # Existing Dev realms already have Keycloak running. This must prepare or
+    # verify the clients before the UserService workload can use FIVE_ACTORS.
+    "helm.sh/hook": pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: keycloak-reconcile-scenario-c-clients
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reconcile-scenario-c-clients
+          image: {{ $image | quote }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          command: ["python3", "/scripts/keycloak-reconcile-scenario-c-clients.py"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 64Mi
+          env:
+            - name: KEYCLOAK_URL
+              value: {{ include "oriso.keycloakAdminUrl" . | quote }}
+            - name: KEYCLOAK_REALM
+              value: {{ .Values.global.keycloak.realm | quote }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KEYCLOAK_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secret-env
+                  key: KEYCLOAK_ADMIN_PASSWORD
+            - name: SCENARIO_C_MODE
+              value: {{ if $provisionOnly }}"provision"{{ else }}"enable"{{ end }}
+            {{- range $pair := list (list "SCENARIO_C_SETUP_CLIENT_SECRET" "IDENTITY_SETUP_CLIENT_SECRET") (list "SCENARIO_C_ACCOUNT_CREATE_CLIENT_SECRET" "IDENTITY_ACCOUNT_CREATE_CLIENT_SECRET") (list "SCENARIO_C_ACCOUNT_ADMIN_CLIENT_SECRET" "IDENTITY_ACCOUNT_ADMIN_CLIENT_SECRET") (list "SCENARIO_C_MAIL_CLIENT_SECRET" "IDENTITY_MAIL_CLIENT_SECRET") (list "SCENARIO_C_RUNTIME_CLIENT_SECRET" "IDENTITY_RUNTIME_CLIENT_SECRET") }}
+            - name: {{ index $pair 0 }}
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-backend-client-secrets
+                  key: {{ index $pair 1 }}
+            {{- end }}
+            {{- if $enabled }}
+            {{- range $pair := list (list "SCENARIO_C_SETUP_SERVICE_SUBJECT" "setup" "serviceSubject") (list "SCENARIO_C_ACCOUNT_CREATE_SERVICE_SUBJECT" "accountCreate" "serviceSubject") (list "SCENARIO_C_ACCOUNT_ADMIN_SERVICE_SUBJECT" "accountAdmin" "serviceSubject") (list "SCENARIO_C_MAIL_SERVICE_SUBJECT" "mail" "serviceSubject") (list "SCENARIO_C_RUNTIME_SERVICE_SUBJECT" "runtime" "serviceSubject") }}
+            - name: {{ index $pair 0 }}
+              value: {{ dig (index $pair 1) (index $pair 2) "" $scenario | quote }}
+            {{- end }}
+            {{- end }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: keycloak-reconcile-scenario-c-clients-script
+{{- end }}
