@@ -46,6 +46,19 @@ global:
     # oriso-db-monitoring) and of Redis (its redis-exporter sidecar). Requires
     # signozCollector.enabled=true. No row data leaves the data stores.
     dbMetrics: false
+    # Trace sampling for the Spring Boot services (0.0-1.0). Empty keeps each
+    # service's own default (Spring Boot: 0.1, i.e. 9 of 10 traces dropped).
+    tracingSamplingProbability: ""
+    # Copy the W3C baggage field `test.run.id` (sent by ORISO-E2E) onto every
+    # span, so one test run can be selected at once. Test environments only:
+    # any caller can set baggage.
+    testRunBaggage: false
+    # Browser Web Vitals from Frontend and Admin, posted to
+    # https://<domainName>/signoz-rum/v1/metrics (unauthenticated, size- and
+    # rate-limited, OTLP metrics only). Requires signoz.enabled=true.
+    webVitals:
+      enabled: false
+      exportIntervalMillis: 60000
 
   acmedomainName: "acme.your-domain.example.com"
  #adminDomainName: "admin.your-domain.example.com"
@@ -184,7 +197,7 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call:2.0.11"
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.13"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Storybook is a development surface and stays absent unless an environment
@@ -256,7 +269,7 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.12"
+  imageVersion: "2.0.13"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -300,10 +313,10 @@ matrixrtcAuth:
   # The dev branch tracks the dev tag; release branches pin these by digest
   # because they are the LiveKit authorization boundary.
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.12"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.13"
     pullPolicy: ""
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.12"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.13"
     pullPolicy: ""
   service:
     port: 3010
@@ -335,7 +348,7 @@ online-counseling-redis:
 # Keycloak
 online-counseling-keycloak:
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
-  imageVersion: "2.0.11"
+  imageVersion: "2.0.13"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
@@ -357,7 +370,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.12"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.13"
 
   keycloakResource: "agency-service"
 
@@ -374,7 +387,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "2.0.12"
+  imageVersion: "2.0.13"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -402,7 +415,7 @@ tenantService:
   systemEmailDeliveryServiceClient: ""
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.12"
+  imageVersion: "2.0.13"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -438,7 +451,7 @@ userService:
     requestsPerSecond: 5
     burstMultiplier: 2
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.12"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.13"
   serviceURL: "http://userservice:8080"
 
   keycloakResource: "user-service"
@@ -527,7 +540,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.12"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.13"
 
 nginxController:
   enabled: true
@@ -538,8 +551,7 @@ nginxController:
 ipAnonymizer:
   enabled: false
   replicas: 1
-  # Built and released by OpenResilienceInitiative/ORISO-IpAnonymizer.
-  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:2.0.12"
+  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:2.0.13"
 
 
 # ---------- Observability & Monitoring -------------------------------------------------------------------------------
@@ -560,6 +572,43 @@ signoz:
   clickhouse:
     persistence:
       size: 20Gi
+  # Data protection (templates/signoz/signoz-data-protection.yaml): volumes
+  # switched to reclaim Retain after every upgrade, daily signoz.db backup.
+  orisoDataProtection:
+    enabled: true
+    image: "docker.io/library/python:3.13-alpine@sha256:79e7a9b9ff1cbceff819f856fb374477792a5967759d94df266de7b7b4120e6f"
+    backup:
+      enabled: true
+      schedule: "30 2 * * *"
+      keep: 14
+      size: 1Gi
+  # Collector resources and exposed protocols. The ORISO collector policy lives
+  # in charts/signoz/files/oriso-otel-collector-policy.yaml.
+  otelCollector:
+    additionalEnvs:
+      # Stamped onto browser metrics; must equal global.observability.deploymentEnvironment.
+      ORISO_DEPLOYMENT_ENVIRONMENT: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 1Gi
+    ports:
+      jaeger-thrift:
+        enabled: false
+      jaeger-grpc:
+        enabled: false
+      logsheroku:
+        enabled: false
+      logsjson:
+        enabled: false
+      otlp-rum:
+        enabled: true
+        containerPort: 4319
+        servicePort: 4319
+        nodePort: ""
+        protocol: TCP
 
 # SigNoz collection agents — node DaemonSet (pod logs, host/kubelet metrics)
 # plus one cluster collector (workload objects, k8s events). Requires
@@ -596,7 +645,7 @@ healthDashboard:
     authSecret: "health-dashboard-basic-auth"
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: "2.0.4"
+    tag: "2.0.13"
     pullPolicy: ""
   replicas: 1
   namespace: ""

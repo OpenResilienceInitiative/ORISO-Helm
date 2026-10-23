@@ -57,6 +57,9 @@ def render(
         os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
     ]
     domain = domain_of("tests/fixtures/values-render-domain.yaml")
+    if overlay == "values-pre-dev.yaml":
+        # Pre-Dev is deployed as an overlay on top of Dev.
+        command.extend(["-f", os.path.join(CHART_DIR, "values-dev.yaml")])
     if overlay:
         command.extend(["-f", os.path.join(CHART_DIR, overlay)])
         domain = domain_of(overlay) or domain

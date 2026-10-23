@@ -207,34 +207,6 @@ kind: ConfigMap
 metadata:
   name: matrix-homeserver-oidc
   namespace: {{ .Release.Namespace }}
----
-apiVersion: v1
-data:
-  oidc-keycloak.yaml: |
-    # Matrix Synapse OIDC Integration with Keycloak
-    oidc_providers:
-      - idp_id: keycloak
-        idp_name: "Caritas Keycloak SSO"
-        idp_brand: "keycloak"
-        discover: false
-        issuer: {{ .Values.global.springSecurityOAuth2ResourceserverJWTIssuerURI }}
-        client_id: "matrix-synapse"
-        client_secret: "caritas-matrix-secret-2025"
-        scopes: ["openid", "profile", "email"]
-        authorization_endpoint:  {{ .Values.global.authorizationendpoint }} 
-        token_endpoint:  {{ .Values.global.tokenendpoint }} 
-        userinfo_endpoint:  {{ .Values.global.userinfoendpoint }} 
-        user_mapping_provider:
-          config:
-            localpart_template: "{{`{{`}} user.preferred_username {{`}}`}}"
-            display_name_template: "{{`{{`}} user.name|default(user.preferred_username) {{`}}`}}"
-            email_template: "{{`{{`}} user.email {{`}}`}}"
-        allow_existing_users: true
-        user_profile_method: "userinfo_endpoint"
-kind: ConfigMap
-metadata:
-  name: matrix-oidc-config
-  namespace: {{ .Release.Namespace }}
 ---  
 apiVersion: v1
 data:
