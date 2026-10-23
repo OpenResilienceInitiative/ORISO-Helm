@@ -40,6 +40,7 @@ def main():
     assert provision.returncode == 0, provision.stderr
     job = docs[("Job", "keycloak-reconcile-scenario-c-clients")]
     assert job["metadata"]["annotations"]["helm.sh/hook"] == "pre-upgrade"
+    assert job["metadata"]["annotations"]["helm.sh/hook-delete-policy"] == "before-hook-creation"
     secret = docs[("Secret", "keycloak-reconcile-scenario-c-clients")]
     assert secret["metadata"]["annotations"]["helm.sh/hook"] == "pre-upgrade"
     env = environment(job)
