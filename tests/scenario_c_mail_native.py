@@ -122,6 +122,30 @@ def strict_report(user, started, evidence):
     return counts
 
 
+def read_smtp_state(case):
+    """Renew only the disposable installer's expired readback token, never a task identity."""
+    status, state = case_module.call(
+        case.base, "GET", "/admin/realms/" + case_module.REALM, bearer=case.installer)
+    observed = {"initialStatus": status, "renewedAfter401": False}
+    if status == 401:
+        renewed, response = case_module.call(
+            case.base, "POST", "/realms/master/protocol/openid-connect/token",
+            {"client_id": "admin-cli", "grant_type": "password",
+             "username": "synthetic-installer", "password": case_module.INSTALLER}, form=True)
+        if renewed != 200 or not isinstance(response, dict) or not isinstance(response.get("access_token"), str) or not response["access_token"]:
+            raise RuntimeError("Disposable installer readback token renewal failed")
+        case.installer = response["access_token"]
+        observed["renewedAfter401"] = True
+        status, state = case_module.call(
+            case.base, "GET", "/admin/realms/" + case_module.REALM, bearer=case.installer)
+    observed["finalStatus"] = status
+    if EVIDENCE is not None:
+        (EVIDENCE / "installer-readback.json").write_text(json.dumps(observed, indent=2))
+    if status != 200 or not isinstance(state, dict):
+        raise RuntimeError("Disposable installer SMTP readback failed")
+    return state
+
+
 def remaining_actors(case, fixture_module):
     """Installer fixture only: create the other four actors beside canonical protected MAIL."""
     actors = []
@@ -324,7 +348,7 @@ def main():
                 with (EVIDENCE / "process-cleanup.jsonl").open("a") as receipt:
                     receipt.write(json.dumps(closed) + "\n")
             server = None
-            if case.admin("GET")["smtpServer"]["host"] != "smtp.fixture.internal":
+            if read_smtp_state(case)["smtpServer"]["host"] != "smtp.fixture.internal":
                 raise RuntimeError("Actual SMTP provider state readback failed")
             after = {"Helm": sources(ROOT), "Keycloak": sources(args.keycloak),
                      "CTS": sources(args.cts), "User": sources(args.user)}

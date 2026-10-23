@@ -4,6 +4,8 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
+from types import SimpleNamespace
 import xml.etree.ElementTree as ET
 
 SCRIPT = Path(__file__).with_name("scenario_c_mail_native.py")
@@ -15,6 +17,43 @@ JOINED = "sameNativeBrokerBearerReadsRealSavedCtsAppliesSmtpAndAcknowledgesExact
 
 
 class MailEvidenceTest(unittest.TestCase):
+    def readback(self, replies):
+        fixture = SimpleNamespace(call=Mock(side_effect=replies), REALM="fixture", INSTALLER="synthetic-installer-fixture")
+        case = SimpleNamespace(base="https://native.fixture.invalid", installer="original-fixture-token")
+        with patch.object(native, "case_module", fixture, create=True), patch.object(native, "EVIDENCE", None):
+            value = native.read_smtp_state(case)
+        return value, fixture, case
+
+    def test_current_installer_readback_needs_no_new_token(self):
+        expected = {"smtpServer": {"host": "smtp.fixture.internal"}}
+        actual, fixture, _ = self.readback([(200, expected)])
+        self.assertEqual(expected, actual)
+        self.assertEqual(1, fixture.call.call_count)
+
+    def test_expired_disposable_installer_token_is_renewed_once_after_the_real_join(self):
+        expected = {"smtpServer": {"host": "smtp.fixture.internal"}}
+        actual, fixture, case = self.readback([(401, {}), (200, {"access_token": "fresh-fixture-token"}), (200, expected)])
+        self.assertEqual(expected, actual)
+        self.assertEqual("fresh-fixture-token", case.installer)
+        self.assertEqual(["GET", "POST", "GET"], [call.args[1] for call in fixture.call.call_args_list])
+        self.assertEqual("/realms/master/protocol/openid-connect/token", fixture.call.call_args_list[1].args[2])
+
+    def test_forbidden_readback_cannot_renew_or_become_a_green_receipt(self):
+        fixture = SimpleNamespace(call=Mock(return_value=(403, {})), REALM="fixture")
+        with patch.object(native, "case_module", fixture, create=True), patch.object(native, "EVIDENCE", None):
+            with self.assertRaises(RuntimeError):
+                native.read_smtp_state(SimpleNamespace(base="https://native.fixture.invalid", installer="original-fixture-token"))
+        self.assertEqual(1, fixture.call.call_count)
+
+    def test_missing_or_rejected_fresh_token_never_uses_the_expired_one_again(self):
+        for reply in [(403, {}), (200, {}), (200, {"access_token": ""})]:
+            with self.subTest(reply=reply), self.assertRaises(RuntimeError):
+                self.readback([(401, {}), reply])
+
+    def test_second_unauthorized_readback_is_not_retried_forever(self):
+        with self.assertRaises(RuntimeError):
+            self.readback([(401, {}), (200, {"access_token": "fresh-fixture-token"}), (401, {})])
+
     def report(self, change=None):
         root = ET.Element("testsuite", tests="4", failures="0", errors="0", skipped="0")
         for name in [BROKER + "[1]", BROKER + "[2]", BROKER + "[3]", JOINED]:
