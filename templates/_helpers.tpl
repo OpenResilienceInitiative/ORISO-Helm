@@ -452,7 +452,7 @@ oriso.io/path: {{ .path | quote }}
 {{- end -}}
 
 {{- define "oriso.backendServiceClientsChecksum" -}}
-{{- printf "%s\x00%s\x00%s\x00%s\x00%s\x00%s" .Values.global.keycloak.backendTechnicalClientId .Values.global.keycloak.serviceAdminClientId .Values.global.keycloak.serviceTechUserId .Values.global.keycloak.serviceAdminSubject (.Values.global.secrets.keycloakBackendTechnicalClientSecret | default "") (.Values.global.secrets.keycloakBackendAdminClientSecret | default "") | sha256sum -}}
+{{- printf "%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s" .Values.global.keycloak.backendTechnicalClientId .Values.global.keycloak.serviceAdminClientId .Values.global.keycloak.serviceTechUserId .Values.global.keycloak.serviceAdminSubject (.Values.global.secrets.keycloakBackendTechnicalClientSecret | default "") (.Values.global.secrets.keycloakBackendAdminClientSecret | default "") (toJson (.Values.global.keycloak.scenarioC | default dict)) (.Values.global.secrets.keycloakScenarioCSetupClientSecret | default "") (.Values.global.secrets.keycloakScenarioCAccountCreateClientSecret | default "") (.Values.global.secrets.keycloakScenarioCAccountAdminClientSecret | default "") (.Values.global.secrets.keycloakScenarioCMailClientSecret | default "") (.Values.global.secrets.keycloakScenarioCRuntimeClientSecret | default "") | sha256sum -}}
 {{- end -}}
 
 {{/*
