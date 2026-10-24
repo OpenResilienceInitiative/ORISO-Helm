@@ -1,0 +1,90 @@
+version: 1
+meaning:
+  stateless-verified: Replica-local state is not required for correctness and replica switching has proof.
+  stateless-target-replica-coupled: Runs as a Deployment, but replica independence is not yet proven or local correctness-relevant state remains.
+  stateful-platform: Owns or fronts durable state and must be operated with persistence, backup, and recovery objectives.
+
+services:
+  - id: frontend
+    workloadKind: Deployment
+    stateClass: stateless-verified
+    dependencies: [user-service, matrix-synapse]
+    evidence: Static browser application; environment values are injected at container start and no server-side session is stored in the pod.
+    qualitySignals: [k8s.pod.restarts, web-vitals, browser-otel-export-success]
+
+  - id: admin
+    workloadKind: Deployment
+    stateClass: stateless-verified
+    dependencies: [user-service, agency-service, tenant-service, consulting-type-service]
+    evidence: Static browser application plus local auth BFF; runtime configuration is recreated at pod start and application data stays in backend services.
+    qualitySignals: [k8s.pod.restarts, web-vitals, browser-otel-export-success]
+
+  - id: user-service
+    workloadKind: Deployment
+    stateClass: stateless-target-replica-coupled
+    dependencies: [mariadb, redis, matrix-synapse, keycloak, agency-service, tenant-service, consulting-type-service]
+    evidence: Live-chat availability moved to Redis, but local Ehcache caches, notification active-view state, Matrix token/sync/presence maps, and multiple scheduled jobs remain replica-local. Tracked by ORISO-UserService#543.
+    qualitySignals: [replica-local-state-components, scheduler-duplicate-executions, cross-replica-conformance, cache-readback-mismatch]
+
+  - id: agency-service
+    workloadKind: Deployment
+    stateClass: stateless-target-replica-coupled
+    dependencies: [mariadb, mongodb, keycloak]
+    evidence: Durable data is external, but replica-switching and cache/job independence have not yet been proven by a multi-replica gate.
+    qualitySignals: [cross-replica-conformance, http-server-duration, dependency-errors]
+
+  - id: tenant-service
+    workloadKind: Deployment
+    stateClass: stateless-target-replica-coupled
+    dependencies: [mariadb, keycloak]
+    evidence: Durable data is external; a replica-independence test and explicit local-state inventory are still missing.
+    qualitySignals: [cross-replica-conformance, http-server-duration, dependency-errors]
+
+  - id: consulting-type-service
+    workloadKind: Deployment
+    stateClass: stateless-target-replica-coupled
+    dependencies: [mariadb, mongodb, keycloak]
+    evidence: Durable data is external; a replica-independence test and explicit local-state inventory are still missing.
+    qualitySignals: [cross-replica-conformance, http-server-duration, dependency-errors]
+
+  - id: matrix-synapse
+    workloadKind: Deployment
+    stateClass: stateful-platform
+    dependencies: [matrix-postgres]
+    evidence: Synapse fronts durable room/event state in Postgres and persistent media volumes; E2EE keys remain client-owned.
+    qualitySignals: [matrix-event-processing, encrypted-room-ratio, postgres-health, media-volume-usage]
+
+  - id: redis
+    workloadKind: Deployment
+    stateClass: stateful-platform
+    dependencies: []
+    evidence: Owns consultant availability leases. It is rendered as a Deployment, so persistence and recovery posture must be explicit rather than inferred from workload kind.
+    qualitySignals: [redis-availability, availability-lease-operations, evictions, memory-saturation]
+
+  - id: mariadb
+    workloadKind: StatefulSet
+    stateClass: stateful-platform
+    dependencies: []
+    evidence: Primary durable relational store for backend services with persistent volume ownership.
+    qualitySignals: [mysql-up, connection-saturation, transaction-errors, volume-usage]
+
+  - id: mongodb
+    workloadKind: StatefulSet
+    stateClass: stateful-platform
+    dependencies: []
+    evidence: Durable document store rendered as a StatefulSet.
+    qualitySignals: [mongodb-up, operation-latency, replication-health, volume-usage]
+
+  - id: keycloak
+    workloadKind: Deployment
+    stateClass: stateful-platform
+    dependencies: [mariadb]
+    evidence: Authentication compute is replaceable, but identity and realm state are durable database state and therefore part of the stateful platform.
+    qualitySignals: [login-success-rate, token-errors, dependency-errors]
+
+  - id: signoz-clickhouse
+    workloadKind: StatefulSet
+    stateClass: stateful-platform
+    dependencies: []
+    evidence: Durable observability store with persistent volume ownership; losing it removes diagnostic history rather than product data.
+    qualitySignals: [clickhouse-up, insert-errors, query-latency, volume-usage, telemetry-ingestion-lag]

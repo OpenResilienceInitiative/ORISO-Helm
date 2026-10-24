@@ -563,6 +563,29 @@ ipAnonymizer:
 # SigNoz — set signoz.enabled=true to deploy it and auto-enable OTLP export.
 signoz:
   enabled: false
+  # ORISO dashboards + alert rules provisioned from files/signoz/observability-catalog.json
+  # by a post-install/post-upgrade hook Job. Off by default: when on, a failing
+  # hook fails the release. Requires signoz.enabled and signozCollector.enabled.
+  # The API key comes only from an existing Secret; see runbooks/signoz-managed-observability.md.
+  orisoObservability:
+    enabled: false
+    # Also prove live telemetry freshness + environment separation (needs data).
+    conformanceCheck: false
+    image: "python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844"
+    # SigNoz API key (Editor role), created in the SigNoz UI after install.
+    apiKeySecret:
+      name: ""
+      key: apiKey
+    # Existing SigNoz notification channel (made by hand, Slack
+    # #oriso-alerts-and-webhooks). Rules reference it; the chart never writes it.
+    channelName: "oriso-alerts-slack"
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 250m
+        memory: 128Mi
   # UI is served at https://<global.domainName>/signoz — keep in sync per environment.
   signoz:
     env:
