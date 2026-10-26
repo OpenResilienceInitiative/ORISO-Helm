@@ -9,6 +9,23 @@ from render_public_entry_rate_limit_test import CHART_DIR, VALUES
 
 FIXTURE = pathlib.Path(CHART_DIR) / "tests/fixtures/task-identities-activation-values.yaml"
 ACTORS = ("SETUP", "ACCOUNT_CREATE", "ACCOUNT_ADMIN", "MAIL", "RUNTIME")
+RECEIVERS = {
+    "consultingtypeservice": {
+        "tasks": "CONFIG_WIZARD,SMTP_SYNC,SYSTEM_EMAIL_DELIVERY",
+        "audience": "consultingtypeservice",
+        "actors": ("SETUP", "MAIL"),
+    },
+    "tenantservice": {
+        "tasks": "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,RUNTIME_POLICY",
+        "audience": "tenantservice",
+        "actors": ("SETUP", "MAIL", "RUNTIME"),
+    },
+    "agencyservice": {
+        "tasks": "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,MATRIX_AGENCY",
+        "audience": "agencyservice",
+        "actors": ("SETUP", "MAIL", "RUNTIME"),
+    },
+}
 
 
 def render(*args, task_identity=True):
@@ -42,6 +59,14 @@ def main():
         assert f"IDENTITY_{actor}_CLIENT_ID" not in legacy_config
         assert f"IDENTITY_{actor}_CLIENT_SECRET" not in legacy_secret
         assert f"IDENTITY_{actor}_CLIENT_ID" not in legacy_env
+    for service, receiver in RECEIVERS.items():
+        receiver_config = legacy_docs[("ConfigMap", f"{service}-configmap-env")]["data"]
+        receiver_env = env_by_name(legacy_docs[("Deployment", service)])
+        assert "TASK_IDENTITY_MODEL" not in receiver_config
+        assert "TASK_IDENTITY_MODEL" not in receiver_env
+        for actor in receiver["actors"]:
+            assert f"IDENTITY_{actor}_CLIENT_ID" not in receiver_config
+            assert f"IDENTITY_{actor}_CLIENT_ID" not in receiver_env
 
     enabled, docs = render()
     assert enabled.returncode == 0, enabled.stderr
@@ -63,6 +88,29 @@ def main():
         assert env[f"IDENTITY_{actor}_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"] == {
             "name": "keycloak-backend-client-secrets", "key": f"IDENTITY_{actor}_CLIENT_SECRET"
         }
+
+    for service, receiver in RECEIVERS.items():
+        receiver_config = docs[("ConfigMap", f"{service}-configmap-env")]["data"]
+        receiver_env = env_by_name(docs[("Deployment", service)])
+        assert receiver_config["TASK_IDENTITY_MODEL"] == "FIVE_ACTORS"
+        assert receiver_config["TASK_IDENTITY_REQUIRED_TASKS"] == receiver["tasks"]
+        assert receiver_config["TASK_IDENTITY_AUDIENCE"] == receiver["audience"]
+        for key in ("TASK_IDENTITY_MODEL", "TASK_IDENTITY_REQUIRED_TASKS", "TASK_IDENTITY_AUDIENCE"):
+            assert receiver_env[key]["valueFrom"]["configMapKeyRef"] == {
+                "name": f"{service}-configmap-env", "key": key
+            }
+        for actor in receiver["actors"]:
+            for suffix in ("CLIENT_ID", "SERVICE_SUBJECT"):
+                key = f"IDENTITY_{actor}_{suffix}"
+                assert receiver_config[key] == config[key]
+                assert receiver_env[key]["valueFrom"]["configMapKeyRef"] == {
+                    "name": f"{service}-configmap-env", "key": key
+                }
+        assert not any(
+            item["name"] == f"IDENTITY_{actor}_CLIENT_SECRET"
+            for item in receiver_env.values()
+            for actor in ACTORS
+        )
 
     missing, _ = render("--set-string", "global.keycloak.taskIdentities.setup.serviceSubject=")
     assert missing.returncode != 0, "missing actor subject must fail rendering"
