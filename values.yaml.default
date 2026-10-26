@@ -129,6 +129,30 @@ global:
     serviceAppClientId: "app"
     serviceAdminClientId: "backend-admin"
     backendTechnicalClientId: "backend-technical"
+    # Task identities are an explicit, all-or-nothing UserService runtime cutover.
+    # Keep it disabled until the five Keycloak clients have been reconciled and
+    # their actual service-account subjects have been read back.
+    taskIdentities:
+      enabled: false
+      # First pass only: reconcile the five disabled Keycloak clients and read
+      # their generated service-account subjects from the hook output. The
+      # second pass supplies those immutable UUIDs and sets enabled=true.
+      provisionOnly: false
+      setup:
+        clientId: "backend-setup"
+        serviceSubject: ""
+      accountCreate:
+        clientId: "backend-account-create"
+        serviceSubject: ""
+      accountAdmin:
+        clientId: "backend-account-admin"
+        serviceSubject: ""
+      mail:
+        clientId: "backend-mail"
+        serviceSubject: ""
+      runtime:
+        clientId: "backend-runtime"
+        serviceSubject: ""
     backendServiceClients:
       # Existing realms: render ONLY the preparation Secret/Job (see runbook).
       # Never install/upgrade the whole chart with prepareOnly=true.

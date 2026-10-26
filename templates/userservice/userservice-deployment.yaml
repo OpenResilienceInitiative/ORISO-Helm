@@ -1,3 +1,4 @@
+{{- $scenarioEnabled := dig "taskIdentities" "enabled" false .Values.global.keycloak -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -43,6 +44,11 @@ spec:
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
             {{- include "oriso.springTelemetryEnv" (dict "root" $ "image" (include "oriso.immutableImage" (list "userService.image" .Values.userService.image))) | nindent 12 }}
+            - name: TASK_IDENTITY_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: TASK_IDENTITY_MODEL
             - name: MATRIXRTC_LIFECYCLE_ENABLED
               valueFrom:
                 configMapKeyRef:
@@ -271,6 +277,22 @@ spec:
                 secretKeyRef:
                   name: keycloak-backend-client-secrets
                   key: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
+            {{- if $scenarioEnabled }}
+            {{- range $pair := list (list "IDENTITY_SETUP_CLIENT_ID" "IDENTITY_SETUP_CLIENT_ID") (list "IDENTITY_SETUP_SERVICE_SUBJECT" "IDENTITY_SETUP_SERVICE_SUBJECT") (list "IDENTITY_ACCOUNT_CREATE_CLIENT_ID" "IDENTITY_ACCOUNT_CREATE_CLIENT_ID") (list "IDENTITY_ACCOUNT_CREATE_SERVICE_SUBJECT" "IDENTITY_ACCOUNT_CREATE_SERVICE_SUBJECT") (list "IDENTITY_ACCOUNT_ADMIN_CLIENT_ID" "IDENTITY_ACCOUNT_ADMIN_CLIENT_ID") (list "IDENTITY_ACCOUNT_ADMIN_SERVICE_SUBJECT" "IDENTITY_ACCOUNT_ADMIN_SERVICE_SUBJECT") (list "IDENTITY_MAIL_CLIENT_ID" "IDENTITY_MAIL_CLIENT_ID") (list "IDENTITY_MAIL_SERVICE_SUBJECT" "IDENTITY_MAIL_SERVICE_SUBJECT") (list "IDENTITY_RUNTIME_CLIENT_ID" "IDENTITY_RUNTIME_CLIENT_ID") (list "IDENTITY_RUNTIME_SERVICE_SUBJECT" "IDENTITY_RUNTIME_SERVICE_SUBJECT") }}
+            - name: {{ index $pair 0 }}
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: {{ index $pair 1 }}
+            {{- end }}
+            {{- range $key := list "IDENTITY_SETUP_CLIENT_SECRET" "IDENTITY_ACCOUNT_CREATE_CLIENT_SECRET" "IDENTITY_ACCOUNT_ADMIN_CLIENT_SECRET" "IDENTITY_MAIL_CLIENT_SECRET" "IDENTITY_RUNTIME_CLIENT_SECRET" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-backend-client-secrets
+                  key: {{ $key }}
+            {{- end }}
+            {{- end }}
             - name: KEYCLOAK_CONFIG_APP_CLIENTID
               valueFrom:
                 configMapKeyRef:

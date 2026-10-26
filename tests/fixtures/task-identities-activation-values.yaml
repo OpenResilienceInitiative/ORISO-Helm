@@ -1,0 +1,21 @@
+# Synthetic values used only to render and verify the task identities activation contract.
+global:
+  keycloak:
+    taskIdentities:
+      enabled: true
+      setup:
+        serviceSubject: "00000000-0000-4000-8000-000000000010"
+      accountCreate:
+        serviceSubject: "00000000-0000-4000-8000-000000000011"
+      accountAdmin:
+        serviceSubject: "00000000-0000-4000-8000-000000000012"
+      mail:
+        serviceSubject: "00000000-0000-4000-8000-000000000013"
+      runtime:
+        serviceSubject: "00000000-0000-4000-8000-000000000014"
+  secrets:
+    keycloakTaskIdentitySetupClientSecret: "render-only-task-identities-setup-secret-canary"
+    keycloakTaskIdentityAccountCreateClientSecret: "render-only-task-identities-account-create-secret"
+    keycloakTaskIdentityAccountAdminClientSecret: "render-only-task-identities-account-admin-secret"
+    keycloakTaskIdentityMailClientSecret: "render-only-task-identities-mail-client-secret-canary"
+    keycloakTaskIdentityRuntimeClientSecret: "render-only-task-identities-runtime-secret-canary"
