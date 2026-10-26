@@ -73,6 +73,7 @@ def main():
     config = docs[("ConfigMap", "userservice-configmap-env")]["data"]
     secret = docs[("Secret", "keycloak-backend-client-secrets")]["data"]
     env = env_by_name(docs[("Deployment", "userservice")])
+    context_secret = docs[("Secret", "task-identity-context-secrets")]["data"]
 
     assert config["TASK_IDENTITY_MODEL"] == "FIVE_ACTORS"
     for actor in ACTORS:
@@ -112,8 +113,31 @@ def main():
             for actor in ACTORS
         )
 
+    assert set(context_secret) == {
+        "ORISO_TENANT_CREATION_CONTEXT_KEY",
+        "ORISO_WIZARD_POLICY_CONTEXT_KEY",
+    }
+    tenant_env = env_by_name(docs[("Deployment", "tenantservice")])
+    assert tenant_env["ORISO_TENANT_CREATION_CONTEXT_KEY"]["valueFrom"]["secretKeyRef"] == {
+        "name": "task-identity-context-secrets", "key": "ORISO_TENANT_CREATION_CONTEXT_KEY"
+    }
+    assert tenant_env["ORISO_WIZARD_POLICY_CONTEXT_KEY"]["valueFrom"]["secretKeyRef"] == {
+        "name": "task-identity-context-secrets", "key": "ORISO_WIZARD_POLICY_CONTEXT_KEY"
+    }
+    cts_env = env_by_name(docs[("Deployment", "consultingtypeservice")])
+    assert cts_env["ORISO_TENANT_CREATION_CONTEXT_KEY"]["valueFrom"]["secretKeyRef"] == {
+        "name": "task-identity-context-secrets", "key": "ORISO_TENANT_CREATION_CONTEXT_KEY"
+    }
+    assert "ORISO_WIZARD_POLICY_CONTEXT_KEY" not in cts_env
+    agency_env = env_by_name(docs[("Deployment", "agencyservice")])
+    assert "ORISO_TENANT_CREATION_CONTEXT_KEY" not in agency_env
+
     missing, _ = render("--set-string", "global.keycloak.taskIdentities.setup.serviceSubject=")
     assert missing.returncode != 0, "missing actor subject must fail rendering"
+    missing_context, _ = render(
+        "--set-string", "global.secrets.taskIdentityTenantCreationContextKey="
+    )
+    assert missing_context.returncode != 0, "missing tenant context key must fail rendering"
     duplicate, _ = render(
         "--set-string",
         "global.keycloak.taskIdentities.runtime.serviceSubject=00000000-0000-4000-8000-000000000010",

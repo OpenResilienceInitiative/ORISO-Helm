@@ -19,3 +19,5 @@ global:
     keycloakTaskIdentityAccountAdminClientSecret: "render-only-task-identities-account-admin-secret"
     keycloakTaskIdentityMailClientSecret: "render-only-task-identities-mail-client-secret-canary"
     keycloakTaskIdentityRuntimeClientSecret: "render-only-task-identities-runtime-secret-canary"
+    taskIdentityTenantCreationContextKey: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+    taskIdentityWizardPolicyContextKey: "ZmVkY2JhOTg3NjU0MzIxMGZlZGNiYTk4NzY1NDMyMTA="
