@@ -78,6 +78,16 @@ spec:
                 key: {{ $key }}
                 name: tenantservice-configmap-env
           {{- end }}
+          - name: ORISO_TENANT_CREATION_CONTEXT_KEY
+            valueFrom:
+              secretKeyRef:
+                name: task-identity-context-secrets
+                key: ORISO_TENANT_CREATION_CONTEXT_KEY
+          - name: ORISO_WIZARD_POLICY_CONTEXT_KEY
+            valueFrom:
+              secretKeyRef:
+                name: task-identity-context-secrets
+                key: ORISO_WIZARD_POLICY_CONTEXT_KEY
           {{- end }}
           - name: KEYCLOAK_AUTH_SERVER_URL
             valueFrom:
