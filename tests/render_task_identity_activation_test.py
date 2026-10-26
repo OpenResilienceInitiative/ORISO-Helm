@@ -113,6 +113,10 @@ def main():
             for actor in ACTORS
         )
 
+    tenant_config = docs[("ConfigMap", "tenantservice-configmap-env")]["data"]
+    assert tenant_config["SYSTEM_EMAIL_DELIVERY_SERVICE_CLIENT"] == config["IDENTITY_MAIL_CLIENT_ID"]
+    assert tenant_config["SYSTEM_EMAIL_DELIVERY_SERVICE_SUBJECT"] == config["IDENTITY_MAIL_SERVICE_SUBJECT"]
+
     assert set(context_secret) == {
         "ORISO_TENANT_CREATION_CONTEXT_KEY",
         "ORISO_WIZARD_POLICY_CONTEXT_KEY",

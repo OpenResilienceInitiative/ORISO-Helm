@@ -1,4 +1,6 @@
 {{- $scenarioEnabled := dig "taskIdentities" "enabled" false .Values.global.keycloak -}}
+{{- $taskMailClient := ternary (dig "taskIdentities" "mail" "clientId" "" .Values.global.keycloak) "" $scenarioEnabled -}}
+{{- $taskMailSubject := ternary (dig "taskIdentities" "mail" "serviceSubject" "" .Values.global.keycloak) "" $scenarioEnabled -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -16,8 +18,10 @@ data:
   SPRING_DATASOURCE_URL: {{ .Values.tenantService.springDatasourceURL }}  
   KEYCLOAK_AUTH_SERVER_URL: {{ .Values.global.keycloakAuthServerUrl  }}  
   KEYCLOAK_REALM: {{ .Values.global.keycloak.realm }}  
-  SYSTEM_EMAIL_DELIVERY_SERVICE_SUBJECT: {{ .Values.tenantService.systemEmailDeliveryServiceSubject | default "" | quote }}
-  SYSTEM_EMAIL_DELIVERY_SERVICE_CLIENT: {{ .Values.tenantService.systemEmailDeliveryServiceClient | default "" | quote }}
+  # The mail actor is the default caller once task identities are enabled.
+  # Explicit TenantService pins remain available for legacy deployments.
+  SYSTEM_EMAIL_DELIVERY_SERVICE_SUBJECT: {{ .Values.tenantService.systemEmailDeliveryServiceSubject | default $taskMailSubject | quote }}
+  SYSTEM_EMAIL_DELIVERY_SERVICE_CLIENT: {{ .Values.tenantService.systemEmailDeliveryServiceClient | default $taskMailClient | quote }}
   {{- if $scenarioEnabled }}
   # TenantService validates task tokens from UserService; it has no client
   # credentials and cannot mint a task token itself.
