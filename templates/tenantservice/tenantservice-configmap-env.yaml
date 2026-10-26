@@ -1,3 +1,4 @@
+{{- $scenarioEnabled := dig "taskIdentities" "enabled" false .Values.global.keycloak -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -17,6 +18,19 @@ data:
   KEYCLOAK_REALM: {{ .Values.global.keycloak.realm }}  
   SYSTEM_EMAIL_DELIVERY_SERVICE_SUBJECT: {{ .Values.tenantService.systemEmailDeliveryServiceSubject | default "" | quote }}
   SYSTEM_EMAIL_DELIVERY_SERVICE_CLIENT: {{ .Values.tenantService.systemEmailDeliveryServiceClient | default "" | quote }}
+  {{- if $scenarioEnabled }}
+  # TenantService validates task tokens from UserService; it has no client
+  # credentials and cannot mint a task token itself.
+  TASK_IDENTITY_MODEL: "FIVE_ACTORS"
+  TASK_IDENTITY_REQUIRED_TASKS: "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,RUNTIME_POLICY"
+  TASK_IDENTITY_AUDIENCE: "tenantservice"
+  IDENTITY_SETUP_CLIENT_ID: {{ dig "taskIdentities" "setup" "clientId" "" .Values.global.keycloak | quote }}
+  IDENTITY_SETUP_SERVICE_SUBJECT: {{ dig "taskIdentities" "setup" "serviceSubject" "" .Values.global.keycloak | quote }}
+  IDENTITY_MAIL_CLIENT_ID: {{ dig "taskIdentities" "mail" "clientId" "" .Values.global.keycloak | quote }}
+  IDENTITY_MAIL_SERVICE_SUBJECT: {{ dig "taskIdentities" "mail" "serviceSubject" "" .Values.global.keycloak | quote }}
+  IDENTITY_RUNTIME_CLIENT_ID: {{ dig "taskIdentities" "runtime" "clientId" "" .Values.global.keycloak | quote }}
+  IDENTITY_RUNTIME_SERVICE_SUBJECT: {{ dig "taskIdentities" "runtime" "serviceSubject" "" .Values.global.keycloak | quote }}
+  {{- end }}
   SPRING_RABBITMQ_HOST: {{ .Values.tenantService.springRabbitmqHost }}  
   SPRING_RABBITMQ_PORT: "{{ .Values.tenantService.springRabbitmqPort }}"  
   SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: {{ .Values.global.springSecurityOAuth2ResourceserverJWTIssuerURI }}   

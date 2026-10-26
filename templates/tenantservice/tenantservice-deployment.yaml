@@ -1,3 +1,4 @@
+{{- $scenarioEnabled := dig "taskIdentities" "enabled" false .Values.global.keycloak -}}
 # TenantService Deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -12,6 +13,7 @@ spec:
     metadata:
       annotations:
         checksum/technical-subject: {{ .Values.global.keycloak.serviceTechUserId | sha256sum | quote }}
+        checksum/task-identities: {{ include "oriso.backendServiceClientsChecksum" . | quote }}
       labels:
         app: tenantservice
         tier: backend
@@ -68,6 +70,15 @@ spec:
               configMapKeyRef:
                 key: SYSTEM_EMAIL_DELIVERY_SERVICE_CLIENT
                 name: tenantservice-configmap-env
+          {{- if $scenarioEnabled }}
+          {{- range $key := list "TASK_IDENTITY_MODEL" "TASK_IDENTITY_REQUIRED_TASKS" "TASK_IDENTITY_AUDIENCE" "IDENTITY_SETUP_CLIENT_ID" "IDENTITY_SETUP_SERVICE_SUBJECT" "IDENTITY_MAIL_CLIENT_ID" "IDENTITY_MAIL_SERVICE_SUBJECT" "IDENTITY_RUNTIME_CLIENT_ID" "IDENTITY_RUNTIME_SERVICE_SUBJECT" }}
+          - name: {{ $key }}
+            valueFrom:
+              configMapKeyRef:
+                key: {{ $key }}
+                name: tenantservice-configmap-env
+          {{- end }}
+          {{- end }}
           - name: KEYCLOAK_AUTH_SERVER_URL
             valueFrom:
               configMapKeyRef:
