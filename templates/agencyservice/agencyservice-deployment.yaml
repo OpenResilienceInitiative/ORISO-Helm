@@ -1,3 +1,4 @@
+{{- $scenarioEnabled := dig "taskIdentities" "enabled" false .Values.global.keycloak -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,6 +14,7 @@ spec:
     metadata:
       annotations:
         checksum/technical-service-identity: {{ printf "%s\x00%s" .Values.global.keycloak.backendTechnicalClientId .Values.global.keycloak.serviceTechUserId | sha256sum | quote }}
+        checksum/task-identities: {{ include "oriso.backendServiceClientsChecksum" . | quote }}
       labels:
         app: agencyservice
     spec:
@@ -67,6 +69,15 @@ spec:
                 configMapKeyRef:
                   key: TECHNICAL_SERVICE_SUBJECT
                   name: agencyservice-configmap-env
+            {{- if $scenarioEnabled }}
+            {{- range $key := list "TASK_IDENTITY_MODEL" "TASK_IDENTITY_REQUIRED_TASKS" "TASK_IDENTITY_AUDIENCE" "IDENTITY_SETUP_CLIENT_ID" "IDENTITY_SETUP_SERVICE_SUBJECT" "IDENTITY_MAIL_CLIENT_ID" "IDENTITY_MAIL_SERVICE_SUBJECT" "IDENTITY_RUNTIME_CLIENT_ID" "IDENTITY_RUNTIME_SERVICE_SUBJECT" }}
+            - name: {{ $key }}
+              valueFrom:
+                configMapKeyRef:
+                  key: {{ $key }}
+                  name: agencyservice-configmap-env
+            {{- end }}
+            {{- end }}
             - name: KEYCLOAKSERVICE_APP_CLIENTID
               valueFrom:
                 configMapKeyRef:

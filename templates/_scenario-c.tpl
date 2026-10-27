@@ -5,6 +5,10 @@
 {{- if not (has $model (list "LEGACY" "FIVE_ACTORS")) -}}
 {{- fail "global.taskIdentities.model must be LEGACY or FIVE_ACTORS" -}}
 {{- end -}}
+{{- $historical := default dict .Values.global.keycloak.taskIdentities -}}
+{{- if and (eq $model "FIVE_ACTORS") (or (dig "enabled" false $historical) (dig "provisionOnly" false $historical)) -}}
+{{- fail "Disable historical global.keycloak.taskIdentities reconciliation before selecting global.taskIdentities.model=FIVE_ACTORS" -}}
+{{- end -}}
 {{- eq $model "FIVE_ACTORS" -}}
 {{- end -}}
 

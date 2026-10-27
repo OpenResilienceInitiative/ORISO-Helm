@@ -58,7 +58,7 @@ def bindings():
     }
 
 
-def render(config=None, keycloak=None):
+def render(config=None, keycloak=None, historical_task_fixture=False):
     with tempfile.TemporaryDirectory() as folder:
         values = Path(folder) / "scenario-c.yaml"
         values.write_text(
@@ -68,12 +68,15 @@ def render(config=None, keycloak=None):
             )
         )
         command = ["helm", "template", "scenario-c", str(ROOT)]
-        for source in (
+        sources = (
             "values.yaml.default",
             "tests/fixtures/values-render-domain.yaml",
             "secrets.yaml.default",
             "tests/fixtures/render-required-secrets.yaml",
-        ):
+        )
+        if historical_task_fixture:
+            sources += ("tests/fixtures/task-identities-activation-values.yaml",)
+        for source in sources:
             command.extend(("-f", str(ROOT / source)))
         command.extend(
             (
@@ -378,8 +381,44 @@ class ScenarioCChartBindingsTest(unittest.TestCase):
             "keycloak",
         ):
             names = {row["name"] for row in container(docs, service)["env"]}
-            self.assertNotIn("TASK_IDENTITY_MODEL", names)
+            if service == "userservice":
+                # The current dev chart explicitly resets a prior cutover to LEGACY.
+                row = next(
+                    row for row in container(docs, service)["env"]
+                    if row["name"] == "TASK_IDENTITY_MODEL"
+                )
+                self.assertEqual(
+                    {"configMapKeyRef": {
+                        "name": "userservice-configmap-env", "key": "TASK_IDENTITY_MODEL"
+                    }}, row["valueFrom"]
+                )
+                settings = next(
+                    doc for doc in docs if doc.get("kind") == "ConfigMap"
+                    and doc["metadata"]["name"] == "userservice-configmap-env"
+                )
+                self.assertEqual("LEGACY", settings["data"]["TASK_IDENTITY_MODEL"])
+            else:
+                self.assertNotIn("TASK_IDENTITY_MODEL", names)
             self.assertNotIn("ORISO_TASK_CONTEXT_KEY", names)
+
+    def test_final_registry_cannot_share_an_upgrade_with_historical_task_reconciliation(self):
+        for flag in ("enabled", "provisionOnly"):
+            old = {"taskIdentities": {
+                "enabled": flag == "enabled", "provisionOnly": flag == "provisionOnly"
+            }}
+            for index, actor in enumerate(
+                ("setup", "accountCreate", "accountAdmin", "mail", "runtime"), 1
+            ):
+                old["taskIdentities"][actor] = {
+                    "serviceSubject": f"30000000-0000-4000-8000-{index:012d}"
+                }
+            with self.subTest(flag=flag):
+                result, _ = render(bindings(), old, historical_task_fixture=True)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(
+                    "Disable historical global.keycloak.taskIdentities reconciliation",
+                    result.stderr,
+                )
 
     def test_incomplete_or_colliding_bindings_refuse_render_without_secret_output(self):
         variants = []

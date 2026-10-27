@@ -183,6 +183,12 @@ catalog from these reviewed profile IDs and explicit versions. Native current
 profile, provenance and permission checks still apply on every request. A mounted
 policy is installation data; it does not authorize a command or prove readiness.
 
+The final `global.taskIdentities.model=FIVE_ACTORS` registry replaces the earlier
+`global.keycloak.taskIdentities` preparation. Set both historical `enabled` and
+`provisionOnly` flags to `false` before selecting the final registry. The chart
+rejects a mixed upgrade so the historical reconciler and context secrets cannot
+override the reviewed final actor bindings and shared context key.
+
 The retained asker contact-email and deletion-start flows require explicit
 `account.email` and `account.deactivate` entries on the installed asker profile.
 They are SELF grants: the current human must still own the exact native account.

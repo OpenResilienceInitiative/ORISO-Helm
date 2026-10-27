@@ -1,3 +1,4 @@
+{{- $scenarioEnabled := dig "taskIdentities" "enabled" false .Values.global.keycloak -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -48,6 +49,20 @@ spec:
                 configMapKeyRef:
                   name: tenantservice-configmap-env
                   key: TECHNICAL_SERVICE_SUBJECT
+            {{- if $scenarioEnabled }}
+            {{- range $key := list "TASK_IDENTITY_MODEL" "TASK_IDENTITY_REQUIRED_TASKS" "TASK_IDENTITY_AUDIENCE" "IDENTITY_SETUP_CLIENT_ID" "IDENTITY_SETUP_SERVICE_SUBJECT" "IDENTITY_MAIL_CLIENT_ID" "IDENTITY_MAIL_SERVICE_SUBJECT" }}
+            - name: {{ $key }}
+              valueFrom:
+                configMapKeyRef:
+                  name: consultingtypeservice-configmap-env
+                  key: {{ $key }}
+            {{- end }}
+            - name: ORISO_TENANT_CREATION_CONTEXT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: task-identity-context-secrets
+                  key: ORISO_TENANT_CREATION_CONTEXT_KEY
+            {{- end }}
             {{- if ne (include "oriso.scenarioC.enabled" $) "true" }}
             - name: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
               valueFrom:
