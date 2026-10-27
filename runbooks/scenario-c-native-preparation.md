@@ -183,6 +183,30 @@ catalog from these reviewed profile IDs and explicit versions. Native current
 profile, provenance and permission checks still apply on every request. A mounted
 policy is installation data; it does not authorize a command or prove readiness.
 
+The retained asker contact-email and deletion-start flows require explicit
+`account.email` and `account.deactivate` entries on the installed asker profile.
+They are SELF grants: the current human must still own the exact native account.
+Do not add a self hard-delete grant or grant another role's profile operations.
+The complete asker list below fits the existing ten-operation bound. Keep the
+actual installed profile ID, version, group IDs and role set unchanged; this is
+the operation list within that reviewed profile, not a replacement policy.
+
+**For operators — asker SELF operations when both existing OTP modes are enabled:**
+```json
+{
+  "selfOperations": [
+    "account.read", "account.locale", "account.email", "account.password",
+    "account.deactivate", "otp.read", "otp.app-setup", "otp.delete",
+    "otp.email-start", "otp.email-finish"
+  ]
+}
+```
+
+Verify the same installed JSON with the matching UserService and Keycloak
+builds before activation. UserService must accept this list without changing
+its derived account selectors. Rendering a ConfigMap reference does not prove
+that these grants are installed or that the account flow has passed its tests.
+
 Missing, ambiguous or duplicate bindings stop rendering in five-actor mode. A
 missing ConfigMap/key stops container configuration; invalid native policy stops
 the affected protected provider from becoming available. These checks do not
