@@ -220,6 +220,8 @@ def main():
     args.keycloak, args.cts, args.user = [p.resolve() for p in (args.keycloak, args.cts, args.user)]
     args.evidence = args.evidence.resolve()
     args.evidence.mkdir(parents=True, exist_ok=True)
+    if any(args.evidence.iterdir()):
+        raise RuntimeError("Native MAIL evidence directory must be empty")
     EVIDENCE = args.evidence
     if args.resource_support is not None:
         if sys.platform != "linux" or os.environ.get("GITHUB_ACTIONS") != "true":

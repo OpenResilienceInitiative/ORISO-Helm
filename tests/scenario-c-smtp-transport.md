@@ -38,7 +38,7 @@ Routine actors: exactly five; no live account, grant, deployment or secret chang
 Resource support: the existing pinned Tenant native resource helper
 Memory lease: 3152 MiB, including overlapping JVMs and both native containers
 Images: pinned Keycloak and Mongo digests
-Acceptance: four exact native cases, stable source inputs, no OOM/restart, confirmed owned cleanup
+Acceptance: five exact native cases, stable source inputs, no OOM/restart, confirmed owned cleanup
 Final delivery: repin the workflow to the final composed User, CTS and Keycloak commits and rerun
 ```
 

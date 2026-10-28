@@ -80,7 +80,7 @@ role unions, removes the realm's actual native default-role mappings from
 these actors only, and places them in the protected technical group. Legacy
 clients/users and unrelated human accounts are preserved.
 
-Native reconciliation installs three user policies and four **Groups-only**
+Native reconciliation installs four user policies and five **Groups-only**
 scope permissions. Only `ACCOUNT_CREATE` reaches the pending group and may join
 ordinary role groups; `ACCOUNT_ADMIN` separately manages ordinary role
 members. Protected groups deny those member operations. No Users/Roles or broad
@@ -121,7 +121,7 @@ only inside the isolated permission fixture. It is not runtime cutover proof.
 
 ## Receiver-only preparation (source completion work)
 
-The measured native group permissions permit changes that the account workflow must refuse. Once bounded account receivers/callers have been installed and verified together, runtime activation must remove those stock Admin paths. The additional preparation mode below makes all seven managed native policies refuse account subjects. It keeps all five clients disabled and does not activate the runtime, rotate secrets or retire old consumers.
+The measured native group permissions permit changes that the account workflow must refuse. Once bounded account receivers/callers have been installed and verified together, runtime activation must remove those stock Admin paths. The additional preparation mode below makes all nine managed native policies refuse account subjects. It keeps all five clients disabled and does not activate the runtime, rotate secrets or retire old consumers.
 
 **For operators — isolated copy only, before any separately reviewed cutover:**
 ```text

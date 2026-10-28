@@ -21,6 +21,51 @@ def smtp_fixture_call(base, method, path, body=None, token=None, context=None, f
 
 
 class MailEvidenceTest(unittest.TestCase):
+    def test_reused_evidence_refuses_before_source_or_native_work_and_preserves_files(self):
+        for populated in ("previous.json", "native-xml"):
+            with self.subTest(populated=populated), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                checkout = root / "checkout"
+                checkout.mkdir()
+                (checkout / ".git").write_text("gitdir: unused-fixture")
+                evidence = root / "evidence"
+                evidence.mkdir()
+                existing = evidence / populated
+                if populated == "native-xml":
+                    existing.mkdir()
+                    existing = existing / "previous.xml"
+                existing.write_text("retained previous evidence")
+                argv = [str(SCRIPT), "--keycloak", str(checkout), "--cts", str(checkout),
+                        "--user", str(checkout), "--java-home", str(root), "--evidence", str(evidence)]
+                with patch.object(native.sys, "argv", argv), patch.object(native, "EVIDENCE", None), \
+                        patch.object(native, "sources", side_effect=RuntimeError("source inspection reached")) as sources, \
+                        patch.object(native, "run") as run:
+                    with self.assertRaisesRegex(RuntimeError, "evidence directory must be empty"):
+                        native.main()
+                    sources.assert_not_called()
+                    run.assert_not_called()
+                self.assertEqual("retained previous evidence", existing.read_text())
+                self.assertEqual([existing.relative_to(evidence)],
+                                 [p.relative_to(evidence) for p in evidence.rglob("*") if p.is_file()])
+
+    def test_empty_evidence_allows_normal_source_preflight(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checkout = root / "checkout"
+            checkout.mkdir()
+            (checkout / ".git").write_text("gitdir: unused-fixture")
+            evidence = root / "evidence"
+            argv = [str(SCRIPT), "--keycloak", str(checkout), "--cts", str(checkout),
+                    "--user", str(checkout), "--java-home", str(root), "--evidence", str(evidence)]
+            with patch.object(native.sys, "argv", argv), patch.object(native, "EVIDENCE", None), \
+                    patch.object(native, "sources", side_effect=RuntimeError("source inspection reached")) as sources, \
+                    patch.object(native, "run") as run:
+                with self.assertRaisesRegex(RuntimeError, "source inspection reached"):
+                    native.main()
+                sources.assert_called_once_with(native.ROOT)
+                run.assert_not_called()
+            self.assertEqual([], list(evidence.iterdir()))
+
     def readback(self, replies):
         fixture = SimpleNamespace(call=create_autospec(smtp_fixture_call, side_effect=replies), REALM="fixture", INSTALLER="synthetic-installer-fixture")
         case = SimpleNamespace(base="https://native.fixture.invalid", installer="original-fixture-token")

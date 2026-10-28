@@ -222,6 +222,7 @@ class ScenarioCChartBindingsTest(unittest.TestCase):
                 result, _ = render(config, {field: client_id} if field else {})
                 self.assertNotEqual(0, result.returncode, 'Service client accepted as human')
                 self.assertEqual('', result.stdout)
+                self.assertIn('taskIdentities', result.stderr)
 
     def test_actor_subject_cannot_alias_either_legacy_service_subject(self):
         for field in ('serviceTechUserId', 'serviceAdminSubject'):
@@ -229,6 +230,7 @@ class ScenarioCChartBindingsTest(unittest.TestCase):
                 result, _ = render(bindings(), {field: bindings()['actors']['SETUP']['serviceSubject']})
                 self.assertNotEqual(0, result.returncode, 'Legacy service subject accepted as actor')
                 self.assertEqual('', result.stdout)
+                self.assertIn('taskIdentities', result.stderr)
 
     def test_five_actor_legacy_hook_has_no_legacy_client_credentials(self):
         result, docs = render(bindings())
