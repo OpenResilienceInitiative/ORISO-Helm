@@ -67,6 +67,10 @@ def main():
     assert baseline_user_checksum == 'disabled'
     assert synapse['metadata']['annotations']['checksum/group-policy'] != baseline_synapse_checksum
     assert user['metadata']['annotations']['checksum/group-policy'] != baseline_user_checksum
+    mirrored = render(*enabled, '--set',
+                      'matrix.image=registry.example/mirror/matrixdotorg/synapse@sha256:5f868df1f5772907c6dbe973a9b69ab530a5d6bb317c011a3788f7ad78eb1292')
+    assert find(mirrored, 'Deployment', 'matrix-synapse')['spec']['template']['spec']['containers'][0]['image'].startswith(
+        'registry.example/mirror/matrixdotorg/synapse@sha256:')
     render('--set', 'matrix.groupPolicy.enabled=true', success=False,
            error='matrix.groupPolicy.existingSecret.name is required')
     render(*enabled, '--set', 'matrix.groupPolicy.enabled="true"', success=False,

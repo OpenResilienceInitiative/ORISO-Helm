@@ -28,10 +28,11 @@ The credential must be separate from Matrix admin, end-user, media and RTC crede
 never put its value in Helm values, source, logs or the ticket. Change `tokenRevision`
 when rotating it so both processes restart with the same token.
 
-The supported process is exactly the reviewed immutable Synapse 1.158.0 image
-(`matrixdotorg/synapse@sha256:5f868df1f5772907c6dbe973a9b69ab530a5d6bb317c011a3788f7ad78eb1292`),
-with one main replica. The chart rejects an enabled different image and the module
-checks the actual runtime version.
+The supported process is the reviewed immutable Synapse 1.158.0 manifest
+(`sha256:5f868df1f5772907c6dbe973a9b69ab530a5d6bb317c011a3788f7ad78eb1292`), with one
+main replica. The chart accepts an environment-configured registry mirror only when it
+serves that digest, and rejects an enabled different image. The module checks the
+actual runtime version.
 The portable storage path is tested with SQLite (the inspected Dev configuration) and
 PostgreSQL. No database engine change or application Liquibase migration is introduced.
 On initialization, the module creates two namespaced metadata tables in the existing
