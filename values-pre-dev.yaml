@@ -1,48 +1,76 @@
-# Pre-Dev overlay for the ORISO chart.
+# Pre-Dev overlay for the ORISO chart. Load it AFTER values-dev.yaml.
 #
-# Apply ON TOP of the base values, e.g.:
-#   helm template ./ -f values.yaml.default -f secrets.yaml.default -f values-pre-dev.yaml
+# Pre-Dev is the team's test environment and has to behave like Dev. This file holds
+# ONLY what is Pre-Dev's own; everything else comes from values-dev.yaml, so a setting
+# added to Dev reaches Pre-Dev on the next upgrade without editing this file.
 #
-# ORISO-Helm is the current release authority. A merge is still not deployment
-# evidence; apply reviewed chart changes through the normal PreDev release flow.
+#   helm upgrade --install caritas ./ -n caritas --create-namespace \
+#     -f values.yaml -f values-dev.yaml -f values-pre-dev.yaml -f secrets.yaml
 #
-# Host ground truth (measured live 2026-09-22): Pre-Dev serves the App at
-# https://predev.oriso.org/, the Admin panel under /admin and Keycloak under
-# /auth on the same host. The older app./admin.oriso-dev.site hosts in the
-# archived ORISO-Kubernetes ingresses belong to another server (404).
+# Deliberate deltas from Dev: host and public URLs, Matrix identity, SigNoz labels,
+# no chart-managed Storybook, no dummy data, the closed mail-locale gate required by
+# tests/render_pending_mail_locale_optin_test.py, and the Spring profile (see below).
+#
+# Inherited from Dev, and new on Pre-Dev compared with the old standalone overlay
+# (helm template of both stacks, 2026-10-21):
+#   - global.observability: every trace kept (MANAGEMENT_TRACING_SAMPLING_PROBABILITY
+#     1.0), test.run.id baggage, Keycloak metrics (appMetrics).
+#   - dbMetrics: the db-monitoring-reconcile Job creates read-only monitoring users in
+#     MariaDB, MongoDB and RabbitMQ and keeps their passwords in Secret oriso-db-monitoring.
+#   - webVitals: Ingress caritas-signoz-rum-ingress publishes the unauthenticated
+#     https://predev.oriso.org/signoz-rum/v1/metrics endpoint for Frontend and Admin.
+# Override them here if Pre-Dev should not have them.
+#
+# values-dev.yaml now sits between values.yaml and this file, so every key it sets
+# overrides Pre-Dev's own values.yaml. Before the first upgrade with this layering,
+# compare `helm get values caritas -n caritas` on Pre-Dev with values-dev.yaml and copy
+# every Pre-Dev value that has to survive into this file. Check
+# userService.supportAccess.enabled first: Dev pins it to "false", while ADR-018
+# Release 1 is exercised on Pre-Dev.
 
 global:
-  # Existing ORISO Pre-Dev product identity. The operator must separately
-  # supply global.emailLegalOrganisationName before deployment.
-  emailBrandingName: "ORISO"
+  # Public host of the Pre-Dev environment (main-ingress serves App, /admin, /auth
+  # and /_matrix on it). Every public URL and mail link derives from it.
   domainName: "predev.oriso.org"
   observability:
     deploymentEnvironment: "pre-dev"
+  # Pre-Dev keeps its existing database; do not seed dummy data.
+  initializeDummyData: false
+  matrix:
+    matrixServerName: "predev.oriso.org"
 
 signoz:
-  enabled: true
   signoz:
     env:
       # observability-validation.yaml requires it in sync with global.domainName.
       signoz_global_external__url: "https://predev.oriso.org/signoz"
+  otelCollector:
+    additionalEnvs:
+      ORISO_DEPLOYMENT_ENVIRONMENT: "pre-dev"
 
 signozCollector:
-  enabled: true
   clusterName: "oriso-predev"
 
-userService:
-  # Magic Link, password reset and account-invite links derive from
-  # global.domainName: https://predev.oriso.org (admin reset
-  # https://predev.oriso.org/admin; admin invite base is the bare origin,
-  # InviteAcceptUrlBuilder appends /admin/tenant-onboarding/{token}).
+storybook:
+  # The two Pre-Dev Storybooks are deployed outside the chart (predev-sync).
+  enabled: false
 
-  # Operator SMTP transport for the mails above. Credentials (smtpUser/
-  # smtpPassword) live in the persistent secret values, never here. Identity
-  # matches what was wired by hand on Pre-Dev on 2026-07-28 (PR #169 context).
-  smtpHost: "mail.dreambau.com"
-  smtpPort: 587
-  smtpSecure: false
-  smtpFrom: "ORISO Platform <monty.burns@oriso.org>"
+# Spring profile: Pre-Dev runs "prod" today. Dev runs "dev" (verbose errors, dev
+# wiring). Pre-Dev is reachable from the internet, so switching to "dev" is a team
+# decision; to follow Dev, delete the three springProfilesActive lines below.
+agencyService:
+  springProfilesActive: "prod"
+tenantService:
+  springProfilesActive: "prod"
+userService:
+  springProfilesActive: "prod"
+  # tests/render_pending_mail_locale_optin_test.py requires the unreviewed-locale
+  # gate to stay closed in every environment except Dev.
+  emailAllowUnreviewedLocales: false
+  # UserService appends "/password-reset/confirm?token=…" to each base URL.
+  magicLinkFrontendBaseUrl: "https://predev.oriso.org"
+  passwordResetFrontendBaseUrl: "https://predev.oriso.org"
+  passwordResetAdminFrontendBaseUrl: "https://predev.oriso.org/admin"
 
   # NOTE — statisticsMessageCountHmacSecret is deliberately NOT set here.
   # It is a mandatory boot config (ConsultantIdentityHasher exits 1 on a blank
@@ -52,3 +80,10 @@ userService:
   # so rendering this overlay without those secret values fails loudly at deploy
   # time instead of shipping an empty key. The value must exist in the Pre-Dev
   # secret values file or the UserService rollout CrashLoops.
+
+# Matrix federation identity (ADR-005 canonical server_name).
+matrix:
+  synapseServerName: "predev.oriso.org"
+  matrixServerName: "predev.oriso.org"
+matrixrtcAuth:
+  membershipReaderUserId: "@matrixrtc-auth:predev.oriso.org"

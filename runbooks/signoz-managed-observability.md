@@ -138,16 +138,16 @@ export SIGNOZ_URL=https://dev.oriso.org/signoz
 read -rs SIGNOZ_API_KEY && export SIGNOZ_API_KEY
 
 # Read-only, structural: compare stored objects with the catalog, run no queries.
-python3 scripts/signoz_observability.py --mode check \
+python3 files/signoz/signoz_observability.py --mode check \
   --environment dev --cluster-name oriso-dev --skip-telemetry
 
 # Read-only, full: also execute every query, require fresh collector data,
 # and reject data from the other environment.
-python3 scripts/signoz_observability.py --mode check \
+python3 files/signoz/signoz_observability.py --mode check \
   --environment dev --cluster-name oriso-dev
 
 # One synthetic notification for one catalog rule, no stored rule.
-python3 scripts/signoz_observability.py --mode test-rule --rule unencrypted-room \
+python3 files/signoz/signoz_observability.py --mode test-rule --rule unencrypted-room \
   --environment dev --cluster-name oriso-dev
 ```
 

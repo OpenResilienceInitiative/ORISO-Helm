@@ -25,6 +25,30 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- if and $collectorEnabled (not $signozEnabled) -}}
 {{- fail "signozCollector.enabled=true requires signoz.enabled=true" -}}
 {{- end -}}
+{{- if and (eq (include "oriso.appMetrics.enabled" .) "true") (not $collectorEnabled) -}}
+{{- fail "global.observability.appMetrics=true requires signozCollector.enabled=true: the cluster collector scrapes the application metrics" -}}
+{{- end -}}
+{{- if and (eq (include "oriso.dbMetrics.enabled" .) "true") (not $collectorEnabled) -}}
+{{- fail "global.observability.dbMetrics=true requires signozCollector.enabled=true: the cluster collector reads the data store metrics" -}}
+{{- end -}}
+{{- $webVitals := get (get .Values.global "observability" | default dict) "webVitals" | default dict -}}
+{{- if and (get $webVitals "enabled" | default false) (not $signozEnabled) -}}
+{{- fail "global.observability.webVitals.enabled=true requires signoz.enabled=true: the browser metrics go to the bundled SigNoz collector through the RUM ingress" -}}
+{{- end -}}
+{{- if and $signozEnabled (get $webVitals "enabled" | default false) -}}
+{{- if not (dig "otelCollector" "ports" "otlp-rum" "enabled" false $signoz) -}}
+{{- fail "global.observability.webVitals.enabled=true requires signoz.otelCollector.ports.otlp-rum.enabled=true: the RUM ingress sends browser metrics to that collector port" -}}
+{{- end -}}
+{{- $rumPort := dig "otelCollector" "ports" "otlp-rum" "servicePort" 4319 $signoz -}}
+{{- if not (and (or (kindIs "float64" $rumPort) (kindIs "int" $rumPort) (kindIs "int64" $rumPort)) (eq (float64 $rumPort) (float64 (int $rumPort))) (ge (int $rumPort) 1) (le (int $rumPort) 65535)) -}}
+{{- fail (printf "signoz.otelCollector.ports.otlp-rum.servicePort must be a port number from 1 to 65535 (got %v): the collector Service and the RUM ingress backend both need it" $rumPort) -}}
+{{- end -}}
+{{- $collectorEnvs := get (get $signoz "otelCollector" | default dict) "additionalEnvs" | default dict -}}
+{{- $environment := get (get .Values.global "observability" | default dict) "deploymentEnvironment" | default "" -}}
+{{- if ne (get $collectorEnvs "ORISO_DEPLOYMENT_ENVIRONMENT" | default "") $environment -}}
+{{- fail (printf "signoz.otelCollector.additionalEnvs.ORISO_DEPLOYMENT_ENVIRONMENT must equal global.observability.deploymentEnvironment (%q) when global.observability.webVitals.enabled=true" $environment) -}}
+{{- end -}}
+{{- end -}}
 {{- if $collectorEnabled -}}
 {{- $globalObservability := get .Values.global "observability" | default dict -}}
 {{- if eq (get $collector "clusterName" | default "") "" -}}

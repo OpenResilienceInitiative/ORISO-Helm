@@ -17,7 +17,7 @@ from unittest import mock
 
 ROOT = Path(__file__).parents[1]
 SPEC = importlib.util.spec_from_file_location(
-    "signoz_observability", ROOT / "scripts" / "signoz_observability.py"
+    "signoz_observability", ROOT / "files" / "signoz" / "signoz_observability.py"
 )
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)

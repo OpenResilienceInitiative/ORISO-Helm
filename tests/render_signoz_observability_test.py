@@ -200,7 +200,7 @@ def main() -> None:
             check=False,
         )
         assert missing_assets.returncode != 0
-        assert "scripts/signoz_observability.py must exist" in missing_assets.stderr
+        assert "files/signoz/signoz_observability.py must exist" in missing_assets.stderr
 
     dev = render(enabled=True, environment="dev", cluster_name="oriso-dev")
     dev_job = find(dev, "Job", "caritas-signoz-observability")

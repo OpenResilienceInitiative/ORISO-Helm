@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
-SCRIPT = ROOT / "scripts" / "signoz_observability.py"
+SCRIPT = ROOT / "files" / "signoz" / "signoz_observability.py"
 ASSETS = ROOT / "files" / "signoz"
 
 SPEC = importlib.util.spec_from_file_location("signoz_observability", SCRIPT)

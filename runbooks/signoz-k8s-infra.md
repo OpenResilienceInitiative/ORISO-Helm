@@ -82,7 +82,7 @@ root of the reviewed revision, with the overlay of the affected environment:
 # PreDev; use values-dev.yaml and the Dev release/namespace for Dev.
 helm upgrade --install caritas ./ -n caritas --create-namespace \
   --wait-for-jobs --timeout 15m \
-  -f values.yaml -f values-pre-dev.yaml -f secrets.yaml \
+  -f values.yaml -f values-dev.yaml -f values-pre-dev.yaml -f secrets.yaml \
   --set signozCollector.enabled=false
 ```
 

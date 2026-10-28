@@ -3,6 +3,44 @@
 {{- if or (eq $technical $admin) (has $technical (list .Values.global.keycloak.serviceAppClientId "admin-cli" "account" "broker" "security-admin-console")) (has $admin (list .Values.global.keycloak.serviceAppClientId "admin-cli" "account" "broker" "security-admin-console")) (not (regexMatch "^[a-zA-Z0-9_-]+$" $technical)) (not (regexMatch "^[a-zA-Z0-9_-]+$" $admin)) -}}
 {{- fail "Backend service client ids must be distinct and cannot be human or built-in clients" -}}
 {{- end -}}
+{{- $scenario := .Values.global.keycloak.taskIdentities | default dict -}}
+{{- $scenarioEnabled := dig "enabled" false $scenario -}}
+{{- $scenarioProvisionOnly := dig "provisionOnly" false $scenario -}}
+{{- if not (kindIs "bool" $scenarioEnabled) -}}
+{{- fail "global.keycloak.taskIdentities.enabled must be a boolean" -}}
+{{- end -}}
+{{- if not (kindIs "bool" $scenarioProvisionOnly) -}}
+{{- fail "global.keycloak.taskIdentities.provisionOnly must be a boolean" -}}
+{{- end -}}
+{{- if and $scenarioEnabled $scenarioProvisionOnly -}}
+{{- fail "Task identities enabled and provisionOnly cannot both be true" -}}
+{{- end -}}
+{{- $setupClient := dig "setup" "clientId" "" $scenario -}}
+{{- $setupSubject := dig "setup" "serviceSubject" "" $scenario -}}
+{{- $accountCreateClient := dig "accountCreate" "clientId" "" $scenario -}}
+{{- $accountCreateSubject := dig "accountCreate" "serviceSubject" "" $scenario -}}
+{{- $accountAdminClient := dig "accountAdmin" "clientId" "" $scenario -}}
+{{- $accountAdminSubject := dig "accountAdmin" "serviceSubject" "" $scenario -}}
+{{- $mailClient := dig "mail" "clientId" "" $scenario -}}
+{{- $mailSubject := dig "mail" "serviceSubject" "" $scenario -}}
+{{- $runtimeClient := dig "runtime" "clientId" "" $scenario -}}
+{{- $runtimeSubject := dig "runtime" "serviceSubject" "" $scenario -}}
+{{- if or $scenarioEnabled $scenarioProvisionOnly -}}
+{{- if or (ne $setupClient "backend-setup") (ne $accountCreateClient "backend-account-create") (ne $accountAdminClient "backend-account-admin") (ne $mailClient "backend-mail") (ne $runtimeClient "backend-runtime") -}}
+{{- fail "Task identities must use the five canonical backend client ids" -}}
+{{- end -}}
+{{- end -}}
+{{- if $scenarioEnabled -}}
+{{- $subjects := list $setupSubject $accountCreateSubject $accountAdminSubject $mailSubject $runtimeSubject -}}
+{{- if or (has "" $subjects) (ne (len (uniq $subjects)) 5) -}}
+{{- fail "Task identities require five distinct service-account subjects" -}}
+{{- end -}}
+{{- range $subject := $subjects -}}
+{{- if not (regexMatch "^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$" $subject) -}}
+{{- fail "Task-identity service subjects must be Keycloak UUIDs" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if hasKey .Values.userService "emailBrandingName" -}}
 {{- fail "userService.emailBrandingName is obsolete: move it to global.emailBrandingName and set global.emailLegalOrganisationName separately" -}}
 {{- end -}}
@@ -64,6 +102,19 @@ data:
   KEYCLOAK_CONFIG_ADMIN_CLIENTID: {{ .Values.global.keycloak.serviceAdminClientId }}
   KEYCLOAK_CONFIG_APP_CLIENTID: {{ .Values.global.keycloak.serviceAppClientId }}
   KEYCLOAKSERVICE_TECHUSER_ID: {{ .Values.global.keycloak.serviceTechUserId }}
+  TASK_IDENTITY_MODEL: {{ if $scenarioEnabled }}"FIVE_ACTORS"{{ else }}"LEGACY"{{ end }}
+  {{- if $scenarioEnabled }}
+  IDENTITY_SETUP_CLIENT_ID: {{ $setupClient | quote }}
+  IDENTITY_SETUP_SERVICE_SUBJECT: {{ $setupSubject | quote }}
+  IDENTITY_ACCOUNT_CREATE_CLIENT_ID: {{ $accountCreateClient | quote }}
+  IDENTITY_ACCOUNT_CREATE_SERVICE_SUBJECT: {{ $accountCreateSubject | quote }}
+  IDENTITY_ACCOUNT_ADMIN_CLIENT_ID: {{ $accountAdminClient | quote }}
+  IDENTITY_ACCOUNT_ADMIN_SERVICE_SUBJECT: {{ $accountAdminSubject | quote }}
+  IDENTITY_MAIL_CLIENT_ID: {{ $mailClient | quote }}
+  IDENTITY_MAIL_SERVICE_SUBJECT: {{ $mailSubject | quote }}
+  IDENTITY_RUNTIME_CLIENT_ID: {{ $runtimeClient | quote }}
+  IDENTITY_RUNTIME_SERVICE_SUBJECT: {{ $runtimeSubject | quote }}
+  {{- end }}
   SESSION_INACTIVE_DELETEWORKFLOW_ENABLED: "false"
 
   # Services

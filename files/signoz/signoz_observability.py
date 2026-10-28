@@ -943,7 +943,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "The API key is read only from the SIGNOZ_API_KEY environment "
             "variable, never from the command line, and is never printed. "
             "Read-only workstation check: SIGNOZ_URL=<signoz base url> "
-            "SIGNOZ_API_KEY=<key> python3 scripts/signoz_observability.py "
+            "SIGNOZ_API_KEY=<key> python3 files/signoz/signoz_observability.py "
             "--mode check --environment dev --cluster-name oriso-dev. "
             "One synthetic notification for one catalog alert, no stored "
             "rule: --mode test-rule --rule <slug>."

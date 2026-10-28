@@ -36,6 +36,14 @@ global:
     autoEnableWithSignoz: true
     deploymentEnvironment: "pre-dev"
     otlpCollectorHost: ""
+    # Application and data-store metrics require signozCollector.enabled=true.
+    appMetrics: false
+    dbMetrics: false
+    tracingSamplingProbability: ""
+    testRunBaggage: false
+    webVitals:
+      enabled: false
+      exportIntervalMillis: 60000
 
   acmedomainName: "acme.your-domain.example.com"
  #adminDomainName: "admin.your-domain.example.com"
@@ -106,6 +114,30 @@ global:
     serviceAppClientId: "app"
     serviceAdminClientId: "backend-admin"
     backendTechnicalClientId: "backend-technical"
+    # Task identities are an explicit, all-or-nothing UserService runtime cutover.
+    # Keep it disabled until the five Keycloak clients have been reconciled and
+    # their actual service-account subjects have been read back.
+    taskIdentities:
+      enabled: false
+      # First pass only: reconcile the five disabled Keycloak clients and read
+      # their generated service-account subjects from the hook output. The
+      # second pass supplies those immutable UUIDs and sets enabled=true.
+      provisionOnly: false
+      setup:
+        clientId: "backend-setup"
+        serviceSubject: ""
+      accountCreate:
+        clientId: "backend-account-create"
+        serviceSubject: ""
+      accountAdmin:
+        clientId: "backend-account-admin"
+        serviceSubject: ""
+      mail:
+        clientId: "backend-mail"
+        serviceSubject: ""
+      runtime:
+        clientId: "backend-runtime"
+        serviceSubject: ""
     backendServiceClients:
       # Existing realms: render ONLY the preparation Secret/Job (see runbook).
       # Never install/upgrade the whole chart with prepareOnly=true.
@@ -560,6 +592,43 @@ signoz:
   clickhouse:
     persistence:
       size: 20Gi
+  # Data protection (templates/signoz/signoz-data-protection.yaml): volumes
+  # switched to reclaim Retain after every upgrade, daily signoz.db backup.
+  orisoDataProtection:
+    enabled: true
+    image: "docker.io/library/python:3.13-alpine@sha256:79e7a9b9ff1cbceff819f856fb374477792a5967759d94df266de7b7b4120e6f"
+    backup:
+      enabled: true
+      schedule: "30 2 * * *"
+      keep: 14
+      size: 1Gi
+  # Collector resources and exposed protocols. The ORISO collector policy lives
+  # in charts/signoz/files/oriso-otel-collector-policy.yaml.
+  otelCollector:
+    additionalEnvs:
+      # Stamped onto browser metrics; must equal global.observability.deploymentEnvironment.
+      ORISO_DEPLOYMENT_ENVIRONMENT: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 1Gi
+    ports:
+      jaeger-thrift:
+        enabled: false
+      jaeger-grpc:
+        enabled: false
+      logsheroku:
+        enabled: false
+      logsjson:
+        enabled: false
+      otlp-rum:
+        enabled: true
+        containerPort: 4319
+        servicePort: 4319
+        nodePort: ""
+        protocol: TCP
 
 # SigNoz node and cluster collectors. Requires signoz.enabled=true.
 signozCollector:
@@ -576,6 +645,12 @@ signozCollector:
     limits:
       cpu: 500m
       memory: 512Mi
+
+# Data store monitoring (global.observability.dbMetrics). The reconcile job uses
+# the stores' own images for MariaDB and MongoDB and this curl image for the
+# RabbitMQ management API.
+dbMonitoring:
+  curlImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Health Dashboard
 healthDashboard:

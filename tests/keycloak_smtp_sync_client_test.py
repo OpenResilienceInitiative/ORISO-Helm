@@ -4,6 +4,7 @@
 Proves on a fresh and on an existing realm that the chart's own scripts give the
 smtp-sync client exactly manage-realm, that this client (not master admin)
 writes the SMTP settings, and that an unchanged snapshot is not written again.
+On a realm with native admin permissions the hook refuses that grant.
 Run: python3 tests/keycloak_smtp_sync_client_test.py -v
 """
 from contextlib import contextmanager
@@ -132,6 +133,17 @@ class SmtpSyncClientTest(unittest.TestCase):
     def test_existing_realm_gets_smtp_sync_from_the_service_identity_hook(self):
         self.import_realm(without_sync_client(self.realm), "smtp-existing")
         self.prove("smtp-existing", kc.prepared_subjects(self.base, "smtp-existing"))
+
+    def test_hook_refuses_manage_realm_when_native_admin_permissions_are_on(self):
+        # Keycloak57: with FGAP, manage-realm can grant itself user management.
+        self.import_realm(dict(without_sync_client(self.realm), adminPermissionsEnabled=True), "smtp-fgap")
+        subjects = kc.prepared_subjects(self.base, "smtp-fgap")  # preparation is not blocked
+        with self.assertRaisesRegex(AssertionError, "SMTP_SYNC_FGAP_ESCALATION"):
+            kc.run_script("keycloak-reconcile-service-clients.py",
+                          kc.service_identity_env(self.base, "smtp-fgap", PREPARE_ONLY="false", **subjects))
+        clients = kc.request(self.base, "GET", "/admin/realms/smtp-fgap/clients?clientId=smtp-sync",
+                             token=kc.master_admin(self.base))
+        self.assertEqual(clients, [], "nothing changed: smtp-sync was not created")
 
 
 if __name__ == "__main__":
