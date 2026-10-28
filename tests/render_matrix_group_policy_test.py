@@ -26,7 +26,8 @@ def main():
     enabled = ['--set', 'matrix.groupPolicy.enabled=true',
                '--set', 'matrix.groupPolicy.existingSecret.name=dedicated-avv-policy',
                '--set', 'matrix.groupPolicy.existingSecret.tokenKey=token',
-               '--set', 'matrix.groupPolicy.tokenRevision=fixture-1']
+               '--set', 'matrix.groupPolicy.tokenRevision=fixture-1',
+               '--set', 'matrix.image=matrixdotorg/synapse@sha256:5f868df1f5772907c6dbe973a9b69ab530a5d6bb317c011a3788f7ad78eb1292']
     docs = render(*enabled)
     env = find(docs, 'ConfigMap', 'userservice-configmap-env')['data']
     assert env['MATRIX_GROUP_POLICY_ENABLED'] == 'true'
@@ -89,8 +90,10 @@ def main():
            '--set', 'mediaScanner.aiCheck.existingSecret=media-ai-secret',
            '--set', 'matrix.groupPolicy.existingSecret.name=media-ai-secret',
            success=False, error='AVV group policy requires a separate dedicated Secret resource')
-    render(*enabled, '--set', 'matrix.image=matrixdotorg/synapse:v1.157.0', success=False,
-           error='AVV group policy requires the reviewed Synapse 1.158.0 image')
+    render(*enabled, '--set', 'matrix.image=matrixdotorg/synapse:v1.158.0', success=False,
+           error='AVV group policy requires the reviewed immutable Synapse 1.158.0 image digest')
+    render(*enabled, '--set', 'matrix.image=matrixdotorg/synapse@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', success=False,
+           error='AVV group policy requires the reviewed immutable Synapse 1.158.0 image digest')
     render(*enabled, '--set', 'matrix.replicas=2', success=False,
            error='AVV group policy currently supports one Synapse main process')
     print('PASS: opt-in pair, dedicated credential, private listener/routing, invalid-config rejection')

@@ -20,8 +20,9 @@
 {{- if has $secret $reserved -}}
 {{- fail "AVV group policy requires a separate dedicated Secret resource" -}}
 {{- end -}}
-{{- if not (regexMatch "^(docker.io/)?matrixdotorg/synapse:v1\\.158\\.0(@sha256:[a-f0-9]{64})?$" .Values.matrix.image) -}}
-{{- fail "AVV group policy requires the reviewed Synapse 1.158.0 image" -}}
+{{- $approvedImage := "matrixdotorg/synapse@sha256:5f868df1f5772907c6dbe973a9b69ab530a5d6bb317c011a3788f7ad78eb1292" -}}
+{{- if not (or (eq .Values.matrix.image $approvedImage) (eq .Values.matrix.image (printf "docker.io/%s" $approvedImage))) -}}
+{{- fail "AVV group policy requires the reviewed immutable Synapse 1.158.0 image digest" -}}
 {{- end -}}
 {{- if ne (int .Values.matrix.replicas) 1 -}}
 {{- fail "AVV group policy currently supports one Synapse main process" -}}
