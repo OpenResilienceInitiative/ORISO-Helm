@@ -173,11 +173,8 @@ already has data (`collector-staleness` and `clickhouse-capacity` use collector
 metrics).
 
 It proves the rule shape, the channel name, and Slack delivery for that rule.
-It does not prove that the stored rule's generated route policy dispatches;
-that binding is checked structurally (`validate_managed_routes`: exactly one
-`rule` route per managed rule id, carrying that id and exactly the managed
-channel). Confirm one real dispatch per environment out of band, for example on
-the first genuine incident, and note it in the release evidence.
+Confirm one real managed-rule dispatch per environment out of band, for example
+on the first genuine incident, and note it in the release evidence.
 
 ## Promotion
 

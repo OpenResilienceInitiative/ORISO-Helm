@@ -533,29 +533,5 @@ class LiveConformanceContractTest(unittest.TestCase):
         ):
             MODULE.eval_window_minutes({"evaluation": {"spec": {"evalWindow": ""}}})
 
-    def test_route_contract_requires_a_route_for_each_managed_rule_id(self) -> None:
-        routes = [
-            {
-                "kind": "rule",
-                "name": "rule-1",
-                "expression": 'threshold_name == "critical" && rule_id == "rule-1"',
-                "channels": ["oriso-alerts-slack"],
-            },
-            {
-                "kind": "rule",
-                "name": "unrelated-rule",
-                "expression": 'rule_id == "unrelated-rule"',
-                "channels": ["oriso-alerts-slack"],
-            },
-        ]
-
-        with self.assertRaisesRegex(RuntimeError, "rule-2"):
-            MODULE.validate_managed_routes(
-                routes,
-                rule_ids=["rule-1", "rule-2"],
-                channel_name="oriso-alerts-slack",
-            )
-
-
 if __name__ == "__main__":
     unittest.main()

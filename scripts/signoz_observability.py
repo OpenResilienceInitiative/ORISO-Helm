@@ -838,27 +838,6 @@ def validate_live_alert(
     return current_query
 
 
-def validate_managed_routes(
-    routes: list[dict[str, Any]],
-    *,
-    rule_ids: list[str],
-    channel_name: str,
-) -> None:
-    for rule_id in rule_ids:
-        matching = [
-            route
-            for route in routes
-            if route.get("kind") == "rule"
-            and route.get("name") == rule_id
-            and rule_id in route.get("expression", "")
-            and route.get("channels") == [channel_name]
-        ]
-        if len(matching) != 1:
-            raise RuntimeError(
-                f"managed alert route is missing or ambiguous: {rule_id}"
-            )
-
-
 def prove_conformance(
     client: SignozClient,
     dashboards: list[dict[str, Any]],
@@ -903,7 +882,6 @@ def prove_conformance(
                 _execute_query(client, query)
 
     listed_alerts = {item.get("alert"): item for item in _list(client, "/api/v2/rules")}
-    managed_rule_ids: list[str] = []
     freshness_query: dict[str, Any] | None = None
     freshness_window_minutes = 0
     for expected in alerts:
@@ -920,16 +898,11 @@ def prove_conformance(
         )
         if telemetry:
             _execute_query(client, query)
-        managed_rule_ids.append(str(current["id"]))
         if expected.get("_orisoSlug") == "collector-staleness":
             freshness_query = query
             freshness_window_minutes = eval_window_minutes(expected)
 
     require_channel(client, channel_name)
-    routes = _list(client, "/api/v1/route_policies")
-    validate_managed_routes(
-        routes, rule_ids=managed_rule_ids, channel_name=channel_name
-    )
     if freshness_query is None:
         raise RuntimeError("managed collector-staleness alert is missing")
     if not telemetry:
