@@ -315,8 +315,9 @@ matrixrtcLifecycle:
 matrixrtcAuth:
   replicas: 1
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
-  # Namespace of the ingress controller, needed by the NetworkPolicy.
-  ingressControllerNamespace: "ingress-nginx"
+  # Optional: namespace of the ingress controller for the call NetworkPolicies.
+  # Empty matches the controller pods by label in any namespace.
+  ingressControllerNamespace: ""
   bootstrap:
     enabled: true
     backoffLimit: 6
