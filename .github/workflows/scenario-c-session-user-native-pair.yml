@@ -24,7 +24,7 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: '1'
       GIT_CONFIG_NOSYSTEM: '1'
-      USER_REF: 6b37b3fe4de013c8b3f47196d2a3b571352add3c
+      USER_REF: b969fd5c1a9f063af13decf8049bdcd31b35747a
       KEYCLOAK_REF: bf3d7f8809d829e33e930115221b122be8e8c287
       SUPPORT_REF: a1a1eb1ce51728e0ad60f7f07660f8c87b96815b
       S1_ROLE: ${{ matrix.role }}
