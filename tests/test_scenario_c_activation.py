@@ -22,6 +22,8 @@ class ActivationControls(unittest.TestCase):
         self.writes=[]
         class Admin:
             def request(inner,method,path,body=None):
+                if method=='GET' and path.endswith('/service-account-user'):
+                    return {'id':self.bindings[path.split('/')[2]]['serviceSubject']}
                 if method=='GET':return copy.deepcopy(self.clients[path])
                 self.writes.append((path,copy.deepcopy(body)));self.clients[path].update(copy.deepcopy(body))
         self.admin=Admin()
@@ -59,6 +61,69 @@ class ActivationControls(unittest.TestCase):
             with self.assertRaises(activation.ReconcileError):self.run_activation()
         self.assertTrue(all(self.clients['/clients/'+name]['enabled'] is False for name in self.actors))
         self.assertTrue(self.clients['/clients/foreign']['enabled'])
+
+    def fail_repeat_actor_read(self, drift=None, rollback_failure=None):
+        original=self.admin.request
+        failed=False
+        def request(method,path,body=None):
+            nonlocal failed
+            if method=='GET' and path=='/clients/ACCOUNT_CREATE' and not failed:
+                failed=True
+                if drift:drift()
+                raise activation.ReconcileError('one-time actor read unavailable')
+            if failed and rollback_failure:rollback_failure(method,path,body)
+            return original(method,path,body)
+        self.admin.request=request
+
+    def test_repeat_actor_read_failure_disables_all_five_prior_owned_clients(self):
+        self.run_activation();self.writes.clear()
+        self.fail_repeat_actor_read()
+        with self.assertRaisesRegex(activation.ReconcileError,'owned staged clients disabled'):
+            self.run_activation()
+        self.assertTrue(all(c['enabled'] is False and c['attributes']['oriso-c.activation-state']=='staged-v1' for c in self.clients.values()))
+        self.assertEqual(set(self.clients),{path for path,body in self.writes if body.get('enabled') is False})
+
+    def test_repeat_failure_preserves_foreign_receipt_policy_and_subject_clients(self):
+        self.run_activation();self.writes.clear()
+        saved={}
+        def drift():
+            self.clients['/clients/ACCOUNT_ADMIN']['attributes']['oriso-c.activation-receipt']='foreign'
+            self.clients['/clients/MAIL']['attributes']['oriso-c.native-policy']='foreign'
+            # The native subject can change independently of an old copied receipt.
+            self.bindings['RUNTIME']['serviceSubject']='foreign-subject'
+            for name in ('ACCOUNT_ADMIN','MAIL','RUNTIME'):
+                saved[name]=copy.deepcopy(self.clients['/clients/'+name])
+        # Keep the approved manifest immutable while the native fixture subject drifts.
+        self.value['actors']=copy.deepcopy(self.bindings)
+        self.fail_repeat_actor_read(drift=drift)
+        with self.assertRaises(activation.ReconcileError):self.run_activation()
+        for name,state in saved.items():
+            self.assertEqual(state,self.clients['/clients/'+name])
+            self.assertFalse(any(path=='/clients/'+name for path,_ in self.writes))
+        self.assertFalse(self.clients['/clients/SETUP']['enabled'])
+        self.assertFalse(self.clients['/clients/ACCOUNT_CREATE']['enabled'])
+
+    def test_repeat_failure_continues_other_owned_rollbacks_after_read_failure(self):
+        self.run_activation();self.writes.clear()
+        def unavailable(method,path,body):
+            if method=='GET' and path=='/clients/ACCOUNT_ADMIN':
+                raise activation.ReconcileError('rollback read unavailable')
+        self.fail_repeat_actor_read(rollback_failure=unavailable)
+        with self.assertRaisesRegex(activation.ReconcileError,'disable readback incomplete'):
+            self.run_activation()
+        self.assertTrue(self.clients['/clients/ACCOUNT_ADMIN']['enabled'])
+        self.assertTrue(all(self.clients['/clients/'+name]['enabled'] is False for name in self.actors if name!='ACCOUNT_ADMIN'))
+
+    def test_repeat_failure_reports_ignored_disable_readback(self):
+        self.run_activation();self.writes.clear()
+        def ignored(method,path,body):
+            if method=='GET' and path=='/clients/MAIL':
+                self.clients[path]['enabled']=True
+        self.fail_repeat_actor_read(rollback_failure=ignored)
+        with self.assertRaisesRegex(activation.ReconcileError,'disable readback incomplete'):
+            self.run_activation()
+        self.assertTrue(self.clients['/clients/MAIL']['enabled'])
+        self.assertTrue(all(self.clients['/clients/'+name]['enabled'] is False for name in self.actors if name!='MAIL'))
 
     def test_incomplete_rollback_is_reported(self):
         original=self.admin.request

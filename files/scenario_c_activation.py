@@ -190,6 +190,11 @@ def activate(admin, url, actors, mapping, value, environment):
         if rollback_failed:
             raise ReconcileError("Activation preflight failed; prior-owned disable readback incomplete") from None
         raise ReconcileError("Activation preflight failed; matching prior-owned clients disabled") from None
+    # Preflight confirmed all native subjects, including clients activated on a
+    # previous run. An early forward read failure must not strand that suffix.
+    # Candidates still require fresh receipt/policy/subject ownership below.
+    rollback_candidates = {"/clients/" + quote(cid, safe=""): name
+                           for name, cid in snapshot["clients"].items()}
     owned = []
     changes = 0
     try:
@@ -222,14 +227,19 @@ def activate(admin, url, actors, mapping, value, environment):
         return changes
     except Exception:
         failed = False
-        for path in owned:
+        for path, name in rollback_candidates.items():
             try:
                 current = admin.request("GET", path)
-                if current.get("attributes", {}).get("oriso-c.activation-receipt") == receipt:
-                    attrs = current["attributes"]
-                    admin.request("PUT", path, {"enabled": False, "attributes": {**attrs, "oriso-c.activation-state": "staged-v1"}})
-                    if admin.request("GET", path).get("enabled") is not False:
-                        failed = True
+                attrs = current.get("attributes", {})
+                if (attrs.get("oriso-c.activation-receipt") != receipt
+                        or attrs.get("oriso-c.native-policy") != "receiver-only-v1"):
+                    continue
+                subject = admin.request("GET", path + "/service-account-user")
+                if subject.get("id") != value["actors"][name]["serviceSubject"]:
+                    continue
+                admin.request("PUT", path, {"enabled": False, "attributes": {**attrs, "oriso-c.activation-state": "staged-v1"}})
+                if admin.request("GET", path).get("enabled") is not False:
+                    failed = True
             except Exception:
                 failed = True
         if failed:
