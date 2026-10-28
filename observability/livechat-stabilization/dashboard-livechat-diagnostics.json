@@ -1,0 +1,50 @@
+{
+  "artifactType": "signoz-dashboard-build-specification",
+  "title": "ORISO Live Chat Stabilization Diagnostics",
+  "version": 1,
+  "variables": ["deployment.environment", "service.version", "tenant.pseudonym", "topic.pseudonym"],
+  "panels": [
+    {
+      "title": "Demand versus visible queue",
+      "signal": "oriso.live_chat.queue.visibility",
+      "query": "sum(visible.count) by deployment.environment,tenant.pseudonym,topic.pseudonym",
+      "diagnoses": ["no_demand"]
+    },
+    {
+      "title": "Routing candidates and eligibility",
+      "signal": "oriso.live_chat.routing.decisions",
+      "query": "sum by reason,candidate.count,relation.count",
+      "diagnoses": ["no_eligible_consultant", "relation_failure"]
+    },
+    {
+      "title": "Redis availability lease outcomes",
+      "signal": "oriso.live_chat.availability.store.operations",
+      "query": "sum by operation,outcome rate 5m",
+      "diagnoses": ["expired_availability"]
+    },
+    {
+      "title": "Matrix event processing and side effects",
+      "signal": "oriso.matrix.event.processing",
+      "query": "sum by stage,outcome,exception.type and correlate oriso.matrix.side_effect.operations",
+      "diagnoses": ["matrix_processing_failure"]
+    },
+    {
+      "title": "Room creation encryption posture",
+      "signal": "oriso.matrix.room.creation",
+      "query": "sum where outcome=success by encryption.enabled,deployment.environment",
+      "diagnoses": ["unencrypted_room_creation"]
+    },
+    {
+      "title": "Provisioning stage and compensation",
+      "signal": "oriso.admin.provisioning.operations",
+      "query": "sum by stage,outcome,rollback.outcome,service.version",
+      "diagnoses": ["relation_failure"]
+    },
+    {
+      "title": "Pre-Dev versus Dev deployment drift",
+      "signal": "service.runtime.identity",
+      "query": "latest vcs.commit.sha,container.image.digest,config.matrix_encryption,config.redis_ttl_seconds by service.name,deployment.environment",
+      "diagnoses": []
+    }
+  ]
+}
