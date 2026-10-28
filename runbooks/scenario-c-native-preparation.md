@@ -284,3 +284,28 @@ mounts the three locally packaged JARs into the pinned stock image (no image
 build), runs the chart entry point, and verifies repeat, drift shutdown and
 recovery. Final caller/receiver and installed-image evidence must still be pinned
 to the common source tuple before any authorized environment cutover.
+
+
+## Reviewed ordinary operator policy
+
+The optional `ordinaryAdminOperations` entries in the existing maintenance-policy
+ConfigMap name exact installed `sourceProfiles`, `targetProfiles` and `operations`.
+Keep the default empty. Current ordinary Agency Admin/combined sources require
+original native birth or authenticated adoption, a current native human session,
+exact grants and a positive same tenant. UserService additionally checks SQL agency
+reach. ASKER targets allow only read/deactivate. Consultant profiles permit full
+profile/email fields and preserving group-chat toggles; combined Consultant/Admin
+profiles permit those Consultant edits but never whole-account deactivation.
+`account.ordinary-profile` requires `account.profile` on both installed profiles.
+Nonsecret two-factor booleans use the same account.read grant; administrative OTP
+mutation and peer Agency Admin CRUD are not granted.
+
+For the existing same-person first Consultant assignment, declare both the original
+Agency Admin and each permitted combined destination ID in the same entry's
+`sourceProfiles` and `targetProfiles`, with account.read/account.profile-transition.
+The catalogue supplies the exact installed versions. Declare legitimate variants
+with and without group-chat explicitly. Only source==target plus
+ADD_CONSULTANT_IDENTITY/group is accepted; missing destination acknowledgement
+refuses before effect. Current fresh native-token replay follows the authenticated
+lineage. This does not decide the separately pending self-Administrator-removal
+product policy.

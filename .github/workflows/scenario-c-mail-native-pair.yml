@@ -21,7 +21,7 @@ jobs:
       PYTHONDONTWRITEBYTECODE: '1'
       USER_REF: 49ac5b318eff0ec108a64ecdb362d20e2ef6b61e
       CTS_REF: 3ce998d3ac676f8ddb8c52f984d01e240ea1fae8
-      KEYCLOAK_REF: 69477d30edbcfa3c49e6799555c127ec4d0023c3
+      KEYCLOAK_REF: 2f63411494947e4a303331632a1732c84af079d3
       SUPPORT_REF: a8f5eec02a6de4faaa36a709f0ce4b42e8926c80
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -112,7 +112,7 @@ jobs:
     timeout-minutes: 15
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      KEYCLOAK_REF: 69477d30edbcfa3c49e6799555c127ec4d0023c3
+      KEYCLOAK_REF: 2f63411494947e4a303331632a1732c84af079d3
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
