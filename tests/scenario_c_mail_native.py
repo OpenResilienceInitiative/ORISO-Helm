@@ -363,6 +363,15 @@ def main():
                 "sameBearerBrokerCtsSmtpAck": True, "exactSavedRevision": 7, "sourceInputsUnchanged": True,
                 "routineActorClients": sorted(a["clientId"] for a in actors),
                 "nativeBuiltinClient": "admin-permissions"}, indent=2))
+    except Exception as failure:
+        # Preserve the first execution failure even when strict cleanup eligibility also fails.
+        # Frames and types reveal the stage without exposing bearer/configuration data.
+        (args.evidence / "primary-failure.json").write_text(json.dumps({
+            "stage": STAGE, "errorType": type(failure).__name__,
+            "locations": [{"file": Path(frame.filename).name, "line": frame.lineno,
+                           "function": frame.name}
+                          for frame in traceback.extract_tb(failure.__traceback__)]}, indent=2))
+        raise
     finally:
         if RESOURCE_SUPPORT is not None:
             signal.setitimer(signal.ITIMER_REAL, 0)
