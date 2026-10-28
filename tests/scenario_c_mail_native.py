@@ -273,7 +273,7 @@ def main():
     try:
         STAGE = "native-smtp-start"
         case_module.SmtpControlPermissions.setUpClass()
-        case = case_module.SmtpControlPermissions("test_real_canonical_protected_mail_can_apply_and_read_status")
+        case = case_module.SmtpControlPermissions("test_real_canonical_protected_setup_can_apply_and_read_status")
         case.setUp()
         STAGE = "remaining-native-actors"
         actors = remaining_actors(case, fixture_module)
