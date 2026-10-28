@@ -191,6 +191,8 @@ data:
   CONSULTANT_AVAILABILITY_REDIS_TTL_SECONDS: {{ .Values.userService.consultantAvailabilityRedisTtlSeconds | default 120 | quote }}
   MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: "always"
   MANAGEMENT_ENDPOINT_HEALTH_SHOW_COMPONENTS: "always"
+  MATRIX_GROUP_POLICY_ENABLED: {{ include "oriso.matrixGroupPolicy.enabled" . | quote }}
+  MATRIX_GROUP_PARTICIPATION_HISTORY_URL: "http://matrix-group-history:8801/oriso-internal/group-participation-history"
   MATRIX_API_URL: {{ .Values.matrix.matrixApiUrl }}
   MATRIX_SERVER_NAME: {{ .Values.matrix.matrixServerName }}
   MATRIX_ENCRYPTION_ENABLED: {{ .Values.userService.matrixEncryptionEnabled | default "true" | quote }}

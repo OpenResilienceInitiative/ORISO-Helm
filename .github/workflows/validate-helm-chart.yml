@@ -129,6 +129,13 @@ jobs:
           sys.exit(0 if result.wasSuccessful() and result.testsRun and not result.skipped else 1)
           EOF
 
+      - name: Run pinned native Synapse AVV contracts
+        # Actual native REST, applied-history, purge and privacy on both DBs.
+        # A missing Docker/runtime is a failure, never a green skipped proof.
+        run: |
+          python tests/synapse_group_policy_integration.py --database=sqlite
+          python tests/synapse_group_policy_integration.py --database=postgres
+
       - name: Run shell guardrails
         shell: bash
         run: |

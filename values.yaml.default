@@ -208,6 +208,14 @@ global:
 
 matrix:
   image: "matrixdotorg/synapse:v1.158.0"
+  # Enable only with the paired UserService v2 context consumer deployed.
+  # Provision a dedicated credential out of band; never put its value here.
+  groupPolicy:
+    enabled: false
+    existingSecret:
+      name: ""
+      tokenKey: "token"
+    tokenRevision: ""
   initImage: "busybox:1.38.0"
   replicas: 1
   postgresReplicas: 1

@@ -19,8 +19,9 @@ spec:
     metadata:
       labels:
         app: matrix-synapse
-      {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
       annotations:
+        checksum/group-policy: {{ include "oriso.matrixGroupPolicy.checksum" . | quote }}
+      {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
         {{- include "oriso.appMetrics.podAnnotations" (dict "job" "synapse" "port" 9000 "path" "/_synapse/metrics") | nindent 8 }}
       {{- end }}
     spec:
@@ -44,6 +45,10 @@ spec:
         image: {{ include "oriso.immutableImage" (list "matrix.image" .Values.matrix.image) | quote }}
         imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
         env:
+          {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
+          - name: PYTHONPATH
+            value: /opt/oriso-modules
+          {{- end }}
           - name: SYNAPSE_SERVER_NAME
             valueFrom:
               configMapKeyRef:
@@ -60,6 +65,11 @@ spec:
                 key: SYNAPSE_ENABLE_AUTHENTICATED_MEDIA
                 name: matrix-configmap-env       
         ports:
+          {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
+          - name: group-history
+            containerPort: 8801
+            protocol: TCP
+          {{- end }}
           - containerPort: 8008
             protocol: TCP
           - containerPort: 8009
@@ -91,12 +101,31 @@ spec:
             cpu: 250m
             memory: 512Mi
         volumeMounts:
+          {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
+          - name: group-policy-module
+            mountPath: /opt/oriso-modules
+            readOnly: true
+          - name: group-policy-token
+            mountPath: /run/oriso-group-policy
+            readOnly: true
+          {{- end }}
           - mountPath: /data
             name: synapse-data
           - mountPath: /data/homeserver.yaml
             name: homeserver-config
             subPath: homeserver.yaml
       volumes:
+        {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
+        - name: group-policy-module
+          configMap:
+            name: matrix-group-policy-module
+        - name: group-policy-token
+          secret:
+            secretName: {{ .Values.matrix.groupPolicy.existingSecret.name | quote }}
+            items:
+              - key: {{ .Values.matrix.groupPolicy.existingSecret.tokenKey | quote }}
+                path: token
+        {{- end }}
         - name: synapse-data
           persistentVolumeClaim:
             claimName: matrix-synapse-data
