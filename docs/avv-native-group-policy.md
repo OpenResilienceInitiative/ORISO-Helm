@@ -143,6 +143,7 @@ Run the chart contract, then the actual pinned runtime on both databases:
 
 ```sh
 python3 tests/render_matrix_group_policy_test.py
+python3 tests/synapse_group_policy_bootstrap_recovery.py
 python3 tests/synapse_group_policy_integration.py --database=sqlite
 python3 tests/synapse_group_policy_integration.py --database=postgres
 ```
@@ -155,6 +156,13 @@ purge, newcomer refusal, retry, ordinary ban, private listener/auth/schema limit
 verification failures, native deactivation and final cleanup. Retention/corruption
 probes deliberately alter only the disposable test database. It never accesses the
 live cluster or real credentials and closes all owned containers/network/volume.
+
+The bootstrap recovery regression runs the real module and Twisted inside the
+same pinned Synapse image, with an explicitly substituted database interaction
+boundary. It proves that a first schema failure returns unavailable, concurrent
+consumers share one retry after recovery, and verification and receipt cleanup
+resume without restart. Successful schema readiness remains cached. This probe
+is distinct from the real-database deactivation DELETE failure/recovery tests.
 
 For the behavioral baseline, `--without-module` deliberately fails: the protected
 native JOIN returns200 where the test requires403. This is the missing boundary,

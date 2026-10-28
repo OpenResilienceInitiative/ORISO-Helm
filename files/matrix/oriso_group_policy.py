@@ -17,6 +17,7 @@ from synapse.http.server import DirectServeJsonResource
 from synapse.module_api import NOT_SPAM, make_deferred_yieldable, run_in_background
 from synapse.storage.engines import PostgresEngine
 from synapse.types import RoomID, UserID
+from synapse.util.async_helpers import ObservableDeferred
 from twisted.internet import reactor
 from twisted.web.client import Agent
 from twisted.web.http_headers import Headers
@@ -77,12 +78,30 @@ def settings(config, policy=False):
 class AppliedHistory:
     def __init__(self, api):
         self.api = api
-        # The callback and private resource receive the same ModuleApi. Start
-        # DDL once: concurrent Postgres CREATE TABLE IF NOT EXISTS can still
-        # race in pg_type's unique index even when the final table is identical.
-        if api not in _INITIALIZATIONS:
-            _INITIALIZATIONS[api] = api.run_db_interaction('oriso_avv_history_schema', self._initialize)
-        self.ready = _INITIALIZATIONS[api]
+        self._readiness()
+
+    def _readiness(self):
+        # The callback and private resource share one DDL generation: concurrent
+        # Postgres CREATE TABLE IF NOT EXISTS can race in pg_type. Cache success,
+        # but a failed generation must not poison every future request/cleanup.
+        generation = _INITIALIZATIONS.get(self.api)
+        if generation is None:
+            generation = ObservableDeferred(self.api.run_db_interaction(
+                'oriso_avv_history_schema', self._initialize), consumeErrors=True)
+            _INITIALIZATIONS[self.api] = generation
+
+            def failed(failure):
+                # An old consumer must never invalidate a newer retry. A caller
+                # gets one attempt; only the next invocation retries the DDL.
+                if _INITIALIZATIONS.get(self.api) is generation:
+                    del _INITIALIZATIONS[self.api]
+                return None
+
+            generation.observe().addErrback(failed)
+        return generation
+
+    async def _ensure_ready(self):
+        await make_deferred_yieldable(self._readiness().observe())
 
     @staticmethod
     def _initialize(txn):
@@ -98,7 +117,7 @@ class AppliedHistory:
         if not valid_room(room) or not valid_actor(actor) or not self.api.is_mine(actor):
             raise unavailable()
         try:
-            await self.ready
+            await self._ensure_ready()
             return await self.api.run_db_interaction('oriso_avv_applied_join', self._read, room, actor)
         except Exception as failure:
             # SQL/schema/decoding details can contain identifiers; never expose them.
@@ -110,7 +129,7 @@ class AppliedHistory:
         if not valid_room(room) or not valid_actor(actor) or not self.api.is_mine(actor):
             raise unavailable()
         try:
-            await self.ready
+            await self._ensure_ready()
             return await self.api.run_db_interaction('oriso_avv_existing_join', self._positive, room, actor)
         except Exception:
             raise unavailable() from None
@@ -253,7 +272,7 @@ class AppliedHistory:
 
     async def snapshot(self, room):
         try:
-            await self.ready
+            await self._ensure_ready()
             await self.api.run_db_interaction('oriso_avv_snapshot_room', self._snapshot, room)
         except Exception:
             raise unavailable() from None
@@ -264,7 +283,7 @@ class AppliedHistory:
                            ON CONFLICT (room_id) DO UPDATE SET complete = -1''', (room,))
             txn.execute('DELETE FROM oriso_avv_join_receipts WHERE room_id = ?', (room,))
         try:
-            await self.ready
+            await self._ensure_ready()
             await self.api.run_db_interaction('oriso_avv_forget_room', remove)
         except Exception:
             raise unavailable() from None
@@ -276,14 +295,14 @@ class AppliedHistory:
             if scoped is None or scoped[0] == -1:
                 return
             self._save(txn, room, self._proofs(txn, room, actor))
-        await self.ready
+        await self._ensure_ready()
         await self.api.run_db_interaction('oriso_avv_record_join', save)
 
     async def forget_actor(self, actor):
         def remove(txn):
             txn.execute('DELETE FROM oriso_avv_join_receipts WHERE user_id = ?', (actor,))
         try:
-            await self.ready
+            await self._ensure_ready()
             await self.api.run_db_interaction('oriso_avv_forget_actor', remove)
         except Exception as failure:
             logger.warning('AVV receipt cleanup failed: category=actor type=%s', type(failure).__name__)
@@ -298,7 +317,7 @@ class AppliedHistory:
                                  AND u.deactivated = ?)
                         ''', (0,))
         try:
-            await self.ready
+            await self._ensure_ready()
             await self.api.run_db_interaction('oriso_avv_reconcile_receipts', remove)
         except Exception as failure:
             # Native deactivation is already committed and Synapse logs a
