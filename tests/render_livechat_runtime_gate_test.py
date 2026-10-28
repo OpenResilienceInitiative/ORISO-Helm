@@ -16,6 +16,7 @@ TEMPLATES = [
     "templates/_helpers.tpl",
     "templates/_scenario-c.tpl",
     "templates/_matrixrtcLifecycle.tpl",
+    "templates/_matrixGroupPolicy.tpl",
     "templates/userservice/userservice-configmap-env.yaml",
     "templates/userservice/userservice-deployment.yaml",
 ]
