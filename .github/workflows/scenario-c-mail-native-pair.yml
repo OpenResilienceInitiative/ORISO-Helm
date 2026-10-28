@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 30
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      USER_REF: 53fb25f6fa578fd6691973f3fe1320dc3c3abbe9
+      USER_REF: 6b37b3fe4de013c8b3f47196d2a3b571352add3c
       CTS_REF: e5cd83bec1f76996e0ec0dbb9f95742dd106cf6e
       KEYCLOAK_REF: bf3d7f8809d829e33e930115221b122be8e8c287
       SUPPORT_REF: a8f5eec02a6de4faaa36a709f0ce4b42e8926c80

@@ -1,0 +1,149 @@
+name: Scenario C current User session compatibility pair
+
+on:
+  push:
+    branches: [codex/367-p1-4-provisioner-20261021, dev]
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scenario-c-current-session-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  current-session-pair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [user, native, legacy]
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      GIT_CONFIG_NOSYSTEM: '1'
+      USER_REF: 6b37b3fe4de013c8b3f47196d2a3b571352add3c
+      KEYCLOAK_REF: bf3d7f8809d829e33e930115221b122be8e8c287
+      SUPPORT_REF: a1a1eb1ce51728e0ad60f7f07660f8c87b96815b
+      S1_ROLE: ${{ matrix.role }}
+      S1_EVIDENCE: ${{ runner.temp }}/scenario-c-current-session-${{ matrix.role }}
+    steps:
+      - name: Check out the exact orchestration source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: orchestrator
+          persist-credentials: false
+      - name: Check out the unchanged qualified Keycloak and session driver
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: OpenResilienceInitiative/ORISO-Keycloak
+          ref: ${{ env.KEYCLOAK_REF }}
+          path: host
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the current immutable User caller
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: OpenResilienceInitiative/ORISO-UserService
+          ref: ${{ env.USER_REF }}
+          path: subject
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the unchanged reviewed resource adapter
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: OpenResilienceInitiative/ORISO-TenantService
+          ref: ${{ env.SUPPORT_REF }}
+          path: support
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21.0.12+8.0.LTS'
+          cache: maven
+          cache-dependency-path: |
+            subject/pom.xml
+            subject/.mvn/wrapper/maven-wrapper.properties
+            host/keycloak-image/account-lifecycle-spi/pom.xml
+            host/keycloak-image/otp-config-spi/pom.xml
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.12.13
+      - name: Bind the orchestration and selected runtime sources
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, re, subprocess
+          from pathlib import Path
+          root = Path('orchestrator')
+          def git(path, *args):
+              return subprocess.check_output(['git', *args], cwd=path, text=True).strip()
+          ref = git(root, 'rev-parse', 'HEAD')
+          assert ref == os.environ['GITHUB_SHA']
+          assert os.environ['GITHUB_REPOSITORY'] == 'OpenResilienceInitiative/ORISO-Helm'
+          assert not git(root, 'status', '--porcelain')
+          refs = {'orchestrator': ref}
+          for path, key in [('host', 'KEYCLOAK_REF'), ('subject', 'USER_REF'), ('support', 'SUPPORT_REF')]:
+              expected = os.environ[key]
+              assert re.fullmatch('[0-9a-f]{40}', expected)
+              assert git(path, 'rev-parse', 'HEAD') == expected
+              assert not git(path, 'status', '--porcelain')
+              refs[path] = expected
+          files = git(root, 'ls-files', '-z').split('\0')
+          hashes = {name: hashlib.sha256(b'symlink\0' + os.readlink(root / name).encode()
+                    if (root / name).is_symlink() else (root / name).read_bytes()).hexdigest()
+                    for name in sorted(filter(None, files))}
+          evidence = Path(os.environ['S1_EVIDENCE'])
+          evidence.mkdir(parents=True, exist_ok=False)
+          (evidence / 'orchestration.json').write_text(json.dumps({
+              'runId': os.environ['GITHUB_RUN_ID'], 'role': os.environ['S1_ROLE'],
+              'refsBefore': refs, 'sourceBefore': hashes,
+              'workflow': '.github/workflows/scenario-c-session-user-native-pair.yml',
+              'meaning': 'Existing bounded S1 driver; classification is not full browser/mail acceptance'
+          }, sort_keys=True, indent=2) + '\n')
+          PY
+      - name: Verify the unchanged driver privacy and resource controls
+        run: |
+          python3 -m unittest discover -s host/scripts/tests -p test_session_exchange_proof.py -q
+          python3 -m unittest discover -s support/scripts/tests -q
+          python3 -m unittest discover -s subject/tests/ci -p test_module_boundaries.py -q
+      - name: Run the existing exact-source session and one-time-claim pair
+        run: |
+          python3 host/scripts/ci/session-exchange-proof.py "$S1_ROLE" \
+            --source host --source-ref "$KEYCLOAK_REF" \
+            --support support --support-ref "$SUPPORT_REF" \
+            --user subject --user-ref "$USER_REF" \
+            --evidence "$S1_EVIDENCE/driver"
+      - name: Verify orchestration source remained unchanged
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          root = Path('orchestrator')
+          path = Path(os.environ['S1_EVIDENCE']) / 'orchestration.json'
+          receipt = json.loads(path.read_text())
+          def git(*args):
+              return subprocess.check_output(['git', *args], cwd=root, text=True).strip()
+          files = git('ls-files', '-z').split('\0')
+          after = {name: hashlib.sha256(b'symlink\0' + os.readlink(root / name).encode()
+                   if (root / name).is_symlink() else (root / name).read_bytes()).hexdigest()
+                   for name in sorted(filter(None, files))}
+          receipt['sourceAfter'] = after
+          receipt['orchestratorRefAfter'] = git('rev-parse', 'HEAD')
+          receipt['sourceStable'] = (after == receipt['sourceBefore']
+              and receipt['orchestratorRefAfter'] == receipt['refsBefore']['orchestrator']
+              and not git('status', '--porcelain'))
+          path.write_text(json.dumps(receipt, sort_keys=True, indent=2) + '\n')
+          assert receipt['sourceStable']
+          PY
+      - name: Retain the bounded selected-source and orchestration receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: scenario-c-current-session-${{ matrix.role }}
+          path: ${{ env.S1_EVIDENCE }}
+          if-no-files-found: error
+          retention-days: 14
