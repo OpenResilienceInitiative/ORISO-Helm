@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Standalone, default-off preparation of scenario C native permissions.
+"""Default-off native preparation and explicit verified Scenario C activation.
 
-This is not chart/runtime wiring or approval of native lifecycle/SMTP gaps.
-No client secrets, tokens or user profile data are printed or persisted.
+Preparation keeps actors disabled. Activation separately checks loaded providers
+and actual issued tokens. No client secrets, tokens or user profile data are printed.
 """
 
 import argparse
