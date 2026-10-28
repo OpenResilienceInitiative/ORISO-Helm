@@ -235,8 +235,13 @@ def main() -> None:
     assert "apiKeySecret.name must name an existing Secret" in without_secrets.stderr
 
     # The shipped defaults keep the feature off; no environment overlay turns
-    # it on until the API key and webhook Secrets exist.
-    for overlay in ("values.yaml.default", "values-dev.yaml", "values-pre-dev.yaml"):
+    # it on until the API key Secret exists.
+    for overlay in (
+        "values.yaml.default",
+        "values-dev.yaml",
+        "values-pre-dev.yaml",
+        "values-prod.yaml",
+    ):
         values = (
             yaml.safe_load(pathlib.Path(CHART_DIR, overlay).read_text(encoding="utf-8"))
             or {}

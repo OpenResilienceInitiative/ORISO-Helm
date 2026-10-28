@@ -154,7 +154,7 @@ python3 files/signoz/signoz_observability.py --mode test-rule --rule unencrypted
 `--mode check` performs no writes. It fails on missing, obsolete, or disabled
 assets, panels removed from the grid, changed queries or group-by fields,
 unbounded grouping, protected fields, unresolved placeholders, a missing
-channel or route, and (without `--skip-telemetry`) failed queries, stale
+channel, and (without `--skip-telemetry`) failed queries, stale
 collector telemetry, or cross-environment telemetry.
 
 Rule slugs for `--mode test-rule`: `provisioning-compensation-failure`,
@@ -172,9 +172,9 @@ the query returned no series and nothing was sent, so pick a rule whose metric
 already has data (`collector-staleness` and `clickhouse-capacity` use collector
 metrics).
 
-It proves the rule shape, the channel name, and Slack delivery for that rule.
-Confirm one real managed-rule dispatch per environment out of band, for example
-on the first genuine incident, and note it in the release evidence.
+It validates the rule shape and configured channel, but does not prove Slack
+delivery. Confirm receipt of the test notification and one real managed-rule
+dispatch per environment out of band, and note both in the release evidence.
 
 ## Promotion
 

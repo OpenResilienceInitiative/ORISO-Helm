@@ -209,8 +209,12 @@ class ProvisionedCatalogCoversSpecificationTest(unittest.TestCase):
         self.assertLessEqual(spec_signals, provisioned)
 
     def test_every_urgent_specification_alert_is_provisioned(self):
+        specification_alerts = {
+            alert["id"] for alert in load_yaml("alerts.yaml")["alerts"]
+        }
         slugs = {item["slug"] for item in self.catalog["alerts"]}
         self.assertLessEqual(REQUIRED_ALERTS, SPEC_TO_CATALOG_ALERTS.keys())
+        self.assertLessEqual(SPEC_TO_CATALOG_ALERTS.keys(), specification_alerts)
         for spec_id, slug in SPEC_TO_CATALOG_ALERTS.items():
             self.assertIn(slug, slugs, spec_id)
 
