@@ -20,6 +20,7 @@ spec:
       # makes an opt-out replace Pods before they can keep sending pending copy.
       annotations:
         checksum/backend-service-clients: {{ include "oriso.backendServiceClientsChecksum" . | quote }}
+        checksum/group-policy: {{ include "oriso.matrixGroupPolicy.userServiceChecksum" . | quote }}
         checksum/media-lifecycle: {{ .Values.matrixrtcLifecycle | toJson | sha256sum | quote }}
         checksum/account-inactivity: {{ printf "%v/%v" (dig "accountInactivity" "enabled" false .Values.userService) (dig "accountInactivity" "dryRun" true .Values.userService) | sha256sum | quote }}
         oriso.org/email-allow-unreviewed-locales: {{ .Values.userService.emailAllowUnreviewedLocales | default false | quote }}
@@ -43,6 +44,23 @@ spec:
           image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            - name: MATRIX_GROUP_POLICY_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: MATRIX_GROUP_POLICY_ENABLED
+            - name: MATRIX_GROUP_PARTICIPATION_HISTORY_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: MATRIX_GROUP_PARTICIPATION_HISTORY_URL
+            {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
+            - name: MATRIX_GROUP_POLICY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.matrix.groupPolicy.existingSecret.name | quote }}
+                  key: {{ .Values.matrix.groupPolicy.existingSecret.tokenKey | quote }}
+            {{- end }}
             {{- include "oriso.springTelemetryEnv" (dict "root" $ "image" (include "oriso.immutableImage" (list "userService.image" .Values.userService.image))) | nindent 12 }}
             - name: TASK_IDENTITY_MODEL
               valueFrom:
