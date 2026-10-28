@@ -316,7 +316,7 @@ matrixrtcAuth:
   replicas: 1
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
   # Optional: namespace of the ingress controller for the call NetworkPolicies.
-  # Empty admits the controller pods from "ingress-nginx" or the release namespace.
+  # Empty means "ingress-nginx". The release namespace is always admitted as well.
   ingressControllerNamespace: ""
   bootstrap:
     enabled: true
