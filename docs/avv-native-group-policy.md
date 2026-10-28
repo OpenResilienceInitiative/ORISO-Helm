@@ -15,8 +15,8 @@ new participants require the serving organisation's permission to begin counsell
 
 The module only removes its AVV veto. Synapse still enforces ordinary authentication,
 invitation, ban and room permissions. Unknown/non-counselling rooms remain under
-their normal rules. A verifier failure is sanitized502, distinct from the explicit
-legal403. Existing exact-room participants can continue without asking a failed owner
+their normal rules. A verifier failure is sanitized 502, distinct from the explicit
+legal 403. Existing exact-room participants can continue without asking a failed owner
 service to re-authorize already begun work.
 
 ## Paired configuration
@@ -28,7 +28,7 @@ The credential must be separate from Matrix admin, end-user, media and RTC crede
 never put its value in Helm values, source, logs or the ticket. Change `tokenRevision`
 when rotating it so both processes restart with the same token.
 
-The supported process is exactly official Synapse1.158.0, one main replica. The chart
+The supported process is exactly official Synapse 1.158.0, one main replica. The chart
 rejects an enabled different version and the module checks the actual runtime version.
 The portable storage path is tested with SQLite (the inspected Dev configuration) and
 PostgreSQL. No database engine change or application Liquibase migration is introduced.
@@ -39,8 +39,8 @@ verification of actual image, configuration and network policy on the target clu
 `GroupPolicy` mounts through the module ConfigMap and `PYTHONPATH`.
 `HistoryResource` is an `additional_resources` resource of a separate HTTP listener on
 8801. It is never registered as a global web resource: Synapse attaches those to every
-listener. The public client listener returns404 for its path even with a valid token.
-The private ClusterIP Service has no Ingress; NetworkPolicy permits8801 only from
+listener. The public client listener returns 404 for its path even with a valid token.
+The private ClusterIP Service has no Ingress; NetworkPolicy permits 8801 only from
 UserService pods in the same namespace. Existing client/media/metrics ports retain
 their previous reachability. Render tests establish configuration; actual CNI
 enforcement remains a deployment acceptance check.
@@ -61,7 +61,7 @@ request has exactly `contractVersion:2`, `operation:"CONTEXT"`, `roomId`, and
 `matrixUserId`. Its response has exactly `contractVersion`, `roomId`, `matrixUserId`,
 `applicable`, `roomIds`, and `historyComplete`. The context is pure persisted
 UserService provenance, without legal/history HTTP calls or group-admission locks.
-The module accepts at most512 distinct canonical current/prior room IDs and64KiB;
+The module accepts at most 512 distinct canonical current/prior room IDs and 64 KiB;
 excess or malformed context fails safely instead of truncating history.
 
 The private history path is `/oriso-internal/group-participation-history`:
@@ -72,9 +72,9 @@ The private history path is `/oriso-internal/group-participation-history`:
 | Before recurring purge | v2, `SNAPSHOT_ROOM`, room | v2, same room, `complete:true` |
 | True final group deletion | v2, `FORGET_ROOM`, room | v2, same room, `complete:true` |
 
-Requests are limited to4096 bytes. Unknown fields, duplicate keys, invalid JSON,
+Requests are limited to 4096 bytes. Unknown fields, duplicate keys, invalid JSON,
 wrong versions and unsuitable identifiers are rejected. Missing/wrong credentials
-are401. Unusable storage or incomplete history coverage is502, never a made-up
+are 401. Unusable storage or incomplete history coverage is 502, never a made-up
 `NOT_COMMENCED`.
 
 ## Applied history, normal purge and privacy
@@ -84,7 +84,7 @@ forward, accepted, non-outlier, non-partial, non-soft-failed self-JOIN whose eve
 actually installed in `current_state_delta_stream`. The module cross-checks stored
 event data and only includes active local users. It does not cache negative decisions.
 
-The official1.158 storage source records applied current-state transitions. Its room
+The official 1.158 storage source records applied current-state transitions. Its room
 purge implementation explicitly does not clean the state-delta stream, but the actual
 event rows are removed by room purge. Therefore the companion stores positive receipts
 before the existing recurring-room purge, including participants who previously LEFT.
@@ -165,11 +165,11 @@ resume without restart. Successful schema readiness remains cached. This probe
 is distinct from the real-database deactivation DELETE failure/recovery tests.
 
 For the behavioral baseline, `--without-module` deliberately fails: the protected
-native JOIN returns200 where the test requires403. This is the missing boundary,
+native JOIN returns 200 where the test requires 403. This is the missing boundary,
 not evidence that the configured candidate works on Dev. The normal CI step runs
 both candidate database modes; it cannot turn a missing Docker into a skipped pass.
 
-Primary implementation references (pinned1.158 source):
+Primary implementation references (pinned 1.158 source):
 
 - [Module API and supported callback registration](https://github.com/element-hq/synapse/blob/v1.158.0/synapse/module_api/__init__.py)
 - [Native join callback semantics](https://github.com/element-hq/synapse/blob/v1.158.0/synapse/module_api/callbacks/spamchecker_callbacks.py)

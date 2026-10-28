@@ -20,7 +20,7 @@ spec:
       labels:
         app: matrix-synapse
       annotations:
-        checksum/group-policy: {{ include "oriso.matrixGroupPolicy.checksum" . | quote }}
+        checksum/group-policy: {{ include "oriso.matrixGroupPolicy.synapseChecksum" . | quote }}
       {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
         {{- include "oriso.appMetrics.podAnnotations" (dict "job" "synapse" "port" 9000 "path" "/_synapse/metrics") | nindent 8 }}
       {{- end }}

@@ -5,10 +5,12 @@ import yaml
 from render_public_entry_rate_limit_test import CHART_DIR, VALUES
 
 
-def render(*args, success=True):
+def render(*args, success=True, error=None):
     result = subprocess.run(['helm', 'template', 'avv-policy', CHART_DIR, *VALUES, *args],
                             capture_output=True, text=True)
     assert (result.returncode == 0) == success, result.stderr
+    if error:
+        assert error in result.stderr, result.stderr
     return [item for item in yaml.safe_load_all(result.stdout) if item] if success else []
 
 
@@ -56,13 +58,41 @@ def main():
         for rule in obj['spec'].get('rules', []):
             for path in rule.get('http', {}).get('paths', []):
                 assert path['backend']['service']['name'] != 'matrix-group-history'
-    assert synapse['metadata']['annotations']['checksum/group-policy'] != find(
-        baseline, 'Deployment', 'matrix-synapse')['spec']['template']['metadata']['annotations'].get('checksum/group-policy')
-    render('--set', 'matrix.groupPolicy.enabled=true', success=False)
-    render(*enabled, '--set', 'matrix.groupPolicy.enabled="true"', success=False)
-    render(*enabled, '--set', 'matrix.groupPolicy.existingSecret.name=matrix-secrets', success=False)
-    render(*enabled, '--set', 'matrix.image=matrixdotorg/synapse:v1.157.0', success=False)
-    render(*enabled, '--set', 'matrix.replicas=2', success=False)
+    baseline_synapse_checksum = find(
+        baseline, 'Deployment', 'matrix-synapse')['spec']['template']['metadata']['annotations']['checksum/group-policy']
+    baseline_user_checksum = find(
+        baseline, 'Deployment', 'userservice')['spec']['template']['metadata']['annotations']['checksum/group-policy']
+    assert baseline_synapse_checksum == 'disabled'
+    assert baseline_user_checksum == 'disabled'
+    assert synapse['metadata']['annotations']['checksum/group-policy'] != baseline_synapse_checksum
+    assert user['metadata']['annotations']['checksum/group-policy'] != baseline_user_checksum
+    render('--set', 'matrix.groupPolicy.enabled=true', success=False,
+           error='matrix.groupPolicy.existingSecret.name is required')
+    render(*enabled, '--set', 'matrix.groupPolicy.enabled="true"', success=False,
+           error='matrix.groupPolicy.enabled must be a boolean')
+    reserved_secrets = [
+        'matrix-secrets', 'userservice-secret', 'keycloak-secret', 'redis-secret',
+        'keycloak-backend-client-secrets', 'matrixrtc-auth-secrets',
+    ]
+    for secret_name in reserved_secrets:
+        render(*enabled, '--set', f'matrix.groupPolicy.existingSecret.name={secret_name}',
+               success=False, error='AVV group policy requires a separate dedicated Secret resource')
+    render(*enabled,
+           '--set', 'userService.identitySuggestions.matrixAdminTokenSecret.name=matrix-admin-token',
+           '--set', 'matrix.groupPolicy.existingSecret.name=matrix-admin-token',
+           success=False, error='AVV group policy requires a separate dedicated Secret resource')
+    render(*enabled,
+           '--set', 'mediaScanner.requestSecret.existingSecret=media-request-secret',
+           '--set', 'matrix.groupPolicy.existingSecret.name=media-request-secret',
+           success=False, error='AVV group policy requires a separate dedicated Secret resource')
+    render(*enabled,
+           '--set', 'mediaScanner.aiCheck.existingSecret=media-ai-secret',
+           '--set', 'matrix.groupPolicy.existingSecret.name=media-ai-secret',
+           success=False, error='AVV group policy requires a separate dedicated Secret resource')
+    render(*enabled, '--set', 'matrix.image=matrixdotorg/synapse:v1.157.0', success=False,
+           error='AVV group policy requires the reviewed Synapse 1.158.0 image')
+    render(*enabled, '--set', 'matrix.replicas=2', success=False,
+           error='AVV group policy currently supports one Synapse main process')
     print('PASS: opt-in pair, dedicated credential, private listener/routing, invalid-config rejection')
 
 

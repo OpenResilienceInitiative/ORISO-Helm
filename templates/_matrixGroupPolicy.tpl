@@ -14,11 +14,14 @@
 {{- $secret := required "matrix.groupPolicy.existingSecret.name is required" $cfg.existingSecret.name -}}
 {{- $_ := required "matrix.groupPolicy.existingSecret.tokenKey is required" $cfg.existingSecret.tokenKey -}}
 {{- $_ := required "matrix.groupPolicy.tokenRevision is required; change on rotation" $cfg.tokenRevision -}}
-{{- if has $secret (list "matrix-secrets" "userservice-secret" "keycloak-secret" .Values.matrixrtcAuth.existingSecret.name .Values.matrixrtcLifecycle.existingSecret.name) -}}
+{{- $identitySuggestions := .Values.userService.identitySuggestions | default dict -}}
+{{- $mediaScanner := .Values.mediaScanner | default dict -}}
+{{- $reserved := list "matrix-secrets" "userservice-secret" "keycloak-secret" "redis-secret" "keycloak-backend-client-secrets" (dig "existingSecret" "name" "" (.Values.matrixrtcAuth | default dict)) (dig "existingSecret" "name" "" (.Values.matrixrtcLifecycle | default dict)) (dig "matrixAdminTokenSecret" "name" "" $identitySuggestions) (dig "requestSecret" "existingSecret" "" $mediaScanner) (dig "aiCheck" "existingSecret" "" $mediaScanner) -}}
+{{- if has $secret $reserved -}}
 {{- fail "AVV group policy requires a separate dedicated Secret resource" -}}
 {{- end -}}
 {{- if not (regexMatch "^(docker.io/)?matrixdotorg/synapse:v1\\.158\\.0(@sha256:[a-f0-9]{64})?$" .Values.matrix.image) -}}
-{{- fail "AVV group policy requires the reviewed Synapse1.158.0 image" -}}
+{{- fail "AVV group policy requires the reviewed Synapse 1.158.0 image" -}}
 {{- end -}}
 {{- if ne (int .Values.matrix.replicas) 1 -}}
 {{- fail "AVV group policy currently supports one Synapse main process" -}}
@@ -26,6 +29,18 @@
 {{- end -}}
 {{- end -}}
 
-{{- define "oriso.matrixGroupPolicy.checksum" -}}
+{{- define "oriso.matrixGroupPolicy.synapseChecksum" -}}
+{{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" -}}
 {{- printf "%s/%s" (.Values.matrix.groupPolicy | toJson) (.Files.Get "files/matrix/oriso_group_policy.py") | sha256sum -}}
+{{- else -}}
+disabled
+{{- end -}}
+{{- end -}}
+
+{{- define "oriso.matrixGroupPolicy.userServiceChecksum" -}}
+{{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" -}}
+{{- .Values.matrix.groupPolicy | toJson | sha256sum -}}
+{{- else -}}
+disabled
+{{- end -}}
 {{- end -}}
