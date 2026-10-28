@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Render contract: the call token gateway admits the ingress controller wherever it runs.
+"""Render contract: the call token gateway admits the ingress controller from its own or the release namespace.
 
 The controller's namespace differs between clusters (Dev: its own namespace, Staging: the
 release namespace). A fixed namespace in the NetworkPolicy dropped every /livekit/jwt request
-on Staging, so calls failed with "Call service unavailable (504)". By default the policy must
-match the controller pods by their labels in any namespace; a namespace stays an optional
-narrowing for clusters that want it.
+on Staging, so calls failed with "Call service unavailable (504)". By default the policy admits
+the controller pods from either namespace, never any namespace; a single namespace stays an
+optional narrowing.
 """
 import os
 import sys
@@ -30,10 +30,17 @@ def controller_peers(policy):
 
 
 class MatrixrtcIngressControllerPeerTest(unittest.TestCase):
-    def assert_any_namespace(self, policy):
+    def assert_default_namespaces(self, policy):
         peers = controller_peers(policy)
         self.assertEqual(len(peers), 1, peers)
-        self.assertEqual(peers[0]["namespaceSelector"], {})
+        self.assertEqual(
+            peers[0]["namespaceSelector"],
+            {"matchExpressions": [{
+                "key": "kubernetes.io/metadata.name",
+                "operator": "In",
+                "values": ["ingress-nginx", "media-test"],
+            }]},
+        )
 
     def assert_namespace(self, policy, namespace):
         peers = controller_peers(policy)
@@ -43,10 +50,10 @@ class MatrixrtcIngressControllerPeerTest(unittest.TestCase):
             {"matchLabels": {"kubernetes.io/metadata.name": namespace}},
         )
 
-    def test_default_matches_controller_in_any_namespace(self):
+    def test_default_admits_controller_namespace_and_release_namespace(self):
         docs = render(ENABLED)
-        self.assert_any_namespace(find(docs, "NetworkPolicy", "matrixrtc-auth-policy-gateway"))
-        self.assert_any_namespace(find(docs, "NetworkPolicy", "matrixrtc-lifecycle-livekit"))
+        self.assert_default_namespaces(find(docs, "NetworkPolicy", "matrixrtc-auth-policy-gateway"))
+        self.assert_default_namespaces(find(docs, "NetworkPolicy", "matrixrtc-lifecycle-livekit"))
 
     def test_explicit_namespace_still_narrows(self):
         docs = render({**ENABLED, "matrixrtcAuth.ingressControllerNamespace": "edge"})

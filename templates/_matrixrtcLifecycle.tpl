@@ -49,9 +49,9 @@
 {{- end -}}
 
 {{/*
-Peer for the ingress controller in the call NetworkPolicies. Its namespace differs per cluster,
-so by default the controller pods are matched by label in any namespace; set
-matrixrtcAuth.ingressControllerNamespace to narrow it to one namespace.
+Peer for the ingress controller in the call NetworkPolicies. Its namespace differs per cluster
+(its own namespace, or the release namespace), so by default both are admitted; only the
+controller pods, never a whole namespace. matrixrtcAuth.ingressControllerNamespace narrows it to one.
 */}}
 {{- define "oriso.matrixrtc.ingressControllerPeer" -}}
 {{- $namespace := (.Values.matrixrtcAuth | default dict).ingressControllerNamespace -}}
@@ -59,7 +59,11 @@ matrixrtcAuth.ingressControllerNamespace to narrow it to one namespace.
 {{- if $namespace }}
     matchLabels:
       kubernetes.io/metadata.name: {{ $namespace | quote }}
-{{- else }} {}
+{{- else }}
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: {{ list "ingress-nginx" .Release.Namespace | uniq | toJson }}
 {{- end }}
   podSelector:
     matchLabels:
