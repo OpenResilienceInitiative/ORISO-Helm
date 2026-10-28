@@ -18,7 +18,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "files/keycloak-reconcile-smtp.py
 KEY = bytes(range(32))
 AUDIENCES = ["tenantservice", "agencyservice", "consultingtypeservice", "userservice",
              "oriso-task-commands"]
-ROLES = ["smtp-sync", "system-email-delivery", "notification-dispatch", "notifications-technical"]
+ROLES = ["config-wizard", "invitation-reservations", "consultant-import", "smtp-sync"]
 
 
 def encoded(value):
@@ -66,8 +66,8 @@ class ScenarioCTransportTest(unittest.TestCase):
                 raw = self.rfile.read(int(self.headers["Content-Length"]))
                 if self.path == "/auth/realms/example/protocol/openid-connect/token":
                     form = parse_qs(raw.decode())
-                    if form != {"grant_type": ["client_credentials"], "client_id": ["backend-mail"],
-                                "client_secret": ["synthetic-mail-client-secret"]}:
+                    if form != {"grant_type": ["client_credentials"], "client_id": ["backend-setup"],
+                                "client_secret": ["synthetic-setup-client-secret"]}:
                         return self.reply(403)
                     return self.reply(200, {"access_token": owner.token})
                 if self.path == "/cts/settingsadmin/smtp-sync-acknowledgement" and self.authenticated():
@@ -103,8 +103,8 @@ class ScenarioCTransportTest(unittest.TestCase):
                     valid = (hmac.compare_digest(signature, expected)
                              and claims["aud"] == "oriso-smtp-control"
                              and claims["target"] == "actual-internal-realm-id"
-                             and claims["taskClient"] == "backend-mail"
-                             and claims["taskSubject"] == "actual-mail-subject"
+                             and claims["taskClient"] == "backend-setup"
+                             and claims["taskSubject"] == "actual-setup-subject"
                              and claims["payloadDigest"] == digest)
                 except Exception:
                     valid = False
@@ -131,9 +131,9 @@ class ScenarioCTransportTest(unittest.TestCase):
             "TASK_IDENTITY_ISSUER": self.issuer,
             "KEYCLOAK_REALM_INTERNAL_ID": "actual-internal-realm-id",
             "CONSULTING_TYPE_SERVICE_URL": self.base + "/cts",
-            "IDENTITY_MAIL_CLIENT_ID": "backend-mail",
-            "IDENTITY_MAIL_CLIENT_SECRET": "synthetic-mail-client-secret",
-            "IDENTITY_MAIL_SERVICE_SUBJECT": "actual-mail-subject",
+            "IDENTITY_SETUP_CLIENT_ID": "backend-setup",
+            "IDENTITY_SETUP_CLIENT_SECRET": "synthetic-setup-client-secret",
+            "IDENTITY_SETUP_SERVICE_SUBJECT": "actual-setup-subject",
             "ORISO_TASK_CONTEXT_KEY": base64.b64encode(KEY).decode(),
         }
         for name in ("TECHNICAL_CLIENT_ID", "TECHNICAL_CLIENT_SECRET", "TECHNICAL_SERVICE_SUBJECT",
@@ -146,14 +146,14 @@ class ScenarioCTransportTest(unittest.TestCase):
         self.thread.join(2)
 
     def run_transport(self):
-        claims = {"iss": self.issuer, "azp": "backend-mail",
-                  "sub": "actual-mail-subject", "exp": int(time.time()) + 300,
+        claims = {"iss": self.issuer, "azp": "backend-setup",
+                  "sub": "actual-setup-subject", "exp": int(time.time()) + 300,
                   "aud": self.audiences, "realm_access": {"roles": self.roles}}
         self.token = "e30." + encoded(json.dumps(claims).encode()) + ".synthetic-signature"
         return subprocess.run([sys.executable, str(SCRIPT)], env=self.env, capture_output=True,
                               text=True, timeout=15)
 
-    def test_one_mail_credential_reads_saved_snapshot_applies_bounded_command_and_acks_exact_revision(self):
+    def test_one_setup_credential_reads_saved_snapshot_applies_bounded_command_and_acks_exact_revision(self):
         result = self.run_transport()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual([{"revision": 7, "status": "APPLIED"}], self.acks)
@@ -222,7 +222,7 @@ class ScenarioCTransportTest(unittest.TestCase):
                 self.env = dict(original)
                 self.env[name] = value
                 if name == "ORISO_TASK_CONTEXT_KEY" and value == cases[-1][1]:
-                    self.env["IDENTITY_MAIL_CLIENT_SECRET"] = "same-synthetic-secret-with-32-bytes"
+                    self.env["IDENTITY_SETUP_CLIENT_SECRET"] = "same-synthetic-secret-with-32-bytes"
                 self.requests.clear()
                 result = self.run_transport()
                 self.assertEqual(2, result.returncode)

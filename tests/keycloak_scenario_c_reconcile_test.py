@@ -151,7 +151,7 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             # mapper mismatches. Never retain native bodies, tokens or secrets.
             literals = {
                 node.args[0].value
-                for node in ast.walk(ast.parse(SCRIPT.read_text()))
+                for node in ast.walk(ast.parse((ROOT / "files/scenario_c_reconcile.py").read_text()))
                 if isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
                 and node.func.id == "ReconcileError"

@@ -238,3 +238,49 @@ contents of an external ConfigMap or prove that every service runs the matching
 image. Before cutover, verify the configured caller graph and the native
 receivers together on the final source revisions. Rendering this chart alone
 does not satisfy that gate.
+
+## Current SMTP credential contract
+
+SMTP_SYNC, smtp-sync and the oriso-task-commands bearer audience belong to SETUP.
+MAIL keeps SYSTEM_EMAIL_DELIVERY and NOTIFICATION_DISPATCH; its roles are exactly
+system-email-delivery, notification-dispatch and notifications-technical and its
+four audiences are tenantservice, agencyservice, consultingtypeservice and userservice.
+The SMTP helper receives only the SETUP secret plus the sole ORISO_TASK_CONTEXT_KEY.
+MAIL with a valid common-key command proof is still refused by the native receiver.
+UserService holds all five actor credentials: this is credential separation and
+makes no process-isolation guarantee for a compromised UserService process.
+
+
+## Explicit receiver activation (default off)
+
+Prepare the isolated realm with the existing reconciler's `--receivers-only`
+mode. Keep all five clients disabled while installing the three same-source
+provider JARs and the reviewed ordinary/protected policy and actor bindings.
+Record the actual build fingerprints for account-lifecycle, OTP and SMTP; these
+inputs are compared with the running factories, not accepted as runtime evidence.
+
+The opt-in chart path is `global.taskIdentities.activation.enabled: true` with
+`confirmIsolatedRealm: true`, an existing short-lived installer-token Secret,
+reviewed mapping ConfigMap, and the exact three `providerJarSha256` values.
+The Job invokes the packaged `keycloak-activate-scenario-c.py`; it uses the same
+five actor secrets, subjects, sole context key and policy references as UserService.
+The standalone equivalent is the existing reconciler with `--apply`,
+`--confirm-isolated-realm`, `--activate-receivers` and `--activation-bindings`.
+Neither mode retires legacy clients or consumers.
+
+Activation checks native groups, roles, client ownership and subjects before it
+enables only the managed set. It then issues all five real tokens, checks exact
+claims and native Admin denial, requests the fixed authenticated installation
+status from the loaded lifecycle provider, and verifies SETUP SMTP access plus
+MAIL refusal with a valid shared-key proof. Loaded policy/binding/JAR hashes and
+these behavior probes are separate checks. An unavailable or mismatching probe
+disables owned staged clients. On repeat, detected native drift also disables
+only clients whose prior receipt and current subject still prove ownership.
+Foreign clients remain untouched and cause refusal. Repeated success changes no
+mapping or secret. An unsuccessful disable readback is explicitly reported.
+
+The native fixture `tests/scenario_c_activation_native.py --keycloak <owned-source>`
+mounts the three locally packaged JARs into the pinned stock image (no image
+build), runs the chart entry point, and verifies repeat, drift shutdown and
+recovery. Final caller/receiver and installed-image evidence must still be pinned
+to the common source tuple before any authorized environment cutover.

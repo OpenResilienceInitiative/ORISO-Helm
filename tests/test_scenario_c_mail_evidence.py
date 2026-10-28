@@ -1,4 +1,4 @@
-"""A native MAIL receipt needs the actual four unique cases, not only XML totals."""
+"""A native MAIL receipt needs the actual five unique cases, not only XML totals."""
 
 import importlib.util
 from pathlib import Path
@@ -12,7 +12,7 @@ SCRIPT = Path(__file__).with_name("scenario_c_mail_native.py")
 spec = importlib.util.spec_from_file_location("mail_native_evidence", SCRIPT)
 native = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(native)
-BROKER = "realNativeFiveAudienceMailIsAcceptedByTheActualBroker(TaskPurpose)"
+BROKER = "realNativeCanonicalPurposeIsAcceptedByTheActualBroker(TaskPurpose)"
 JOINED = "sameNativeBrokerBearerReadsRealSavedCtsAppliesSmtpAndAcknowledgesExactRevision"
 
 
@@ -60,8 +60,8 @@ class MailEvidenceTest(unittest.TestCase):
             self.readback([(401, {}), (200, {"access_token": "fresh-fixture-token"}), (401, {})])
 
     def report(self, change=None):
-        root = ET.Element("testsuite", tests="4", failures="0", errors="0", skipped="0")
-        for name in [BROKER + "[1]", BROKER + "[2]", BROKER + "[3]", JOINED]:
+        root = ET.Element("testsuite", tests="5", failures="0", errors="0", skipped="0")
+        for name in [BROKER + "[1]", BROKER + "[2]", BROKER + "[3]", JOINED, "realDeliveryBearerCannotApplySmtpEvenWithValidSharedKeyProof"]:
             ET.SubElement(root, "testcase", classname="de.caritas.cob.userservice.api.config.auth.RealMailActorNativeGate", name=name)
         if change:
             change(root)
@@ -77,8 +77,8 @@ class MailEvidenceTest(unittest.TestCase):
             evidence.mkdir()
             return native.strict_report(user, 0, evidence)
 
-    def test_all_four_unique_real_cases_are_required(self):
-        self.assertEqual({"tests": 4, "failures": 0, "errors": 0, "skipped": 0}, self.check(self.report()))
+    def test_all_five_unique_real_cases_are_required(self):
+        self.assertEqual({"tests": 5, "failures": 0, "errors": 0, "skipped": 0}, self.check(self.report()))
 
     def test_a_missing_case_cannot_hide_behind_the_summary(self):
         value = self.report()

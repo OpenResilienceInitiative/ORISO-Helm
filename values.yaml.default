@@ -21,6 +21,14 @@ global:
     # the native receiver share this reference so profile selectors cannot drift.
     # This must reference a different JSON key from the protected policy.
     accountMaintenanceConfigMapRef: {}
+    # A separate explicit installer step, after disabled preparation and provider rollout.
+    # Existing credentials are verified, never rotated. Legacy consumers are preserved.
+    activation:
+      enabled: false
+      confirmIsolatedRealm: false
+      installerTokenSecretRef: {}
+      mappingConfigMapRef: {}
+      providerJarSha256: {}
 
   # Kubernetes service DNS suffix, supplied by the cluster operator.
   clusterDomain: "cluster.local"

@@ -674,12 +674,13 @@ class HttpReconciliationTest(unittest.TestCase):
         self.assertEqual(0, first.returncode, first.stderr)
         expected = {
             "backend-setup": (
-                {"config-wizard", "invitation-reservations", "consultant-import"},
+                {"config-wizard", "invitation-reservations", "consultant-import", "smtp-sync"},
                 {
                     "tenantservice",
                     "agencyservice",
                     "consultingtypeservice",
                     "userservice",
+                    "oriso-task-commands",
                 },
             ),
             "backend-account-create": (
@@ -697,7 +698,6 @@ class HttpReconciliationTest(unittest.TestCase):
             ),
             "backend-mail": (
                 {
-                    "smtp-sync",
                     "system-email-delivery",
                     "notification-dispatch",
                     "notifications-technical",
@@ -707,7 +707,6 @@ class HttpReconciliationTest(unittest.TestCase):
                     "agencyservice",
                     "consultingtypeservice",
                     "userservice",
-                    "oriso-task-commands",
                 },
             ),
             "backend-runtime": (
@@ -1010,7 +1009,7 @@ class RegistryContractTest(unittest.TestCase):
         )
         self.assertEqual("SETUP", report["purposes"]["CONSULTANT_IMPORT"])
         self.assertEqual("ACCOUNT_ADMIN", report["purposes"]["OTP"])
-        self.assertEqual("MAIL", report["purposes"]["SMTP_SYNC"])
+        self.assertEqual("SETUP", report["purposes"]["SMTP_SYNC"])
         self.assertEqual("RUNTIME", report["purposes"]["APPOINTMENT_CLEANUP"])
         self.assertFalse(report["runtime_cutover"])
 

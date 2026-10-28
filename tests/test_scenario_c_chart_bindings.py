@@ -12,7 +12,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 ACTORS = ("SETUP", "ACCOUNT_CREATE", "ACCOUNT_ADMIN", "MAIL", "RUNTIME")
 AUDIENCES = {
-    "SETUP": {"tenantservice", "agencyservice", "consultingtypeservice", "userservice"},
+    "SETUP": {"tenantservice", "agencyservice", "consultingtypeservice", "userservice", "oriso-task-commands"},
     "ACCOUNT_CREATE": {"userservice", "oriso-account-lifecycle"},
     "ACCOUNT_ADMIN": {"userservice", "oriso-account-lifecycle", "oriso-otp"},
     "MAIL": {
@@ -20,7 +20,6 @@ AUDIENCES = {
         "agencyservice",
         "consultingtypeservice",
         "userservice",
-        "oriso-task-commands",
     },
     "RUNTIME": {"tenantservice", "agencyservice", "appointmentservice"},
 }

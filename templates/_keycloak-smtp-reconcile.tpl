@@ -1,7 +1,7 @@
 {{- /* Must match the smtp-sync client in charts/keycloak/keycloak-resources/realm.json. */ -}}
 {{- define "oriso.smtpSyncClientId" -}}smtp-sync{{- end -}}
 
-{{- /* Short-lived SMTP sync pod. C uses the sole MAIL actor and bounded resource;
+{{- /* Short-lived SMTP sync pod. C uses the sole SETUP actor and bounded resource;
 the default legacy path keeps its established credentials. */ -}}
 {{- define "oriso.keycloakSmtpReconcilePod" -}}
 {{- include "oriso.scenarioC.validate" . -}}
@@ -57,15 +57,15 @@ containers:
         value: {{ printf "%s/realms/%s" (trimSuffix "/" .Values.global.keycloak.authServerUrl) .Values.global.keycloak.realm | quote }}
       - name: KEYCLOAK_REALM_INTERNAL_ID
         value: {{ .Values.global.taskIdentities.realmId | quote }}
-      - name: IDENTITY_MAIL_CLIENT_ID
-        value: {{ .Values.global.taskIdentities.actors.MAIL.clientId | quote }}
-      - name: IDENTITY_MAIL_SERVICE_SUBJECT
-        value: {{ .Values.global.taskIdentities.actors.MAIL.serviceSubject | quote }}
-      - name: IDENTITY_MAIL_CLIENT_SECRET
+      - name: IDENTITY_SETUP_CLIENT_ID
+        value: {{ .Values.global.taskIdentities.actors.SETUP.clientId | quote }}
+      - name: IDENTITY_SETUP_SERVICE_SUBJECT
+        value: {{ .Values.global.taskIdentities.actors.SETUP.serviceSubject | quote }}
+      - name: IDENTITY_SETUP_CLIENT_SECRET
         valueFrom:
           secretKeyRef:
-            name: {{ .Values.global.taskIdentities.actors.MAIL.secretRef.name | quote }}
-            key: {{ .Values.global.taskIdentities.actors.MAIL.secretRef.key | quote }}
+            name: {{ .Values.global.taskIdentities.actors.SETUP.secretRef.name | quote }}
+            key: {{ .Values.global.taskIdentities.actors.SETUP.secretRef.key | quote }}
       - name: ORISO_TASK_CONTEXT_KEY
         valueFrom:
           secretKeyRef:

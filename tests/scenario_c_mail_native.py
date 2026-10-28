@@ -28,7 +28,8 @@ MEMORY_LEASE = None
 MONGO_IMAGE = "mongo@sha256:d341a86584b96eb665345a8f5b35fba8695ee1d0618fd012ec4696223a3d6c62"
 EXPECTED_CASES = frozenset([
     "sameNativeBrokerBearerReadsRealSavedCtsAppliesSmtpAndAcknowledgesExactRevision",
-    *["realNativeFiveAudienceMailIsAcceptedByTheActualBroker(TaskPurpose)[" + str(i) + "]"
+    "realDeliveryBearerCannotApplySmtpEvenWithValidSharedKeyProof",
+    *["realNativeCanonicalPurposeIsAcceptedByTheActualBroker(TaskPurpose)[" + str(i) + "]"
       for i in range(1, 4)],
 ])
 
@@ -110,12 +111,12 @@ def strict_report(user, started, evidence):
     report = XML.parse(reports[0]).getroot()
     counts = {k: int(report.get(k, "0")) for k in ("tests", "failures", "errors", "skipped")}
     rows = list(report.iter("testcase"))
-    if (counts != {"tests": 4, "failures": 0, "errors": 0, "skipped": 0}
-            or len(rows) != 4 or {row.get("name") for row in rows} != EXPECTED_CASES
+    if (counts != {"tests": 5, "failures": 0, "errors": 0, "skipped": 0}
+            or len(rows) != 5 or {row.get("name") for row in rows} != EXPECTED_CASES
             or any(row.get("classname") != "de.caritas.cob.userservice.api.config.auth.RealMailActorNativeGate"
                    or any(row.find(marker) is not None for marker in ("failure", "error", "skipped"))
                    for row in rows)):
-        raise RuntimeError("Native MAIL must execute all four real cases without skips")
+        raise RuntimeError("Native MAIL must execute all five real cases without skips")
     archive = evidence / "native-xml"
     archive.mkdir(exist_ok=False)
     shutil.copy2(reports[0], archive / reports[0].name)
@@ -147,7 +148,7 @@ def read_smtp_state(case):
 
 
 def remaining_actors(case, fixture_module):
-    """Installer fixture only: create the other four actors beside canonical protected MAIL."""
+    """Installer fixture only: create the other four actors beside canonical protected SETUP."""
     actors = []
     baseline = case.admin("GET", "/clients")
     native = [client for client in baseline if client["clientId"] == "admin-permissions"]
@@ -157,13 +158,13 @@ def remaining_actors(case, fixture_module):
             or native[0].get("fullScopeAllowed") is not False):
         raise RuntimeError("Measured native FGAP control client is required")
     if {client["clientId"] for client in baseline if client.get("serviceAccountsEnabled")} != {
-            "admin-permissions", "backend-mail"}:
+            "admin-permissions", "backend-setup"}:
         raise RuntimeError("Unexpected service client existed before fixture actor creation")
     basics = case.admin("GET", "/client-scopes")
     basic = next(scope for scope in basics if scope["name"] == "basic")
     existing_roles = {role["name"] for role in case.admin("GET", "/roles")}
     for key, client_id, roles, audiences in fixture_module.ACTORS:
-        if key == "MAIL":
+        if key == "SETUP":
             client = case.admin("GET", "/clients/" + case.client)
             client["protocolMappers"] = [m for m in client["protocolMappers"]
                                           if m["protocolMapper"] != "oidc-audience-mapper"]
@@ -324,8 +325,8 @@ def main():
                 "TASK_IDENTITY_ISSUER": data["issuer"],
                 "KEYCLOAK_REALM_INTERNAL_ID": realm["id"],
                 "CONSULTING_TYPE_SERVICE_URL": ready.read_text(),
-                "IDENTITY_MAIL_CLIENT_ID": "backend-mail", "IDENTITY_MAIL_CLIENT_SECRET": case_module.SECRET,
-                "IDENTITY_MAIL_SERVICE_SUBJECT": case_module.SUBJECT,
+                "IDENTITY_SETUP_CLIENT_ID": "backend-setup", "IDENTITY_SETUP_CLIENT_SECRET": case_module.SECRET,
+                "IDENTITY_SETUP_SERVICE_SUBJECT": case_module.SUBJECT,
                 "ORISO_TASK_CONTEXT_KEY": base64.b64encode(case_module.KEY).decode()}
             fixture.write_text(json.dumps(data))
             environment.update({"ORISO_TASK_TOKEN_FIXTURE": str(fixture), "ORISO_NATIVE_PYTHON": sys.executable,
@@ -417,7 +418,7 @@ def main():
             os.environ.pop("SMTP_CONTROL_TEST_JAR", None)
         else:
             os.environ["SMTP_CONTROL_TEST_JAR"] = old_jar
-    print("NATIVE_MAIL_4_CASES_PASSED")
+    print("NATIVE_MAIL_5_CASES_PASSED")
 
 
 if __name__ == "__main__":

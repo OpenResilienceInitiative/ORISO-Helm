@@ -8,18 +8,21 @@
       "purposes": [
         "CONFIG_WIZARD",
         "INVITE_RESERVATIONS",
-        "CONSULTANT_IMPORT"
+        "CONSULTANT_IMPORT",
+        "SMTP_SYNC"
       ],
       "roles": [
         "config-wizard",
         "invitation-reservations",
-        "consultant-import"
+        "consultant-import",
+        "smtp-sync"
       ],
       "bearerAudiences": [
         "tenantservice",
         "agencyservice",
         "consultingtypeservice",
-        "userservice"
+        "userservice",
+        "oriso-task-commands"
       ]
     },
     {
@@ -61,12 +64,10 @@
       "key": "MAIL",
       "clientId": "backend-mail",
       "purposes": [
-        "SMTP_SYNC",
         "SYSTEM_EMAIL_DELIVERY",
         "NOTIFICATION_DISPATCH"
       ],
       "roles": [
-        "smtp-sync",
         "system-email-delivery",
         "notification-dispatch",
         "notifications-technical"
@@ -75,8 +76,7 @@
         "tenantservice",
         "agencyservice",
         "consultingtypeservice",
-        "userservice",
-        "oriso-task-commands"
+        "userservice"
       ]
     },
     {

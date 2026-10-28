@@ -8,7 +8,7 @@ import sys
 
 
 def main():
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in (2, 3) or len(sys.argv) == 3 and sys.argv[2] != "mail-refused":
         raise ValueError("Private native fixture is required")
     fixture = json.loads(Path(sys.argv[1]).read_text())
     token = sys.stdin.read(32769).strip()
@@ -25,7 +25,31 @@ def main():
     snapshot, revision = module.read_snapshot(http, config, token)
     if revision != 7:
         raise ValueError("Exact synthetic saved revision required")
-    status = module.apply_mail_snapshot(http, config, token, snapshot, revision)
+    if len(sys.argv) == 3:
+        # Independent SETUP status readback observes native revision without granting MAIL a read.
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "files"))
+        from scenario_c_activation import command_proof
+        setup = module.setup_login(http, config)
+        url = config["KEYCLOAK_URL"] + "/realms/" + config["KEYCLOAK_REALM"] + "/oriso-smtp-control/v1/smtp"
+        def status_read():
+            proof = command_proof(config["context_key"], {}, "SETUP", config["IDENTITY_SETUP_SERVICE_SUBJECT"],
+                config["KEYCLOAK_REALM"], config["KEYCLOAK_REALM_INTERNAL_ID"], "SMTP_STATUS", "GET", smtp=True)
+            return http.request("GET", url, headers={"Authorization": "Bearer " + setup,
+                "X-ORISO-Task-Context": proof})
+        before = status_read()
+        try:
+            module.apply_setup_snapshot(http, config, token, snapshot, revision + 1)
+        except module.ReconcileError as refused:
+            if refused.status != 403:
+                raise ValueError("Actual MAIL request must reach explicit receiver refusal") from None
+        else:
+            raise ValueError("MAIL unexpectedly configured SMTP")
+        if before != status_read() or (snapshot, revision) != module.read_snapshot(http, config, token):
+            raise ValueError("Rejected MAIL changed native or saved CTS state")
+        # No acknowledgement function is called in this path.
+        print("NATIVE_MAIL_SMTP_REFUSED_PASSED")
+        return
+    status = module.apply_setup_snapshot(http, config, token, snapshot, revision)
     if status != "APPLIED" or module.acknowledge(http, config, token, revision, status) != "SMTP_RECONCILE_ACKNOWLEDGED":
         raise ValueError("Exact known-response acknowledgement required")
     print("NATIVE_MAIL_BROKER_CTS_SMTP_ACK_PASSED")

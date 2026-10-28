@@ -56,7 +56,7 @@ class ScenarioCSmtpChartTest(unittest.TestCase):
                 rows.append({row["name"]: row for row in env})
             return rows
 
-    def test_c_job_and_cron_mount_only_mail_and_common_context_secret(self):
+    def test_c_job_and_cron_mount_only_setup_and_common_context_secret(self):
         config = bindings()
         for env in self.render(config):
             self.assertIn("TASK_IDENTITY_MODEL", env)
@@ -64,14 +64,14 @@ class ScenarioCSmtpChartTest(unittest.TestCase):
             self.assertEqual(
                 config["realmId"], env["KEYCLOAK_REALM_INTERNAL_ID"]["value"]
             )
-            self.assertEqual("backend-mail", env["IDENTITY_MAIL_CLIENT_ID"]["value"])
+            self.assertEqual("backend-setup", env["IDENTITY_SETUP_CLIENT_ID"]["value"])
             self.assertEqual(
-                config["actors"]["MAIL"]["serviceSubject"],
-                env["IDENTITY_MAIL_SERVICE_SUBJECT"]["value"],
+                config["actors"]["SETUP"]["serviceSubject"],
+                env["IDENTITY_SETUP_SERVICE_SUBJECT"]["value"],
             )
             self.assertEqual(
-                config["actors"]["MAIL"]["secretRef"],
-                env["IDENTITY_MAIL_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"],
+                config["actors"]["SETUP"]["secretRef"],
+                env["IDENTITY_SETUP_CLIENT_SECRET"]["valueFrom"]["secretKeyRef"],
             )
             self.assertEqual(
                 config["contextKeySecretRef"],
@@ -98,7 +98,7 @@ class ScenarioCSmtpChartTest(unittest.TestCase):
         for env in self.render({"model": "LEGACY"}):
             self.assertIn("TECHNICAL_CLIENT_SECRET", env)
             self.assertIn("SMTP_SYNC_CLIENT_SECRET", env)
-            self.assertNotIn("IDENTITY_MAIL_CLIENT_SECRET", env)
+            self.assertNotIn("IDENTITY_SETUP_CLIENT_SECRET", env)
             self.assertNotIn("ORISO_TASK_CONTEXT_KEY", env)
 
 
