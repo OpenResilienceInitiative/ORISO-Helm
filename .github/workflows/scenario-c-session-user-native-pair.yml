@@ -28,8 +28,9 @@ jobs:
       KEYCLOAK_REF: bf3d7f8809d829e33e930115221b122be8e8c287
       SUPPORT_REF: a1a1eb1ce51728e0ad60f7f07660f8c87b96815b
       S1_ROLE: ${{ matrix.role }}
-      S1_EVIDENCE: ${{ runner.temp }}/scenario-c-current-session-${{ matrix.role }}
     steps:
+      - name: Set the per-role evidence directory after runner allocation
+        run: printf 'S1_EVIDENCE=%s/scenario-c-current-session-%s\n' "$RUNNER_TEMP" "$S1_ROLE" >> "$GITHUB_ENV"
       - name: Check out the exact orchestration source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
