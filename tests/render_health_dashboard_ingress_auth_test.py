@@ -223,13 +223,15 @@ class HealthDashboardIngressAuthTest(unittest.TestCase):
 
     def test_other_overlays_keep_ingress_guarded_and_allow_explicit_off(self) -> None:
         for overlay in ("values-pre-dev.yaml", "values-prod.yaml"):
+            # Pre-Dev is deployed as an overlay on top of Dev.
+            layers = ("values-dev.yaml", overlay) if overlay == "values-pre-dev.yaml" else (overlay,)
             with self.subTest(overlay=overlay):
-                resources = health_resources(render(overlay))
+                resources = health_resources(render(*layers))
                 self.assertEqual(set(resources), {"Deployment", "Service", "Ingress"})
                 annotations = resources["Ingress"]["metadata"]["annotations"]
                 self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-type"], "basic")
                 self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-secret"], "health-dashboard-basic-auth")
-                disabled = health_resources(render(overlay, health_dashboard={"ingress": {"enabled": False}}))
+                disabled = health_resources(render(*layers, health_dashboard={"ingress": {"enabled": False}}))
                 self.assertEqual(set(disabled), {"Deployment", "Service"})
 
 
