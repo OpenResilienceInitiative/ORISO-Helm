@@ -19,6 +19,7 @@ spec:
       # ConfigMap-backed env vars do not change in running Pods. This annotation
       # makes an opt-out replace Pods before they can keep sending pending copy.
       annotations:
+        checksum/config-env: {{ include (print $.Template.BasePath "/userservice/userservice-configmap-env.yaml") . | sha256sum }}
         checksum/backend-service-clients: {{ include "oriso.backendServiceClientsChecksum" . | quote }}
         checksum/group-policy: {{ include "oriso.matrixGroupPolicy.userServiceChecksum" . | quote }}
         checksum/media-lifecycle: {{ .Values.matrixrtcLifecycle | toJson | sha256sum | quote }}
