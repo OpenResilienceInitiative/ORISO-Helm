@@ -61,6 +61,7 @@ TEMPLATES = [
     "templates/_matrixrtcLifecycle.tpl",
     "templates/_matrixGroupPolicy.tpl",
     "templates/matrix/matrix-configmaps.yaml",
+    "templates/matrix/matrix-deployment.yaml",
     "templates/userservice/userservice-configmap-env.yaml",
     "templates/agencyservice/agencyservice-configmap-env.yaml",
     "templates/tenantservice/tenantservice-configmap-env.yaml",
@@ -172,6 +173,12 @@ def configmaps(stdout: str) -> dict:
     return {d["metadata"]["name"]: d for d in docs if d.get("kind") == "ConfigMap"}
 
 
+def deployments(stdout: str) -> dict:
+    """Parse helm output into {deployment name: document}."""
+    docs = [d for d in yaml.safe_load_all(stdout) if isinstance(d, dict)]
+    return {d["metadata"]["name"]: d for d in docs if d.get("kind") == "Deployment"}
+
+
 def parse_homeserver(cm: dict):
     """Return the parsed homeserver.yaml mapping, or None if it is not valid YAML."""
     raw = cm["matrix-homeserver-oidc"]["data"]["homeserver.yaml"]
@@ -210,6 +217,17 @@ def main() -> None:
         hs_b = parse_homeserver(cm_b)
         check(
             hs_a is not None, "rendered homeserver.yaml parses as a valid YAML mapping"
+        )
+
+        # The homeserver config is mounted with subPath, which Kubernetes does
+        # not refresh in a running container. Its checksum must therefore be on
+        # the pod template so a Helm upgrade rolls Synapse after config changes.
+        synapse = deployments(stdout_a).get("matrix-synapse", {})
+        annotations = synapse.get("spec", {}).get("template", {}).get("metadata", {}).get("annotations", {})
+        checksum = annotations.get("checksum/homeserver-config")
+        check(
+            isinstance(checksum, str) and re.fullmatch(r"[0-9a-f]{64}", checksum),
+            "matrix-synapse pod template has a homeserver-config checksum for ConfigMap rollouts",
         )
 
         # --- Requirement 2: server_name is the configured domain, never IPv4 -----

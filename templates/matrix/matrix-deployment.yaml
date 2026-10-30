@@ -21,6 +21,9 @@ spec:
         app: matrix-synapse
       annotations:
         checksum/group-policy: {{ include "oriso.matrixGroupPolicy.synapseChecksum" . | quote }}
+        # homeserver.yaml is mounted with subPath, so ConfigMap updates do not
+        # reach an existing pod. Roll the Deployment when its source changes.
+        checksum/homeserver-config: {{ include (print $.Template.BasePath "/matrix/matrix-configmaps.yaml") . | sha256sum }}
       {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
         {{- include "oriso.appMetrics.podAnnotations" (dict "job" "synapse" "port" 9000 "path" "/_synapse/metrics") | nindent 8 }}
       {{- end }}
