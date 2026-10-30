@@ -104,6 +104,7 @@ metadata:
   name: matrix-discovery-data
   namespace: {{ .Release.Namespace }}
 ---
+{{ define "oriso.matrix.homeserverConfigMap" }}
 apiVersion: v1
 data:
   homeserver.yaml: |
@@ -228,6 +229,8 @@ kind: ConfigMap
 metadata:
   name: matrix-homeserver-oidc
   namespace: {{ .Release.Namespace }}
+{{ end }}
+{{ include "oriso.matrix.homeserverConfigMap" . }}
 ---  
 apiVersion: v1
 data:
