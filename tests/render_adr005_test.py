@@ -227,6 +227,14 @@ def main() -> None:
         check(
             hs_a is not None, "rendered homeserver.yaml parses as a valid YAML mapping"
         )
+        check(
+            (hs_a or {}).get("enable_registration") is False,
+            "homeserver disables public self-registration",
+        )
+        check(
+            "enable_registration_without_verification" not in (hs_a or {}),
+            "homeserver does not allow registration without verification",
+        )
 
         # The homeserver config is mounted with subPath, which Kubernetes does
         # not refresh in a running container. Its checksum must therefore be on
