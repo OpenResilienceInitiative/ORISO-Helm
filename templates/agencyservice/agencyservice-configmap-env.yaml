@@ -31,7 +31,7 @@ data:
   # AgencyService validates task tokens from UserService; it does not hold
   # task client secrets or use them to obtain tokens.
   TASK_IDENTITY_MODEL: "FIVE_ACTORS"
-  TASK_IDENTITY_REQUIRED_TASKS: "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,MATRIX_AGENCY"
+  TASK_IDENTITY_REQUIRED_TASKS: "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,MATRIX_AGENCY,DELETION_AUDIT_READ"
   TASK_IDENTITY_AUDIENCE: "agencyservice"
   IDENTITY_SETUP_CLIENT_ID: {{ dig "taskIdentities" "setup" "clientId" "" .Values.global.keycloak | quote }}
   IDENTITY_SETUP_SERVICE_SUBJECT: {{ dig "taskIdentities" "setup" "serviceSubject" "" .Values.global.keycloak | quote }}

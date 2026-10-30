@@ -21,7 +21,7 @@ RECEIVERS = {
         "actors": ("SETUP", "MAIL", "RUNTIME"),
     },
     "agencyservice": {
-        "tasks": "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,MATRIX_AGENCY",
+        "tasks": "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,MATRIX_AGENCY,DELETION_AUDIT_READ",
         "audience": "agencyservice",
         "actors": ("SETUP", "MAIL", "RUNTIME"),
     },

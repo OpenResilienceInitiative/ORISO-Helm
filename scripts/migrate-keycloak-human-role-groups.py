@@ -120,6 +120,7 @@ TECHNICAL_ROLES = {
     "matrix-agency-provision",
     "appointment-sync",
     "appointment-participant-cleanup",
+    "deletion-audit-read",
 }
 
 
