@@ -71,7 +71,6 @@ userService:
   magicLinkFrontendBaseUrl: "https://predev.oriso.org"
   passwordResetFrontendBaseUrl: "https://predev.oriso.org"
   passwordResetAdminFrontendBaseUrl: "https://predev.oriso.org/admin"
-
   # NOTE — statisticsMessageCountHmacSecret is deliberately NOT set here.
   # It is a mandatory boot config (ConsultantIdentityHasher exits 1 on a blank
   # value), but it is a credential, so it lives in the persistent secret values
