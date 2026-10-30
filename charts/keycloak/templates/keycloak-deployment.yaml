@@ -58,6 +58,7 @@ spec:
             # Keep this out of lifecycle hooks so pod restarts never re-import over live data.
             - --import-realm
           env:
+            {{- include "oriso.scenarioC.env" (dict "root" $ "component" "keycloak") | nindent 12 }}
             - name: KC_DB
               valueFrom:
                 configMapKeyRef:

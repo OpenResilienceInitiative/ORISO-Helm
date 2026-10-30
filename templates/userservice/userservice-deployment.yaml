@@ -45,6 +45,7 @@ spec:
           image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            {{- include "oriso.scenarioC.env" (dict "root" $ "component" "userservice") | nindent 12 }}
             - name: MATRIX_GROUP_POLICY_ENABLED
               valueFrom:
                 configMapKeyRef:
@@ -63,11 +64,13 @@ spec:
                   key: {{ .Values.matrix.groupPolicy.existingSecret.tokenKey | quote }}
             {{- end }}
             {{- include "oriso.springTelemetryEnv" (dict "root" $ "image" (include "oriso.immutableImage" (list "userService.image" .Values.userService.image))) | nindent 12 }}
+            {{- if ne (include "oriso.scenarioC.enabled" $) "true" }}
             - name: TASK_IDENTITY_MODEL
               valueFrom:
                 configMapKeyRef:
                   name: userservice-configmap-env
                   key: TASK_IDENTITY_MODEL
+            {{- end }}
             - name: MATRIXRTC_LIFECYCLE_ENABLED
               valueFrom:
                 configMapKeyRef:
@@ -281,16 +284,19 @@ spec:
                 configMapKeyRef:
                   name: userservice-configmap-env
                   key: KEYCLOAK_BACKEND_ADMIN_SERVICE_SUBJECT
+            {{- if ne (include "oriso.scenarioC.enabled" $) "true" }}
             - name: KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: keycloak-backend-client-secrets
                   key: KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET
+            {{- end }}
             - name: IDENTITY_TECHNICAL_CLIENT_ID
               valueFrom:
                 configMapKeyRef:
                   name: userservice-configmap-env
                   key: IDENTITY_TECHNICAL_CLIENT_ID
+            {{- if ne (include "oriso.scenarioC.enabled" $) "true" }}
             - name: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -310,6 +316,7 @@ spec:
                 secretKeyRef:
                   name: keycloak-backend-client-secrets
                   key: {{ $key }}
+            {{- end }}
             {{- end }}
             {{- end }}
             - name: KEYCLOAK_CONFIG_APP_CLIENTID

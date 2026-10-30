@@ -8,12 +8,21 @@
       "purposes": [
         "CONFIG_WIZARD",
         "INVITE_RESERVATIONS",
-        "CONSULTANT_IMPORT"
+        "CONSULTANT_IMPORT",
+        "SMTP_SYNC"
       ],
       "roles": [
         "config-wizard",
         "invitation-reservations",
-        "consultant-import"
+        "consultant-import",
+        "smtp-sync"
+      ],
+      "bearerAudiences": [
+        "tenantservice",
+        "agencyservice",
+        "consultingtypeservice",
+        "userservice",
+        "oriso-task-commands"
       ]
     },
     {
@@ -25,6 +34,10 @@
       "roles": [
         "account-provisioning",
         "account-read"
+      ],
+      "bearerAudiences": [
+        "userservice",
+        "oriso-account-lifecycle"
       ]
     },
     {
@@ -40,21 +53,30 @@
         "account-read",
         "otp-config-admin",
         "session-exchange"
+      ],
+      "bearerAudiences": [
+        "userservice",
+        "oriso-account-lifecycle",
+        "oriso-otp"
       ]
     },
     {
       "key": "MAIL",
       "clientId": "backend-mail",
       "purposes": [
-        "SMTP_SYNC",
         "SYSTEM_EMAIL_DELIVERY",
         "NOTIFICATION_DISPATCH"
       ],
       "roles": [
-        "smtp-sync",
         "system-email-delivery",
         "notification-dispatch",
         "notifications-technical"
+      ],
+      "bearerAudiences": [
+        "tenantservice",
+        "agencyservice",
+        "consultingtypeservice",
+        "userservice"
       ]
     },
     {
@@ -72,6 +94,11 @@
         "matrix-agency-provision",
         "appointment-sync",
         "appointment-participant-cleanup"
+      ],
+      "bearerAudiences": [
+        "tenantservice",
+        "agencyservice",
+        "appointmentservice"
       ]
     }
   ]

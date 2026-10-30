@@ -63,26 +63,25 @@ ACTORS = (
     (
         "SETUP",
         "backend-setup",
-        ("config-wizard", "invitation-reservations", "consultant-import"),
-        ("tenantservice", "agencyservice", "consultingtypeservice", "userservice"),
+        ("config-wizard", "invitation-reservations", "consultant-import", "smtp-sync"),
+        ("tenantservice", "agencyservice", "consultingtypeservice", "userservice", "oriso-task-commands"),
     ),
     (
         "ACCOUNT_CREATE",
         "backend-account-create",
         ("account-provisioning", "account-read"),
-        ("userservice",),
+        ("userservice", "oriso-account-lifecycle"),
     ),
     (
         "ACCOUNT_ADMIN",
         "backend-account-admin",
         ("account-maintenance", "account-read", "otp-config-admin", "session-exchange"),
-        ("userservice", "oriso-otp"),
+        ("userservice", "oriso-account-lifecycle", "oriso-otp"),
     ),
     (
         "MAIL",
         "backend-mail",
         (
-            "smtp-sync",
             "system-email-delivery",
             "notification-dispatch",
             "notifications-technical",

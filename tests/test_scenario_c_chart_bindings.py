@@ -1,0 +1,483 @@
+"""Render the real chart: five public bindings and least-needed secret references."""
+
+import copy
+import json
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+ACTORS = ("SETUP", "ACCOUNT_CREATE", "ACCOUNT_ADMIN", "MAIL", "RUNTIME")
+AUDIENCES = {
+    "SETUP": {"tenantservice", "agencyservice", "consultingtypeservice", "userservice", "oriso-task-commands"},
+    "ACCOUNT_CREATE": {"userservice", "oriso-account-lifecycle"},
+    "ACCOUNT_ADMIN": {"userservice", "oriso-account-lifecycle", "oriso-otp"},
+    "MAIL": {
+        "tenantservice",
+        "agencyservice",
+        "consultingtypeservice",
+        "userservice",
+    },
+    "RUNTIME": {"tenantservice", "agencyservice", "appointmentservice"},
+}
+
+
+def bindings():
+    return {
+        "model": "FIVE_ACTORS",
+        "realmId": "10000000-0000-4000-8000-000000000001",
+        "contextKeyVersion": "1",
+        "humanClientIds": ["app", "admin"],
+        "contextKeySecretRef": {"name": "shared-task-context", "key": "context-key"},
+        "ordinaryGroups": {
+            "/human-roles/asker": ["user"],
+            "/human-roles/consultant": ["consultant"],
+        },
+        "protectedInvitations": {
+            "configMapRef": {"name": "reviewed-protected-policy", "key": "policy.json"},
+            "profileIds": {
+                "TENANT_ADMIN": "reviewed-tenant-admin-v1",
+                "PLATFORM_ADMIN": "reviewed-platform-admin-v1",
+            },
+        },
+        "accountMaintenanceConfigMapRef": {
+            "name": "reviewed-ordinary-account-policy", "key": "policy.json"
+        },
+        "actors": {
+            actor: {
+                "clientId": "backend-" + actor.lower().replace("_", "-"),
+                "serviceSubject": f"20000000-0000-4000-8000-{i:012d}",
+                "secretRef": {"name": "task-credentials", "key": actor.lower()},
+            }
+            for i, actor in enumerate(ACTORS, 1)
+        },
+    }
+
+
+def render(config=None, keycloak=None, historical_task_fixture=False):
+    with tempfile.TemporaryDirectory() as folder:
+        values = Path(folder) / "scenario-c.yaml"
+        values.write_text(
+            yaml.safe_dump(
+                {"global": {"taskIdentities": config or {"model": "LEGACY"},
+                            "keycloak": keycloak or {}}}
+            )
+        )
+        command = ["helm", "template", "scenario-c", str(ROOT)]
+        sources = (
+            "values.yaml.default",
+            "tests/fixtures/values-render-domain.yaml",
+            "secrets.yaml.default",
+            "tests/fixtures/render-required-secrets.yaml",
+        )
+        if historical_task_fixture:
+            sources += ("tests/fixtures/task-identities-activation-values.yaml",)
+        for source in sources:
+            command.extend(("-f", str(ROOT / source)))
+        command.extend(
+            (
+                "-f",
+                str(values),
+                "--set-string",
+                "global.secrets.redisdefaultPass=render-redis",
+                "--set-string",
+                "tenantService.smtpPasswordEncryptionSecret=render-encryption",
+                "--set-string",
+                "global.keycloak.realm=render-realm",
+            )
+        )
+        result = subprocess.run(command, capture_output=True, text=True, timeout=40)
+        docs = list(yaml.safe_load_all(result.stdout)) if result.returncode == 0 else []
+        return result, [doc for doc in docs if doc]
+
+
+def container(docs, service):
+    deployment = next(
+        doc
+        for doc in docs
+        if doc.get("kind") == "Deployment" and doc["metadata"]["name"] == service
+    )
+    return next(
+        item
+        for item in deployment["spec"]["template"]["spec"]["containers"]
+        if item["name"] == service
+    )
+
+
+class ScenarioCChartBindingsTest(unittest.TestCase):
+    def test_password_profile_catalog_uses_the_same_reviewed_policies_as_the_receiver(self):
+        config = bindings()
+        result, docs = render(config)
+        self.assertEqual(0, result.returncode, result.stderr)
+        for name, expected in (
+            ("ORISO_ACCOUNT_MAINTENANCE_CONFIG", config["accountMaintenanceConfigMapRef"]),
+            ("ORISO_PROTECTED_INVITATIONS_CONFIG", config["protectedInvitations"]["configMapRef"]),
+        ):
+            with self.subTest(policy=name):
+                for service in ("userservice", "keycloak"):
+                    env = {row["name"]: row for row in container(docs, service)["env"]}
+                    self.assertEqual(expected, env.get(name, {}).get("valueFrom", {}).get("configMapKeyRef"))
+                for service in ("tenantservice", "agencyservice", "consultingtypeservice"):
+                    env = {row["name"]: row for row in container(docs, service)["env"]}
+                    self.assertNotIn(name, env)
+        result, legacy = render()
+        self.assertEqual(0, result.returncode, result.stderr)
+        for service in ("userservice", "keycloak"):
+            env = {row["name"]: row for row in container(legacy, service)["env"]}
+            self.assertNotIn("ORISO_ACCOUNT_MAINTENANCE_CONFIG", env)
+            self.assertNotIn("ORISO_PROTECTED_INVITATIONS_CONFIG", env)
+
+    def test_ordinary_role_sets_select_one_reviewed_group_independent_of_order(self):
+        for roles in ((["user"], ["user"]),
+                      (["consultant", "group-chat-consultant"],
+                       ["group-chat-consultant", "consultant"])):
+            with self.subTest(roles=roles):
+                config = bindings()
+                config["ordinaryGroups"]["/human-roles/reviewed-first"] = roles[0]
+                config["ordinaryGroups"]["/human-roles/reviewed-second"] = roles[1]
+                result, _ = render(config)
+                self.assertNotEqual(0, result.returncode,
+                                    "An ordinary role set must select one reviewed group")
+                self.assertEqual("", result.stdout)
+                self.assertIn("ordinaryGroups", result.stderr)
+
+    def test_reviewed_ordinary_human_policy_reaches_only_the_caller_and_receiver(self):
+        config = bindings()
+        result, docs = render(config)
+        self.assertEqual(0, result.returncode, result.stderr)
+        for service in ("userservice", "keycloak", "tenantservice", "agencyservice", "consultingtypeservice"):
+            with self.subTest(service=service):
+                env = {row["name"]: row for row in container(docs, service)["env"]}
+                if service in ("keycloak", "userservice"):
+                    self.assertEqual(config["accountMaintenanceConfigMapRef"], env.get("ORISO_ACCOUNT_MAINTENANCE_CONFIG", {}).get("valueFrom", {}).get("configMapKeyRef"))
+                else:
+                    self.assertNotIn("ORISO_ACCOUNT_MAINTENANCE_CONFIG", env)
+
+    def test_five_actors_refuses_missing_or_aliased_ordinary_human_policy(self):
+        for reference in (None, {}, {"name": "missing-key"}, {"name": "../unsafe", "key": "policy.json"}, bindings()["protectedInvitations"]["configMapRef"]):
+            with self.subTest(reference=reference):
+                config = bindings()
+                config["accountMaintenanceConfigMapRef"] = reference
+                result, _ = render(config)
+                self.assertNotEqual(0, result.returncode, "Missing or aliased ordinary policy accepted")
+                self.assertEqual("", result.stdout)
+                self.assertIn("accountMaintenanceConfigMapRef", result.stderr)
+
+    def test_protected_native_policy_and_caller_profiles_reach_only_their_owners(self):
+        config = bindings()
+        result, docs = render(config)
+        self.assertEqual(0, result.returncode, result.stderr)
+        policy = config["protectedInvitations"]
+        for service in ("userservice", "keycloak", "tenantservice", "agencyservice", "consultingtypeservice"):
+            with self.subTest(service=service):
+                rows = container(docs, service)["env"]
+                env = {row["name"]: row for row in rows}
+                self.assertEqual(len(rows), len(env), "Duplicate protected bindings")
+                if service == "keycloak":
+                    self.assertEqual("true", env.get("ORISO_PROTECTED_INVITATIONS_ENABLED", {}).get("value"))
+                else:
+                    self.assertNotIn("ORISO_PROTECTED_INVITATIONS_ENABLED", env)
+                if service in ("keycloak", "userservice"):
+                    self.assertEqual(policy["configMapRef"], env.get("ORISO_PROTECTED_INVITATIONS_CONFIG", {}).get("valueFrom", {}).get("configMapKeyRef"))
+                else:
+                    self.assertNotIn("ORISO_PROTECTED_INVITATIONS_CONFIG", env)
+                if service == "userservice":
+                    self.assertEqual(policy["profileIds"], json.loads(env.get("ORISO_PROTECTED_INVITATION_PROFILE_IDS", {}).get("value", "{}")))
+                else:
+                    self.assertNotIn("ORISO_PROTECTED_INVITATION_PROFILE_IDS", env)
+
+    def test_five_actors_requires_exact_reviewed_protected_policy_reference(self):
+        for reference in (None, {}, {"name": "reviewed-protected-policy"}, {"name": "../unsafe", "key": "policy.json"}, {"name": "reviewed-protected-policy", "key": "policy.json", "inline": "unreviewed"}):
+            with self.subTest(reference=reference):
+                config = bindings()
+                config["protectedInvitations"]["configMapRef"] = reference
+                result, _ = render(config)
+                self.assertNotEqual(0, result.returncode, "Missing or ambiguous native policy accepted")
+                self.assertEqual("", result.stdout)
+                self.assertIn("protectedInvitations", result.stderr)
+
+    def test_five_actors_requires_exact_distinct_protected_profile_ids(self):
+        for profiles in ({}, {"TENANT_ADMIN": "tenant"}, {"TENANT_ADMIN": "same", "PLATFORM_ADMIN": "same"}, {"TENANT_ADMIN": "${UNRESOLVED}", "PLATFORM_ADMIN": "platform"}, {"TENANT_ADMIN": "tenant", "PLATFORM_ADMIN": "platform", "EXTRA": "unreviewed"}):
+            with self.subTest(profiles=profiles):
+                config = bindings()
+                config["protectedInvitations"]["profileIds"] = profiles
+                result, _ = render(config)
+                self.assertNotEqual(0, result.returncode, "Missing or ambiguous profile mapping accepted")
+                self.assertEqual("", result.stdout)
+                self.assertIn("protectedInvitations", result.stderr)
+
+    def test_legacy_service_clients_cannot_be_reviewed_as_human_clients(self):
+        variants = (
+            ('backendTechnicalClientId', 'custom-technical'),
+            ('serviceAdminClientId', 'custom-admin'),
+            (None, 'smtp-sync'),
+        )
+        for field, client_id in variants:
+            with self.subTest(field=field):
+                config = bindings()
+                config['humanClientIds'].append(client_id)
+                result, _ = render(config, {field: client_id} if field else {})
+                self.assertNotEqual(0, result.returncode, 'Service client accepted as human')
+                self.assertEqual('', result.stdout)
+                self.assertIn('taskIdentities', result.stderr)
+
+    def test_actor_subject_cannot_alias_either_legacy_service_subject(self):
+        for field in ('serviceTechUserId', 'serviceAdminSubject'):
+            with self.subTest(field=field):
+                result, _ = render(bindings(), {field: bindings()['actors']['SETUP']['serviceSubject']})
+                self.assertNotEqual(0, result.returncode, 'Legacy service subject accepted as actor')
+                self.assertEqual('', result.stdout)
+                self.assertIn('taskIdentities', result.stderr)
+
+    def test_five_actor_legacy_hook_has_no_legacy_client_credentials(self):
+        result, docs = render(bindings())
+        self.assertEqual(0, result.returncode, result.stderr)
+        job = next(doc for doc in docs if doc.get('kind') == 'Job'
+                   and doc['metadata']['name'] == 'keycloak-reconcile-service-identities')
+        env = {row['name']: row for row in job['spec']['template']['spec']['containers'][0]['env']}
+        self.assertEqual('FIVE_ACTORS', env.get('TASK_IDENTITY_MODEL', {}).get('value'))
+        for name in ('TECHNICAL_CLIENT_SECRET', 'ADMIN_CLIENT_SECRET', 'SMTP_SYNC_CLIENT_SECRET'):
+            self.assertNotIn(name, env)
+
+    def test_account_mutation_ingress_allows_client_intent_correlation_header(self):
+        for config in ({"model": "LEGACY"}, bindings()):
+            with self.subTest(model=config["model"]):
+                result, docs = render(config)
+                self.assertEqual(0, result.returncode, result.stderr)
+                ingress = next(
+                    doc
+                    for doc in docs
+                    if doc.get("kind") == "Ingress"
+                    and doc["metadata"]["name"] == "userservice-rewrite-ingress"
+                )
+                annotations = ingress["metadata"]["annotations"]
+                self.assertEqual(
+                    "true", annotations["nginx.ingress.kubernetes.io/enable-cors"]
+                )
+                headers = annotations["nginx.ingress.kubernetes.io/cors-allow-headers"]
+                self.assertIn(
+                    "idempotency-key",
+                    {header.strip().lower() for header in headers.split(",")},
+                )
+
+    def test_enabled_real_chart_passes_one_shared_key_and_exact_actor_secret_ownership(
+        self,
+    ):
+        result, docs = render(bindings())
+        self.assertEqual(0, result.returncode, result.stderr)
+        for service in (
+            "userservice",
+            "tenantservice",
+            "agencyservice",
+            "consultingtypeservice",
+            "keycloak",
+        ):
+            with self.subTest(service=service):
+                rows = container(docs, service)["env"]
+                env = {row["name"]: row for row in rows}
+                self.assertEqual(
+                    len(rows),
+                    len(env),
+                    "Duplicate env entries may override validated values",
+                )
+                self.assertTrue(
+                    "TASK_IDENTITY_MODEL" in env, "Missing explicit scenario C mode"
+                )
+                self.assertEqual("FIVE_ACTORS", env["TASK_IDENTITY_MODEL"]["value"])
+                for actor in ACTORS:
+                    self.assertEqual(
+                        bindings()["actors"][actor]["serviceSubject"],
+                        env[f"IDENTITY_{actor}_SERVICE_SUBJECT"]["value"],
+                    )
+                expected = (
+                    set(ACTORS)
+                    if service == "userservice"
+                    else set()
+                )
+                actual = {
+                    actor
+                    for actor in ACTORS
+                    if f"IDENTITY_{actor}_CLIENT_SECRET" in env
+                }
+                self.assertEqual(expected, actual)
+                if service == "agencyservice":
+                    self.assertNotIn("ORISO_TASK_CONTEXT_KEY", env)
+                else:
+                    self.assertEqual(
+                        bindings()["contextKeySecretRef"],
+                        env["ORISO_TASK_CONTEXT_KEY"]["valueFrom"]["secretKeyRef"],
+                    )
+        keycloak = {row["name"]: row for row in container(docs, "keycloak")["env"]}
+        self.assertTrue(
+            "ORISO_ACCOUNT_LIFECYCLE_ENABLED" in keycloak,
+            "Missing lifecycle provider configuration",
+        )
+        self.assertEqual("true", keycloak["ORISO_ACCOUNT_LIFECYCLE_ENABLED"]["value"])
+        self.assertEqual(
+            "render-realm", keycloak["ORISO_ACCOUNT_LIFECYCLE_REALM"]["value"]
+        )
+        self.assertTrue(
+            "ORISO_SMTP_CONTROL_ENABLED" in keycloak,
+            "Missing SMTP receiver enable binding",
+        )
+        self.assertEqual("true", keycloak["ORISO_SMTP_CONTROL_ENABLED"]["value"])
+        self.assertEqual("render-realm", keycloak["ORISO_SMTP_CONTROL_REALM"]["value"])
+        self.assertEqual(
+            bindings()["realmId"], keycloak["KEYCLOAK_REALM_INTERNAL_ID"]["value"]
+        )
+        user = {row["name"]: row for row in container(docs, "userservice")["env"]}
+        self.assertTrue(
+            "ORISO_IDENTITY_HUMAN_CLIENT_IDS" in user,
+            "Missing reviewed human client pins",
+        )
+        self.assertEqual(
+            bindings()["humanClientIds"],
+            json.loads(user["ORISO_IDENTITY_HUMAN_CLIENT_IDS"]["value"]),
+        )
+        self.assertEqual(
+            bindings()["ordinaryGroups"],
+            json.loads(keycloak["ORISO_ACCOUNT_LIFECYCLE_GROUPS"]["value"]),
+        )
+
+    def test_enabled_services_do_not_receive_legacy_backend_credentials(self):
+        result, docs = render(bindings())
+        self.assertEqual(0, result.returncode, result.stderr)
+        forbidden = {
+            "KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET",
+            "KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET",
+        }
+        for service in (
+            "userservice",
+            "tenantservice",
+            "agencyservice",
+            "consultingtypeservice",
+        ):
+            names = {row["name"] for row in container(docs, service)["env"]}
+            self.assertFalse(
+                names & forbidden, "Legacy credential mounted in " + service
+            )
+
+    def test_import_policy_guard_is_required_only_by_its_tenant_receiver(self):
+        result, docs = render(bindings())
+        self.assertEqual(0, result.returncode, result.stderr)
+        for service in ("tenantservice", "agencyservice", "consultingtypeservice"):
+            env = {row["name"]: row for row in container(docs, service)["env"]}
+            purposes = env["TASK_IDENTITY_REQUIRED_TASKS"]["value"].split(",")
+            self.assertEqual(
+                service == "tenantservice", "CONSULTANT_IMPORT" in purposes
+            )
+            self.assertEqual(len(purposes), len(set(purposes)))
+
+    def test_legacy_chart_does_not_enable_or_mount_task_credentials(self):
+        result, docs = render()
+        self.assertEqual(0, result.returncode, result.stderr)
+        for service in (
+            "userservice",
+            "tenantservice",
+            "agencyservice",
+            "consultingtypeservice",
+            "keycloak",
+        ):
+            names = {row["name"] for row in container(docs, service)["env"]}
+            if service == "userservice":
+                # The current dev chart explicitly resets a prior cutover to LEGACY.
+                row = next(
+                    row for row in container(docs, service)["env"]
+                    if row["name"] == "TASK_IDENTITY_MODEL"
+                )
+                self.assertEqual(
+                    {"configMapKeyRef": {
+                        "name": "userservice-configmap-env", "key": "TASK_IDENTITY_MODEL"
+                    }}, row["valueFrom"]
+                )
+                settings = next(
+                    doc for doc in docs if doc.get("kind") == "ConfigMap"
+                    and doc["metadata"]["name"] == "userservice-configmap-env"
+                )
+                self.assertEqual("LEGACY", settings["data"]["TASK_IDENTITY_MODEL"])
+            else:
+                self.assertNotIn("TASK_IDENTITY_MODEL", names)
+            self.assertNotIn("ORISO_TASK_CONTEXT_KEY", names)
+
+    def test_final_registry_cannot_share_an_upgrade_with_historical_task_reconciliation(self):
+        for flag in ("enabled", "provisionOnly"):
+            old = {"taskIdentities": {
+                "enabled": flag == "enabled", "provisionOnly": flag == "provisionOnly"
+            }}
+            for index, actor in enumerate(
+                ("setup", "accountCreate", "accountAdmin", "mail", "runtime"), 1
+            ):
+                old["taskIdentities"][actor] = {
+                    "serviceSubject": f"30000000-0000-4000-8000-{index:012d}"
+                }
+            with self.subTest(flag=flag):
+                result, _ = render(bindings(), old, historical_task_fixture=True)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(
+                    "Disable historical global.keycloak.taskIdentities reconciliation",
+                    result.stderr,
+                )
+
+    def test_incomplete_or_colliding_bindings_refuse_render_without_secret_output(self):
+        variants = []
+        for field in (
+            "realmId",
+            "contextKeyVersion",
+            "contextKeySecretRef",
+            "ordinaryGroups",
+            "humanClientIds",
+        ):
+            value = bindings()
+            value[field] = ""
+            variants.append((field, value))
+        for field in ("clientId", "serviceSubject", "secretRef"):
+            value = bindings()
+            value["actors"]["MAIL"][field] = copy.deepcopy(
+                value["actors"]["SETUP"][field]
+            )
+            variants.append(("duplicate " + field, value))
+        value = bindings()
+        value["actors"]["MAIL"]["clientId"] = "admin-cli"
+        variants.append(("human client", value))
+        value = bindings()
+        value["actors"]["MAIL"]["serviceSubject"] = "not-a-uuid"
+        variants.append(("subject", value))
+        value = bindings()
+        value["contextKeySecretRef"] = value["actors"]["MAIL"]["secretRef"].copy()
+        variants.append(("same key/credential ref", value))
+        value = bindings()
+        value["actors"]["SIXTH"] = value["actors"]["MAIL"].copy()
+        variants.append(("sixth actor", value))
+        value = bindings()
+        value["model"] = "FIVE_ACTOR"
+        variants.append(("unknown model", value))
+        for name, value in variants:
+            with self.subTest(name=name):
+                result, _ = render(value)
+                self.assertNotEqual(
+                    0,
+                    result.returncode,
+                    "Unsafe scenario C configuration rendered: " + name,
+                )
+                self.assertIn("taskIdentities", result.stderr)
+                self.assertEqual("", result.stdout)
+
+    def test_registry_has_one_final_bearer_audience_union_per_actor(self):
+        registry = json.loads(
+            (ROOT / "files/scenario-c-task-identities.json").read_text()
+        )
+        self.assertEqual(set(ACTORS), {actor["key"] for actor in registry["actors"]})
+        for actor in registry["actors"]:
+            self.assertEqual(
+                AUDIENCES[actor["key"]], set(actor.get("bearerAudiences", []))
+            )
+            self.assertEqual(
+                len(actor["bearerAudiences"]), len(set(actor["bearerAudiences"]))
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

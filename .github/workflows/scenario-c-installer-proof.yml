@@ -1,0 +1,101 @@
+name: Scenario C installer and chart diagnostic proof
+
+on:
+  push:
+    branches: [codex/367-p1-4-provisioner-20261021]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scenario-c-installer-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  chart-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: OpenResilienceInitiative/ORISO-Docs
+          ref: 18d7fe0bf52028bb554ec7c3d209a2ae367219ce
+          path: _contract_docs
+          persist-credentials: false
+      - name: Keep the existing reviewed contract fixture outside the chart
+        run: mv "$GITHUB_WORKSPACE/_contract_docs" "$RUNNER_TEMP/oriso-docs-contract"
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v4.2.2
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.12.13
+      - run: python -m pip install --disable-pip-version-check -r requirements-ci.txt
+      - name: Run all current offline, render, shell and actual chart checks
+        env:
+          ORISO_DOCS_SOURCE_ROOT: ${{ runner.temp }}/oriso-docs-contract
+        run: >-
+          python scripts/ci/scenario-c-installer-proof.py offline
+          --docs "$RUNNER_TEMP/oriso-docs-contract"
+          --report "$RUNNER_TEMP/installer-offline/receipt.json"
+      - name: Retain fresh offline outcomes and exact chart-docs source bindings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scenario-c-installer-offline-diagnostic
+          path: ${{ runner.temp }}/installer-offline/*
+          if-no-files-found: error
+          retention-days: 14
+
+  native-six:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v4.2.2
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.12.13
+      - run: python -m pip install --disable-pip-version-check -r requirements-ci.txt
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: OpenResilienceInitiative/ORISO-TenantService
+          ref: a8f5eec02a6de4faaa36a709f0ce4b42e8926c80
+          path: _native_support
+          persist-credentials: false
+      - name: Keep exact reviewed resource support outside the chart
+        run: mv "$GITHUB_WORKSPACE/_native_support" "$RUNNER_TEMP/installer-native-support"
+      - name: Check that skips, duplicates and setup errors cannot count as green
+        run: python -m unittest discover -s tests -p test_scenario_c_installer_evidence.py -q
+      - name: Exercise reviewed memory, ownership, reset and finite timeout controls
+        run: |
+          python -m unittest discover -s "$RUNNER_TEMP/installer-native-support/scripts/tests" -p test_native_context_resources.py -q
+          python tests/scenario_c_installer_resource_controls.py --support-root "$RUNNER_TEMP/installer-native-support"
+      - name: Prepare the exact pinned stock Keycloak image
+        run: |
+          docker info > /dev/null
+          docker pull quay.io/keycloak/keycloak@sha256:9b0330756022422149aa6502eb2def8cd47c6e1b000c7c65cdb13e7c0133e992 > /dev/null
+      - name: Run six real installer cases under the reviewed finite resource lease
+        run: >-
+          python scripts/ci/scenario-c-installer-proof.py hosted
+          --support "$RUNNER_TEMP/installer-native-support"
+          --report "$RUNNER_TEMP/installer-native/native-cases.json"
+      - name: Retain only sanitized outcomes and exact source-image receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scenario-c-installer-native-diagnostic
+          path: ${{ runner.temp }}/installer-native/*
+          if-no-files-found: error
+          retention-days: 14

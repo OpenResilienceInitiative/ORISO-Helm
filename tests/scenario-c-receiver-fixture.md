@@ -8,13 +8,13 @@ It imports no old fourteen-client registry, chart reconciler, account provider o
 
 | Actor | Client | Receiving audiences |
 |---|---|---|
-| SETUP | backend-setup | tenantservice, agencyservice, consultingtypeservice, userservice |
-| ACCOUNT_CREATE | backend-account-create | userservice |
-| ACCOUNT_ADMIN | backend-account-admin | userservice, oriso-otp |
+| SETUP | backend-setup | tenantservice, agencyservice, consultingtypeservice, userservice, oriso-task-commands |
+| ACCOUNT_CREATE | backend-account-create | userservice, oriso-account-lifecycle |
+| ACCOUNT_ADMIN | backend-account-admin | userservice, oriso-account-lifecycle, oriso-otp |
 | MAIL | backend-mail | tenantservice, agencyservice, consultingtypeservice, userservice |
 | RUNTIME | backend-runtime | tenantservice, agencyservice, appointmentservice |
 
-The role unions are the five-actor contract selected in Helm423. Before and after generating faults, the runner checks actual effective realm and client grants and group memberships. There are no baseline-role, native administration or group grants on these synthetic service accounts. Native fine-grained administration permissions are not configured by this fixture.
+The role unions are the five-actor contract selected in Helm423. SETUP owns SMTP configuration; MAIL owns delivery and notifications. Tenant and CTS native suites use only the shared synthetic ORISO_TASK_CONTEXT_KEY, without separate creation/policy keys. Before and after generating faults, the runner checks actual effective realm and client grants and group memberships. There are no baseline-role, native administration or group grants on these synthetic service accounts. Native fine-grained administration permissions are not configured by this fixture.
 
 For each actor it obtains three negative tokens from Keycloak itself: an added unrelated realm grant, an unrelated receiver audience, and an unbound subject. It temporarily changes only the isolated native role/scope or mapper configuration, obtains a signed token, and restores the original configuration in `finally` blocks. It then obtains and checks another valid token. It never builds a locally forged JWT.
 

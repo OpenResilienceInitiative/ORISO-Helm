@@ -31,6 +31,7 @@ spec:
           image:  {{ .Values.consultingTypeService.imageName }}:{{ .Values.consultingTypeService.imageVersion }}          
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
+            {{- include "oriso.scenarioC.env" (dict "root" $ "component" "consultingtypeservice") | nindent 12 }}
             {{- include "oriso.springTelemetryEnv" (dict "root" $ "image" (printf "%s:%s" .Values.consultingTypeService.imageName (toString .Values.consultingTypeService.imageVersion))) | nindent 12 }}
             # Same existing technical identity; no realm-admin credentials in CTS.
             - name: SMTP_RECONCILE_URL
@@ -62,11 +63,13 @@ spec:
                   name: task-identity-context-secrets
                   key: ORISO_TENANT_CREATION_CONTEXT_KEY
             {{- end }}
+            {{- if ne (include "oriso.scenarioC.enabled" $) "true" }}
             - name: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: keycloak-backend-client-secrets
                   key: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
+            {{- end }}
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:

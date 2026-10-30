@@ -3,6 +3,7 @@
 {{- fail "keycloakSmtpReconcile.image must use an immutable sha256 digest" -}}
 {{- end -}}
 {{- $migration := .Values.global.keycloak.backendServiceClients -}}
+{{- $scenarioC := eq (include "oriso.scenarioC.enabled" .) "true" -}}
 {{- $realmAdmin := default (dict) (default (dict) .Values.global.keycloak.bootstrapUsers).realmAdmin -}}
 {{- if and $migration.prepareOnly .Release.IsUpgrade -}}
 {{- fail "backendServiceClients.prepareOnly is for the isolated render/show-only preparation Job; never use it in a Helm upgrade" -}}
@@ -60,6 +61,8 @@ spec:
               cpu: 250m
               memory: 64Mi
           env:
+            - name: TASK_IDENTITY_MODEL
+              value: {{ ternary "FIVE_ACTORS" "LEGACY" $scenarioC | quote }}
             - name: KEYCLOAK_URL
               value: {{ include "oriso.keycloakAdminUrl" . | quote }}
             - name: KEYCLOAK_REALM
@@ -75,12 +78,14 @@ spec:
                   name: keycloak-secret-env
                   key: {{ index $pair 1 }}
             {{- end }}
+            {{- if not $scenarioC }}
             {{- range $pair := list (list "TECHNICAL_CLIENT_SECRET" "KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET") (list "ADMIN_CLIENT_SECRET" "KEYCLOAK_BACKEND_ADMIN_CLIENT_SECRET") }}
             - name: {{ index $pair 0 }}
               valueFrom:
                 secretKeyRef:
                   name: keycloak-backend-client-secrets
                   key: {{ index $pair 1 }}
+            {{- end }}
             {{- end }}
             - name: TECHNICAL_CLIENT_ID
               value: {{ .Values.global.keycloak.backendTechnicalClientId | quote }}
@@ -105,15 +110,17 @@ spec:
               value: {{ default "realmadmin" $realmAdmin.username | quote }}
             - name: DISABLE_REALM_ADMIN
               value: {{ and (not $migration.prepareOnly) (default false $realmAdmin.disableExisting) | toString | quote }}
-            {{- if not $migration.prepareOnly }}
+            {{- if or $scenarioC (not $migration.prepareOnly) }}
             # Ensures the SMTP sync realm client on existing realms (Helm#420).
             - name: SMTP_SYNC_CLIENT_ID
               value: {{ include "oriso.smtpSyncClientId" . | quote }}
+            {{- if not $scenarioC }}
             - name: SMTP_SYNC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: keycloak-smtp-sync-client
                   key: KEYCLOAK_SMTP_SYNC_CLIENT_SECRET
+            {{- end }}
             {{- end }}
           volumeMounts:
             - name: scripts

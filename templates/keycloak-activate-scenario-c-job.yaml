@@ -1,0 +1,105 @@
+{{- $s := default dict .Values.global.taskIdentities -}}
+{{- $a := default dict $s.activation -}}
+{{- if (dig "enabled" false $a) -}}
+{{- if ne (include "oriso.scenarioC.enabled" .) "true" -}}
+{{- fail "Scenario C activation requires global.taskIdentities.model=FIVE_ACTORS" -}}
+{{- end -}}
+{{- include "oriso.scenarioC.validate" . -}}
+{{- if not (dig "confirmIsolatedRealm" false $a) -}}
+{{- fail "Scenario C activation requires explicit confirmIsolatedRealm" -}}
+{{- end -}}
+{{- include "oriso.scenarioC.secretRef" $a.installerTokenSecretRef -}}
+{{- include "oriso.scenarioC.secretRef" $a.mappingConfigMapRef -}}
+{{- $jars := default dict $a.providerJarSha256 -}}
+{{- if ne (len $jars) 3 -}}{{- fail "Scenario C activation requires all three actual provider JAR fingerprints" -}}{{- end -}}
+{{- range $provider := list "oriso-account-lifecycle" "otp-config" "oriso-smtp-control" -}}
+{{- if not (regexMatch "^[a-f0-9]{64}$" (default "" (get $jars $provider))) -}}
+{{- fail "Scenario C activation requires all three actual provider JAR fingerprints" -}}
+{{- end -}}
+{{- end -}}
+{{- $image := required "keycloakSmtpReconcile.image is required" .Values.keycloakSmtpReconcile.image -}}
+{{- if not (regexMatch "^[^[:space:]]+@sha256:[a-f0-9]{64}$" $image) -}}{{- fail "Activation image must use an immutable digest" -}}{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-activate-scenario-c-script
+data:
+  {{- range $file := list "keycloak-activate-scenario-c.py" "scenario_c_reconcile.py" "scenario_c_activation.py" "scenario_c_human_groups.py" "scenario-c-task-identities.json" "keycloak-reconcile-smtp.py" }}
+  {{ $file }}: |
+{{ $.Files.Get (printf "files/%s" $file) | indent 4 }}
+  {{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-activate-scenario-c
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: keycloak-activate-scenario-c
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: activate
+          image: {{ $image | quote }}
+          imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          command: ["python3", "-B", "/scripts/keycloak-activate-scenario-c.py"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 64Mi
+          env:
+            {{- include "oriso.scenarioC.env" (dict "root" . "component" "userservice") | nindent 12 }}
+            - name: ORISO_SCENARIO_C_ACTIVATE
+              value: "true"
+            - name: ORISO_SCENARIO_C_ISOLATED_REALM
+              value: "true"
+            - name: KEYCLOAK_URL
+              value: {{ include "oriso.keycloakAdminUrl" . | quote }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: TASK_IDENTITY_ISSUER
+              value: {{ printf "%s/realms/%s" (trimSuffix "/" .Values.global.keycloak.authServerUrl) .Values.global.keycloak.realm | quote }}
+            - name: ORISO_KEYCLOAK_INSTALLER_TOKEN
+              valueFrom:
+                secretKeyRef: {{ $a.installerTokenSecretRef | toJson }}
+            - name: ORISO_ACTIVATION_MAPPING
+              valueFrom:
+                configMapKeyRef: {{ $a.mappingConfigMapRef | toJson }}
+            - name: ORISO_PROVIDER_JAR_SHA256
+              value: {{ $jars | toJson | quote }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: keycloak-activate-scenario-c-script
+            defaultMode: 0444
+{{- end }}

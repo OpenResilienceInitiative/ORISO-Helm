@@ -5,6 +5,9 @@ Uses isolated realms; never changes live ORISO settings. Runtime activation is
 synthetic fixture setup only, after the disabled-clients reconciliation proof.
 """
 
+import base64
+import ast
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -13,6 +16,12 @@ import sys
 import tempfile
 import unittest
 import uuid
+import re
+import threading
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 from urllib.parse import quote
 
 import _keycloak_container as shared
@@ -26,6 +35,9 @@ SCRIPT = ROOT / "scripts/reconcile-keycloak-scenario-c.py"
 class NativeScenarioCReconcileTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.cli_diagnostics = []
+        cls.provisioner_observations = {}
+        cls.external_review_observations = {}
         cls.container = shared.KeycloakContainer(
             "scenario-c-policies", os.environ.get("SCENARIO_C_KEYCLOAK_URL")
         )
@@ -108,13 +120,13 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             rows.append(value)
         return sorted(rows, key=lambda client: client["id"])
 
-    def cli(self, *args):
+    def cli(self, *args, endpoint=None, expect_failure=False):
         result = subprocess.run(
             [
                 sys.executable,
                 str(SCRIPT),
                 "--url",
-                self.container.base,
+                endpoint or self.container.base,
                 "--realm",
                 self.realm,
                 "--mapping",
@@ -131,7 +143,40 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             text=True,
             timeout=60,
         )
+        if expect_failure:
+            self.assertNotEqual(0, result.returncode, 'Injected native HTTP failure was not observed')
+            return result
         if result.returncode:
+            # Export only exact source-authored refusal literals and structural
+            # mapper mismatches. Never retain native bodies, tokens or secrets.
+            literals = {
+                node.args[0].value
+                for node in ast.walk(ast.parse((ROOT / "files/scenario_c_reconcile.py").read_text()))
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "ReconcileError"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            }
+            reason = next(
+                (
+                    text
+                    for text in literals
+                    if result.stderr.strip()
+                    == "Scenario C preparation refused: " + text
+                ),
+                "UNCLASSIFIED_REFUSAL",
+            )
+            spec = importlib.util.spec_from_file_location(
+                "installer_diagnostic", SCRIPT
+            )
+            installer = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(installer)
+            registry = installer.registry(
+                ROOT / "files/scenario-c-task-identities.json"
+            )
+            observation = {"reason": reason, "mapperMismatches": [], "pendingShape": []}
             for client in self.admin("GET", "/clients"):
                 if client["clientId"] not in {
                     "backend-setup",
@@ -141,6 +186,66 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
                     "backend-runtime",
                 }:
                     continue
+                actor = next(
+                    actor
+                    for actor in registry.values()
+                    if actor["clientId"] == client["clientId"]
+                )
+                attributes = client.get('attributes', {})
+                if 'oriso-c.pending-receipt' in attributes:
+                    expected = installer.pending_receipt(registry, json.loads(self.mapping.read_text()),
+                                                         self.admin('GET', ''), actor['key'])
+                    observation['pendingShape'].append({
+                        'pendingMarkerMatches': attributes.get('oriso-c.pending-receipt') == expected,
+                        'nativeSecretTimestampPresent': 'client.secret.creation.time' in attributes,
+                        'nativeSecretTimestampValid': installer.native_secret_timestamp_valid(
+                            attributes.get('client.secret.creation.time')),
+                        'unknownAttributeCount': len(set(attributes) - {'oriso-c.pending-receipt', 'client.secret.creation.time'}
+                                                     - set(installer.NATIVE_PENDING_READBACK_VALUES)),
+                        'namedNativeDefaultsMatch': all(name not in attributes or attributes[name] == value
+                            for name, value in installer.NATIVE_PENDING_READBACK_VALUES.items()),
+                        'inactiveFlagsMatch': all(client.get(field, False) is False for field in
+                            ('enabled', 'publicClient', 'bearerOnly', 'authorizationServicesEnabled',
+                             'consentRequired', 'standardFlowEnabled', 'directAccessGrantsEnabled',
+                             'implicitFlowEnabled', 'fullScopeAllowed')),
+                    })
+                desired = {row["name"]: row for row in installer.token_mappers(actor)}
+                actual = self.admin(
+                    "GET", "/clients/" + client["id"] + "/protocol-mappers/models"
+                )
+                for mapper in actual:
+                    if mapper.get("name") not in desired:
+                        observation["mapperMismatches"].append(
+                            {"actor": actor["key"], "unknownMapper": True}
+                        )
+                        continue
+                    expected = desired[mapper["name"]]
+                    config = mapper.get("config", {})
+                    differing = [
+                        key
+                        for key in expected["config"]
+                        if config.get(key) != expected["config"][key]
+                    ]
+                    extra = sorted(set(config) - set(expected["config"]))
+                    # Config field names are not emitted unless part of the finite
+                    # source-authored public mapper key set.
+                    public = {key for row in desired.values() for key in row["config"]}
+                    if (
+                        differing
+                        or extra
+                        or mapper.get("protocolMapper") != expected["protocolMapper"]
+                    ):
+                        observation["mapperMismatches"].append(
+                            {
+                                "actor": actor["key"],
+                                "mapper": mapper["name"],
+                                "differentExpectedFields": sorted(differing),
+                                "extraKnownFields": sorted(set(extra) & public),
+                                "extraUnknownFieldCount": len(set(extra) - public),
+                                "mapperTypeMatches": mapper.get("protocolMapper")
+                                == expected["protocolMapper"],
+                            }
+                        )
                 users = self.admin(
                     "GET",
                     "/users?username=service-account-"
@@ -161,14 +266,88 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
                         for k, v in grants.get("clientMappings", {}).items()
                     },
                 )
+            type(self).cli_diagnostics.append(observation)
         self.assertEqual(0, result.returncode, result.stderr)
         return json.loads(result.stdout)
 
+    @contextmanager
+    def faulting_admin(self, phase):
+        """Finite HTTP fault after native persistence, with no production flag."""
+        fixture = self
+        observed = []
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+            def request(self):
+                body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+                value = json.loads(body) if body else {}
+                post = (self.command == 'POST' and self.path.endswith('/clients')
+                        and value.get('clientId') == 'backend-setup')
+                final = (self.command == 'PUT' and value.get('attributes', {}).get('oriso-c.prepared-subject'))
+                target = (phase == 'after-post' and post) or (phase in ('before-final-put', 'after-final-put') and final)
+                if target and phase == 'before-final-put':
+                    observed.append(503)
+                    self.send_response(503); self.end_headers(); return
+                request = Request(fixture.container.base + self.path.removeprefix('/auth'),
+                                  data=body if body else None, method=self.command,
+                                  headers={key: self.headers[key] for key in ('Authorization', 'Content-Type')
+                                           if key in self.headers})
+                try:
+                    with urlopen(request, timeout=30) as response:
+                        code, payload = response.status, response.read()
+                except HTTPError as error:
+                    code, payload = error.code, error.read()
+                if target:
+                    observed.append(code)
+                    code, payload = 503, b'{}'
+                self.send_response(code); self.end_headers(); self.wfile.write(payload)
+            do_GET = do_POST = do_PUT = do_DELETE = request
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        try:
+            yield 'http://127.0.0.1:' + str(server.server_port) + '/auth', observed
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=5)
+            self.assertFalse(thread.is_alive(), 'Owned HTTP fault proxy did not stop')
+
     def test_fresh_chart_realm_installer_setup_and_second_reconcile_converge(self):
         self.assertFalse(self.cli()["applied"])
+        for phase, expected in (('after-post', 201), ('before-final-put', 503), ('after-final-put', 204)):
+            with self.faulting_admin(phase) as (endpoint, observed):
+                self.cli('--apply', '--confirm-isolated-realm', endpoint=endpoint, expect_failure=True)
+                self.assertEqual([expected], observed)
+            client = self.admin('GET', '/clients?clientId=backend-setup')[0]
+            user = self.admin('GET', '/users?username=service-account-backend-setup&exact=true')
+            self.assertEqual(1, len(user), 'Original POST has no read-only native subject')
+            pair = (client['id'], user[0]['id'])
+            stamp = client.get('attributes', {}).get('client.secret.creation.time')
+            self.assertTrue(isinstance(stamp, str) and re.fullmatch(r'[1-9][0-9]{0,9}', stamp)
+                            is not None and int(stamp) <= 2147483647,
+                            'Native POST secret timestamp must be present and valid')
+            type(self).external_review_observations['nativeSecretTimestampPresentAndValid'] = True
+            self.assertTrue(all(client['attributes'].get(name) == value for name, value in {
+                'backchannel.logout.session.required': 'true',
+                'backchannel.logout.revoke.offline.tokens': 'false',
+                'realm_client': 'false'}.items()), 'Actual native defaults do not match pinned readback')
+            type(self).external_review_observations['namedNativeReadbackDefaultsVerified'] = True
+            credential = self.admin('GET', '/clients/' + client['id'] + '/client-secret').get('value')
+            self.assertTrue(isinstance(credential, str) and bool(credential), 'Native POST has no client credential')
+            if phase == 'after-post':
+                original_pair = pair
+                original_stamp, original_credential = stamp, credential
+            self.assertEqual(original_pair, pair)
+            self.assertTrue(stamp == original_stamp and credential == original_credential,
+                            'Recovery changed native secret timestamp or credential')
+            self.assertFalse(client['enabled'])
+            marker = 'oriso-c.pending-receipt' if phase != 'after-final-put' else 'oriso-c.prepared-subject'
+            self.assertIn(marker, client['attributes'])
+            if phase == 'after-final-put':
+                self.assertNotIn('oriso-c.pending-receipt', client['attributes'])
+            self.assertFalse(self.cli()['applied'])
+        type(self).external_review_observations['ownedPendingCrashRecoverySameNativeSubject'] = True
         first = self.cli("--apply", "--confirm-isolated-realm")
         self.assertGreater(first["changes"], 0)
-        self.assertEqual(7, first["native_policy_count"])
+        self.assertEqual(9, first["native_policy_count"])
         self.assertEqual(0, self.cli("--apply", "--confirm-isolated-realm")["changes"])
         actors = [
             c
@@ -185,6 +364,81 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
         self.assertEqual(5, len(actors))
         self.assertTrue(all(c["enabled"] is False for c in actors))
         self.assertTrue(self.admin("GET", "")["adminPermissionsEnabled"])
+        completed = self.admin('GET', '/clients?clientId=backend-setup')[0]
+        self.assertNotIn('oriso-c.pending-receipt', completed['attributes'])
+        self.assertEqual(original_pair, (completed['id'], completed['attributes']['oriso-c.prepared-subject']))
+        final_credential = self.admin('GET', '/clients/' + completed['id'] + '/client-secret').get('value')
+        self.assertTrue(completed['attributes'].get('client.secret.creation.time') == original_stamp
+                        and final_credential == original_credential,
+                        'Completion changed native secret timestamp or credential')
+        type(self).external_review_observations['nativeSecretTimestampAndCredentialPreserved'] = True
+        # The actual upgrade helper must inspect retired clients without
+        # re-enabling, rotating or requiring any of their credentials.
+        retired = {}
+        for client_id in ("backend-technical", "backend-admin", "smtp-sync"):
+            client = self.admin("GET", "/clients?clientId=" + client_id)[0]
+            self.admin("PUT", "/clients/" + client["id"], {"enabled": False})
+            retired[client["id"]] = (
+                self.admin("GET", "/clients/" + client["id"]),
+                self.admin("GET", "/clients/" + client["id"] + "/client-secret"),
+            )
+        env = {"KEYCLOAK_URL": self.container.base, "KEYCLOAK_REALM": self.realm,
+               "POD_NAMESPACE": "fixture", "KEYCLOAK_ADMIN_USERNAME": shared.INSTALLER[0],
+               "KEYCLOAK_ADMIN_PASSWORD": shared.INSTALLER[1],
+               "TECHNICAL_CLIENT_ID": "backend-technical", "ADMIN_CLIENT_ID": "backend-admin",
+               "HUMAN_CLIENT_ID": "app", "SMTP_SYNC_CLIENT_ID": "smtp-sync",
+               "TASK_IDENTITY_MODEL": "FIVE_ACTORS"}
+        self.assertIn("LEGACY_SERVICE_CLIENTS_INSPECTED", shared.run_script(
+            "keycloak-reconcile-service-clients.py", env))
+        for cid, before in retired.items():
+            after = (self.admin("GET", "/clients/" + cid),
+                     self.admin("GET", "/clients/" + cid + "/client-secret"))
+            self.assertTrue(before == after, "Inspect-only hook changed a retired client")
+        type(self).external_review_observations['retiredLegacyClientsAndCredentialsPreserved'] = True
+
+    def test_five_prepared_actors_issue_exact_native_subject_role_audience_tokens(self):
+        self.cli("--apply", "--confirm-isolated-realm", "--receivers-only")
+        self.assertEqual(
+            0,
+            self.cli("--apply", "--confirm-isolated-realm", "--receivers-only")[
+                "changes"
+            ],
+        )
+        registry = json.loads(
+            (ROOT / "files/scenario-c-task-identities.json").read_text()
+        )
+        for actor in registry["actors"]:
+            with self.subTest(actor=actor["key"]):
+                # Enabling and setting synthetic fixture credentials happen only
+                # after disabled preparation has independently converged twice.
+                token = self.actor_token(actor["clientId"].removeprefix("backend-"))
+                payload = token.split(".")[1]
+                claims = json.loads(
+                    base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+                )
+                client = next(
+                    c
+                    for c in self.admin("GET", "/clients")
+                    if c["clientId"] == actor["clientId"]
+                )
+                user = self.admin(
+                    "GET", "/clients/" + client["id"] + "/service-account-user"
+                )
+                self.assertEqual(
+                    self.container.base + "/realms/" + self.realm, claims.get("iss")
+                )
+                self.assertEqual(actor["clientId"], claims.get("azp"))
+                self.assertEqual(user["id"], claims.get("sub"))
+                self.assertEqual(
+                    set(actor["roles"]),
+                    set(claims.get("realm_access", {}).get("roles", [])),
+                )
+                audiences = claims.get("aud", [])
+                if isinstance(audiences, str):
+                    audiences = [audiences]
+                self.assertEqual(set(actor["bearerAudiences"]), set(audiences))
+                self.assertEqual(len(actor["bearerAudiences"]), len(audiences))
+                self.assertFalse(claims.get("resource_access"))
 
     def prepare(self):
         self.cli("--apply", "--confirm-isolated-realm")
@@ -261,6 +515,13 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             5, len({self.admin("GET", "/users/" + uid)["id"] for uid in account_ids})
         )
 
+    def assert_phase_status(self, phase, expected, actual):
+        if type(expected) is not int or type(actual) is not int or not (100 <= expected <= 599 and 100 <= actual <= 599):
+            raise AssertionError("Only HTTP statuses may enter phase evidence")
+        type(self).external_review_observations.setdefault("permissionPhases", {})[phase] = {
+            "expected": expected, "actual": actual}
+        self.assertEqual(expected, actual)
+
     def test_real_actor_tokens_keep_group_commit_and_protected_denials(self):
         self.prepare()
         human = self.user("existing-consultant", ["/human-roles/consultant"])
@@ -280,35 +541,61 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
                 {"username": "without-pending", "enabled": False},
             )[0],
         )
+        creator_status = self.native(
+            creator,
+            "POST",
+            "/users",
+            {
+                "username": "owned-pending",
+                "enabled": False,
+                "groups": ["/pending-provisioning"],
+            },
+        )[0]
+        maintainer_status = self.native(
+            maintainer,
+            "POST",
+            "/users",
+            {
+                "username": "maintainer-pending",
+                "enabled": False,
+                "groups": ["/pending-provisioning"],
+            },
+        )[0]
+        type(self).provisioner_observations = {
+            "creatorPendingCreateStatus": creator_status,
+            "maintainerPendingCreateStatus": maintainer_status,
+        }
+        self.assertEqual(201, creator_status)
+        self.assertEqual(403, maintainer_status)
         self.assertEqual(
-            201,
-            self.native(
-                creator,
-                "POST",
-                "/users",
-                {
-                    "username": "owned-pending",
-                    "enabled": False,
-                    "groups": ["/pending-provisioning"],
-                },
-            )[0],
+            [], self.admin("GET", "/users?username=maintainer-pending&exact=true")
         )
         pending = self.admin("GET", "/users?username=owned-pending&exact=true")[0]["id"]
-        self.assertEqual(200, self.native(creator, "GET", "/users/" + pending)[0])
+        self.assert_phase_status("creator-pending-read", 200, self.native(creator, "GET", "/users/" + pending)[0])
         self.assertFalse(self.native(creator, "GET", "/users/" + pending)[1]["enabled"])
         consultant_group = self.admin("GET", "/group-by-path/human-roles/consultant")[
             "id"
         ]
-        self.assertEqual(
-            204,
+        self.assert_phase_status(
+            "creator-ordinary-group-commit", 204,
             self.native(
                 creator, "PUT", "/users/" + pending + "/groups/" + consultant_group
             )[0],
         )
-        self.assertEqual(403, self.native(creator, "DELETE", "/users/" + pending)[0])
-        self.assertEqual(200, self.native(maintainer, "GET", "/users/" + human)[0])
-        self.assertEqual(
-            204,
+        self.assert_phase_status("creator-delete-refused", 403, self.native(creator, "DELETE", "/users/" + pending)[0])
+        ordinary_before = self.admin("GET", "/users/" + human + "/groups")
+        self.assert_phase_status(
+            "maintainer-ordinary-create-refused", 403,
+            self.native(maintainer, "POST", "/users", {
+                "username": "maintainer-ordinary", "enabled": False,
+                "groups": ["/human-roles/consultant"],
+            })[0],
+        )
+        self.assertEqual([], self.admin("GET", "/users?username=maintainer-ordinary&exact=true"))
+        self.assertEqual(ordinary_before, self.admin("GET", "/users/" + human + "/groups"))
+        self.assert_phase_status("maintainer-human-read", 200, self.native(maintainer, "GET", "/users/" + human)[0])
+        self.assert_phase_status(
+            "maintainer-human-update", 204,
             self.native(
                 maintainer, "PUT", "/users/" + human, {"firstName": "Maintained"}
             )[0],
@@ -317,17 +604,18 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             "Maintained",
             self.native(maintainer, "GET", "/users/" + human)[1]["firstName"],
         )
-        self.assertEqual(
-            403,
+        self.assert_phase_status(
+            "creator-other-human-update-refused", 403,
             self.native(creator, "PUT", "/users/" + human, {"firstName": "Forbidden"})[
                 0
             ],
         )
-        self.assertEqual(
-            200, self.native(maintainer, "GET", "/users/" + centre_admin)[0]
+        self.assert_phase_status(
+            "maintainer-centre-admin-read", 200, self.native(maintainer, "GET", "/users/" + centre_admin)[0]
         )
-        for token in (creator, maintainer, mail):
-            self.assertEqual(403, self.native(token, "GET", "/users/" + protected)[0])
+        for actor, token in (("creator", creator), ("maintainer", maintainer), ("mail", mail)):
+            self.assert_phase_status("protected-read-refused-" + actor,
+                                     403, self.native(token, "GET", "/users/" + protected)[0])
             self.assertEqual(
                 403,
                 self.native(
@@ -337,14 +625,93 @@ class NativeScenarioCReconcileTest(unittest.TestCase):
             self.assertEqual(
                 403, self.native(token, "PUT", "", {"registrationAllowed": True})[0]
             )
-        self.assertEqual(403, self.native(mail, "GET", "/users/" + human)[0])
+        self.assert_phase_status("mail-human-read-refused", 403, self.native(mail, "GET", "/users/" + human)[0])
         self.assertEqual(
             403,
             self.native(
                 mail, "PUT", "", {"smtpServer": {"host": "mail.example.invalid"}}
             )[0],
         )
+        dual = self.user('protected-ordinary-dual-member',
+                         ['/protected-admins/platform-admins', '/human-roles/consultant'])
+        get_status = self.native(maintainer, 'GET', '/users/' + dual)[0]
+        put_status = self.native(maintainer, 'PUT', '/users/' + dual, {'firstName': 'MustRefuse'})[0]
+        type(self).external_review_observations.update(
+            dualProtectedMemberGetStatus=get_status, dualProtectedMemberPutStatus=put_status)
+        self.assertEqual(403, get_status)
+        self.assertEqual(403, put_status)
         # A grouped MAIL actor has no native SMTP authority. #57 remains open.
+
+    def test_receiver_only_policies_refuse_stock_mutation_with_real_actor_tokens(self):
+        self.prepare()
+        converted = self.cli("--apply", "--confirm-isolated-realm", "--receivers-only")
+        self.assertEqual("RECEIVER_ONLY", converted["policy_model"])
+        self.assertEqual(
+            0,
+            self.cli("--apply", "--confirm-isolated-realm", "--receivers-only")[
+                "changes"
+            ],
+        )
+        ordinary = self.user("receiver-only-human", ["/human-roles/consultant"])
+        pending = self.user("receiver-only-pending", ["/pending-provisioning"])
+        protected = self.user(
+            "receiver-only-protected", ["/protected-admins/platform-admins"]
+        )
+        self.admin("PUT", "/users/" + pending, {"enabled": False})
+        group = self.admin("GET", "/group-by-path/human-roles/consultant")["id"]
+        before = {
+            uid: self.admin("GET", "/users/" + uid)
+            for uid in (ordinary, pending, protected)
+        }
+        for actor in ("account-create", "account-admin"):
+            token = self.actor_token(actor)
+            for uid in (ordinary, pending, protected):
+                for method, suffix, body in (
+                    (
+                        "PUT",
+                        "",
+                        {
+                            "enabled": True,
+                            "attributes": {"attempt-owner": ["rewritten"]},
+                        },
+                    ),
+                    (
+                        "PUT",
+                        "/reset-password",
+                        {
+                            "type": "password",
+                            "value": "synthetic-policy-only-credential",
+                            "temporary": False,
+                        },
+                    ),
+                    ("PUT", "/groups/" + group, None),
+                    ("DELETE", "", None),
+                ):
+                    with self.subTest(
+                        actor=actor, method=method, target=uid, operation=suffix
+                    ):
+                        self.assertEqual(
+                            403,
+                            self.native(token, method, "/users/" + uid + suffix, body)[
+                                0
+                            ],
+                        )
+            self.assertEqual(
+                403,
+                self.native(
+                    token,
+                    "POST",
+                    "/users",
+                    {
+                        "username": "forbidden-" + actor,
+                        "enabled": False,
+                        "groups": ["pending-provisioning"],
+                    },
+                )[0],
+            )
+        after = {uid: self.admin("GET", "/users/" + uid) for uid in before}
+        self.assertEqual(before, after)
+        self.assertFalse(after[pending]["enabled"])
 
     def test_unmanaged_existing_actor_is_refused_without_adoption(self):
         self.admin(

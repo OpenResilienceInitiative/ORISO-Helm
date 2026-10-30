@@ -15,6 +15,7 @@ import yaml
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES = (
     "templates/_helpers.tpl",
+    "templates/_scenario-c.tpl",
     "templates/tenantservice/tenantservice-configmap-env.yaml",
     "templates/tenantservice/tenantservice-deployment.yaml",
 )
