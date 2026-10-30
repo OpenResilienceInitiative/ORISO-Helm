@@ -104,6 +104,7 @@ metadata:
   name: matrix-discovery-data
   namespace: {{ .Release.Namespace }}
 ---
+{{ define "oriso.matrix.homeserverConfigMap" }}
 apiVersion: v1
 data:
   homeserver.yaml: |
@@ -184,8 +185,7 @@ data:
 
     registration_shared_secret: {{ .Values.global.secrets.matrixRegistrationSharedSecret }}
     report_stats: false
-    enable_registration: true
-    enable_registration_without_verification: true
+    enable_registration: false
     # Public client URL (login well-known, generated links). Synapse is served
     # on the main host under /_matrix (matrix-client-ingress); matrixApiUrl is
     # the in-cluster address for services and must not be advertised.
@@ -229,6 +229,8 @@ kind: ConfigMap
 metadata:
   name: matrix-homeserver-oidc
   namespace: {{ .Release.Namespace }}
+{{ end }}
+{{ include "oriso.matrix.homeserverConfigMap" . }}
 ---  
 apiVersion: v1
 data:
