@@ -71,13 +71,6 @@ userService:
   magicLinkFrontendBaseUrl: "https://predev.oriso.org"
   passwordResetFrontendBaseUrl: "https://predev.oriso.org"
   passwordResetAdminFrontendBaseUrl: "https://predev.oriso.org/admin"
-  # Every new staff account must set up 2FA; "allowed" only permits enrolment.
-  # Set explicitly so Pre-Dev never depends on the chart default.
-  otpAllowedForConsultants: "true"
-  otpAllowedForSingleTenantAdmins: "true"
-  otpAllowedForTenantSuperAdmins: "true"
-  otpAllowedForRestrictedAgencyAdmins: "true"
-
   # NOTE — statisticsMessageCountHmacSecret is deliberately NOT set here.
   # It is a mandatory boot config (ConsultantIdentityHasher exits 1 on a blank
   # value), but it is a credential, so it lives in the persistent secret values

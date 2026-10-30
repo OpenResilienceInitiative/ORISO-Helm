@@ -1,19 +1,17 @@
 """Every new staff account must set up 2FA, so the OTP "allowed" flags for staff
-roles must default to true and Pre-Dev must set them explicitly.
+roles must default to true.
 
 "Allowed" only permits enrolment; it does not force it. While it is false,
 UserService answers 2FA enrolment with 409 and never announces the requirement.
-The advice-seeker template fallback stays "false" (Dev and Pre-Dev set it to
-"true" in their overlays). Staff flags use `dig`, not `| default`, because
-`default` treats an explicit boolean false as empty and would turn an
-operator's `--set ...=false` into "true". Pure source checks, no helm.
+The advice-seeker template fallback stays "false". Staff flags use `dig`, not
+`| default`, because `default` treats an explicit boolean false as empty and
+would turn an operator's `--set ...=false` into "true". Pure source checks,
+no helm.
 """
 
 import re
 import unittest
 from pathlib import Path
-
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "templates" / "userservice" / "userservice-configmap-env.yaml"
@@ -54,12 +52,6 @@ class UserServiceOtpStaffDefaults(unittest.TestCase):
 
     def test_advice_seeker_template_fallback_is_false(self):
         self.assertEqual("false", default_of("IDENTITY_OTP_ALLOWED_FOR_USERS"))
-
-    def test_pre_dev_sets_staff_flags_explicitly(self):
-        values = yaml.safe_load((ROOT / "values-pre-dev.yaml").read_text())["userService"]
-        for value_key in STAFF.values():
-            self.assertEqual("true", values.get(value_key), value_key)
-
 
 if __name__ == "__main__":
     unittest.main()
