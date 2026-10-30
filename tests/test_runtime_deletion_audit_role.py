@@ -66,6 +66,18 @@ class RuntimeDeletionAuditRoleTest(unittest.TestCase):
             configmap,
         )
 
+    def test_agencyservice_pods_roll_when_its_env_configmap_changes(self):
+        # The required-task list is a literal in the ConfigMap, so only a pod-template
+        # checksum makes a chart-only change to it restart AgencyService.
+        deployment = (
+            ROOT / "templates/agencyservice/agencyservice-deployment.yaml"
+        ).read_text()
+        self.assertIn(
+            'checksum/config-env: {{ include (print $.Template.BasePath '
+            '"/agencyservice/agencyservice-configmap-env.yaml") . | sha256sum }}',
+            deployment,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

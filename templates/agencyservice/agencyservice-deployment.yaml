@@ -15,6 +15,7 @@ spec:
       annotations:
         checksum/technical-service-identity: {{ printf "%s\x00%s" .Values.global.keycloak.backendTechnicalClientId .Values.global.keycloak.serviceTechUserId | sha256sum | quote }}
         checksum/task-identities: {{ include "oriso.backendServiceClientsChecksum" . | quote }}
+        checksum/config-env: {{ include (print $.Template.BasePath "/agencyservice/agencyservice-configmap-env.yaml") . | sha256sum }}
       labels:
         app: agencyservice
     spec:
