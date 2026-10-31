@@ -64,14 +64,16 @@
         "RUNTIME_POLICY",
         "MATRIX_AGENCY",
         "APPOINTMENT_SYNC",
-        "APPOINTMENT_CLEANUP"
+        "APPOINTMENT_CLEANUP",
+        "DELETION_AUDIT_READ"
       ],
       "roles": [
         "runtime-policy",
         "matrix-agency",
         "matrix-agency-provision",
         "appointment-sync",
-        "appointment-participant-cleanup"
+        "appointment-participant-cleanup",
+        "deletion-audit-read"
       ]
     }
   ]

@@ -68,6 +68,11 @@ spec:
                 configMapKeyRef:
                   name: userservice-configmap-env
                   key: TASK_IDENTITY_MODEL
+            - name: DELETION_AUDIT_AGENCYOUTBOX_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: DELETION_AUDIT_AGENCYOUTBOX_ENABLED
             - name: MATRIXRTC_LIFECYCLE_ENABLED
               valueFrom:
                 configMapKeyRef:

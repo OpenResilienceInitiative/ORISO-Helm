@@ -389,6 +389,10 @@ online-counseling-keycloak:
 agencyService:
   replicas: 1
   image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:dev"
+  # Deletion-log outbox (OBP 2.1 #130). With task identities on, an AgencyService image older
+  # than ORISO-AgencyService#356 refuses to start once DELETION_AUDIT_READ is required. Switch this
+  # on in the same release that deploys that image; until then the outbox stays unreadable.
+  deletionAuditOutboxEnabled: false
 
   keycloakResource: "agency-service"
 

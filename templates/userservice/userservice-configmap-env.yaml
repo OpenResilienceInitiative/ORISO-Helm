@@ -103,6 +103,8 @@ data:
   KEYCLOAK_CONFIG_APP_CLIENTID: {{ .Values.global.keycloak.serviceAppClientId }}
   KEYCLOAKSERVICE_TECHUSER_ID: {{ .Values.global.keycloak.serviceTechUserId }}
   TASK_IDENTITY_MODEL: {{ if $scenarioEnabled }}"FIVE_ACTORS"{{ else }}"LEGACY"{{ end }}
+  # OBP 2.1 #130: pull agency purges only once AgencyService serves its outbox (same switch).
+  DELETION_AUDIT_AGENCYOUTBOX_ENABLED: {{ .Values.agencyService.deletionAuditOutboxEnabled | default false | quote }}
   {{- if $scenarioEnabled }}
   IDENTITY_SETUP_CLIENT_ID: {{ $setupClient | quote }}
   IDENTITY_SETUP_SERVICE_SUBJECT: {{ $setupSubject | quote }}
