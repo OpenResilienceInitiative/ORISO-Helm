@@ -56,15 +56,17 @@ class RuntimeDeletionAuditRoleTest(unittest.TestCase):
         migration = load("scripts/migrate-keycloak-human-role-groups.py", "human_groups")
         self.assertIn("deletion-audit-read", migration.TECHNICAL_ROLES)
 
-    def test_agencyservice_requires_the_outbox_purpose(self):
+    def test_agencyservice_requires_the_outbox_purpose_only_when_switched_on(self):
+        # An AgencyService image without the outbox refuses to start when DELETION_AUDIT_READ is
+        # required, so the chart must not require it before that image is deployed.
         configmap = (
             ROOT / "templates/agencyservice/agencyservice-configmap-env.yaml"
         ).read_text()
-        self.assertIn(
-            'TASK_IDENTITY_REQUIRED_TASKS: '
-            '"CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,MATRIX_AGENCY,DELETION_AUDIT_READ"',
-            configmap,
-        )
+        self.assertIn("if .Values.agencyService.deletionAuditOutboxEnabled", configmap)
+        self.assertIn('printf "%s,DELETION_AUDIT_READ" $requiredTasks', configmap)
+        self.assertIn("TASK_IDENTITY_REQUIRED_TASKS: {{ $requiredTasks | quote }}", configmap)
+        defaults = (ROOT / "values.yaml.default").read_text()
+        self.assertIn("  deletionAuditOutboxEnabled: false\n", defaults)
 
     def test_agencyservice_pods_roll_when_its_env_configmap_changes(self):
         # The required-task list is a literal in the ConfigMap, so only a pod-template

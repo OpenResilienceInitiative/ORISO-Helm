@@ -21,7 +21,7 @@ RECEIVERS = {
         "actors": ("SETUP", "MAIL", "RUNTIME"),
     },
     "agencyservice": {
-        "tasks": "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,MATRIX_AGENCY,DELETION_AUDIT_READ",
+        "tasks": "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,MATRIX_AGENCY",
         "audience": "agencyservice",
         "actors": ("SETUP", "MAIL", "RUNTIME"),
     },
@@ -171,6 +171,15 @@ def main():
     provision_env = env_by_name(provision_docs[("Deployment", "userservice")])
     assert provision_config["TASK_IDENTITY_MODEL"] == "LEGACY"
     assert "IDENTITY_SETUP_CLIENT_ID" not in provision_env
+
+    outbox, outbox_docs = render("--set", "agencyService.deletionAuditOutboxEnabled=true")
+    assert outbox.returncode == 0, outbox.stderr
+    assert (
+        outbox_docs[("ConfigMap", "agencyservice-configmap-env")]["data"][
+            "TASK_IDENTITY_REQUIRED_TASKS"
+        ]
+        == RECEIVERS["agencyservice"]["tasks"] + ",DELETION_AUDIT_READ"
+    ), "the deletion-log outbox switch must add exactly DELETION_AUDIT_READ"
 
     conflicting, _ = render("--set", "global.keycloak.taskIdentities.provisionOnly=true")
     assert conflicting.returncode != 0, "enable and provisionOnly must be mutually exclusive"
