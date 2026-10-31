@@ -180,6 +180,15 @@ def main():
         ]
         == RECEIVERS["agencyservice"]["tasks"] + ",DELETION_AUDIT_READ"
     ), "the deletion-log outbox switch must add exactly DELETION_AUDIT_READ"
+    # UserService pulls only when AgencyService serves the outbox; otherwise it would get 403 on
+    # every run while the switch is off.
+    for rendered, expected in ((docs, "false"), (outbox_docs, "true")):
+        user_config = rendered[("ConfigMap", "userservice-configmap-env")]["data"]
+        assert user_config["DELETION_AUDIT_AGENCYOUTBOX_ENABLED"] == expected
+        user_env = env_by_name(rendered[("Deployment", "userservice")])
+        assert user_env["DELETION_AUDIT_AGENCYOUTBOX_ENABLED"]["valueFrom"]["configMapKeyRef"] == {
+            "name": "userservice-configmap-env", "key": "DELETION_AUDIT_AGENCYOUTBOX_ENABLED"
+        }
 
     conflicting, _ = render("--set", "global.keycloak.taskIdentities.provisionOnly=true")
     assert conflicting.returncode != 0, "enable and provisionOnly must be mutually exclusive"
