@@ -61,6 +61,25 @@ def override(documents: list[dict]) -> str:
     return configmap["data"][KEY]
 
 
+def config_env_checksum(documents: list[dict]) -> str | None:
+    deployment = next(
+        doc for doc in documents
+        if doc.get("kind") == "Deployment"
+        and doc.get("metadata", {}).get("name") == "consultingtypeservice"
+    )
+    annotations = deployment["spec"]["template"]["metadata"].get("annotations") or {}
+    return annotations.get("checksum/config-env")
+
+
+def test_override_change_rolls_out_cts() -> None:
+    # The env var is read from the ConfigMap only at Pod start, so a changed
+    # override must change the Pod template (as for agency/user service).
+    default_checksum = config_env_checksum(render())
+    dev_checksum = config_env_checksum(render("dev"))
+    assert default_checksum, "CTS Pod template has no checksum/config-env"
+    assert dev_checksum and dev_checksum != default_checksum
+
+
 def test_override_is_empty_by_default_and_in_prod() -> None:
     assert override(render()) == ""
     assert override(render("prod")) == ""
@@ -81,6 +100,7 @@ if __name__ == "__main__":
         test_override_is_empty_by_default_and_in_prod()
         test_dev_switches_new_notifications_on()
         test_pre_dev_resets_the_dev_override()
+        test_override_change_rolls_out_cts()
     except AssertionError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         sys.exit(1)

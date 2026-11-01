@@ -14,6 +14,7 @@ spec:
     metadata:
       annotations:
         checksum/backend-service-clients: {{ include "oriso.backendServiceClientsChecksum" . | quote }}
+        checksum/config-env: {{ include (print $.Template.BasePath "/consultingtypeservice/consultingtypeservice-configmap-env.yaml") . | sha256sum }}
       labels:
         app: consultingtypeservice
     spec:
