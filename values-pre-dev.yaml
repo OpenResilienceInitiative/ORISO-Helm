@@ -8,7 +8,7 @@
 #     -f values.yaml -f values-dev.yaml -f values-pre-dev.yaml -f secrets.yaml
 #
 # Deliberate deltas from Dev: host and public URLs, Matrix identity, SigNoz labels,
-# no chart-managed Storybook, no dummy data, the closed mail-locale gate required by
+# no chart-managed Storybook, no dummy data, no release-toggle override, the closed mail-locale gate required by
 # tests/render_pending_mail_locale_optin_test.py, and the Spring profile (see below).
 #
 # Inherited from Dev, and new on Pre-Dev compared with the old standalone overlay
@@ -62,6 +62,10 @@ agencyService:
   springProfilesActive: "prod"
 tenantService:
   springProfilesActive: "prod"
+consultingTypeService:
+  # tests/render_release_toggle_overrides_test.py: the e-mail notification
+  # switch (Frontend#1979) is QA'd on Dev only; Pre-Dev keeps what MongoDB stores.
+  releaseToggleOverrides: ""
 userService:
   springProfilesActive: "prod"
   # tests/render_pending_mail_locale_optin_test.py requires the unreviewed-locale

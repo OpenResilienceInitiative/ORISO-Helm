@@ -72,8 +72,8 @@ tenantService:
   liquibaseContexts: "seed"
 consultingTypeService:
   liquibaseContexts: "seed"
-  # Frontend#1979 (OBP 2.1 #101): e-mail notification settings are QA'd on dev
-  # only. Pre-dev and prod keep the value stored in MongoDB.
+  # Frontend#1979 (OBP 2.1 #101): e-mail notification settings are QA'd on Dev.
+  # values-pre-dev.yaml clears it again; prod keeps the value stored in MongoDB.
   releaseToggleOverrides: "enableNewNotifications=true"
 userService:
   springProfilesActive: "dev"
