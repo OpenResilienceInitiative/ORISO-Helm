@@ -46,6 +46,7 @@
   "quickLoginCheckMilliSeconds": 1000,
   "maxDeltaTimeSeconds": 43200,
   "failureFactor": 15,
+  "passwordPolicy": "length(16)",
   "roles": {
     "realm": [
       {
