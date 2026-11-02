@@ -417,6 +417,9 @@ consultingTypeService:
   consultingTypesJsonPath : "consulting-type-settings"
   liquibaseChangeLog: "classpath:db/changelog/consultingtypeservice-master.xml"
   liquibaseContexts: "seed"
+  # Release toggles served on top of the ones stored in MongoDB, e.g.
+  # "enableNewNotifications=true". Empty: the stored values apply unchanged.
+  releaseToggleOverrides: ""
   bootstrapTopics:
     enabled: true
 
