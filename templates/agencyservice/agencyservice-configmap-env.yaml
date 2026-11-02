@@ -9,7 +9,7 @@
 {{- end -}}
 {{- $scenarioEnabled := dig "taskIdentities" "enabled" false .Values.global.keycloak -}}
 {{- $requiredTasks := "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,MATRIX_AGENCY" -}}
-{{- if .Values.agencyService.deletionAuditOutboxEnabled -}}
+{{- if eq (include "oriso.deletionAuditOutboxEnabled" .) "true" -}}
 {{- $requiredTasks = printf "%s,DELETION_AUDIT_READ" $requiredTasks -}}
 {{- end -}}
 apiVersion: v1
