@@ -504,3 +504,21 @@ Browser Web Vitals ingest URL, or "" when browser telemetry is off.
 {{- $o := get .Values.global "observability" | default dict -}}
 {{- get (get $o "webVitals" | default dict) "exportIntervalMillis" | default 60000 | toString -}}
 {{- end -}}
+
+{{/*
+agencyService.deletionAuditOutboxEnabled as a real boolean, read once for both services (#459).
+AgencyService adds DELETION_AUDIT_READ when it is on, UserService pulls the outbox when it is on.
+A quoted "false" (--set-string, or quotes in an override file) is truthy in a template `if` but
+reaches UserService as the string false, so the two services would disagree. Fail at render time.
+An unset or empty value means off. Returns "true" or "false".
+*/}}
+{{- define "oriso.deletionAuditOutboxEnabled" -}}
+{{- $value := dig "deletionAuditOutboxEnabled" false (.Values.agencyService | default dict) -}}
+{{- if kindIs "invalid" $value -}}
+{{- $value = false -}}
+{{- end -}}
+{{- if not (kindIs "bool" $value) -}}
+{{- fail (printf "agencyService.deletionAuditOutboxEnabled must be true or false without quotes (got %s %q). Use --set, not --set-string, and do not quote it in a values file." (kindOf $value) (toString $value)) -}}
+{{- end -}}
+{{- ternary "true" "false" $value -}}
+{{- end -}}

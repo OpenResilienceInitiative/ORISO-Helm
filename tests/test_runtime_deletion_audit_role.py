@@ -62,7 +62,7 @@ class RuntimeDeletionAuditRoleTest(unittest.TestCase):
         configmap = (
             ROOT / "templates/agencyservice/agencyservice-configmap-env.yaml"
         ).read_text()
-        self.assertIn("if .Values.agencyService.deletionAuditOutboxEnabled", configmap)
+        self.assertIn('if eq (include "oriso.deletionAuditOutboxEnabled" .) "true"', configmap)
         self.assertIn('printf "%s,DELETION_AUDIT_READ" $requiredTasks', configmap)
         self.assertIn("TASK_IDENTITY_REQUIRED_TASKS: {{ $requiredTasks | quote }}", configmap)
         defaults = (ROOT / "values.yaml.default").read_text()
