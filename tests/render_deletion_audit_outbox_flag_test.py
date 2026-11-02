@@ -26,6 +26,7 @@ def main():
         (("--set", f"{KEY}=false"), (False, "false")),
         (("--set", f"{KEY}=true"), (True, "true")),
         (("--set", f"{KEY}=null"), (False, "false")),
+        (("--set-string", f"{KEY}="), (False, "false")),
     ):
         result, docs = render(*args)
         assert result.returncode == 0, (args, result.stderr)
@@ -34,7 +35,7 @@ def main():
             assert docs[AGENCY]["data"]["TASK_IDENTITY_REQUIRED_TASKS"] == RECEIVERS["agencyservice"]["tasks"]
 
     # Strings, including the dangerous quoted "false": rendering stops with a clear message.
-    for value in ("false", "true", "yes", ""):
+    for value in ("false", "true", "yes"):
         result, _ = render("--set-string", f"{KEY}={value}")
         assert result.returncode != 0, f"--set-string {KEY}={value!r} must not render"
         assert f"{KEY} must be true or false without quotes" in result.stderr, result.stderr
@@ -42,6 +43,10 @@ def main():
     # The legacy model (no task identities) reads the same switch for UserService.
     legacy, _ = render("--set-string", f"{KEY}=false", task_identity=False)
     assert legacy.returncode != 0 and "without quotes" in legacy.stderr, legacy.stderr
+
+    legacy_empty, legacy_docs = render("--set-string", f"{KEY}=", task_identity=False)
+    assert legacy_empty.returncode == 0, legacy_empty.stderr
+    assert legacy_docs[USER]["data"]["DELETION_AUDIT_AGENCYOUTBOX_ENABLED"] == "false"
 
     print("PASS: the deletion-log outbox switch renders only as a boolean, the same for both services")
 

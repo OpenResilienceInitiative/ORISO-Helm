@@ -517,6 +517,9 @@ An unset or empty value means off. Returns "true" or "false".
 {{- if kindIs "invalid" $value -}}
 {{- $value = false -}}
 {{- end -}}
+{{- if and (kindIs "string" $value) (eq $value "") -}}
+{{- $value = false -}}
+{{- end -}}
 {{- if not (kindIs "bool" $value) -}}
 {{- fail (printf "agencyService.deletionAuditOutboxEnabled must be true or false without quotes (got %s %q). Use --set, not --set-string, and do not quote it in a values file." (kindOf $value) (toString $value)) -}}
 {{- end -}}
