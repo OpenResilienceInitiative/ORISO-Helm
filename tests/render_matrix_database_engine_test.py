@@ -44,6 +44,14 @@ def database_block(stdout: str) -> dict:
     return yaml.safe_load(secret["stringData"]["homeserver-database.yaml"])["database"]
 
 
+def pod_annotations(stdout: str) -> dict:
+    deployment = next(
+        d for d in yaml.safe_load_all(stdout)
+        if isinstance(d, dict) and d["kind"] == "Deployment" and d["metadata"]["name"] == "matrix-synapse"
+    )
+    return deployment["spec"]["template"]["metadata"]["annotations"]
+
+
 def main() -> None:
     default = render()
     assert default.returncode == 0, default.stderr
@@ -61,6 +69,13 @@ def main() -> None:
     assert db["name"] == "psycopg2", db["name"]
     assert db["args"]["host"] == "matrix-postgres-service", db["args"]["host"]
     assert db["args"]["password"] == PG_PASSWORD
+
+    # Synapse reads the database block once at start, and the Secret change alone
+    # does not replace the pod. Without a roll, the runbook's rollback would leave
+    # Synapse running on PostgreSQL.
+    key = "checksum/database-engine"
+    assert pod_annotations(default.stdout)[key] != pod_annotations(pg.stdout)[key]
+    assert pod_annotations(default.stdout)[key] == pod_annotations(legacy.stdout)[key]
 
     bad = render("--set-string", "matrix.database.engine=mysql")
     assert bad.returncode != 0 and "matrix.database.engine" in bad.stderr, bad.stderr

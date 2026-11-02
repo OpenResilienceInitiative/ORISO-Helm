@@ -24,6 +24,9 @@ spec:
         # homeserver.yaml is mounted with subPath, so ConfigMap updates do not
         # reach an existing pod. Roll the Deployment when its source changes.
         checksum/homeserver-config: {{ include "oriso.matrix.homeserverConfigMap" . | sha256sum }}
+        # Synapse reads the database block only at start, so a switch of the engine
+        # must replace the pod, in both directions (runbooks/matrix-sqlite-to-postgres.md).
+        checksum/database-engine: {{ (.Values.matrix.database | default dict).engine | default "sqlite3" | sha256sum | quote }}
       {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
         {{- include "oriso.appMetrics.podAnnotations" (dict "job" "synapse" "port" 9000 "path" "/_synapse/metrics") | nindent 8 }}
       {{- end }}
