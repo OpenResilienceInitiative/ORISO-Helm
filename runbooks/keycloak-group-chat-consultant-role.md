@@ -27,4 +27,12 @@ Then create a counsellor with group chats enabled in the Admin UI. The request s
 
 ## Recovery
 
-`$KC delete roles/group-chat-consultant -r online-beratung $AUTH` removes the role again, and it is also removed from every user who has it. Do this only if you must roll back. Counsellors created with group chats then lose the right to create, start, stop and update group chats.
+Do this only if you must roll back. Deleting the role also removes it from every user who has it. Counsellors created with group chats then lose the right to create, start, stop and update group chats.
+
+```sh
+kubectl -n <ns> exec -it deploy/keycloak -- bash -ec '
+  export KC_CLI_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD"
+  KC=/opt/keycloak/bin/kcadm.sh
+  AUTH="--no-config --server http://localhost:8080/auth --realm master --user $KEYCLOAK_ADMIN"
+  $KC delete roles/group-chat-consultant -r online-beratung $AUTH'
+```
