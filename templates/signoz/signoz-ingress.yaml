@@ -41,3 +41,54 @@ spec:
                 port:
                   number: {{ get $signozService "port" | default 8080 }}
 {{- end -}}
+
+{{- $o := get .Values.global "observability" | default dict }}
+{{- if and (get $signoz "enabled" | default false) (get (get $o "webVitals" | default dict) "enabled" | default false) }}
+---
+{{- /*
+Browser Web Vitals ingest (global.observability.webVitals). Same origin as
+Frontend and Admin, so no CORS. Unauthenticated, so the location only accepts
+small uncompressed OTLP metric POSTs at a bounded rate, and is its own Ingress
+so these limits do not touch the SigNoz UI. It reaches only the collector's
+otlp/rum receiver, whose pipeline drops anything that is not a known browser
+metric and overwrites the resource attributes (values.yaml.default).
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "oriso.signozServiceName" . }}-rum-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: signoz
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "32k"
+    nginx.ingress.kubernetes.io/limit-rps: "10"
+    # Compressed bodies would slip past the size limit; the browser exporter
+    # does not compress. The rewrite stays in this location: the
+    # rewrite-target annotation would switch every path of the host to
+    # case-insensitive regex matching.
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      if ($request_method != POST) { return 405; }
+      if ($http_content_encoding != "") { return 415; }
+      rewrite ^/signoz-rum/v1/metrics$ /v1/metrics break;
+spec:
+  ingressClassName: {{ get $orisoIngress "ingressClassName" | default "nginx" | quote }}
+  tls:
+    - hosts:
+        - {{ .Values.global.domainName | quote }}
+      secretName: {{ printf "%s-tls" (.Values.global.domainName | replace "." "-") }}
+  rules:
+    - host: {{ .Values.global.domainName | quote }}
+      http:
+        paths:
+          - path: /signoz-rum/v1/metrics
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "oriso.signozOtelCollectorServiceName" . }}
+                port:
+                  number: {{ dig "otelCollector" "ports" "otlp-rum" "servicePort" 4319 (get .Values "signoz" | default dict) }}
+{{- end }}

@@ -1,19 +1,169 @@
 #!/bin/bash
+# Removes the Helm release "caritas" and its volumes.
+# SigNoz, ClickHouse and ZooKeeper data plus the signoz.db backup are kept by
+# default, so a reinstall reuses them. Run with --dry-run first.
+set -euo pipefail
 
-# 1. Remove only the Helm release "caritas"
-echo "Uninstalling Helm release 'caritas'..."
-if helm status caritas -n caritas >/dev/null 2>&1; then
-  helm uninstall caritas -n caritas
+usage() {
+  cat <<'EOF'
+Usage: clear-helm.sh [--dry-run] [--include-observability]
+
+  --dry-run                 print what would be deleted, delete nothing
+  --include-observability   also delete the SigNoz, ClickHouse, ZooKeeper and
+                            backup volumes (all dashboards, users, API keys,
+                            alert rules and telemetry are lost)
+EOF
+}
+
+RELEASE=caritas
+NAMESPACE=caritas
+DRY_RUN=false
+INCLUDE_OBSERVABILITY=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=true ;;
+    --include-observability) INCLUDE_OBSERVABILITY=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown argument: $arg" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+# Claims the observability stack reuses on reinstall (see
+# templates/signoz/signoz-data-protection.yaml), as patterns so every
+# replica, shard and ZooKeeper member is covered, not only the first.
+OBSERVABILITY_CLAIMS=(
+  "signoz-db-${RELEASE}-signoz-[0-9]*"
+  "data-volumeclaim-template-chi-${RELEASE}-clickhouse-*"
+  "data-${RELEASE}-zookeeper-[0-9]*"
+  "${RELEASE}-signoz-data-protection-backup"
+)
+
+# Claims the release's values name explicitly (existingClaim, the data
+# protection list) can have any name; they are read before the uninstall.
+RELEASE_CLAIMS=()
+
+is_observability_claim() {
+  local pattern
+  for pattern in "${OBSERVABILITY_CLAIMS[@]}" ${RELEASE_CLAIMS[@]+"${RELEASE_CLAIMS[@]}"}; do
+    # shellcheck disable=SC2053 # the pattern is meant to match as a glob
+    [[ "$1" == $pattern ]] && return 0
+  done
+  return 1
+}
+
+# Labels the vendored charts put on every claim they create, whatever the
+# volume template is called (custom ClickHouse templates, ZooKeeper data log).
+is_observability_label() {
+  local claim="$1" name="$2" chi="$3"
+  [ -n "$chi" ] && return 0
+  case "$name" in
+    signoz|clickhouse|zookeeper) return 0 ;;
+    # SigNoz's own PostgreSQL store (signoz.postgresql.enabled).
+    postgres) [[ "$claim" == pgdata-* ]] && return 0 ;;
+  esac
+  return 1
+}
+
+is_kept() {
+  local claim="$1" keep_annotation="$2" name_label="$3" chi_label="$4"
+  if [ "$INCLUDE_OBSERVABILITY" = true ]; then
+    return 1
+  fi
+  [ "$keep_annotation" = "keep" ] && return 0
+  is_observability_label "$claim" "$name_label" "$chi_label" && return 0
+  is_observability_claim "$claim"
+}
+
+run() {
+  if [ "$DRY_RUN" = true ]; then
+    echo "[dry-run] $*"
+  else
+    "$@"
+  fi
+}
+
+# 1. Remove only the Helm release
+echo "Uninstalling Helm release '${RELEASE}'..."
+if helm status "$RELEASE" -n "$NAMESPACE" >/dev/null 2>&1; then
+  values=$(helm get values "$RELEASE" -n "$NAMESPACE" --all -o json)
+  named=$(python3 -c '
+import json, sys
+s = json.loads(sys.argv[1]).get("signoz") or {}
+ch = s.get("clickhouse") or {}
+zk = (ch.get("zookeeper") or {}).get("persistence") or {}
+names = [(s.get("signoz") or {}).get("persistence", {}).get("existingClaim"),
+         (ch.get("persistence") or {}).get("existingClaim"),
+         zk.get("existingClaim"), (zk.get("dataLogDir") or {}).get("existingClaim"),
+         ((s.get("postgresql") or {}).get("persistence") or {}).get("existingClaim")]
+names += [c.split("/")[-1] for c in (s.get("orisoDataProtection") or {}).get("claims") or []]
+print("\n".join(n for n in names if n))' "$values")
+  while IFS= read -r claim; do
+    if [ -n "$claim" ]; then RELEASE_CLAIMS+=("$claim"); fi
+  done <<<"$named"
+  run helm uninstall "$RELEASE" -n "$NAMESPACE"
 else
-  echo "Helm release 'caritas' not found in namespace 'caritas'."
+  echo "Helm release '${RELEASE}' not found in namespace '${NAMESPACE}':" \
+    "claims named only in its values are kept only if an earlier run marked them."
 fi
 
-# 2. Delete all PVCs in namespace caritas
-echo "Deleting all PVCs in namespace caritas..."
-kubectl delete pvc --all -n caritas
+# 2. Delete the PVCs in the namespace, except the kept ones
+echo "Deleting PVCs in namespace ${NAMESPACE}..."
+kept_claims=()
+deleted_claims=()
+claims=$(kubectl get pvc -n "$NAMESPACE" \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.metadata.annotations.helm\.sh/resource-policy}{"|"}{.metadata.labels.app\.kubernetes\.io/name}{"|"}{.metadata.labels.clickhouse\.altinity\.com/chi}{"\n"}{end}')
+while IFS='|' read -r claim keep_annotation name_label chi_label; do
+  [ -n "$claim" ] || continue
+  if is_kept "$claim" "$keep_annotation" "$name_label" "$chi_label"; then
+    echo "Keeping PVC ${claim}"
+    kept_claims+=("$claim")
+    # Marked, so a later run still keeps it when the release and its values
+    # are already gone.
+    if [ "$keep_annotation" != "keep" ]; then
+      run kubectl annotate pvc "$claim" -n "$NAMESPACE" helm.sh/resource-policy=keep --overwrite
+    fi
+  else
+    run kubectl delete pvc "$claim" -n "$NAMESPACE"
+    deleted_claims+=("$claim")
+  fi
+done <<<"$claims"
 
-# 3. Delete all PersistentVolumes (PVs) that are Released or Available
-echo "Deleting all unattached PersistentVolumes..."
-kubectl get pv --no-headers | awk '$5 != "Bound" {print $1}' | xargs -r kubectl delete pv
+# 3. Delete unbound PVs that belonged to this namespace, except kept claims'.
+# A PV still bound to a claim deleted above counts as unbound, so the dry run
+# lists the volumes the real run frees and deletes.
+echo "Deleting unattached PersistentVolumes of namespace ${NAMESPACE}..."
+volumes=$(kubectl get pv \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.phase}{"|"}{.spec.claimRef.namespace}{"|"}{.spec.claimRef.name}{"\n"}{end}')
+while IFS='|' read -r volume phase claim_namespace claim; do
+  [ -n "$volume" ] || continue
+  [ "$claim_namespace" = "$NAMESPACE" ] || continue
+  if [ "$phase" = "Bound" ]; then
+    freed=false
+    for deleted in ${deleted_claims[@]+"${deleted_claims[@]}"}; do
+      [ "$claim" = "$deleted" ] && freed=true
+    done
+    [ "$freed" = true ] || continue
+  fi
+  keep=false
+  if [ "$INCLUDE_OBSERVABILITY" != true ]; then
+    is_observability_claim "$claim" && keep=true
+    for kept in ${kept_claims[@]+"${kept_claims[@]}"}; do
+      [ "$claim" = "$kept" ] && keep=true
+    done
+  fi
+  if [ "$keep" = true ]; then
+    echo "Keeping PV ${volume} (claim ${claim})"
+  else
+    # The provisioner may remove a freed volume itself in the meantime.
+    run kubectl delete pv "$volume" --ignore-not-found
+  fi
+done <<<"$volumes"
 
-echo "Helm release 'caritas', its PVCs, and unattached PVs have been deleted."
+if [ "$DRY_RUN" = true ]; then
+  echo "Dry run: nothing was deleted."
+elif [ "$INCLUDE_OBSERVABILITY" = true ]; then
+  echo "Helm release '${RELEASE}', all its PVCs and its unattached PVs have been deleted."
+else
+  echo "Helm release '${RELEASE}' and its PVCs have been deleted; observability volumes were kept."
+fi

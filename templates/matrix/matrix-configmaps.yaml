@@ -35,6 +35,7 @@ metadata:
   name: matrix-discovery-data
   namespace: {{ .Release.Namespace }}
 ---
+{{ define "oriso.matrix.homeserverConfigMap" }}
 apiVersion: v1
 data:
   homeserver.yaml: |
@@ -55,11 +56,44 @@ data:
         resources:
           - names: [client, federation]
             compress: false
+      {{- if eq (include "oriso.matrixGroupPolicy.enabled" $) "true" }}
+      # No global register_web_resource: that would mount the history API on
+      # every HTTP listener, including the public Matrix client surface.
+      - port: 8801
+        tls: false
+        type: http
+        bind_addresses: ["0.0.0.0"]
+        resources: []
+        additional_resources:
+          /oriso-internal/group-participation-history:
+            module: oriso_group_policy.HistoryResource
+            config:
+              token_file: /run/oriso-group-policy/token
+      {{- end }}
+      {{- if eq (include "oriso.appMetrics.enabled" $) "true" }}
+      # Prometheus metrics for the SigNoz cluster collector. Separate port, no
+      # ingress routes it; the client listener above never serves /_synapse/metrics.
+      - port: 9000
+        type: metrics
+        bind_addresses: ["0.0.0.0"]
+      {{- end }}
+
+    {{- if eq (include "oriso.appMetrics.enabled" $) "true" }}
+    enable_metrics: true
+    {{- end }}
 
     # KDG epic #282 task 4: the database block is NOT in this ConfigMap. It lives in the
     # matrix-postgres-secret Secret (key homeserver-database.yaml) and is loaded as a second
     # --config-path file. matrix.database.engine selects sqlite3 (default) or postgres;
     # an existing install switches only via runbooks/matrix-sqlite-to-postgres.md.
+
+    {{- if eq (include "oriso.matrixGroupPolicy.enabled" $) "true" }}
+    modules:
+      - module: oriso_group_policy.GroupPolicy
+        config:
+          token_file: /run/oriso-group-policy/token
+          policy_url: http://userservice:8080/internal/matrix/group-join-policy
+    {{- end }}
 
     redis:
       enabled: true
@@ -126,6 +160,8 @@ kind: ConfigMap
 metadata:
   name: matrix-homeserver-oidc
   namespace: {{ .Release.Namespace }}
+{{ end }}
+{{ include "oriso.matrix.homeserverConfigMap" . }}
 ---  
 apiVersion: v1
 data:

@@ -1,0 +1,39 @@
+version: 1
+capturedAt: "2026-07-22T08:00:00+02:00"
+source: Self-hosted SigNoz UI and ClickHouse plus Kubernetes runtime inspection
+window: 30 minutes for APM service snapshot; 24 hours for environment ingestion check
+
+environmentEvidence:
+  preDev:
+    metricsIngesting: true
+    webVitalsSeriesPresent: [frontend, admin]
+    deploymentFinding: Admin and UserService images lagged behind their merged pre-dev fixes at capture time.
+  dev:
+    metricsIngesting: false
+    webVitalsSeriesPresent: []
+    deploymentFinding: Frontend, Admin, and UserService images were older than the coordinated pre-dev stabilization package.
+
+apmSnapshot:
+  user-service:
+    p99Milliseconds: 626.12
+    displayedErrorRatePercent: 80.92
+  tenant-service:
+    p99Milliseconds: 463.08
+    displayedErrorRatePercent: 5.0
+  consulting-type-service:
+    p99Milliseconds: 219.09
+    displayedErrorRatePercent: 0.0
+  agency-service:
+    p99Milliseconds: 18.64
+    displayedErrorRatePercent: 0.0
+
+interpretation:
+  - The displayed error rate is a triage baseline, not an SLO, until expected authentication and client status classes are separated from server failures.
+  - PreDev and Dev cannot be compared as a refactoring before and after pair while their image revisions and telemetry availability differ.
+  - A Kubernetes Deployment is not proof of replica-safe stateless behavior.
+
+limitations:
+  - runtime identity signals are not emitted
+  - live-chat diagnostic emitters are not emitted
+  - Dev has no recent metric data in the inspected 24-hour window
+  - The imported Web Vitals dashboard requires an explicit service-name variable and is not a management scorecard

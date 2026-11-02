@@ -10,16 +10,24 @@ spec:
   selector:
     matchLabels:
       app: matrix-synapse
+  # matrix-synapse-data is ReadWriteOnce: a rolling update deadlocks with a
+  # Multi-Attach error when the new pod lands on another node, because the old
+  # pod keeps the volume until the new one is ready. Stop first, then start.
   strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 25%
-      maxUnavailable: 25%
+    type: Recreate
   template:
     metadata:
       labels:
         app: matrix-synapse
-    spec:       
+      annotations:
+        checksum/group-policy: {{ include "oriso.matrixGroupPolicy.synapseChecksum" . | quote }}
+        # homeserver.yaml is mounted with subPath, so ConfigMap updates do not
+        # reach an existing pod. Roll the Deployment when its source changes.
+        checksum/homeserver-config: {{ include "oriso.matrix.homeserverConfigMap" . | sha256sum }}
+      {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
+        {{- include "oriso.appMetrics.podAnnotations" (dict "job" "synapse" "port" 9000 "path" "/_synapse/metrics") | nindent 8 }}
+      {{- end }}
+    spec:
       initContainers:
         - name: fix-permissions
           image: {{ include "oriso.immutableImage" (list "matrix.initImage" .Values.matrix.initImage) | quote }}
@@ -48,6 +56,10 @@ spec:
           - --config-path
           - /secrets/synapse/homeserver-database.yaml
         env:
+          {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
+          - name: PYTHONPATH
+            value: /opt/oriso-modules
+          {{- end }}
           - name: SYNAPSE_SERVER_NAME
             valueFrom:
               configMapKeyRef:
@@ -64,10 +76,20 @@ spec:
                 key: SYNAPSE_ENABLE_AUTHENTICATED_MEDIA
                 name: matrix-configmap-env       
         ports:
+          {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
+          - name: group-history
+            containerPort: 8801
+            protocol: TCP
+          {{- end }}
           - containerPort: 8008
             protocol: TCP
           - containerPort: 8009
             protocol: TCP
+          {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
+          - name: metrics
+            containerPort: 9000
+            protocol: TCP
+          {{- end }}
         livenessProbe:
           httpGet:
             path: /_matrix/client/versions
@@ -90,6 +112,14 @@ spec:
             cpu: 250m
             memory: 512Mi
         volumeMounts:
+          {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
+          - name: group-policy-module
+            mountPath: /opt/oriso-modules
+            readOnly: true
+          - name: group-policy-token
+            mountPath: /run/oriso-group-policy
+            readOnly: true
+          {{- end }}
           - mountPath: /data
             name: synapse-data
           - mountPath: /data/homeserver.yaml
@@ -99,6 +129,17 @@ spec:
             name: homeserver-database-secret
             readOnly: true
       volumes:
+        {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
+        - name: group-policy-module
+          configMap:
+            name: matrix-group-policy-module
+        - name: group-policy-token
+          secret:
+            secretName: {{ .Values.matrix.groupPolicy.existingSecret.name | quote }}
+            items:
+              - key: {{ .Values.matrix.groupPolicy.existingSecret.tokenKey | quote }}
+                path: token
+        {{- end }}
         - name: synapse-data
           persistentVolumeClaim:
             claimName: matrix-synapse-data
