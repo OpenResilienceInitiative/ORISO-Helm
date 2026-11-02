@@ -28,13 +28,15 @@ def render(overlay: str | None = None) -> list[dict]:
         "helm", "template", "release-toggle-overrides-test", CHART_DIR,
         "-f", os.path.join(CHART_DIR, "values.yaml.default"),
         "-f", os.path.join(CHART_DIR, "tests/fixtures/values-render-domain.yaml"),
-        "-f", os.path.join(CHART_DIR, "secrets.yaml.default"),
-        "-f", os.path.join(CHART_DIR, "tests/fixtures/render-required-secrets.yaml"),
     ]
     if overlay == "pre-dev":
         command += ["-f", os.path.join(CHART_DIR, "values-dev.yaml")]
     if overlay:
         command += ["-f", os.path.join(CHART_DIR, f"values-{overlay}.yaml")]
+    command += [
+        "-f", os.path.join(CHART_DIR, "secrets.yaml.default"),
+        "-f", os.path.join(CHART_DIR, "tests/fixtures/render-required-secrets.yaml"),
+    ]
     command += [
         "--set-string", "userService.smtpUser=smtp-canary-user",
         "--set-string", "userService.smtpPassword=smtp-canary-password",
