@@ -2,8 +2,12 @@
 
 Synapse's database is chosen by `matrix.database.engine`:
 
-- `sqlite3` (default): `/data/homeserver.db` on the `matrix-synapse-data` PVC.
-- `postgres`: the chart's `matrix-postgres` StatefulSet.
+- `sqlite3`: `/data/homeserver.db` on the `matrix-synapse-data` PVC.
+- `postgres` (in `values.yaml.default`): the chart's `matrix-postgres` StatefulSet.
+
+Existing SQLite installations must explicitly set `matrix.database.engine: sqlite3`
+before adopting the new default values, until migration is complete. Old values
+files with no database engine key still fall back to SQLite in the templates.
 
 Changing the value moves no data. On an install that already holds Matrix
 data, flipping it alone starts Synapse on an empty database. Follow this
@@ -14,8 +18,9 @@ Media (`/data/media_store`) and the signing key stay on the PVC in both modes.
 
 ## Fresh installation with PostgreSQL
 
-For a new release with empty Matrix PostgreSQL and Synapse storage, use
-`values-fresh-postgres.yaml` after your environment values. PostgreSQL initializes
+For a new release with empty Matrix PostgreSQL and Synapse storage, create your
+`values.yaml` from the current `values.yaml.default`, which selects PostgreSQL.
+No separate database overlay is required. PostgreSQL initializes
 empty PGDATA with UTF-8 encoding and C collation/ctype; Synapse creates its schema.
 No SQLite port is needed. Existing PostgreSQL volumes are NOT reinitialized:
 check their locale using step 4 before reusing them.
@@ -26,8 +31,7 @@ PVCs: that would also destroy unrelated application and observability data.
 
 ```sh
 helm install caritas ./ --namespace caritas --create-namespace \
-  -f values.yaml -f values-dev.yaml -f secrets.yaml \
-  -f values-fresh-postgres.yaml --timeout 20m
+  -f values.yaml -f values-dev.yaml -f secrets.yaml --timeout 20m
 
 kubectl -n caritas rollout status statefulset/matrix-postgres --timeout=10m
 kubectl -n caritas rollout status deployment/matrix-synapse --timeout=10m
@@ -40,8 +44,7 @@ MatrixRTC waits for a token supplied by a `post-install` hook. Helm already wait
 for hook Jobs to finish; wait for workload rollouts separately afterwards.
 Check all other workloads and perform login/chat/media smoke tests too.
 
-Keep `values-fresh-postgres.yaml` in every later upgrade, or persist
-`matrix.database.engine: postgres` in the installation's own values. Omitting
+Keep `matrix.database.engine: postgres` in the installation's own values. Omitting
 the setting can switch Synapse back to SQLite.
 
 This overlay selects only the Matrix database. It does not solve other stack

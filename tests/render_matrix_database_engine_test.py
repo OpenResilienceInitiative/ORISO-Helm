@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Render guard: Synapse's database engine is an explicit opt-in.
-
-A helm upgrade must never move an install with Matrix data from SQLite to
-PostgreSQL by itself (ORISO-Helm#282, review on #426). The default stays
-sqlite3; postgres is rendered only when matrix.database.engine says so, and an
-unknown engine fails the render.
-"""
+"""New values default to PostgreSQL; legacy missing keys retain SQLite."""
 
 from __future__ import annotations
 
@@ -56,7 +50,7 @@ def main() -> None:
     default = render()
     assert default.returncode == 0, default.stderr
     db = database_block(default.stdout)
-    assert db == {"name": "sqlite3", "args": {"database": "/data/homeserver.db"}}, db
+    assert db["name"] == "psycopg2", db
 
     # An environment values.yaml copied before the key existed must stay on SQLite.
     legacy = render("--set", "matrix.database=null")
@@ -70,7 +64,7 @@ def main() -> None:
     assert db["args"]["host"] == "matrix-postgres-service", db["args"]["host"]
     assert db["args"]["password"] == PG_PASSWORD
 
-    fresh = render("-f", os.path.join(CHART_DIR, "values-fresh-postgres.yaml"))
+    fresh = default
     assert fresh.returncode == 0, fresh.stderr
     assert database_block(fresh.stdout)["name"] == "psycopg2"
     docs = [d for d in yaml.safe_load_all(fresh.stdout) if isinstance(d, dict)]
@@ -88,8 +82,13 @@ def main() -> None:
     # does not replace the pod. Without a roll, the runbook's rollback would leave
     # Synapse running on PostgreSQL.
     key = "checksum/database-engine"
-    assert pod_annotations(default.stdout)[key] != pod_annotations(pg.stdout)[key]
-    assert pod_annotations(default.stdout)[key] == pod_annotations(legacy.stdout)[key]
+    assert pod_annotations(default.stdout)[key] == pod_annotations(pg.stdout)[key]
+    assert pod_annotations(default.stdout)[key] != pod_annotations(legacy.stdout)[key]
+    sqlite = render("--set-string", "matrix.database.engine=sqlite3")
+    assert sqlite.returncode == 0, sqlite.stderr
+    assert database_block(sqlite.stdout) == {
+        "name": "sqlite3", "args": {"database": "/data/homeserver.db"}}
+    assert pod_annotations(sqlite.stdout)[key] == pod_annotations(legacy.stdout)[key]
 
     bad = render("--set-string", "matrix.database.engine=mysql")
     assert bad.returncode != 0 and "matrix.database.engine" in bad.stderr, bad.stderr

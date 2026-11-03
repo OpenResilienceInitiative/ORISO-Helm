@@ -84,7 +84,7 @@ data:
 
     # KDG epic #282 task 4: the database block is NOT in this ConfigMap. It lives in the
     # matrix-postgres-secret Secret (key homeserver-database.yaml) and is loaded as a second
-    # --config-path file. matrix.database.engine selects sqlite3 (default) or postgres;
+    # --config-path file. matrix.database.engine selects sqlite3 or postgres;
     # an existing install switches only via runbooks/matrix-sqlite-to-postgres.md.
 
     {{- if eq (include "oriso.matrixGroupPolicy.enabled" $) "true" }}

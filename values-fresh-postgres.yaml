@@ -1,6 +1,0 @@
-# For a NEW installation with empty Matrix storage, or after completing
-# runbooks/matrix-sqlite-to-postgres.md. This does not migrate existing data.
-# Keep this overlay in subsequent deployments of that installation.
-matrix:
-  database:
-    engine: postgres
