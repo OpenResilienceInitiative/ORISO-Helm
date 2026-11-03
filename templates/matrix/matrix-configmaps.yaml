@@ -124,6 +124,20 @@ data:
         resources:
           - names: [client, federation]
             compress: false
+      {{- if eq (include "oriso.matrixGroupPolicy.enabled" $) "true" }}
+      # No global register_web_resource: that would mount the history API on
+      # every HTTP listener, including the public Matrix client surface.
+      - port: 8801
+        tls: false
+        type: http
+        bind_addresses: ["0.0.0.0"]
+        resources: []
+        additional_resources:
+          /oriso-internal/group-participation-history:
+            module: oriso_group_policy.HistoryResource
+            config:
+              token_file: /run/oriso-group-policy/token
+      {{- end }}
       {{- if eq (include "oriso.appMetrics.enabled" $) "true" }}
       # Prometheus metrics for the SigNoz cluster collector. Separate port, no
       # ingress routes it; the client listener above never serves /_synapse/metrics.
@@ -140,6 +154,14 @@ data:
       name: sqlite3
       args:
         database: /data/homeserver.db
+
+    {{- if eq (include "oriso.matrixGroupPolicy.enabled" $) "true" }}
+    modules:
+      - module: oriso_group_policy.GroupPolicy
+        config:
+          token_file: /run/oriso-group-policy/token
+          policy_url: http://userservice:8080/internal/matrix/group-join-policy
+    {{- end }}
 
     redis:
       enabled: true

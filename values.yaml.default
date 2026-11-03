@@ -30,32 +30,17 @@ global:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
-  # OTLP export to SigNoz — auto-enabled when signoz.enabled=true; backend and agents below.
+  # OTLP signal export. SigNoz backend and collectors are configured below.
   observability:
     otlpEnabled: false
     autoEnableWithSignoz: true
-    deploymentEnvironment: "pre-dev"   # environment tag on exported signals
-    otlpCollectorHost: "" # optional external collector host:port when signoz.enabled=false
-    # Prometheus metrics of ingress-nginx, Keycloak and Synapse, scraped by the
-    # SigNoz cluster collector. Requires signozCollector.enabled=true. Opens
-    # cluster-internal metrics ports (nginx 10254, Keycloak 9000, Synapse 9000);
-    # none of them is routed by an ingress.
+    deploymentEnvironment: "pre-dev"
+    otlpCollectorHost: ""
+    # Application and data-store metrics require signozCollector.enabled=true.
     appMetrics: false
-    # Status metrics of MariaDB, MongoDB and RabbitMQ (via read-only monitoring
-    # users the chart creates and keeps, passwords generated into the Secret
-    # oriso-db-monitoring) and of Redis (its redis-exporter sidecar). Requires
-    # signozCollector.enabled=true. No row data leaves the data stores.
     dbMetrics: false
-    # Trace sampling for the Spring Boot services (0.0-1.0). Empty keeps each
-    # service's own default (Spring Boot: 0.1, i.e. 9 of 10 traces dropped).
     tracingSamplingProbability: ""
-    # Copy the W3C baggage field `test.run.id` (sent by ORISO-E2E) onto every
-    # span, so one test run can be selected at once. Test environments only:
-    # any caller can set baggage.
     testRunBaggage: false
-    # Browser Web Vitals from Frontend and Admin, posted to
-    # https://<domainName>/signoz-rum/v1/metrics (unauthenticated, size- and
-    # rate-limited, OTLP metrics only). Requires signoz.enabled=true.
     webVitals:
       enabled: false
       exportIntervalMillis: 60000
@@ -129,6 +114,30 @@ global:
     serviceAppClientId: "app"
     serviceAdminClientId: "backend-admin"
     backendTechnicalClientId: "backend-technical"
+    # Task identities are an explicit, all-or-nothing UserService runtime cutover.
+    # Keep it disabled until the five Keycloak clients have been reconciled and
+    # their actual service-account subjects have been read back.
+    taskIdentities:
+      enabled: false
+      # First pass only: reconcile the five disabled Keycloak clients and read
+      # their generated service-account subjects from the hook output. The
+      # second pass supplies those immutable UUIDs and sets enabled=true.
+      provisionOnly: false
+      setup:
+        clientId: "backend-setup"
+        serviceSubject: ""
+      accountCreate:
+        clientId: "backend-account-create"
+        serviceSubject: ""
+      accountAdmin:
+        clientId: "backend-account-admin"
+        serviceSubject: ""
+      mail:
+        clientId: "backend-mail"
+        serviceSubject: ""
+      runtime:
+        clientId: "backend-runtime"
+        serviceSubject: ""
     backendServiceClients:
       # Existing realms: render ONLY the preparation Secret/Job (see runbook).
       # Never install/upgrade the whole chart with prepareOnly=true.
@@ -184,6 +193,14 @@ global:
 
 matrix:
   image: "matrixdotorg/synapse:v1.158.0"
+  # Enable only with the paired UserService v2 context consumer deployed.
+  # Provision a dedicated credential out of band; never put its value here.
+  groupPolicy:
+    enabled: false
+    existingSecret:
+      name: ""
+      tokenKey: "token"
+    tokenRevision: ""
   initImage: "busybox:1.38.0"
   replicas: 1
   postgresReplicas: 1
@@ -197,7 +214,7 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call:2.0.13"
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.14"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Storybook is a development surface and stays absent unless an environment
@@ -269,7 +286,7 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.13"
+  imageVersion: "2.0.14"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -298,8 +315,9 @@ matrixrtcLifecycle:
 matrixrtcAuth:
   replicas: 1
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
-  # Namespace of the ingress controller, needed by the NetworkPolicy.
-  ingressControllerNamespace: "ingress-nginx"
+  # Optional: namespace of the ingress controller for the call NetworkPolicies.
+  # Empty means "ingress-nginx". The release namespace is always admitted as well.
+  ingressControllerNamespace: ""
   bootstrap:
     enabled: true
     backoffLimit: 6
@@ -313,10 +331,10 @@ matrixrtcAuth:
   # The dev branch tracks the dev tag; release branches pin these by digest
   # because they are the LiveKit authorization boundary.
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.13"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.14"
     pullPolicy: ""
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.13"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.14"
     pullPolicy: ""
   service:
     port: 3010
@@ -348,7 +366,7 @@ online-counseling-redis:
 # Keycloak
 online-counseling-keycloak:
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
-  imageVersion: "2.0.13"
+  imageVersion: "2.0.14"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
@@ -370,7 +388,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.13"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.14"
 
   keycloakResource: "agency-service"
 
@@ -387,7 +405,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "2.0.13"
+  imageVersion: "2.0.14"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -415,7 +433,7 @@ tenantService:
   systemEmailDeliveryServiceClient: ""
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.13"
+  imageVersion: "2.0.14"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -451,7 +469,7 @@ userService:
     requestsPerSecond: 5
     burstMultiplier: 2
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.13"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.14"
   serviceURL: "http://userservice:8080"
 
   keycloakResource: "user-service"
@@ -540,7 +558,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.13"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.14"
 
 nginxController:
   enabled: true
@@ -554,16 +572,27 @@ ipAnonymizer:
   image: "ghcr.io/openresilienceinitiative/ip-anonymizer:2.0.13"
 
 
-# ---------- Observability & Monitoring -------------------------------------------------------------------------------
-# SigNoz ships as two upstream charts and this chart mirrors that split:
-#   signoz:    backend — ClickHouse, query service, UI
-#   signozCollector: agents — node DaemonSet + cluster collector
-# Per-service OTLP export is global.observability near the top of this file.
-
-# SigNoz — set signoz.enabled=true to deploy it and auto-enable OTLP export.
+# ---------- Observability ----------------------------------------------------------------
+# SigNoz backend, collection agents, and optional ORISO dashboards/alerts.
 signoz:
   enabled: false
-  # UI is served at https://<global.domainName>/signoz — keep in sync per environment.
+  orisoObservability:
+    enabled: false
+    conformanceCheck: false
+    image: "python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844"
+    # Existing SigNoz Editor API-key Secret; required only when enabled.
+    apiKeySecret:
+      name: ""
+      key: apiKey
+    # Existing SigNoz notification channel; the chart does not create it.
+    channelName: "oriso-alerts-slack"
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 250m
+        memory: 128Mi
   signoz:
     env:
       signoz_global_external__url: "https://your-domain.example.com/signoz"
@@ -610,13 +639,9 @@ signoz:
         nodePort: ""
         protocol: TCP
 
-# SigNoz collection agents — node DaemonSet (pod logs, host/kubelet metrics)
-# plus one cluster collector (workload objects, k8s events). Requires
-# signoz.enabled=true; observability-validation.yaml enforces that.
-# Pipelines, RBAC and hardening live in templates/signoz/ and files/signoz/.
+# SigNoz node and cluster collectors. Requires signoz.enabled=true.
 signozCollector:
   enabled: false
-  # Cluster identity tagged onto every exported signal; required when enabled.
   clusterName: ""
   image:
     repository: docker.io/otel/opentelemetry-collector-contrib
@@ -645,7 +670,7 @@ healthDashboard:
     authSecret: "health-dashboard-basic-auth"
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: "2.0.13"
+    tag: "2.0.14"
     pullPolicy: ""
   replicas: 1
   namespace: ""

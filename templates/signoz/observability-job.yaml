@@ -1,0 +1,94 @@
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $managed := get $signoz "orisoObservability" | default dict -}}
+{{- if and (get $signoz "enabled" | default false) (get $managed "enabled" | default false) }}
+{{- $name := printf "%s-signoz-observability" .Release.Name -}}
+{{- $apiKeySecret := get $managed "apiKeySecret" | default dict -}}
+{{- $collector := get .Values "signozCollector" | default dict -}}
+{{- $signozApp := get $signoz "signoz" | default dict -}}
+{{- $signozService := get $signozApp "service" | default dict -}}
+{{- $signozServicePort := get $signozService "port" | default 8080 -}}
+{{- /* SigNoz serves its API under the path of its external URL (StripPrefix
+in v0.135.1), so the in-cluster base URL carries that path too. */ -}}
+{{- $signozEnv := get $signozApp "env" | default dict -}}
+{{- $signozBasePath := (urlParse (get $signozEnv "signoz_global_external__url" | default "")).path | trimSuffix "/" -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: signoz-observability
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "30"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: signoz-observability
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: provision-and-prove
+          image: {{ required "signoz.orisoObservability.image must be set" (get $managed "image") | quote }}
+          imagePullPolicy: IfNotPresent
+          command:
+            - python3
+          args:
+            - /opt/oriso/signoz/signoz_observability.py
+            - --mode
+            - provision
+          env:
+            - name: SIGNOZ_API_URL
+              value: {{ printf "http://%s:%v%s" (include "oriso.signozServiceName" .) $signozServicePort $signozBasePath | quote }}
+            - name: SIGNOZ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "signoz.orisoObservability.apiKeySecret.name must name an existing Secret" (get $apiKeySecret "name") | quote }}
+                  key: {{ get $apiKeySecret "key" | default "apiKey" | quote }}
+            - name: SIGNOZ_CHANNEL_NAME
+              value: {{ get $managed "channelName" | default "oriso-alerts-slack" | quote }}
+            - name: ORISO_ASSETS_DIR
+              value: /opt/oriso/signoz
+            - name: ORISO_ENVIRONMENT
+              value: {{ .Values.global.observability.deploymentEnvironment | quote }}
+            - name: ORISO_CLUSTER_NAME
+              value: {{ get $collector "clusterName" | quote }}
+            - name: ORISO_CONFORMANCE_CHECK
+              value: {{ get $managed "conformanceCheck" | default false | quote }}
+          resources:
+{{ get $managed "resources" | default dict | toYaml | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: assets
+              mountPath: /opt/oriso/signoz
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: assets
+          configMap:
+            name: {{ $name }}
+            defaultMode: 0444
+        - name: tmp
+          emptyDir: {}
+{{- end }}

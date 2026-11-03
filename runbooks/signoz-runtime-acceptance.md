@@ -5,6 +5,10 @@ reviewed promotion to Dev. Kubernetes readiness alone is not acceptance: the
 gate must prove that OTLP traces, metrics, logs, Kubernetes infrastructure
 signals, and collector self-telemetry reach ClickHouse.
 
+This is the ingestion half of the release proof. The managed dashboards,
+alerts, and Slack route are provisioned and proved by
+`runbooks/signoz-managed-observability.md`.
+
 ## What the gate proves
 
 The command fails closed unless all of the following are true:

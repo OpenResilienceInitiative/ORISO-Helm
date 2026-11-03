@@ -59,6 +59,7 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES = [
     "templates/_helpers.tpl",
     "templates/_matrixrtcLifecycle.tpl",
+    "templates/_matrixGroupPolicy.tpl",
     "templates/matrix/matrix-configmaps.yaml",
     "templates/userservice/userservice-configmap-env.yaml",
     "templates/agencyservice/agencyservice-configmap-env.yaml",
