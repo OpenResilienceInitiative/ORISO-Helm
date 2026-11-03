@@ -101,6 +101,12 @@ way at 12:00 UTC, that hook, `keycloak-reconcile-smtp` and
 `keycloak-reconcile-mail-locales` all completed. The next upgrade removes the
 failed Job.
 
+The hook runs before the images below are put back, so it talks to Keycloak on the
+chart's image tag. On revision 49 it failed four times within 80 seconds, each in
+2 to 3 seconds, although `--wait` had passed. Started again after the Dev image was
+back, it passed. The cause is not proven. If the hook fails, put the images back
+first and then start it again.
+
 After the upgrade, put the recorded images back:
 
 ```bash
