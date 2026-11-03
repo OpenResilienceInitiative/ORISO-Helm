@@ -287,6 +287,34 @@ class HttpFlowTest(unittest.TestCase):
                 telemetry=False,
             )
 
+    def test_e2e_dashboards_are_provisioned_and_read_back_when_enabled(self) -> None:
+        dashboards, alerts = MODULE.load_assets(
+            ROOT / "files" / "signoz", include_e2e=True
+        )
+        dashboards, alerts = MODULE.materialize_assets(
+            dashboards,
+            alerts,
+            environment="dev",
+            cluster_name="oriso-dev",
+            channel_name="oriso-alerts-slack",
+        )
+        self.assertEqual(len(dashboards), 5)
+        client = MODULE.SignozClient(
+            f"http://127.0.0.1:{self.server.server_port}", "test-api-key"
+        )
+        MODULE.upsert_dashboards(client, dashboards)
+        MODULE.upsert_alerts(client, alerts)
+        self.assertEqual(len(self.state.dashboards), 5)
+        MODULE.prove_conformance(
+            client,
+            dashboards,
+            alerts,
+            environment="dev",
+            cluster_name="oriso-dev",
+            channel_name="oriso-alerts-slack",
+            telemetry=False,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

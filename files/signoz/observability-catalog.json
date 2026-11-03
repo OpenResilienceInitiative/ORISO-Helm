@@ -47,5 +47,274 @@
     {"slug": "unencrypted-room", "title": "An unencrypted Matrix room was created", "description": "At least one Matrix room creation completed without encryption enabled.", "metric": "oriso.matrix.room.creation", "timeAggregation": "rate", "spaceAggregation": "sum", "filter": "encryption = 'disabled'", "op": "above", "target": 0, "severity": "critical"},
     {"slug": "clickhouse-capacity", "title": "SigNoz ClickHouse capacity is low", "description": "Available space on a ClickHouse persistent volume is below 2 GiB.", "metric": "k8s.volume.available", "timeAggregation": "latest", "spaceAggregation": "min", "filter": "k8s.persistentvolumeclaim.name CONTAINS 'clickhouse'", "op": "below", "target": 2147483648, "severity": "critical", "clusterScoped": true},
     {"slug": "collector-staleness", "title": "SigNoz collector telemetry is stale", "description": "The ORISO Kubernetes collector is accepting no metric points or has stopped reporting.", "metric": "otelcol_receiver_accepted_metric_points", "timeAggregation": "rate", "spaceAggregation": "sum", "filter": "service.name = 'oriso-k8s-infra-cluster'", "op": "below", "target": 0.01, "severity": "critical", "clusterScoped": true, "notifyOnNoData": true}
+  ],
+  "e2eDashboards": [
+    {
+      "slug": "oriso-e2e-test-health",
+      "title": "ORISO E2E Test Health",
+      "description": "Pass rate per test over runs, from the oriso-e2e test spans. First attempts only (test.retry = 0), skipped tests excluded.",
+      "duration": "7d",
+      "panels": [
+        {
+          "id": "outcomes",
+          "title": "First-attempt outcomes over time",
+          "signal": "traces",
+          "panelType": "timeseries",
+          "filter": "service.name = 'oriso-e2e' AND test.status != 'skipped' AND test.retry = 0",
+          "aggregations": [
+            {
+              "expression": "count()"
+            }
+          ],
+          "groupBy": [
+            "test.status"
+          ],
+          "stepInterval": 3600
+        },
+        {
+          "id": "pass-rate",
+          "title": "Pass rate per test",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.status != 'skipped' AND test.retry = 0",
+          "aggregations": [
+            {
+              "expression": "countIf(test.status = 'passed') * 100 / count()",
+              "alias": "pass_rate_pct"
+            },
+            {
+              "expression": "count()",
+              "alias": "runs"
+            }
+          ],
+          "groupBy": [
+            "test.file",
+            "test.case"
+          ],
+          "limit": 100
+        },
+        {
+          "id": "failing",
+          "title": "Tests with a failed first attempt",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.status != 'skipped' AND test.retry = 0",
+          "aggregations": [
+            {
+              "expression": "countIf(test.status != 'passed')",
+              "alias": "failures"
+            },
+            {
+              "expression": "count()",
+              "alias": "runs"
+            }
+          ],
+          "groupBy": [
+            "test.file",
+            "test.case"
+          ],
+          "having": "failures > 0",
+          "limit": 100
+        },
+        {
+          "id": "duration",
+          "title": "Slowest tests (p95 duration, ms)",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.status != 'skipped' AND test.retry = 0",
+          "aggregations": [
+            {
+              "expression": "p95(test.duration_ms)",
+              "alias": "p95_ms"
+            }
+          ],
+          "groupBy": [
+            "test.file",
+            "test.case"
+          ],
+          "limit": 100
+        },
+        {
+          "id": "runs",
+          "title": "Recent runs",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e'",
+          "aggregations": [
+            {
+              "expression": "min(timestamp)",
+              "alias": "started"
+            },
+            {
+              "expression": "count()",
+              "alias": "tests"
+            },
+            {
+              "expression": "countIf(test.status = 'failed' OR test.status = 'timedOut')",
+              "alias": "failed"
+            }
+          ],
+          "groupBy": [
+            "test.run.id"
+          ],
+          "limit": 100
+        }
+      ]
+    },
+    {
+      "slug": "oriso-e2e-flaky",
+      "title": "ORISO E2E Flaky Tests",
+      "description": "A test is flaky when the same commit has a pass and a fail for it. The commit is test.commit, the commit of the E2E code under test. Seed panels show when each known flaky test was first seen in oriso-e2e.",
+      "duration": "7d",
+      "panels": [
+        {
+          "id": "flaky-by-commit",
+          "title": "Flaky: pass and fail on the same commit",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.status != 'skipped'",
+          "aggregations": [
+            {
+              "expression": "countIf(test.status = 'passed')",
+              "alias": "passes"
+            },
+            {
+              "expression": "countIf(test.status != 'passed')",
+              "alias": "fails"
+            }
+          ],
+          "groupBy": [
+            "test.file",
+            "test.case",
+            "test.commit"
+          ],
+          "having": "passes > 0 AND fails > 0",
+          "limit": 100
+        },
+        {
+          "id": "flaky-retry",
+          "title": "Flaky: passed only after a retry (test.flaky)",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.flaky = 'true' AND test.status = 'passed'",
+          "aggregations": [
+            {
+              "expression": "count()",
+              "alias": "runs"
+            }
+          ],
+          "groupBy": [
+            "test.file",
+            "test.case"
+          ],
+          "limit": 100
+        },
+        {
+          "id": "seed-1",
+          "title": "Seed ORISO-Frontend#1613 ChatStage Storybook: first seen (no row = not seen)",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.case CONTAINS 'ChatStage'",
+          "aggregations": [
+            {
+              "expression": "min(timestamp)",
+              "alias": "first_seen"
+            },
+            {
+              "expression": "count()",
+              "alias": "runs"
+            }
+          ],
+          "groupBy": [
+            "test.case"
+          ],
+          "limit": 100
+        },
+        {
+          "id": "seed-2",
+          "title": "Seed ORISO-Frontend#1707 PracticeFlow: first seen (no row = not seen)",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.case CONTAINS 'PracticeFlow'",
+          "aggregations": [
+            {
+              "expression": "min(timestamp)",
+              "alias": "first_seen"
+            },
+            {
+              "expression": "count()",
+              "alias": "runs"
+            }
+          ],
+          "groupBy": [
+            "test.case"
+          ],
+          "limit": 100
+        },
+        {
+          "id": "seed-3",
+          "title": "Seed ORISO-Frontend#1443 New messages arrow: first seen (no row = not seen)",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.case CONTAINS 'New messages'",
+          "aggregations": [
+            {
+              "expression": "min(timestamp)",
+              "alias": "first_seen"
+            },
+            {
+              "expression": "count()",
+              "alias": "runs"
+            }
+          ],
+          "groupBy": [
+            "test.case"
+          ],
+          "limit": 100
+        },
+        {
+          "id": "seed-4",
+          "title": "Seed ORISO-UserService#251 ArchiveOrDeleteSessionStatistics: first seen (no row = not seen)",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.case CONTAINS 'ArchiveOrDeleteSessionStatistics'",
+          "aggregations": [
+            {
+              "expression": "min(timestamp)",
+              "alias": "first_seen"
+            },
+            {
+              "expression": "count()",
+              "alias": "runs"
+            }
+          ],
+          "groupBy": [
+            "test.case"
+          ],
+          "limit": 100
+        },
+        {
+          "id": "seed-5",
+          "title": "Seed ORISO-Admin#1016 full test suite: first seen (no row = not seen)",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.case CONTAINS 'full test suite'",
+          "aggregations": [
+            {
+              "expression": "min(timestamp)",
+              "alias": "first_seen"
+            },
+            {
+              "expression": "count()",
+              "alias": "runs"
+            }
+          ],
+          "groupBy": [
+            "test.case"
+          ],
+          "limit": 100
+        }
+      ]
+    }
   ]
 }
