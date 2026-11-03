@@ -90,6 +90,28 @@ def main() -> None:
         "name": "sqlite3", "args": {"database": "/data/homeserver.db"}}
     assert pod_annotations(sqlite.stdout)[key] == pod_annotations(legacy.stdout)[key]
 
+    # Both database modes must keep generated signing keys on persistent storage,
+    # not beside the last config file in the read-only Secret mount.
+    for result in (default, legacy, pg, sqlite):
+        deployment = next(
+            d for d in yaml.safe_load_all(result.stdout)
+            if isinstance(d, dict) and d["kind"] == "Deployment"
+            and d["metadata"]["name"] == "matrix-synapse"
+        )
+        spec = deployment["spec"]["template"]["spec"]
+        synapse = next(c for c in spec["containers"] if c["name"] == "synapse")
+        args = synapse["args"]
+        assert args.count("--keys-directory") == 1
+        assert args[args.index("--keys-directory") + 1] == "/data"
+        configs = [args[i + 1] for i, arg in enumerate(args) if arg == "--config-path"]
+        assert configs == ["/data/homeserver.yaml", "/secrets/synapse/homeserver-database.yaml"]
+        data = next(m for m in synapse["volumeMounts"] if m["mountPath"] == "/data")
+        assert not data.get("readOnly", False)
+        volume = next(v for v in spec["volumes"] if v["name"] == data["name"])
+        assert volume["persistentVolumeClaim"]["claimName"] == "matrix-synapse-data"
+        secret = next(m for m in synapse["volumeMounts"] if m["mountPath"] == "/secrets/synapse")
+        assert secret["readOnly"] is True
+
     bad = render("--set-string", "matrix.database.engine=mysql")
     assert bad.returncode != 0 and "matrix.database.engine" in bad.stderr, bad.stderr
     print("matrix database engine: OK")

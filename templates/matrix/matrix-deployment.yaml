@@ -58,6 +58,9 @@ spec:
           - /data/homeserver.yaml
           - --config-path
           - /secrets/synapse/homeserver-database.yaml
+          # Otherwise Synapse generates keys beside the last config, in the read-only Secret.
+          - --keys-directory
+          - /data
         env:
           {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
           - name: PYTHONPATH
