@@ -32,15 +32,15 @@ cd /root/ORISO-Helm && git fetch origin && git checkout <merged dev commit>
 python3 scripts/observability_overlay.py values-dev.yaml > /root/observability-dev.yaml
 ```
 
-The upgrade below does not use `--reuse-values` on purpose: the chart directory's
-own `values.yaml` carries the live settings, and the release's user-supplied
-values are exactly `secrets.yaml` (checked on revision 41, 2026-10-17), plus
-the observability overlay once this rollout has run. If a later revision was
-upgraded with extra `-f` files, pass them too. Without them, their settings
-fall back to `values.yaml`.
+The upgrade below does not use `--reuse-values` on purpose. The release's
+user-supplied values are `values.yaml` plus `secrets.yaml` (measured on
+revisions 47 and 48, 2026-11-02), plus the observability overlay once this
+rollout has run. If a later revision was upgraded with extra `-f` files, pass
+them too.
 
 So, right before the upgrade, list every user-supplied value path that the
-planned `-f` files (`secrets.yaml`, then the overlay) would drop or change.
+planned `-f` files (`values.yaml`, `secrets.yaml`, then the overlay) would drop
+or change.
 Paths the new overlay sets are the intended change and only count when it
 drops them. It compares values without printing them:
 
@@ -52,7 +52,7 @@ def leaves(d, p=""):
     for k, v in (d or {}).items():
         out.update(leaves(v, f"{p}.{k}") if isinstance(v, dict) and v else {f"{p}.{k}": v})
     return out
-files = ["secrets.yaml", "/root/observability-dev.yaml"]
+files = ["values.yaml", "secrets.yaml", "/root/observability-dev.yaml"]
 planned = {}
 for name in files:
     planned.update(leaves(yaml.safe_load(open(name))))
@@ -63,18 +63,60 @@ print(len(drift), *drift, sep="\n")' | tee /root/observability-drift.out
 ```
 
 Stop unless the first line is `0`; otherwise add the listed paths' files with
-`-f` first. The upgrade commands check it themselves, and the live upgrade
-also needs a successful server-side dry run, whose output you read first:
+`-f` first. Then record the running images, because the deploy scripts run
+workloads on image digests and an upgrade resets them to the chart's tags:
+
+```bash
+kubectl get deploy -n caritas -o json | python3 -c '
+import json, sys
+for d in json.load(sys.stdin)["items"]:
+    for c in d["spec"]["template"]["spec"]["containers"]:
+        print(d["metadata"]["name"], c["name"], c["image"])' > /root/observability-images-before.txt
+```
+
+The upgrade commands check the drift themselves, and the live upgrade also
+needs a successful server-side dry run, whose output you read first. The dry
+run output contains rendered Secrets, so keep it private and delete it after
+reading:
 
 ```bash
 rm -f /root/observability-dry.ok
 test "$(head -n 1 /root/observability-drift.out)" = 0 && \
-helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
-  --dry-run=server > /root/observability-dry.out && touch /root/observability-dry.ok
-# read /root/observability-dry.out, then:
+(umask 077; helm upgrade caritas . -n caritas -f values.yaml -f secrets.yaml -f /root/observability-dev.yaml \
+  --dry-run=server > /root/observability-dry.out) && touch /root/observability-dry.ok
+# read /root/observability-dry.out, delete it, then:
 test "$(head -n 1 /root/observability-drift.out)" = 0 && test -f /root/observability-dry.ok && \
-helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
-  --wait --wait-for-jobs --timeout 15m
+helm upgrade caritas . -n caritas -f values.yaml -f secrets.yaml -f /root/observability-dev.yaml \
+  --wait --timeout 20m
+```
+
+`--wait` works on Dev again since `userservice-report` was removed: revision 49
+passed the wait in about 2 minutes on 2026-11-03.
+
+If a `post-upgrade` hook fails, Helm marks the revision `failed` and skips the
+remaining hooks, although all objects are applied. Revision 49 stopped at
+`keycloak-reconcile-service-identities`; the cause is unknown because its logs
+were unreachable. Read `helm get hooks` for the failed hook and the ones with a
+higher `helm.sh/hook-weight`, and run each once more as a plain Job. Started this
+way at 12:00 UTC, that hook, `keycloak-reconcile-smtp` and
+`keycloak-reconcile-mail-locales` all completed. The next upgrade removes the
+failed Job.
+
+The hook runs before the images below are put back, so it talks to Keycloak on the
+chart's image tag. On revision 49 it failed four times within 80 seconds, each in
+2 to 3 seconds, although `--wait` had passed. Started again after the Dev image was
+back, it passed. The cause is not proven. If the hook fails, put the images back
+first and then start it again.
+
+After the upgrade, put the recorded images back:
+
+```bash
+while read -r deploy container image; do
+  current=$(kubectl get deploy "$deploy" -n caritas \
+    -o jsonpath="{.spec.template.spec.containers[?(@.name==\"$container\")].image}")
+  [ "$current" = "$image" ] || kubectl set image "deploy/$deploy" "$container=$image" -n caritas
+done < /root/observability-images-before.txt
+kubectl get deploy -n caritas -o name | xargs -n 1 kubectl rollout status -n caritas --timeout=300s
 ```
 
 The first rollout restarts Keycloak, Synapse (`Recreate`, a short Matrix gap),
@@ -104,6 +146,15 @@ kubectl get pv | grep -E 'signoz|clickhouse|zookeeper'   # RECLAIM POLICY = Reta
 
 `scripts/signoz_runtime_acceptance.py` (see `signoz-runtime-acceptance.md`)
 remains the full gate.
+
+Known gap: nginx metrics do not reach SigNoz on Dev. The chart's scrape
+annotations sit on its own controller template, but Dev's controller runs
+outside the release in the namespace `ingress-nginx`, and the `oriso-apps`
+scrape job only looks at pods in `caritas` (measured 2026-11-02).
+
+Harmless error: the MongoDB receiver logs `failed to collect metric
+mongodb.flushes.rate` every minute on Dev. The other `mongodb.*` metrics still
+arrive.
 
 ## ClickHouse memory and old system tables
 
