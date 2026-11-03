@@ -12,6 +12,45 @@ runbook instead. A fresh install with no Matrix data may set `postgres` directly
 
 Media (`/data/media_store`) and the signing key stay on the PVC in both modes.
 
+## Fresh installation with PostgreSQL
+
+For a new release with empty Matrix PostgreSQL and Synapse storage, use
+`values-fresh-postgres.yaml` after your environment values. PostgreSQL initializes
+empty PGDATA with UTF-8 encoding and C collation/ctype; Synapse creates its schema.
+No SQLite port is needed. Existing PostgreSQL volumes are NOT reinitialized:
+check their locale using step 4 before reusing them.
+
+Prepare the normal installation values, persistent secrets and externally managed
+Secrets first (including LiveKit runtime configuration). Do not delete all namespace
+PVCs: that would also destroy unrelated application and observability data.
+
+```sh
+helm install caritas ./ --namespace caritas --create-namespace \
+  -f values.yaml -f values-dev.yaml -f secrets.yaml \
+  -f values-fresh-postgres.yaml --timeout 20m
+
+kubectl -n caritas rollout status statefulset/matrix-postgres --timeout=10m
+kubectl -n caritas rollout status deployment/matrix-synapse --timeout=10m
+kubectl -n caritas rollout status deployment/matrixrtc-auth-policy-gateway --timeout=10m
+```
+
+This must be an install, not an upgrade of a release whose PVCs were emptied.
+Do not add Helm 3 `--wait`/`--atomic` (or enable readiness waiting in a wrapper):
+MatrixRTC waits for a token supplied by a `post-install` hook. Helm already waits
+for hook Jobs to finish; wait for workload rollouts separately afterwards.
+Check all other workloads and perform login/chat/media smoke tests too.
+
+Keep `values-fresh-postgres.yaml` in every later upgrade, or persist
+`matrix.database.engine: postgres` in the installation's own values. Omitting
+the setting can switch Synapse back to SQLite.
+
+This overlay selects only the Matrix database. It does not solve other stack
+bootstrap requirements: keep task identities disabled for initial installation,
+then provision/activate through the documented upgrade process. The Dev overlay
+enables dummy data and seed migrations; review those separately if no demo data
+is desired. Validate fresh Keycloak service-account subjects instead of reusing
+UUIDs from a deleted realm. See `runbooks/backend-service-clients.md`.
+
 ## 0. Before you start
 
 - Announce a chat downtime of about 30 minutes; Synapse is stopped from step 2

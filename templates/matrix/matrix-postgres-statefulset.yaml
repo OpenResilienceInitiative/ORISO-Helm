@@ -24,6 +24,10 @@ spec:
         image: postgres:15-alpine
         imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
         env:
+        # Only initializes empty PGDATA; existing databases are not changed.
+        # Synapse requires C collation/ctype and UTF-8 encoding.
+        - name: POSTGRES_INITDB_ARGS
+          value: "--encoding=UTF8 --locale=C"
         - name: POSTGRES_USER
           valueFrom:
             secretKeyRef:

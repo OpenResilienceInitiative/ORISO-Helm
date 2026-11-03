@@ -70,6 +70,20 @@ def main() -> None:
     assert db["args"]["host"] == "matrix-postgres-service", db["args"]["host"]
     assert db["args"]["password"] == PG_PASSWORD
 
+    fresh = render("-f", os.path.join(CHART_DIR, "values-fresh-postgres.yaml"))
+    assert fresh.returncode == 0, fresh.stderr
+    assert database_block(fresh.stdout)["name"] == "psycopg2"
+    docs = [d for d in yaml.safe_load_all(fresh.stdout) if isinstance(d, dict)]
+    postgres = next(d for d in docs if d["kind"] == "StatefulSet"
+                    and d["metadata"]["name"] == "matrix-postgres")
+    env = {e["name"]: e.get("value") for e in
+           postgres["spec"]["template"]["spec"]["containers"][0]["env"]}
+    assert env["POSTGRES_INITDB_ARGS"] == "--encoding=UTF8 --locale=C"
+    service = next(d for d in docs if d["kind"] == "Service"
+                   and d["metadata"]["name"] == database_block(fresh.stdout)["args"]["host"])
+    assert service["spec"]["selector"] == postgres["spec"]["template"]["metadata"]["labels"]
+    assert postgres["spec"]["serviceName"] == service["metadata"]["name"]
+
     # Synapse reads the database block once at start, and the Secret change alone
     # does not replace the pod. Without a roll, the runbook's rollback would leave
     # Synapse running on PostgreSQL.
