@@ -17,6 +17,8 @@ import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BODY_SIZE = "nginx.ingress.kubernetes.io/proxy-body-size"
+UPLOAD_PATH = "/_matrix/media/v3/upload"
+MATRIX_PATH = "/_matrix"
 PROMISED_BYTES = 10_000_000
 SYNAPSE_DEFAULT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
@@ -69,24 +71,45 @@ def assert_limit_covers_the_promise(docs: list[dict], source: str) -> None:
         f"{source}: {size} bytes must lie between the promised {PROMISED_BYTES} "
         f"and Synapse's {SYNAPSE_DEFAULT_MAX_UPLOAD_BYTES}"
     )
-    paths = [
-        path["path"]
+    paths = {
+        path["path"]: path["pathType"]
         for rule in ingress["spec"]["rules"]
         for path in rule["http"]["paths"]
-    ]
-    assert "/_matrix" in paths, f"{source}: /_matrix left the ingress: {paths}"
+    }
+    # Exact would send the upload to another route, and its limit.
+    assert paths.get(MATRIX_PATH) == "Prefix", (
+        f"{source}: {MATRIX_PATH} must stay a Prefix path on the ingress: {paths}"
+    )
+
+
+def takes_the_upload_from_matrix(path: dict) -> bool:
+    """Whether nginx would pick this path over /_matrix for an upload."""
+    value = path.get("path") or ""
+    if path.get("pathType") == "Exact":
+        return value == UPLOAD_PATH
+    prefix = value.rstrip("/")
+    matches = UPLOAD_PATH == prefix or UPLOAD_PATH.startswith(f"{prefix}/")
+    return matches and len(prefix) > len(MATRIX_PATH)
 
 
 def assert_nothing_narrower_shadows_the_upload(docs: list[dict]) -> None:
     """A more specific /_matrix path would win in nginx and carry its own limit."""
+    matrix_host = next(
+        rule.get("host")
+        for rule in matrix_ingress(docs)["spec"]["rules"]
+        if any(path.get("path") == MATRIX_PATH for path in rule["http"]["paths"])
+    )
     for doc in docs:
         if doc.get("kind") != "Ingress" or doc["metadata"]["name"] == "matrix-client-ingress":
             continue
         for rule in doc["spec"].get("rules", []):
+            # A rule without a host applies to every host, this one included.
+            if rule.get("host") not in (matrix_host, None):
+                continue
             for path in rule.get("http", {}).get("paths", []):
-                value = path.get("path") or ""
-                assert not value.startswith("/_matrix/media/v3/upload"), (
-                    f"{doc['metadata']['name']} shadows the upload route with {value}"
+                assert not takes_the_upload_from_matrix(path), (
+                    f"{doc['metadata']['name']} shadows the upload route "
+                    f"with {path.get('path')}"
                 )
 
 
@@ -111,11 +134,19 @@ def assert_homeserver_keeps_synapse_default(docs: list[dict]) -> None:
         )
 
 
+def assert_annotation_follows_setting(value: str) -> None:
+    annotation = matrix_ingress(render("--set", f"matrix.maxUploadSize={value}"))[
+        "metadata"
+    ]["annotations"].get(BODY_SIZE)
+    assert annotation == value, f"{BODY_SIZE} is {annotation!r}, expected {value!r}"
+
+
 def main() -> int:
     base = render()
     assert_limit_covers_the_promise(base, "base")
     assert_nothing_narrower_shadows_the_upload(base)
     assert_homeserver_keeps_synapse_default(base)
+    assert_annotation_follows_setting("25m")
 
     # An older private copy of values.yaml has no matrix.maxUploadSize.
     assert_limit_covers_the_promise(
