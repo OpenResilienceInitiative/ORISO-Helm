@@ -14,7 +14,6 @@ PVC_NAMES = {
     "matrix-synapse-data",
     "matrix-postgres-pvc",
     "matrix-postgres-backup-pvc",
-    "userservice-report",
     "redis-pvc",
 }
 STATEFULSET_CLAIMS = {
@@ -115,9 +114,6 @@ def main() -> None:
 
     pvc_guarded_templates = {
         "charts/redis/templates/redis-persistentvolumeclaim.yaml": ["redis-pvc"],
-        "templates/userservice/userservice-report-persistentvolumeclaim.yaml": [
-            "userservice-report"
-        ],
         "templates/matrix/matrix-pvcs-clean.yaml": [
             "matrix-synapse-data",
             "matrix-postgres-pvc",
