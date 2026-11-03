@@ -36,6 +36,14 @@ signoz:
   signoz:
     env:
       signoz_global_external__url: "https://dev.oriso.org/signoz"
+  clickhouse:
+    # Measured on Dev, 2026-11-03: 1.2-2.6 GiB in use, largest healthy merge 486 MiB.
+    # ClickHouse caps itself at 90% of the limit instead of filling the 7.57 GiB worker.
+    resources:
+      requests:
+        memory: 2Gi
+      limits:
+        memory: 4Gi
   otelCollector:
     additionalEnvs:
       ORISO_DEPLOYMENT_ENVIRONMENT: "dev"
