@@ -663,6 +663,14 @@ signoz:
         servicePort: 4319
         nodePort: ""
         protocol: TCP
+      # Dedicated receiver for global.observability.e2eTraceIngest (own pipeline
+      # that keeps only service.name=oriso-e2e). Off unless the route is on.
+      otlp-e2e:
+        enabled: false
+        containerPort: 4321
+        servicePort: 4321
+        nodePort: ""
+        protocol: TCP
 
 # SigNoz node and cluster collectors. Requires signoz.enabled=true.
 signozCollector:

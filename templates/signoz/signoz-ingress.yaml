@@ -103,7 +103,9 @@ ingress-nginx itself checks HTTP Basic credentials against an existing Secret
 (auth-type/auth-secret, the same mechanism as Storybook and the health
 dashboard), so no snippet reads a token and none is rendered into this chart.
 Only POST of a small uncompressed OTLP/HTTP trace body at a bounded rate is
-forwarded, and only to the collector's /v1/traces on its regular OTLP port.
+forwarded, and only to the dedicated otlp/e2e collector receiver (own port,
+own pipeline: only service.name=oriso-e2e is kept, environment is overwritten,
+oriso.signal.source=e2e is set), never to the main OTLP receiver.
 */}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -144,5 +146,5 @@ spec:
               service:
                 name: {{ include "oriso.signozOtelCollectorServiceName" . }}
                 port:
-                  number: {{ dig "otelCollector" "ports" "otlp-http" "servicePort" 4318 (get .Values "signoz" | default dict) }}
+                  number: {{ dig "otelCollector" "ports" "otlp-e2e" "servicePort" 4321 (get .Values "signoz" | default dict) }}
 {{- end }}

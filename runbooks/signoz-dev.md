@@ -110,7 +110,7 @@ The scheduled GitHub run (`nightly-dev-e2e`, ORISO-E2E#97) sends its test spans 
 `https://dev.oriso.org/signoz-e2e/v1/traces`. The route is off by default and on in
 `values-dev.yaml` (`global.observability.e2eTraceIngest`). ingress-nginx checks HTTP
 Basic credentials (user `e2e`) against a Secret, accepts only small uncompressed POSTs
-(256k, 5 requests per second) and forwards to the collector's `/v1/traces`. The chart
+(256k, 5 requests per second) and forwards to the collector's `/v1/traces` on a dedicated receiver `otlp/e2e` (port 4321, 256k body cap), never the main OTLP port 4318. Its own pipeline `traces/e2e` keeps only spans whose resource `service.name` is `oriso-e2e`, overwrites `deployment.environment` with the collector's `ORISO_DEPLOYMENT_ENVIRONMENT` (`dev`) and adds `oriso.signal.source=e2e`, so a token holder cannot inject telemetry under another service name or environment. The collector port is enabled by `signoz.otelCollector.ports.otlp-e2e.enabled` (on in `values-dev.yaml`; the render fails if the route is on without it). The chart
 only references the Secret by name; it never creates or renders the token.
 
 The repo admin does this once, before the rollout that enables the route (steps only;
@@ -129,7 +129,7 @@ generate the token yourself and do not paste it into a ticket or chat):
    by hand (`workflow_dispatch`).
 
 Check: without credentials the route answers 401, a GET answers 405 or 401, and with
-the token a run shows `oriso-e2e` spans in SigNoz. Rotate by replacing the Secret and
+the token a run shows `oriso-e2e` spans in SigNoz (filter by `oriso.signal.source=e2e`); a test span with another `service.name` must not appear. Rotate by replacing the Secret and
 `DEV_OTLP_TOKEN` together. To switch it off set `e2eTraceIngest.enabled: false`.
 
 ## signoz.db backup and restore

@@ -66,9 +66,9 @@ def assert_dev(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     # metrics have their own receiver and a pipeline that filters and relabels.
     collector_cm = docs[("ConfigMap", "caritas-signoz-otel-collector")]
     config = yaml.safe_load(next(iter(collector_cm["data"].values())))
-    assert set(config["receivers"]) == {"otlp", "otlp/rum"}, config["receivers"]
+    assert set(config["receivers"]) == {"otlp", "otlp/rum", "otlp/e2e"}, config["receivers"]
     assert config["receivers"]["otlp/rum"]["protocols"]["http"]["max_request_body_size"] == 65536
-    for name in ("traces", "metrics", "logs", "metrics/rum"):
+    for name in ("traces", "metrics", "logs", "metrics/rum", "traces/e2e"):
         pipeline = config["service"]["pipelines"][name]
         assert pipeline["processors"][0] == "memory_limiter", (name, pipeline)
     for name in ("traces", "metrics", "logs"):
@@ -134,7 +134,7 @@ def assert_e2e_trace_ingest() -> None:
     assert len(rules) == 1 and len(rules[0]["http"]["paths"]) == 1, rules
     path = rules[0]["http"]["paths"][0]
     assert (path["path"], path["pathType"]) == ("/signoz-e2e/v1/traces", "Exact")
-    assert path["backend"]["service"] == {"name": "caritas-signoz-otel-collector", "port": {"number": 4318}}
+    assert path["backend"]["service"] == {"name": "caritas-signoz-otel-collector", "port": {"number": 4321}}
     annotations = ingress["metadata"]["annotations"]
     # The token is checked by ingress-nginx itself against a Secret named in values.
     assert annotations["nginx.ingress.kubernetes.io/auth-type"] == "basic"
@@ -147,6 +147,30 @@ def assert_e2e_trace_ingest() -> None:
     assert "nginx.ingress.kubernetes.io/rewrite-target" not in annotations
     assert annotations["nginx.ingress.kubernetes.io/proxy-body-size"] == "256k"
     assert "nginx.ingress.kubernetes.io/limit-rps" in annotations
+    # Dedicated receiver/pipeline: own port, body cap, filter, fixed environment, source tag.
+    collector_cm = docs[("ConfigMap", "caritas-signoz-otel-collector")]
+    config = yaml.safe_load(next(iter(collector_cm["data"].values())))
+    e2e_http = config["receivers"]["otlp/e2e"]["protocols"]["http"]
+    assert e2e_http["endpoint"] == "0.0.0.0:4321" and e2e_http["max_request_body_size"] == 262144, e2e_http
+    assert config["service"]["pipelines"]["traces"]["receivers"] == ["otlp"], "main pipeline must not take the E2E receiver"
+    pipeline = config["service"]["pipelines"]["traces/e2e"]
+    assert pipeline["receivers"] == ["otlp/e2e"], pipeline
+    procs = pipeline["processors"]
+    assert procs[0] == "memory_limiter" and procs.index("filter/e2e") < procs.index("transform/e2e"), procs
+    drop_rule = config["processors"]["filter/e2e"]["traces"]["span"]
+    assert drop_rule == ['resource.attributes["service.name"] != "oriso-e2e"'], drop_rule
+    statements = config["processors"]["transform/e2e"]["trace_statements"][0]
+    assert statements["context"] == "resource"
+    assert 'set(attributes["deployment.environment"], "${env:ORISO_DEPLOYMENT_ENVIRONMENT}")' in statements["statements"]
+    assert 'set(attributes["oriso.signal.source"], "e2e")' in statements["statements"]
+    assert env(docs[("Deployment", "caritas-signoz-otel-collector")])["ORISO_DEPLOYMENT_ENVIRONMENT"] == "dev"
+    service_ports = {p["name"]: p["port"] for p in docs[("Service", "caritas-signoz-otel-collector")]["spec"]["ports"]}
+    assert service_ports["otlp-e2e"] == 4321 and service_ports["otlp-http"] == 4318, service_ports
+    assert path["backend"]["service"]["port"]["number"] in service_ports.values()
+    error = render_dev_fails({"signoz": {"otelCollector": {"ports": {"otlp-e2e": {"enabled": False}}}}})
+    assert "e2eTraceIngest.enabled=true requires signoz.otelCollector.ports.otlp-e2e.enabled=true" in error, error
+    error = render_dev_fails({"signoz": {"otelCollector": {"additionalEnvs": {"ORISO_DEPLOYMENT_ENVIRONMENT": "prod"}}}})
+    assert "ORISO_DEPLOYMENT_ENVIRONMENT must equal" in error, error
     # Only the Secret name is rendered, never a credential.
     assert "password" not in str(ingress).lower()
     # Nothing else of the collector is exposed through this Ingress.
