@@ -123,6 +123,27 @@ kubectl -n caritas scale statefulset caritas-signoz --replicas=0
 kubectl -n caritas scale statefulset caritas-signoz --replicas=1
 ```
 
+## ClickHouse system logs
+
+The chart turns `system.metric_log` off. With 1552 columns its background merges
+hit the memory limit about 6 times per second on Dev and used about 3 CPU cores.
+Pausing only those merges for two minutes on 2026-11-03 took ClickHouse from 3.17
+to 0.43 cores and the errors from 6.45 per second to 0.
+
+The setting stops new rows, but an existing table keeps merging, so drop it once
+on every environment after the upgrade. ClickHouse may also have renamed older
+versions with a numeric suffix:
+
+```bash
+kubectl -n caritas exec -i chi-caritas-clickhouse-cluster-0-0-0 -c clickhouse -- clickhouse-client --multiquery <<'SQL'
+SELECT name, formatReadableSize(total_bytes) FROM system.tables WHERE database = 'system' AND match(name, '^metric_log(_[0-9]+)?$');
+DROP TABLE IF EXISTS system.metric_log SYNC;
+DROP TABLE IF EXISTS system.metric_log_0 SYNC;
+SQL
+```
+
+Drop any other suffix the first line lists the same way.
+
 ## Rollback
 
 Turn single parts off in the generated overlay (`signozCollector.enabled`,
