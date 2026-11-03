@@ -86,16 +86,20 @@ test "$(head -n 1 /root/observability-drift.out)" = 0 && \
 # read /root/observability-dry.out, delete it, then:
 test "$(head -n 1 /root/observability-drift.out)" = 0 && test -f /root/observability-dry.ok && \
 helm upgrade caritas . -n caritas -f values.yaml -f secrets.yaml -f /root/observability-dev.yaml \
-  --timeout 20m
+  --wait --timeout 20m
 ```
 
-Do not add `--wait` on Dev. Helm's wait requires every PersistentVolumeClaim in
-the release to be `Bound`, and `userservice-report` has stayed `Pending` since
-2026-08-05: its storage class binds on first consumer and no workload mounts
-it. With `--wait` the upgrade applies all objects, reports `context deadline
-exceeded` after the timeout, marks the revision `failed`, and never runs the
-`post-upgrade` hooks, including `db-monitoring-reconcile`. Revisions 47 and 48
-failed this way.
+`--wait` works on Dev again since `userservice-report` was removed: revision 49
+passed the wait in about 2 minutes on 2026-11-03.
+
+If a `post-upgrade` hook fails, Helm marks the revision `failed` and skips the
+remaining hooks, although all objects are applied. Revision 49 stopped at
+`keycloak-reconcile-service-identities`; the cause is unknown because its logs
+were unreachable. Read `helm get hooks` for the failed hook and the ones with a
+higher `helm.sh/hook-weight`, and run each once more as a plain Job. Started this
+way at 12:00 UTC, that hook, `keycloak-reconcile-smtp` and
+`keycloak-reconcile-mail-locales` all completed. The next upgrade removes the
+failed Job.
 
 After the upgrade, put the recorded images back:
 
