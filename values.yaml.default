@@ -44,6 +44,13 @@ global:
     webVitals:
       enabled: false
       exportIntervalMillis: 60000
+    # Authenticated public OTLP/HTTP trace ingest at /signoz-e2e/v1/traces for
+    # the scheduled E2E run (needs signoz.enabled). authSecret is the NAME of an
+    # existing Secret in the release namespace with an htpasswd `auth` key; the
+    # chart never creates or renders the credential.
+    e2eTraceIngest:
+      enabled: false
+      authSecret: ""
 
   acmedomainName: "acme.your-domain.example.com"
  #adminDomainName: "admin.your-domain.example.com"

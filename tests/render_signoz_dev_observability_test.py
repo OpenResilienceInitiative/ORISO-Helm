@@ -126,9 +126,43 @@ def assert_dev(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
         assert "checksum/config" in annotations, name
 
 
+def assert_e2e_trace_ingest() -> None:
+    """Authenticated span ingest for the Dev nightly E2E run (ORISO-E2E#97)."""
+    docs = by_key(render("values-dev.yaml"))
+    ingress = docs[("Ingress", "caritas-signoz-e2e-ingress")]
+    rules = ingress["spec"]["rules"]
+    assert len(rules) == 1 and len(rules[0]["http"]["paths"]) == 1, rules
+    path = rules[0]["http"]["paths"][0]
+    assert (path["path"], path["pathType"]) == ("/signoz-e2e/v1/traces", "Exact")
+    assert path["backend"]["service"] == {"name": "caritas-signoz-otel-collector", "port": {"number": 4318}}
+    annotations = ingress["metadata"]["annotations"]
+    # The token is checked by ingress-nginx itself against a Secret named in values.
+    assert annotations["nginx.ingress.kubernetes.io/auth-type"] == "basic"
+    assert annotations["nginx.ingress.kubernetes.io/auth-secret"] == "signoz-e2e-ingest-auth"
+    assert annotations["nginx.ingress.kubernetes.io/auth-secret-type"] == "auth-file"
+    snippet = annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
+    assert "if ($request_method != POST) { return 405; }" in snippet
+    assert "$http_content_encoding" in snippet
+    assert "rewrite ^/signoz-e2e/v1/traces$ /v1/traces break;" in snippet
+    assert "nginx.ingress.kubernetes.io/rewrite-target" not in annotations
+    assert annotations["nginx.ingress.kubernetes.io/proxy-body-size"] == "256k"
+    assert "nginx.ingress.kubernetes.io/limit-rps" in annotations
+    # Only the Secret name is rendered, never a credential.
+    assert "password" not in str(ingress).lower()
+    # Nothing else of the collector is exposed through this Ingress.
+    assert not any(k == "Secret" and "e2e" in n for k, n in docs), "chart must not create the token"
+
+    error = render_dev_fails({"global": {"observability": {"e2eTraceIngest": {"authSecret": ""}}}})
+    assert "e2eTraceIngest.authSecret must name an existing basic-auth Secret" in error, error
+    # Default off, and off without SigNoz.
+    assert "caritas-signoz-e2e-ingress" not in {n for _, n in by_key(render())}
+    off = render_dev_with({"global": {"observability": {"e2eTraceIngest": {"enabled": False}}}})
+    assert ("Ingress", "caritas-signoz-e2e-ingress") not in off
+
+
 def assert_default_off(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     names = {name for _, name in docs}
-    assert not any("data-protection" in name or "rum-ingress" in name for name in names), names
+    assert not any("data-protection" in name or "rum-ingress" in name or "e2e-ingress" in name for name in names), names
     for name in JAVA_SERVICES:
         variables = env(docs[("Deployment", name)])
         assert "OTEL_RESOURCE_ATTRIBUTES" not in variables, name
@@ -533,6 +567,7 @@ def assert_backends_follow_signoz_names() -> None:
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
+    assert_e2e_trace_ingest()
     assert_review_findings()
     assert_second_review_findings()
     assert_backup_is_atomic()

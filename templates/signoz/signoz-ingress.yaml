@@ -92,3 +92,57 @@ spec:
                 port:
                   number: {{ dig "otelCollector" "ports" "otlp-rum" "servicePort" 4319 (get .Values "signoz" | default dict) }}
 {{- end }}
+
+{{- $e2e := get $o "e2eTraceIngest" | default dict }}
+{{- if and (get $signoz "enabled" | default false) (get $e2e "enabled" | default false) }}
+---
+{{- /*
+E2E trace ingest (global.observability.e2eTraceIngest), for the scheduled Dev
+E2E run on a GitHub runner that cannot reach the cluster. Off by default.
+ingress-nginx itself checks HTTP Basic credentials against an existing Secret
+(auth-type/auth-secret, the same mechanism as Storybook and the health
+dashboard), so no snippet reads a token and none is rendered into this chart.
+Only POST of a small uncompressed OTLP/HTTP trace body at a bounded rate is
+forwarded, and only to the collector's /v1/traces on its regular OTLP port.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "oriso.signozServiceName" . }}-e2e-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: signoz
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: {{ required "global.observability.e2eTraceIngest.authSecret must name an existing basic-auth Secret when e2eTraceIngest is enabled" (get $e2e "authSecret") | quote }}
+    nginx.ingress.kubernetes.io/auth-secret-type: auth-file
+    nginx.ingress.kubernetes.io/auth-realm: "ORISO E2E trace ingest"
+    nginx.ingress.kubernetes.io/proxy-body-size: "256k"
+    nginx.ingress.kubernetes.io/limit-rps: "5"
+    # Same shape as the RUM rule: no rewrite-target annotation, which would turn
+    # every path of the host into a regex location.
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      if ($request_method != POST) { return 405; }
+      if ($http_content_encoding != "") { return 415; }
+      rewrite ^/signoz-e2e/v1/traces$ /v1/traces break;
+spec:
+  ingressClassName: {{ get $orisoIngress "ingressClassName" | default "nginx" | quote }}
+  tls:
+    - hosts:
+        - {{ .Values.global.domainName | quote }}
+      secretName: {{ printf "%s-tls" (.Values.global.domainName | replace "." "-") }}
+  rules:
+    - host: {{ .Values.global.domainName | quote }}
+      http:
+        paths:
+          - path: /signoz-e2e/v1/traces
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "oriso.signozOtelCollectorServiceName" . }}
+                port:
+                  number: {{ dig "otelCollector" "ports" "otlp-http" "servicePort" 4318 (get .Values "signoz" | default dict) }}
+{{- end }}

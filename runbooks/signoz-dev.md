@@ -104,6 +104,34 @@ kubectl get pv | grep -E 'signoz|clickhouse|zookeeper'   # RECLAIM POLICY = Reta
 `scripts/signoz_runtime_acceptance.py` (see `signoz-runtime-acceptance.md`)
 remains the full gate.
 
+## E2E trace ingest (Dev nightly)
+
+The scheduled GitHub run (`nightly-dev-e2e`, ORISO-E2E#97) sends its test spans to
+`https://dev.oriso.org/signoz-e2e/v1/traces`. The route is off by default and on in
+`values-dev.yaml` (`global.observability.e2eTraceIngest`). ingress-nginx checks HTTP
+Basic credentials (user `e2e`) against a Secret, accepts only small uncompressed POSTs
+(256k, 5 requests per second) and forwards to the collector's `/v1/traces`. The chart
+only references the Secret by name; it never creates or renders the token.
+
+The repo admin does this once, before the rollout that enables the route (steps only;
+generate the token yourself and do not paste it into a ticket or chat):
+
+1. Generate a long random token in your password manager.
+2. On the Dev master (`KUBECONFIG=/etc/rancher/k3s/k3s.yaml`), create the Secret
+   `signoz-e2e-ingest-auth` in namespace `caritas` with one key `auth` holding an
+   htpasswd line for user `e2e` (`htpasswd -nbB e2e '<token>'`, entered without
+   leaving it in shell history).
+3. In GitHub, repository ORISO-E2E, environment `dev-e2e`, add the secrets
+   `DEV_OTLP_TOKEN` (the token) and `DEV_OTLP_ENDPOINT`
+   (`https://dev.oriso.org/signoz-e2e/v1/traces`). The same environment also needs
+   `ORISO_TEST_ACCESS_TOKEN` and `TEST_ACCESS_IDENTITY` (as in `predev-e2e`).
+4. Roll out with the observability overlay (Rollout above), then run the workflow once
+   by hand (`workflow_dispatch`).
+
+Check: without credentials the route answers 401, a GET answers 405 or 401, and with
+the token a run shows `oriso-e2e` spans in SigNoz. Rotate by replacing the Secret and
+`DEV_OTLP_TOKEN` together. To switch it off set `e2eTraceIngest.enabled: false`.
+
 ## signoz.db backup and restore
 
 The CronJob `caritas-signoz-data-protection-backup` runs at 02:30 UTC and keeps
