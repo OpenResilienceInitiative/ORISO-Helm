@@ -185,6 +185,15 @@
         "clientRole": false,
         "containerId": "online-beratung",
         "attributes": {}
+      },
+      {
+        "id": "b1ee443a-a024-4b7a-862e-802c25a5c8bc",
+        "name": "group-chat-consultant",
+        "description": "Consultant who may create, start, stop and update group chats; assigned by UserService together with consultant",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "online-beratung",
+        "attributes": {}
       }
     ],
     "client": {
