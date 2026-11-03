@@ -97,6 +97,7 @@ ACTORS = (
             "matrix-agency-provision",
             "appointment-sync",
             "appointment-participant-cleanup",
+            "deletion-audit-read",
         ),
         ("tenantservice", "agencyservice", "appointmentservice"),
     ),

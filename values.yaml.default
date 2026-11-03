@@ -231,6 +231,17 @@ matrix:
   initImage: "busybox:1.38.0"
   replicas: 1
   postgresReplicas: 1
+  database:
+    # Synapse database: "sqlite3" (/data/homeserver.db on the matrix-synapse-data PVC)
+    # or "postgres" (the matrix-postgres StatefulSet). Switching moves no data; an
+    # existing install follows runbooks/matrix-sqlite-to-postgres.md.
+    # New installs use PostgreSQL. Existing SQLite installs must explicitly keep
+    # engine: sqlite3 until their data has been migrated.
+    engine: "postgres"
+  # In-cluster Service name of the PostgreSQL StatefulSet (Service metadata.name and serviceName).
+  postgresServiceName: "matrix-postgres-service"
+  # Host Synapse and the PITR backup job connect to. Empty = postgresServiceName.
+  postgresHost: ""
   synapseServerName: "your-server.local"
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"
@@ -342,8 +353,9 @@ matrixrtcLifecycle:
 matrixrtcAuth:
   replicas: 1
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
-  # Namespace of the ingress controller, needed by the NetworkPolicy.
-  ingressControllerNamespace: "ingress-nginx"
+  # Optional: namespace of the ingress controller for the call NetworkPolicies.
+  # Empty means "ingress-nginx". The release namespace is always admitted as well.
+  ingressControllerNamespace: ""
   bootstrap:
     enabled: true
     backoffLimit: 6
@@ -415,6 +427,10 @@ online-counseling-keycloak:
 agencyService:
   replicas: 1
   image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:dev"
+  # Deletion-log outbox (OBP 2.1 #130). With task identities on, an AgencyService image older
+  # than ORISO-AgencyService#356 refuses to start once DELETION_AUDIT_READ is required. Switch this
+  # on in the same release that deploys that image; until then the outbox stays unreadable.
+  deletionAuditOutboxEnabled: false
 
   keycloakResource: "agency-service"
 
@@ -439,6 +455,9 @@ consultingTypeService:
   consultingTypesJsonPath : "consulting-type-settings"
   liquibaseChangeLog: "classpath:db/changelog/consultingtypeservice-master.xml"
   liquibaseContexts: "seed"
+  # Release toggles served on top of the ones stored in MongoDB, e.g.
+  # "enableNewNotifications=true". Empty: the stored values apply unchanged.
+  releaseToggleOverrides: ""
   bootstrapTopics:
     enabled: true
 

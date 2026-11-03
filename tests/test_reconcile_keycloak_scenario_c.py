@@ -716,6 +716,7 @@ class HttpReconciliationTest(unittest.TestCase):
                     "matrix-agency-provision",
                     "appointment-sync",
                     "appointment-participant-cleanup",
+                    "deletion-audit-read",
                 },
                 {"tenantservice", "agencyservice", "appointmentservice"},
             ),
@@ -1011,6 +1012,7 @@ class RegistryContractTest(unittest.TestCase):
         self.assertEqual("ACCOUNT_ADMIN", report["purposes"]["OTP"])
         self.assertEqual("SETUP", report["purposes"]["SMTP_SYNC"])
         self.assertEqual("RUNTIME", report["purposes"]["APPOINTMENT_CLEANUP"])
+        self.assertEqual("RUNTIME", report["purposes"]["DELETION_AUDIT_READ"])
         self.assertFalse(report["runtime_cutover"])
 
 

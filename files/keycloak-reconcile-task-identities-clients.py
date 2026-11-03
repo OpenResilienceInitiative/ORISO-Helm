@@ -35,7 +35,7 @@ ACTORS = (
      ("smtp-sync", "system-email-delivery", "notification-dispatch", "notifications-technical"),
      ("tenantservice", "agencyservice", "consultingtypeservice", "userservice")),
     ("RUNTIME", "backend-runtime", "TASK_IDENTITY_RUNTIME_CLIENT_SECRET", "TASK_IDENTITY_RUNTIME_SERVICE_SUBJECT",
-     ("runtime-policy", "matrix-agency", "matrix-agency-provision", "appointment-sync", "appointment-participant-cleanup"),
+     ("runtime-policy", "matrix-agency", "matrix-agency-provision", "appointment-sync", "appointment-participant-cleanup", "deletion-audit-read"),
      ("tenantservice", "agencyservice", "appointmentservice")),
 )
 RECEIPT = "oriso-task-identities-client"
