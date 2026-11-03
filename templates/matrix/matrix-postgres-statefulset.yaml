@@ -13,7 +13,7 @@ spec:
   selector:
     matchLabels:
       app: matrix-postgres
-  serviceName: matrix-postgres-service
+  serviceName: {{ .Values.matrix.postgresServiceName }}
   template:
     metadata:
       labels:
@@ -24,6 +24,10 @@ spec:
         image: postgres:15-alpine
         imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
         env:
+        # Only initializes empty PGDATA; existing databases are not changed.
+        # Synapse requires C collation/ctype and UTF-8 encoding.
+        - name: POSTGRES_INITDB_ARGS
+          value: "--encoding=UTF8 --locale=C"
         - name: POSTGRES_USER
           valueFrom:
             secretKeyRef:
@@ -91,3 +95,21 @@ spec:
     type: RollingUpdate
     rollingUpdate:
       partition: 0
+---
+# Headless Service named by matrix.postgresServiceName (also the StatefulSet serviceName).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.matrix.postgresServiceName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: matrix-postgres
+spec:
+  clusterIP: None
+  selector:
+    app: matrix-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
