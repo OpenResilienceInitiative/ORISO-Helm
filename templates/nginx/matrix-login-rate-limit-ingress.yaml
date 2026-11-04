@@ -33,7 +33,8 @@ spec:
             name: matrix-synapse
             port:
               number: 8008
-        # Every client API version, also with a trailing slash or ;parameter.
-        path: /_matrix/client/[^/]+/login/?(;.*)?$
+        # Every client API version, including the legacy api/v1, also with a
+        # trailing slash or ;parameter.
+        path: /_matrix/client/(api/v1|[^/]+)/login/?(;.*)?$
         pathType: ImplementationSpecific
 {{- end }}

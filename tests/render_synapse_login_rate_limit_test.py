@@ -18,6 +18,7 @@ INGRESS_NAME = "matrix-login-rate-limit-ingress"
 LOGIN_PATHS = {
     "/_matrix/client/v3/login": True,
     "/_matrix/client/r0/login/": True,
+    "/_matrix/client/api/v1/login": True,
     "/_matrix/client/v3/login;x=1": True,
     "/_matrix/client/v3/login/sso/redirect": False,
     "/_matrix/client/v3/sync": False,
