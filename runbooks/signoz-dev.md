@@ -131,7 +131,19 @@ Pausing only those merges for two minutes on 2026-11-03 took ClickHouse from 3.1
 to 0.43 cores and the errors from 6.45 per second to 0.
 
 The setting stops new rows, but an existing table keeps merging, so drop it once
-on every environment after the upgrade. ClickHouse may also have renamed older
+on every environment after the upgrade. Helm `--wait` does not wait for the
+ClickHouse operator, which restarts ClickHouse after the upgrade. Drop only after
+the restart is done and the configuration is active, otherwise the old writer can
+create the table again on its next flush:
+
+```bash
+kubectl -n caritas rollout status statefulset/chi-caritas-clickhouse-cluster-0-0 --timeout=10m
+kubectl -n caritas exec chi-caritas-clickhouse-cluster-0-0-0 -c clickhouse -- clickhouse extract-from-config --config-file /etc/clickhouse-server/config.xml --key metric_log
+```
+
+The second command must print `Not found: metric_log`. Then check that the newest
+row of the old table stops growing (`SELECT max(event_time) FROM system.metric_log`
+twice, a minute apart). ClickHouse may also have renamed older
 versions with a numeric suffix:
 
 ```bash
