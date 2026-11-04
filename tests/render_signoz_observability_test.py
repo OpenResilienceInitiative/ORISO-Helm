@@ -235,10 +235,14 @@ def main() -> None:
     assert "apiKeySecret.name must name an existing Secret" in without_secrets.stderr
 
     # The shipped defaults keep the feature off; no environment overlay turns
-    # it on until the API key Secret exists.
+    # it on until the API key Secret exists. Dev is the only overlay that has
+    # it on, and it must then name that Secret.
+    dev = yaml.safe_load(pathlib.Path(CHART_DIR, "values-dev.yaml").read_text(encoding="utf-8"))
+    dev_managed = (dev.get("signoz") or {}).get("orisoObservability") or {}
+    assert dev_managed.get("enabled") is True, "values-dev.yaml"
+    assert (dev_managed.get("apiKeySecret") or {}).get("name"), "values-dev.yaml"
     for overlay in (
         "values.yaml.default",
-        "values-dev.yaml",
         "values-pre-dev.yaml",
         "values-prod.yaml",
     ):
