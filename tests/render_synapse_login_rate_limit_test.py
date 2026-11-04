@@ -6,6 +6,7 @@ protection (failed_attempts) must stay at the Synapse default."""
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 
@@ -13,13 +14,21 @@ import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HELM_TIMEOUT_SECONDS = 180
+INGRESS_NAME = "matrix-login-rate-limit-ingress"
+LOGIN_PATHS = {
+    "/_matrix/client/v3/login": True,
+    "/_matrix/client/r0/login/": True,
+    "/_matrix/client/v3/login;x=1": True,
+    "/_matrix/client/v3/login/sso/redirect": False,
+    "/_matrix/client/v3/sync": False,
+}
 EXPECTED = {
     "address": {"per_second": 1, "burst_count": 50},
     "account": {"per_second": 0.1, "burst_count": 20},
 }
 
 
-def render_login_limit(*extra: str) -> dict:
+def render_documents(*extra: str) -> list[dict]:
     result = subprocess.run(
         [
             "helm",
@@ -45,8 +54,12 @@ def render_login_limit(*extra: str) -> dict:
     )
     if result.returncode:
         raise AssertionError(result.stderr)
-    for document in yaml.safe_load_all(result.stdout):
-        for value in ((document or {}).get("data") or {}).values():
+    return [document for document in yaml.safe_load_all(result.stdout) if document]
+
+
+def render_login_limit(*extra: str) -> dict:
+    for document in render_documents(*extra):
+        for value in (document.get("data") or {}).values():
             if not isinstance(value, str):
                 continue
             if "server_name:" in value and "rc_login" in value:
@@ -69,6 +82,29 @@ def main() -> int:
         if actual != expected:
             print(f"{name}: expected rc_login {expected}, got {actual}", file=sys.stderr)
             return 1
+    ingresses = [
+        document
+        for document in render_documents()
+        if document.get("metadata", {}).get("name") == INGRESS_NAME
+    ]
+    if len(ingresses) != 1:
+        print(f"expected one {INGRESS_NAME}, found {len(ingresses)}", file=sys.stderr)
+        return 1
+    annotations = ingresses[0]["metadata"]["annotations"]
+    path = ingresses[0]["spec"]["rules"][0]["http"]["paths"][0]["path"]
+    if annotations.get("nginx.ingress.kubernetes.io/limit-rpm") != "6":
+        print("public login path must be limited per IP", file=sys.stderr)
+        return 1
+    for uri, expected in LOGIN_PATHS.items():
+        if bool(re.match(path, uri)) != expected:
+            print(f"{uri}: expected match {expected} for {path}", file=sys.stderr)
+            return 1
+    if any(
+        document.get("metadata", {}).get("name") == INGRESS_NAME
+        for document in render_documents("--set", "matrix.loginRateLimit.enabled=false")
+    ):
+        print("loginRateLimit.enabled=false must remove the ingress", file=sys.stderr)
+        return 1
     print("Synapse login rate limit ok")
     return 0
 

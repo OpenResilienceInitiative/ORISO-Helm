@@ -154,7 +154,8 @@ data:
     # sees all users behind one client address. The shipped address limit of
     # burst 5 + 1 per 333s is therefore a platform-wide limit, and it returned
     # 429 -> token 503 on Dev. Address and account are raised; failed_attempts
-    # stays at the shipped default and keeps limiting wrong passwords.
+    # stays at the shipped default and keeps limiting wrong passwords. Public
+    # clients are limited per IP by matrix-login-rate-limit-ingress.
     {{- $rateLimits := .Values.matrix.rateLimits | default dict }}
     rc_login:
       address:
