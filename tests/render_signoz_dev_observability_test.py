@@ -588,6 +588,26 @@ def assert_backends_follow_signoz_names() -> None:
         assert endpoints and endpoints <= services, (overlay, endpoints)
 
 
+def clickhouse_resources(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        container.get("resources", {})
+        for doc in docs
+        if doc.get("kind") == "ClickHouseInstallation"
+        for template in doc["spec"]["templates"]["podTemplates"]
+        for container in template["spec"]["containers"]
+        if container["name"] == "clickhouse"
+    ]
+
+
+def assert_clickhouse_memory_on_dev() -> None:
+    # A limit stops ClickHouse taking the whole worker; the request lets the
+    # scheduler see what it really uses.
+    assert clickhouse_resources(render("values-dev.yaml")) == [{
+        "requests": {"cpu": "100m", "memory": "2Gi"},
+        "limits": {"memory": "4Gi"},
+    }]
+
+
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
@@ -604,6 +624,7 @@ def main() -> None:
     assert_rum_port_and_source_class()
     assert_read_write_once_pod_rejected()
     assert_backends_follow_signoz_names()
+    assert_clickhouse_memory_on_dev()
     print("PASS: SigNoz on Dev keeps its data, bounds the collector, and labels every signal")
 
 
