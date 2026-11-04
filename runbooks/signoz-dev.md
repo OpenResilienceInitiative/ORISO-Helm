@@ -108,10 +108,12 @@ chart's image tag. On revision 49 it failed four times within 80 seconds, each i
 back, it passed. The cause is not proven. If the hook fails, put the images back
 first and then start it again.
 
-After the upgrade, put the recorded images back:
+After the upgrade, put the recorded images back. The SigNoz deployments are skipped on
+purpose: their images come from the chart, not from the deploy scripts.
 
 ```bash
 while read -r deploy container image; do
+  case "$deploy" in caritas-signoz*) continue ;; esac  # the chart selects the SigNoz images
   current=$(kubectl get deploy "$deploy" -n caritas \
     -o jsonpath="{.spec.template.spec.containers[?(@.name==\"$container\")].image}")
   [ "$current" = "$image" ] || kubectl set image "deploy/$deploy" "$container=$image" -n caritas
