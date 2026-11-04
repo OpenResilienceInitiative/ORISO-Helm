@@ -132,7 +132,7 @@ generate the token yourself and do not paste it into a ticket or chat):
 Check: without credentials the route answers 401, a GET answers 405 or 401, and with
 the token a run shows `oriso-e2e` spans in SigNoz (filter by `oriso.signal.source=e2e`); a test span with another `service.name` must not appear. Rotate by replacing the Secret and
 `DEV_OTLP_TOKEN` together. To switch it off set `e2eTraceIngest.enabled: false`.
-=======
+
 ## ClickHouse memory and old system tables
 
 ClickHouse ran without a memory limit and the kernel killed it on 2026-11-03 when
@@ -178,7 +178,6 @@ pod. For example:
 ```bash
 kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP TABLE IF EXISTS system.trace_log_0 SYNC"
 ```
->>>>>>> 9f515a9816adeea422d81047224b64ffa44b29eb
 
 ## signoz.db backup and restore
 
