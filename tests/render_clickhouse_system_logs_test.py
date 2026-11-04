@@ -74,8 +74,8 @@ def main() -> int:
     files = installations[0]["spec"]["configuration"]["files"]
     # Parse the XML so a commented-out element cannot satisfy the check.
     root = ET.fromstring(files.get(DEV_METRIC_LOG_FILE, "<clickhouse/>"))
-    disabled = [element for element in root.findall("metric_log") if element.get("remove") == "1"]
-    if len(disabled) != 1:
+    metric_logs = root.findall("metric_log")
+    if len(metric_logs) != 1 or metric_logs[0].get("remove") != "1":
         print(f'{DEV_METRIC_LOG_FILE} must contain <metric_log remove="1"/>', file=sys.stderr)
         return 1
     print("Dev ClickHouse system logs ok")
