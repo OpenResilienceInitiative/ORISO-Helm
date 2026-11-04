@@ -5,12 +5,7 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
-    # Chat uploads end here (POST /_matrix/media/v3/upload). Without this
-    # annotation ingress-nginx applies its default of 1m and answers 413 to
-    # anything larger, while the composer promises 10 MB
-    # (ORISO-Frontend ATTACHMENT_MAX_SIZE_IN_MB). Synapse itself allows 50M by
-    # default (max_upload_size is not set in homeserver.yaml), so this is the
-    # limit that counts. The default keeps older copies of values.yaml working.
+    # Match the 10 MB limit promised by the chat attachment composer.
     nginx.ingress.kubernetes.io/proxy-body-size: {{ (.Values.matrix).maxUploadSize | default "10m" | quote }}
     # Matrix server delegation. Without it, anything doing federation
     # discovery for this server name falls back to the default port 8448,
