@@ -37,7 +37,7 @@ signoz:
     env:
       signoz_global_external__url: "https://dev.oriso.org/signoz"
   # Dev worker ran out of memory on 2026-11-03 (09:12-09:53 UTC): ClickHouse had
-  # no limit, so merges on system.metric_log pushed the node into a global OOM.
+  # no limit, so merges pushed the node into a global OOM.
   clickhouse:
     resources:
       requests:
@@ -45,6 +45,13 @@ signoz:
         memory: 1Gi
       limits:
         memory: 4Gi
+    files:
+      # Dev's wide metric_log schema caused repeated failed merges. Keep this
+      # environment-specific until other SigNoz installations are measured.
+      config.d/99-oriso-disable-metric-log.xml: |
+        <clickhouse>
+          <metric_log remove="1"/>
+        </clickhouse>
   otelCollector:
     additionalEnvs:
       ORISO_DEPLOYMENT_ENVIRONMENT: "dev"
