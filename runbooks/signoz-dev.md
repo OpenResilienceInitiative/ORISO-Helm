@@ -112,14 +112,24 @@ the worker ran out of memory. Dev now requests 2 GiB and limits it to 4 GiB, and
 ClickHouse caps itself at 90% of that limit (3.6 GiB). The first upgrade with this
 setting restarts ClickHouse once; the volume stays.
 
-Check every ClickHouse pod after the upgrade. The first command must show about
-3.6 GiB and the restart count must not rise:
+Before the upgrade, record the restart count of every ClickHouse pod:
 
 ```bash
-kubectl -n caritas get pods -o name | grep '^pod/chi-caritas-clickhouse-cluster-'
-POD=chi-caritas-clickhouse-cluster-0-0-0
-kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "SELECT formatReadableSize(toUInt64(value)) FROM system.server_settings WHERE name = 'max_server_memory_usage'"
-kubectl -n caritas get pod "$POD" -o jsonpath='{.status.containerStatuses[?(@.name=="clickhouse")].restartCount}'
+kubectl -n caritas get pods -o name | grep '^pod/chi-caritas-clickhouse-cluster-' | while read -r pod; do
+  echo "$pod $(kubectl -n caritas get "$pod" -o jsonpath='{.status.containerStatuses[?(@.name=="clickhouse")].restartCount}')"
+done | tee /root/clickhouse-restarts-before.txt
+```
+
+After the upgrade, run it again and compare each pod with its own line. The
+operator replaces the pod during the first upgrade, so a new pod starts at 0; any
+count above 0 afterwards means ClickHouse restarted on its own. Each pod must show
+about 3.6 GiB:
+
+```bash
+kubectl -n caritas get pods -o name | grep '^pod/chi-caritas-clickhouse-cluster-' | while read -r pod; do
+  echo "$pod $(kubectl -n caritas get "$pod" -o jsonpath='{.status.containerStatuses[?(@.name=="clickhouse")].restartCount}')"
+  kubectl -n caritas exec "${pod#pod/}" -c clickhouse -- clickhouse-client --query "SELECT formatReadableSize(toUInt64(value)) FROM system.server_settings WHERE name = 'max_server_memory_usage'"
+done
 ```
 
 Raise the limit if ClickHouse restarts or reports `MEMORY_LIMIT_EXCEEDED` for its
