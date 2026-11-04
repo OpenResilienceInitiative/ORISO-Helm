@@ -502,8 +502,6 @@ clickhouse:
       </clickhouse>
     config.d/system_log.xml: |
       <clickhouse>
-        <!-- ORISO: 1552 columns make a merge of 34 MiB need about 6 GiB, measured on Dev. -->
-        <metric_log remove="1"/>
         <text_log>
           <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
         </text_log>

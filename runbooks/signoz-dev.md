@@ -125,36 +125,39 @@ kubectl -n caritas scale statefulset caritas-signoz --replicas=1
 
 ## ClickHouse system logs
 
-The chart turns `system.metric_log` off. With 1552 columns its background merges
+Dev turns `system.metric_log` off. With 1552 columns its background merges
 hit the memory limit about 6 times per second on Dev and used about 3 CPU cores.
 Pausing only those merges for two minutes on 2026-11-03 took ClickHouse from 3.17
 to 0.43 cores and the errors from 6.45 per second to 0.
 
-The setting stops new rows, but an existing table keeps merging, so drop it once
-on every environment after the upgrade. Helm `--wait` does not wait for the
+The setting stops new rows, but an existing table keeps merging. Helm `--wait` does not wait for the
 ClickHouse operator, which restarts ClickHouse after the upgrade. Drop only after
 the restart is done and the configuration is active, otherwise the old writer can
 create the table again on its next flush:
 
 ```bash
 kubectl -n caritas rollout status statefulset/chi-caritas-clickhouse-cluster-0-0 --timeout=10m
-kubectl -n caritas exec chi-caritas-clickhouse-cluster-0-0-0 -c clickhouse -- clickhouse extract-from-config --config-file /etc/clickhouse-server/config.xml --key metric_log
+kubectl -n caritas get pods -o name | grep '^pod/chi-caritas-clickhouse-cluster-'
 ```
 
-The second command must print `Not found: metric_log`. Then check that the newest
-row of the old table stops growing (`SELECT max(event_time) FROM system.metric_log`
-twice, a minute apart). ClickHouse may also have renamed older
-versions with a numeric suffix:
+For every listed pod, confirm `metric_log` is absent from the active configuration,
+then inspect its local tables. ClickHouse may have renamed older versions with a
+numeric suffix:
 
 ```bash
-kubectl -n caritas exec -i chi-caritas-clickhouse-cluster-0-0-0 -c clickhouse -- clickhouse-client --multiquery <<'SQL'
-SELECT name, formatReadableSize(total_bytes) FROM system.tables WHERE database = 'system' AND match(name, '^metric_log(_[0-9]+)?$');
-DROP TABLE IF EXISTS system.metric_log SYNC;
-DROP TABLE IF EXISTS system.metric_log_0 SYNC;
-SQL
+POD=chi-caritas-clickhouse-cluster-0-0-0
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse extract-from-config --config-file /etc/clickhouse-server/config.xml --key metric_log
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "SELECT name, formatReadableSize(total_bytes) FROM system.tables WHERE database = 'system' AND match(name, '^metric_log(_[0-9]+)?$')"
 ```
 
-Drop any other suffix the first line lists the same way.
+The configuration command must print `Not found: metric_log`. Review the output
+and confirm the listed tables are old, unused Dev system logs before deleting any
+of them. Delete one explicitly at a time, then repeat the inspection for each
+ClickHouse pod. For example:
+
+```bash
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP TABLE IF EXISTS system.metric_log_0 SYNC"
+```
 
 ## Rollback
 

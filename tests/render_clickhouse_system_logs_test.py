@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render guard: ClickHouse must not write system.metric_log."""
+"""Render guard: Dev ClickHouse must not write system.metric_log."""
 
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURE_DOMAIN = "render.oriso.internal"
-SYSTEM_LOG_FILE = "config.d/system_log.xml"
+DEV_METRIC_LOG_FILE = "config.d/99-oriso-disable-metric-log.xml"
 HELM_TIMEOUT_SECONDS = 180
 
 
-def render() -> list[dict]:
+def render(*overlays: str) -> list[dict]:
     command = [
         "helm",
         "template",
@@ -30,6 +30,11 @@ def render() -> list[dict]:
         os.path.join(CHART_DIR, "secrets.yaml.default"),
         "-f",
         os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
+        *[
+            item
+            for overlay in overlays
+            for item in ("-f", os.path.join(CHART_DIR, overlay))
+        ],
         "--set-string",
         "global.secrets.redisdefaultPass=test-redis-password",
         "--set-string",
@@ -38,9 +43,12 @@ def render() -> list[dict]:
         "userService.smtpPassword=smtp-canary-password",
         "--set",
         "signoz.enabled=true",
-        "--set-string",
-        f"signoz.signoz.env.signoz_global_external__url=https://{FIXTURE_DOMAIN}/signoz",
     ]
+    if not overlays:
+        command.extend([
+            "--set-string",
+            f"signoz.signoz.env.signoz_global_external__url=https://{FIXTURE_DOMAIN}/signoz",
+        ])
     try:
         result = subprocess.run(
             command,
@@ -58,19 +66,19 @@ def render() -> list[dict]:
 
 def main() -> int:
     installations = [
-        document for document in render() if document.get("kind") == "ClickHouseInstallation"
+        document for document in render("values-dev.yaml") if document.get("kind") == "ClickHouseInstallation"
     ]
     if len(installations) != 1:
         print(f"expected one ClickHouseInstallation, found {len(installations)}", file=sys.stderr)
         return 1
     files = installations[0]["spec"]["configuration"]["files"]
     # Parse the XML so a commented-out element cannot satisfy the check.
-    root = ET.fromstring(files.get(SYSTEM_LOG_FILE, "<clickhouse/>"))
+    root = ET.fromstring(files.get(DEV_METRIC_LOG_FILE, "<clickhouse/>"))
     disabled = [element for element in root.findall("metric_log") if element.get("remove") == "1"]
     if len(disabled) != 1:
-        print(f'{SYSTEM_LOG_FILE} must contain <metric_log remove="1"/>', file=sys.stderr)
+        print(f'{DEV_METRIC_LOG_FILE} must contain <metric_log remove="1"/>', file=sys.stderr)
         return 1
-    print("clickhouse system logs ok")
+    print("Dev ClickHouse system logs ok")
     return 0
 
 
