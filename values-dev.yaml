@@ -44,6 +44,13 @@ signoz:
         memory: 2Gi
       limits:
         memory: 4Gi
+    files:
+      # Dev's wide metric_log schema caused repeated failed merges. Keep this
+      # environment-specific until other SigNoz installations are measured.
+      config.d/99-oriso-disable-metric-log.xml: |
+        <clickhouse>
+          <metric_log remove="1"/>
+        </clickhouse>
   otelCollector:
     additionalEnvs:
       ORISO_DEPLOYMENT_ENVIRONMENT: "dev"
