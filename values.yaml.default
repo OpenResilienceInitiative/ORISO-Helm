@@ -219,6 +219,10 @@ matrix:
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"
   matrixApiUrl: "http://matrix-synapse:8008"
+  # Largest chat upload the edge accepts on /_matrix (nginx size syntax; 10m is
+  # 10,485,760 bytes). Keep it at or above ATTACHMENT_MAX_SIZE_IN_MB in
+  # ORISO-Frontend (10,000,000 bytes) and below Synapse's max_upload_size (50M).
+  maxUploadSize: "10m"
   matrixServerName: "your-server.local"
   # Public IP exempt from Synapse rate limiting; set per environment (ADR-005).
   serverPublicIp: ""
