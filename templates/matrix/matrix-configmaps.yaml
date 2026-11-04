@@ -148,6 +148,21 @@ data:
     # `get_ratelimit_override_for_user` module callback. Neither is wired up
     # here — internal service traffic runs under the same shipped rc_* limits
     # as everything else for now.
+    #
+    # The one exception is rc_login. UserService performs every browser Matrix
+    # login (GET /matrix/me/token -> loginBrowserDevice, no cache), so Synapse
+    # sees all users behind one client address. The shipped address limit of
+    # burst 5 + 1 per 333s is therefore a platform-wide limit, and it returned
+    # 429 -> token 503 on Dev. Address and account are raised; failed_attempts
+    # stays at the shipped default and keeps limiting wrong passwords.
+    {{- $rateLimits := .Values.matrix.rateLimits | default dict }}
+    rc_login:
+      address:
+        per_second: {{ dig "loginAddress" "perSecond" 1 $rateLimits }}
+        burst_count: {{ dig "loginAddress" "burstCount" 50 $rateLimits }}
+      account:
+        per_second: {{ dig "loginAccount" "perSecond" 0.1 $rateLimits }}
+        burst_count: {{ dig "loginAccount" "burstCount" 20 $rateLimits }}
 
     # Enable Sliding Sync (Matrix 2.0) for INSTANT real-time synchronization
     # MSC4140 delayed events let Element Call schedule a crash-safe leave event.
