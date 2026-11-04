@@ -2,12 +2,12 @@
 
 Synapse's database is chosen by `matrix.database.engine`:
 
-- `sqlite3`: `/data/homeserver.db` on the `matrix-synapse-data` PVC.
-- `postgres` (in `values.yaml.default`): the chart's `matrix-postgres` StatefulSet.
+- `sqlite3` (default): `/data/homeserver.db` on the `matrix-synapse-data` PVC.
+- `postgres` (explicit override): the chart's `matrix-postgres` StatefulSet.
 
-Existing SQLite installations must explicitly set `matrix.database.engine: sqlite3`
-before adopting the new default values, until migration is complete. Old values
-files with no database engine key still fall back to SQLite in the templates.
+SQLite remains the default to support existing deployments and Matrix users/history.
+Installations already using PostgreSQL must retain `matrix.database.engine: postgres`
+in their own values on every upgrade. Missing engine keys fall back to SQLite.
 
 Changing the value moves no data. On an install that already holds Matrix
 data, flipping it alone starts Synapse on an empty database. Follow this
@@ -19,7 +19,8 @@ Media (`/data/media_store`) and the signing key stay on the PVC in both modes.
 ## Fresh installation with PostgreSQL
 
 For a new release with empty Matrix PostgreSQL and Synapse storage, create your
-`values.yaml` from the current `values.yaml.default`, which selects PostgreSQL.
+`values.yaml` from the current `values.yaml.default`, then explicitly set
+`matrix.database.engine: postgres` in that file.
 No separate database overlay is required. PostgreSQL initializes
 empty PGDATA with UTF-8 encoding and C collation/ctype; Synapse creates its schema.
 No SQLite port is needed. Existing PostgreSQL volumes are NOT reinitialized:
@@ -47,7 +48,11 @@ Check all other workloads and perform login/chat/media smoke tests too.
 Keep `matrix.database.engine: postgres` in the installation's own values. Omitting
 the setting can switch Synapse back to SQLite.
 
-This overlay selects only the Matrix database. It does not solve other stack
+For a planned user/data reset, select PostgreSQL only after backing up and preparing
+fresh Matrix storage. Changing the engine does not delete application or Keycloak
+users, clear an existing PostgreSQL database, or migrate Matrix accounts/history.
+
+This setting selects only the Matrix database. It does not solve other stack
 bootstrap requirements: keep task identities disabled for initial installation,
 then provision/activate through the documented upgrade process. The Dev overlay
 enables dummy data and seed migrations; review those separately if no demo data

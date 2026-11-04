@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""New values default to PostgreSQL; legacy missing keys retain SQLite."""
+"""SQLite remains the compatible default; PostgreSQL is an explicit override."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def main() -> None:
     default = render()
     assert default.returncode == 0, default.stderr
     db = database_block(default.stdout)
-    assert db["name"] == "psycopg2", db
+    assert db == {"name": "sqlite3", "args": {"database": "/data/homeserver.db"}}, db
 
     # An environment values.yaml copied before the key existed must stay on SQLite.
     legacy = render("--set", "matrix.database=null")
@@ -64,7 +64,7 @@ def main() -> None:
     assert db["args"]["host"] == "matrix-postgres-service", db["args"]["host"]
     assert db["args"]["password"] == PG_PASSWORD
 
-    fresh = default
+    fresh = pg
     assert fresh.returncode == 0, fresh.stderr
     assert database_block(fresh.stdout)["name"] == "psycopg2"
     docs = [d for d in yaml.safe_load_all(fresh.stdout) if isinstance(d, dict)]
@@ -82,8 +82,8 @@ def main() -> None:
     # does not replace the pod. Without a roll, the runbook's rollback would leave
     # Synapse running on PostgreSQL.
     key = "checksum/database-engine"
-    assert pod_annotations(default.stdout)[key] == pod_annotations(pg.stdout)[key]
-    assert pod_annotations(default.stdout)[key] != pod_annotations(legacy.stdout)[key]
+    assert pod_annotations(default.stdout)[key] != pod_annotations(pg.stdout)[key]
+    assert pod_annotations(default.stdout)[key] == pod_annotations(legacy.stdout)[key]
     sqlite = render("--set-string", "matrix.database.engine=sqlite3")
     assert sqlite.returncode == 0, sqlite.stderr
     assert database_block(sqlite.stdout) == {

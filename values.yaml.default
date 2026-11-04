@@ -208,9 +208,12 @@ matrix:
     # Synapse database: "sqlite3" (/data/homeserver.db on the matrix-synapse-data PVC)
     # or "postgres" (the matrix-postgres StatefulSet). Switching moves no data; an
     # existing install follows runbooks/matrix-sqlite-to-postgres.md.
-    # New installs use PostgreSQL. Existing SQLite installs must explicitly keep
-    # engine: sqlite3 until their data has been migrated.
-    engine: "postgres"
+    # Keep SQLite by default for existing deployments and their Matrix users/history.
+    # For a planned user/data reset with a fresh Matrix database, explicitly set
+    # engine: postgres in the installation's values.yaml. Switching engines does
+    # not delete application/Keycloak users or migrate Matrix data.
+    # Already on PostgreSQL? Keep an explicit postgres override on every upgrade.
+    engine: "sqlite3"
   # In-cluster Service name of the PostgreSQL StatefulSet (Service metadata.name and serviceName).
   postgresServiceName: "matrix-postgres-service"
   # Host Synapse and the PITR backup job connect to. Empty = postgresServiceName.
