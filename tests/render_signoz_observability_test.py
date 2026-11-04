@@ -21,7 +21,7 @@ API_KEY_SECRET = "signoz-observability-api-key"
 
 def render_result(
     *,
-    enabled: bool,
+    enabled: bool | None,
     environment: str = "pre-dev",
     cluster_name: str = "oriso-predev",
     signoz_enabled: bool = True,
@@ -53,8 +53,6 @@ def render_result(
         "--set-string",
         f"signoz.signoz.env.signoz_global_external__url=https://{FIXTURE_DOMAIN}/signoz",
         "--set",
-        f"signoz.orisoObservability.enabled={'true' if enabled else 'false'}",
-        "--set",
         f"signoz.enabled={'true' if signoz_enabled else 'false'}",
         "--set",
         f"signozCollector.enabled={'true' if collector_enabled else 'false'}",
@@ -63,6 +61,8 @@ def render_result(
         "--set-string",
         f"global.observability.deploymentEnvironment={environment}",
     ]
+    if enabled is not None:
+        command += ["--set", f"signoz.orisoObservability.enabled={str(enabled).lower()}"]
     if secret_names:
         command += [
             "--set-string",
@@ -234,13 +234,13 @@ def main() -> None:
     assert without_secrets.returncode != 0
     assert "apiKeySecret.name must name an existing Secret" in without_secrets.stderr
 
-    # The shipped defaults keep the feature off; no environment overlay turns
-    # it on until the API key Secret exists. Dev is the only overlay that has
-    # it on, and it must then name that Secret.
+    # Dev alone enables provisioning and must name the expected Secret.
     dev = yaml.safe_load(pathlib.Path(CHART_DIR, "values-dev.yaml").read_text(encoding="utf-8"))
     dev_managed = (dev.get("signoz") or {}).get("orisoObservability") or {}
     assert dev_managed.get("enabled") is True, "values-dev.yaml"
-    assert (dev_managed.get("apiKeySecret") or {}).get("name"), "values-dev.yaml"
+    assert (dev_managed.get("apiKeySecret") or {}).get("name") == API_KEY_SECRET, (
+        "values-dev.yaml"
+    )
     for overlay in (
         "values.yaml.default",
         "values-pre-dev.yaml",
@@ -252,6 +252,23 @@ def main() -> None:
         )
         managed = ((values.get("signoz") or {}).get("orisoObservability")) or {}
         assert managed.get("enabled", False) is False, overlay
+
+    layered_predev = render(
+        enabled=None,
+        extra_args=(
+            "-f",
+            os.path.join(CHART_DIR, "values-dev.yaml"),
+            "-f",
+            os.path.join(CHART_DIR, "values-pre-dev.yaml"),
+            "--set-string",
+            "signoz.signoz.env.signoz_global_external__url=https://predev.oriso.org/signoz",
+        ),
+    )
+    assert not any(
+        item.get("kind") == "Job"
+        and item.get("metadata", {}).get("name") == "caritas-signoz-observability"
+        for item in layered_predev
+    ), "Pre-Dev layering must not enable managed observability"
 
     print("PASS: managed SigNoz assets and fail-closed provisioning render correctly")
 
