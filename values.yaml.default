@@ -193,6 +193,22 @@ global:
 
 matrix:
   image: "matrixdotorg/synapse:v1.158.0"
+  # Synapse rc_login. All browser logins reach Synapse through UserService, so
+  # the address limit applies to the whole platform. failed_attempts is not set
+  # on purpose: it keeps Synapse's default and limits wrong passwords.
+  rateLimits:
+    loginAddress:
+      perSecond: 1
+      burstCount: 50
+    loginAccount:
+      perSecond: 0.1
+      burstCount: 20
+  # Per-IP limit at the ingress for logins from outside the cluster. Browsers do
+  # not log in here; they get their Matrix token from UserService.
+  loginRateLimit:
+    enabled: true
+    requestsPerMinute: 6
+    burstMultiplier: 2
   # Enable only with the paired UserService v2 context consumer deployed.
   # Provision a dedicated credential out of band; never put its value here.
   groupPolicy:
