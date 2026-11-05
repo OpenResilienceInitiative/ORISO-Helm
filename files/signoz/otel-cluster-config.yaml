@@ -125,6 +125,34 @@ receivers:
         - source_labels: [__meta_kubernetes_pod_name]
           target_label: k8s_pod_name
 {{- end }}
+{{- $ingressNs := get (get (.Values.global | default dict) "observability" | default dict) "externalIngressNginxNamespace" | default "" }}
+{{- if and $ingressNs (eq (include "oriso.appMetrics.enabled" .) "true") }}
+  # Cluster-wide ingress-nginx that is not installed by this chart (Dev): scraped by
+  # pod IP on the controller's metrics port, only in the named namespace.
+  prometheus/oriso-ingress-nginx:
+    config:
+      scrape_configs:
+      - job_name: ingress-nginx
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - {{ $ingressNs }}
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name, __meta_kubernetes_pod_label_app_kubernetes_io_component]
+          action: keep
+          regex: ingress-nginx;controller
+        - source_labels: [__meta_kubernetes_pod_ip]
+          action: replace
+          replacement: $$1:10254
+          target_label: __address__
+        - source_labels: [__meta_kubernetes_namespace]
+          target_label: k8s_namespace_name
+        - source_labels: [__meta_kubernetes_pod_name]
+          target_label: k8s_pod_name
+{{- end }}
 {{- if eq (include "oriso.dbMetrics.enabled" .) "true" }}
   # Data store metrics (global.observability.dbMetrics): status counters only,
   # read with the monitoring users db-monitoring-reconcile-job maintains.
@@ -189,6 +217,9 @@ service:
       - batch
       receivers:
       - prometheus/oriso-apps
+{{- if and $ingressNs (eq (include "oriso.appMetrics.enabled" .) "true") }}
+      - prometheus/oriso-ingress-nginx
+{{- end }}
 {{- end }}
 {{- if eq (include "oriso.dbMetrics.enabled" .) "true" }}
     metrics/dbs:
