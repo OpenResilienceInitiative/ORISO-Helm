@@ -96,7 +96,7 @@ class E2eDashboardTest(unittest.TestCase):
         encoded = json.dumps(e2e_only(dashboards))
         import re
 
-        used = set(re.findall(r"\btest\.[a-z_.]+", encoded))
+        used = set(re.findall(r"\btest\.[a-z0-9_.]+", encoded))
         self.assertTrue(used, "expected test.* attributes")
         unknown = {
             name for name in used if name.rstrip(".") not in REPORTER_ATTRIBUTES
@@ -113,7 +113,11 @@ class E2eDashboardTest(unittest.TestCase):
             {"test.file", "test.case", "test.commit"},
         )
         self.assertEqual(
-            [item["alias"] for item in query["aggregations"]], ["passes", "fails"]
+            [(item["alias"], item["expression"]) for item in query["aggregations"]],
+            [
+                ("passes", "countIf(test.status = 'passed')"),
+                ("fails", "countIf(test.status != 'passed')"),
+            ],
         )
         self.assertEqual(query["having"]["expression"], "passes > 0 AND fails > 0")
 

@@ -34,8 +34,9 @@ ORISO-E2E (`tests/support/otelReporter.ts`), see ORISO-E2E#97:
 - `ORISO E2E Flaky Tests [<environment>]`: a test is flaky when the same commit
   (`test.commit`) has a pass and a fail; tests that passed only after a retry
   (`test.flaky`); and one panel per seed test (ORISO-Frontend#1613, #1707, #1443,
-  ORISO-UserService#251, ORISO-Admin#1016) showing its first-seen time, or no row
-  when it was never seen.
+  ORISO-UserService#251, ORISO-Admin#1016) showing its first-seen time within the
+  selected time range, or no row when it was not seen in that range. Runs outside
+  the range are not counted, so no row does not mean the test never ran.
 
 The filter uses `deployment.environment = '<environment>'`, and the reporter sets
 that to the Playwright project name, so the panels fill for `dev` (project `dev`)
