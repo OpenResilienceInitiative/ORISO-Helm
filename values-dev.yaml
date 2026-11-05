@@ -17,9 +17,6 @@ global:
     tracingSamplingProbability: "1.0"
     testRunBaggage: true
     appMetrics: true
-    # Cluster-wide ingress-nginx (not part of this chart) whose controller metrics
-    # the cluster collector scrapes. Needs --enable-metrics=true on the controller.
-    externalIngressNginxNamespace: "ingress-nginx"
     dbMetrics: true
     webVitals:
       enabled: true
