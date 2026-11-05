@@ -38,14 +38,16 @@ rejects assets that mention user, room, IP, token, or message-content fields.
 ## Switch and what it costs
 
 Everything here is behind `signoz.orisoObservability.enabled`, default `false`
-in `values.yaml.default`; no environment overlay turns it on. Enabling it
+in `values.yaml.default`. The Dev overlay already enables it and names the
+`signoz-observability-api-key` Secret. Pre-Dev explicitly disables it. Enabling it
 requires `signoz.enabled=true` and `signozCollector.enabled=true`
 (`templates/observability-validation.yaml` fails the render otherwise).
 
 When it is on, the Job is a Helm post-install/post-upgrade hook. A failing hook
 fails the release, so a broken API key or an unreachable SigNoz blocks that
-deploy. That is why it stays off until the API key Secret exists, and why the
-telemetry-dependent proof has its own switch:
+deploy. On a first Dev install, explicitly override the Dev overlay to keep the
+hook off until the API key Secret exists. The telemetry-dependent proof has its
+own switch:
 
 | Value | Default | Effect |
 |---|---|---|
@@ -86,15 +88,28 @@ recreates every dashboard and rule with no further clicks.
 
 ## First installation in an environment
 
-1. Deploy SigNoz and the collectors with the switch still off. Run the active
-   ingestion gate from `runbooks/signoz-runtime-acceptance.md`.
+1. Deploy SigNoz and the collectors with provisioning explicitly disabled.
+   The Dev overlay turns it on, so put the override **after** the overlay:
+
+   ```bash
+   helm upgrade --install caritas . \
+     --namespace caritas --create-namespace \
+     -f values.yaml -f secrets.yaml -f <environment overlay> \
+     --set signoz.orisoObservability.enabled=false \
+     --wait-for-jobs --timeout 15m
+   ```
+
+   Run the active ingestion gate from `runbooks/signoz-runtime-acceptance.md`.
 2. Create the `oriso-alerts-slack` Slack channel in SigNoz and an Editor-role
-   API key; store the key in a Secret in the release namespace.
+   API key; store the key under `apiKey` in a Secret in the release namespace.
+   For Dev, use the name `signoz-observability-api-key` from the overlay.
 3. Run the read-only check below from a workstation (it fails on the missing
    dashboards, which is expected before the first provisioning).
-4. Set `signoz.orisoObservability.enabled=true` and
-   `signoz.orisoObservability.apiKeySecret.name` in the environment's values
-   and upgrade:
+4. For Dev, upgrade with the overlay and without the temporary `--set` override;
+   it already enables provisioning and names the Secret. For another environment,
+   set `signoz.orisoObservability.enabled=true` and
+   `signoz.orisoObservability.apiKeySecret.name` in that environment's values
+   before upgrading:
 
 ```bash
 helm upgrade --install caritas . \
