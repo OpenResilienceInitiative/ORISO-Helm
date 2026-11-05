@@ -105,7 +105,9 @@ recreates every dashboard and rule with no further clicks.
    API key; store the key under `apiKey` in a Secret in the release namespace.
    For Dev, use the name `signoz-observability-api-key` from the overlay.
 3. For an approved environment, run the read-only check below from a workstation.
-   Missing dashboards are expected before the first provisioning.
+   The example commands target Dev; for another approved environment use its own
+   SigNoz URL, deployment environment and collector cluster name. Missing
+   dashboards are expected before the first provisioning.
 4. For Dev, upgrade with the overlay and without the temporary `--set` override;
    it already enables provisioning and names the Secret. For another environment,
    enable provisioning only if it is approved for that environment: set
@@ -143,6 +145,11 @@ PASS: SigNoz dashboards, alerts, routes, queries, freshness, and environment sep
 The second line appears only with `conformanceCheck=true`.
 
 ## Workstation commands
+
+The commands below are **Dev examples**. For another approved environment,
+replace the URL, `--environment`, and `--cluster-name` with that target’s
+configured values before running them. Do not run provisioning checks for a
+disabled environment.
 
 The script runs from a chart checkout with the Python standard library only.
 The key is read from the environment, never from the command line, and is
