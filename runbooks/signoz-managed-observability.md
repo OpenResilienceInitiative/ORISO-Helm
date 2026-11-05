@@ -100,16 +100,20 @@ recreates every dashboard and rule with no further clicks.
    ```
 
    Run the active ingestion gate from `runbooks/signoz-runtime-acceptance.md`.
-2. Create the `oriso-alerts-slack` Slack channel in SigNoz and an Editor-role
+2. Only for an environment approved for managed observability, create the
+   `oriso-alerts-slack` Slack channel in SigNoz and an Editor-role
    API key; store the key under `apiKey` in a Secret in the release namespace.
    For Dev, use the name `signoz-observability-api-key` from the overlay.
-3. Run the read-only check below from a workstation (it fails on the missing
-   dashboards, which is expected before the first provisioning).
+3. For an approved environment, run the read-only check below from a workstation.
+   Missing dashboards are expected before the first provisioning.
 4. For Dev, upgrade with the overlay and without the temporary `--set` override;
    it already enables provisioning and names the Secret. For another environment,
-   set `signoz.orisoObservability.enabled=true` and
+   enable provisioning only if it is approved for that environment: set
+   `signoz.orisoObservability.enabled=true` and
    `signoz.orisoObservability.apiKeySecret.name` in that environment's values
-   before upgrading:
+   before upgrading. Keep Pre-Dev and every other disabled environment at
+   `signoz.orisoObservability.enabled=false`; skip the channel, API key and
+   provisioning check there.
 
 ```bash
 helm upgrade --install caritas . \
