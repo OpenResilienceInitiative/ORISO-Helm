@@ -24,6 +24,7 @@ EXPECTED_PURPOSES = {
         "MATRIX_AGENCY",
         "APPOINTMENT_SYNC",
         "APPOINTMENT_CLEANUP",
+        "DELETION_AUDIT_READ",
     },
 }
 EXPECTED_ROLES = {
@@ -47,6 +48,7 @@ EXPECTED_ROLES = {
         "matrix-agency-provision",
         "appointment-sync",
         "appointment-participant-cleanup",
+        "deletion-audit-read",
     },
 }
 

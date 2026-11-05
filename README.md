@@ -37,7 +37,7 @@ Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fi
 - `global.secrets.matrixRegistrationSharedSecret` — Matrix shared secret
 - `global.keycloak.technicalUser.password` — Keycloak technical user password
 - `global.keycloak.serviceTechUserId` (in `values.yaml.default`, not a secret) — Keycloak user id (`sub`) of the `technical` user, rendered as TenantService `TECHNICAL_SERVICE_SUBJECT`. **Required, a UUID, no default.** On an existing realm look up the live id once (admin console, Users > technical > ID). Only a fresh install that imports `realm.json` may use its fixed id `8294c392-e1e0-405b-ac2f-ba3043cbad3e`. The reconcile hook compares it with the realm before changing anything and fails the release on a mismatch.
-- `postgres.postgresPassword` — PostgreSQL root password
+- `postgres.postgresPassword` — PostgreSQL password, rendered into `matrix-postgres-secret`, not a ConfigMap. The default engine is `sqlite3` to preserve compatibility with existing deployments. For a fresh Matrix database during a planned reset, explicitly set `matrix.database.engine: postgres` in your own `values.yaml`. Existing PostgreSQL installations must retain that override on every upgrade. Empty PostgreSQL storage initializes with UTF-8 and C locale. Follow the [fresh-install or migration instructions](runbooks/matrix-sqlite-to-postgres.md); selecting PostgreSQL neither migrates Matrix data nor deletes application/Keycloak users.
 - `global.matrix.matrixAdminUsername` / `matrixAdminPassword` — Matrix admin credentials (must live under `global:` so subcharts can read them)
 - `online-counseling-mongodb.*Password` / `*Pass` — MongoDB passwords
 - `online-counseling-mariadb.dbRootPassword` — MariaDB root password

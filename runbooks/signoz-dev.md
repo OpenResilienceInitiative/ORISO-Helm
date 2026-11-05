@@ -16,6 +16,7 @@ SigNoz database back. Collector internals: `signoz-k8s-infra.md`.
 | `global.observability.webVitals.enabled` | `true` | browser metrics at `/signoz-rum/v1/metrics` |
 | `signozCollector.enabled` | `true` | node agent (pod logs) and cluster collector |
 | `signoz.orisoDataProtection` | default on | volumes on `Retain`, daily `signoz.db` backup |
+| `signoz.clickhouse.resources` | request 2 GiB, limit 4 GiB | ClickHouse cannot fill the worker |
 
 ## Rollout
 
@@ -104,6 +105,52 @@ kubectl get pv | grep -E 'signoz|clickhouse|zookeeper'   # RECLAIM POLICY = Reta
 `scripts/signoz_runtime_acceptance.py` (see `signoz-runtime-acceptance.md`)
 remains the full gate.
 
+## ClickHouse memory and old system tables
+
+ClickHouse ran without a memory limit and the kernel killed it on 2026-11-03 when
+the worker ran out of memory. Dev now requests 2 GiB and limits it to 4 GiB, and
+ClickHouse caps itself at 90% of that limit (3.6 GiB). The first upgrade with this
+setting restarts ClickHouse once; the volume stays.
+
+Before the upgrade, record the restart count of every ClickHouse pod:
+
+```bash
+kubectl -n caritas get pods -o name | grep '^pod/chi-caritas-clickhouse-cluster-' | while read -r pod; do
+  echo "$pod $(kubectl -n caritas get "$pod" -o jsonpath='{.status.containerStatuses[?(@.name=="clickhouse")].restartCount}')"
+done | tee /root/clickhouse-restarts-before.txt
+```
+
+After the upgrade, run it again and compare each pod with its own line. The
+operator replaces the pod during the first upgrade, so a new pod starts at 0; any
+count above 0 afterwards means ClickHouse restarted on its own. Each pod must show
+about 3.6 GiB:
+
+```bash
+kubectl -n caritas get pods -o name | grep '^pod/chi-caritas-clickhouse-cluster-' | while read -r pod; do
+  echo "$pod $(kubectl -n caritas get "$pod" -o jsonpath='{.status.containerStatuses[?(@.name=="clickhouse")].restartCount}')"
+  kubectl -n caritas exec "${pod#pod/}" -c clickhouse -- clickhouse-client --query "SELECT formatReadableSize(toUInt64(value)) FROM system.server_settings WHERE name = 'max_server_memory_usage'"
+done
+```
+
+Raise the limit if ClickHouse restarts or reports `MEMORY_LIMIT_EXCEEDED` for its
+real tables during a load test.
+
+When a ClickHouse upgrade changes a system log's schema, it may rename the old
+table with a numeric suffix such as `trace_log_0`. List these tables on each pod
+first. This is read-only:
+
+```bash
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "SELECT name, formatReadableSize(total_bytes) FROM system.tables WHERE database = 'system' AND match(name, '_log_[0-9]+\$')"
+```
+
+Review each candidate's age and usage before removal. Do not pipe the list into
+`DROP`. Delete only confirmed obsolete Dev system tables, one at a time, on each
+pod. For example:
+
+```bash
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP TABLE IF EXISTS system.trace_log_0 SYNC"
+```
+
 ## signoz.db backup and restore
 
 The CronJob `caritas-signoz-data-protection-backup` runs at 02:30 UTC and keeps
@@ -121,6 +168,42 @@ kubectl -n caritas scale statefulset caritas-signoz --replicas=0
 # start a pod on the same node that mounts both claims, then inside it:
 #   gunzip -c /backup/signoz-<stamp>.db.gz > /signoz/signoz.db && rm -f /signoz/signoz.db-wal /signoz/signoz.db-shm
 kubectl -n caritas scale statefulset caritas-signoz --replicas=1
+```
+
+## ClickHouse system logs
+
+Dev turns `system.metric_log` off. With 1552 columns its background merges
+hit the memory limit about 6 times per second on Dev and used about 3 CPU cores.
+Pausing only those merges for two minutes on 2026-11-03 took ClickHouse from 3.17
+to 0.43 cores and the errors from 6.45 per second to 0.
+
+The setting stops new rows, but an existing table keeps merging. Helm `--wait` does not wait for the
+ClickHouse operator, which restarts ClickHouse after the upgrade. Drop only after
+the restart is done and the configuration is active, otherwise the old writer can
+create the table again on its next flush:
+
+```bash
+kubectl -n caritas rollout status statefulset/chi-caritas-clickhouse-cluster-0-0 --timeout=10m
+kubectl -n caritas get pods -o name | grep '^pod/chi-caritas-clickhouse-cluster-'
+```
+
+For every listed pod, confirm `metric_log` is absent from the active configuration,
+then inspect its local tables. ClickHouse may have renamed older versions with a
+numeric suffix:
+
+```bash
+POD=chi-caritas-clickhouse-cluster-0-0-0
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse extract-from-config --config-file /etc/clickhouse-server/config.xml --key metric_log
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "SELECT name, formatReadableSize(total_bytes) FROM system.tables WHERE database = 'system' AND match(name, '^metric_log(_[0-9]+)?$')"
+```
+
+The configuration command must print `Not found: metric_log`. Review the output
+and confirm the listed tables are old, unused Dev system logs before deleting any
+of them. Delete one explicitly at a time, then repeat the inspection for each
+ClickHouse pod. For example:
+
+```bash
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP TABLE IF EXISTS system.metric_log_0 SYNC"
 ```
 
 ## Rollback

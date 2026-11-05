@@ -61,6 +61,7 @@ TEMPLATES = [
     "templates/_matrixrtcLifecycle.tpl",
     "templates/_matrixGroupPolicy.tpl",
     "templates/matrix/matrix-configmaps.yaml",
+    "templates/matrix/matrix-deployment.yaml",
     "templates/userservice/userservice-configmap-env.yaml",
     "templates/agencyservice/agencyservice-configmap-env.yaml",
     "templates/tenantservice/tenantservice-configmap-env.yaml",
@@ -112,7 +113,11 @@ def build_minimal_chart(dst: str) -> None:
         shutil.copyfile(src, out)
 
 
-def render(chart: str, server_public_ip: str) -> str:
+def render(
+    chart: str,
+    server_public_ip: str,
+    registration_shared_secret: str = "test-shared-secret",
+) -> str:
     """Render the minimal chart and return helm's raw stdout."""
     overlay = {
         "matrix": {"matrixServerName": SENTINEL, "serverPublicIp": server_public_ip},
@@ -136,7 +141,7 @@ def render(chart: str, server_public_ip: str) -> str:
             },
             "secrets": {
                 "redisdefaultPass": "test-redis-pass",
-                "matrixRegistrationSharedSecret": "test-shared-secret",
+                "matrixRegistrationSharedSecret": registration_shared_secret,
                 "keycloakBackendTechnicalClientSecret": "render-only-technical-client-secret-canary",
                 "keycloakBackendAdminClientSecret": "render-only-admin-client-secret-canary",
             }
@@ -172,6 +177,12 @@ def configmaps(stdout: str) -> dict:
     return {d["metadata"]["name"]: d for d in docs if d.get("kind") == "ConfigMap"}
 
 
+def deployments(stdout: str) -> dict:
+    """Parse helm output into {deployment name: document}."""
+    docs = [d for d in yaml.safe_load_all(stdout) if isinstance(d, dict)]
+    return {d["metadata"]["name"]: d for d in docs if d.get("kind") == "Deployment"}
+
+
 def parse_homeserver(cm: dict):
     """Return the parsed homeserver.yaml mapping, or None if it is not valid YAML."""
     raw = cm["matrix-homeserver-oidc"]["data"]["homeserver.yaml"]
@@ -190,6 +201,11 @@ def main() -> None:
 
         stdout_a = render(chart, "")  # serverPublicIp unset (empty == unset)
         stdout_b = render(chart, PUBLIC_IP)  # serverPublicIp provided
+        stdout_c = render(
+            chart,
+            "",
+            "test-shared-secret-after-config-change",
+        )
 
         # --- Requirement 1: the rendered config parses as valid YAML -------------
         # (a) the whole helm output, (b) the inner homeserver.yaml block scalar.
@@ -210,6 +226,42 @@ def main() -> None:
         hs_b = parse_homeserver(cm_b)
         check(
             hs_a is not None, "rendered homeserver.yaml parses as a valid YAML mapping"
+        )
+        check(
+            (hs_a or {}).get("enable_registration") is False,
+            "homeserver disables public self-registration",
+        )
+        check(
+            "enable_registration_without_verification" not in (hs_a or {}),
+            "homeserver does not allow registration without verification",
+        )
+
+        # The homeserver config is mounted with subPath, which Kubernetes does
+        # not refresh in a running container. Its checksum must therefore be on
+        # the pod template so a Helm upgrade rolls Synapse after config changes.
+        synapse = deployments(stdout_a).get("matrix-synapse", {})
+        annotations = synapse.get("spec", {}).get("template", {}).get("metadata", {}).get("annotations", {})
+        checksum = annotations.get("checksum/homeserver-config")
+        check(
+            isinstance(checksum, str) and re.fullmatch(r"[0-9a-f]{64}", checksum),
+            "matrix-synapse pod template has a homeserver-config checksum for ConfigMap rollouts",
+        )
+        checksum_after_config_change = (
+            deployments(stdout_c)
+            .get("matrix-synapse", {})
+            .get("spec", {})
+            .get("template", {})
+            .get("metadata", {})
+            .get("annotations", {})
+            .get("checksum/homeserver-config")
+        )
+        check(
+            checksum_after_config_change != checksum,
+            "matrix-synapse homeserver checksum changes when homeserver config changes",
+        )
+        check(
+            synapse.get("spec", {}).get("strategy", {}).get("type") == "Recreate",
+            "matrix-synapse uses Recreate to avoid concurrent SQLite writers during rollouts",
         )
 
         # --- Requirement 2: server_name is the configured domain, never IPv4 -----
