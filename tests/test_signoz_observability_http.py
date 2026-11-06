@@ -287,6 +287,49 @@ class HttpFlowTest(unittest.TestCase):
                 telemetry=False,
             )
 
+    def test_e2e_dashboards_are_provisioned_and_read_back_when_enabled(self) -> None:
+        dashboards, alerts = MODULE.load_assets(
+            ROOT / "files" / "signoz", include_e2e=True
+        )
+        dashboards, alerts = MODULE.materialize_assets(
+            dashboards,
+            alerts,
+            environment="dev",
+            cluster_name="oriso-dev",
+            channel_name="oriso-alerts-slack",
+        )
+        self.assertEqual(len(dashboards), 5)
+        client = MODULE.SignozClient(
+            f"http://127.0.0.1:{self.server.server_port}", "test-api-key"
+        )
+        MODULE.upsert_dashboards(client, dashboards)
+        MODULE.upsert_alerts(client, alerts)
+        self.assertEqual(len(self.state.dashboards), 5)
+        MODULE.prove_conformance(
+            client,
+            dashboards,
+            alerts,
+            environment="dev",
+            cluster_name="oriso-dev",
+            channel_name="oriso-alerts-slack",
+            telemetry=False,
+        )
+
+    def test_e2e_dashboards_flag_reads_a_strict_true_from_the_environment(self) -> None:
+        for value, expected in (
+            ("true", True),
+            ("TRUE", True),
+            ("false", False),
+            (None, False),
+            ("1", False),
+            ("yes", False),
+        ):
+            with self.subTest(value=value), mock.patch.dict(os.environ):
+                os.environ.pop("ORISO_E2E_DASHBOARDS", None)
+                if value is not None:
+                    os.environ["ORISO_E2E_DASHBOARDS"] = value
+                self.assertIs(MODULE._parse_args([]).e2e_dashboards, expected)
+
 
 if __name__ == "__main__":
     unittest.main()

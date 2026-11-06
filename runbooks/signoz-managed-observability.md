@@ -23,6 +23,27 @@ creates or updates:
   ClickHouse capacity, and stale collector telemetry. SigNoz generates one
   route policy per rule when the rule is saved.
 
+### Optional: E2E test dashboards (off by default)
+
+With `signoz.orisoObservability.e2eDashboards=true` (default `false`) the same
+Job also manages two dashboards over the `oriso-e2e` test spans exported by
+ORISO-E2E (`tests/support/otelReporter.ts`), see ORISO-E2E#97:
+
+- `ORISO E2E Test Health [<environment>]`: first-attempt outcomes over time, pass
+  rate per test, tests with a failed first attempt, p95 duration, recent runs;
+- `ORISO E2E Flaky Tests [<environment>]`: a test is flaky when the same commit
+  (`test.commit`) has a pass and a fail; tests that passed only after a retry
+  (`test.flaky`); and one panel per seed test (ORISO-Frontend#1613, #1707, #1443,
+  ORISO-UserService#251, ORISO-Admin#1016) showing its first-seen time within the
+  selected time range, or no row when it was not seen in that range. Runs outside
+  the range are not counted, so no row does not mean the test never ran.
+
+The filter uses `deployment.environment = '<environment>'`, and the reporter sets
+that to the Playwright project name, so the panels fill for `dev` (project `dev`)
+and stay empty where the environment name and the project differ.
+Spans reach SigNoz only when a run sends them, see `docs/test-telemetry.md` in
+ORISO-E2E; there is no scheduled run yet (ORISO-E2E#97 D.4).
+
 It does **not** own the notification channel. The Slack channel
 `oriso-alerts-slack` (Slack `#oriso-alerts-and-webhooks`) is made by hand in
 SigNoz from a webhook that stays secret. The rules reference it by name

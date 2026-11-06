@@ -65,6 +65,8 @@ spec:
               value: {{ .Values.global.observability.deploymentEnvironment | quote }}
             - name: ORISO_CLUSTER_NAME
               value: {{ get $collector "clusterName" | quote }}
+            - name: ORISO_E2E_DASHBOARDS
+              value: {{ get $managed "e2eDashboards" | default false | quote }}
             - name: ORISO_CONFORMANCE_CHECK
               value: {{ get $managed "conformanceCheck" | default false | quote }}
           resources:

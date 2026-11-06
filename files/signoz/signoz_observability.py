@@ -33,6 +33,13 @@ REQUIRED_DASHBOARD_SLUGS = {
     "oriso-service-reliability",
     "oriso-platform-health",
 }
+# Opt-in dashboards over the oriso-e2e test spans (ORISO-E2E#97). They are only
+# provisioned with ORISO_E2E_DASHBOARDS=true and are all-or-nothing.
+E2E_DASHBOARD_SLUGS = {
+    "oriso-e2e-test-health",
+    "oriso-e2e-flaky",
+}
+E2E_SERVICE = "oriso-e2e"
 REQUIRED_ALERT_SLUGS = {
     "provisioning-compensation-failure",
     "availability-store-failure",
@@ -55,6 +62,12 @@ ALLOWED_GROUPS = {
     "side_effect",
     "stage",
     "status",
+    "test.case",
+    "test.commit",
+    "test.file",
+    "test.project",
+    "test.run.id",
+    "test.status",
     "workflow",
 }
 FORBIDDEN_TERMS = {
@@ -85,14 +98,38 @@ def _scope_filter(definition: dict[str, Any]) -> str:
     return " AND ".join(parts)
 
 
-def _group_by(names: Iterable[str]) -> list[dict[str, str]]:
+def _group_by(names: Iterable[str], context: str = "tag") -> list[dict[str, str]]:
     return [
-        {"name": name, "fieldContext": "tag", "fieldDataType": "string"}
+        {"name": name, "fieldContext": context, "fieldDataType": "string"}
         for name in names
     ]
 
 
+def _trace_query(definition: dict[str, Any]) -> dict[str, Any]:
+    """Builder query over test spans (signal traces), one or more aggregations."""
+    query: dict[str, Any] = {
+        "name": "A",
+        "signal": "traces",
+        "source": "",
+        "stepInterval": definition.get("stepInterval", 60),
+        "aggregations": [
+            {key: value for key, value in aggregation.items() if value}
+            for aggregation in definition["aggregations"]
+        ],
+        "disabled": False,
+        "filter": {"expression": _scope_filter(definition)},
+        "groupBy": _group_by(definition.get("groupBy", []), "attribute"),
+        "having": {"expression": definition.get("having", "")},
+        "legend": "",
+    }
+    if definition.get("limit"):
+        query["limit"] = definition["limit"]
+    return query
+
+
 def _builder_query(definition: dict[str, Any]) -> dict[str, Any]:
+    if definition.get("signal") == "traces":
+        return _trace_query(definition)
     return {
         "name": "A",
         "signal": "metrics",
@@ -123,11 +160,18 @@ def _dashboard(definition: dict[str, Any]) -> dict[str, Any]:
             "kind": "Panel",
             "spec": {
                 "display": {"name": panel["title"], "description": ""},
-                "plugin": {"kind": "signoz/TimeSeriesPanel", "spec": {}},
+                "plugin": {
+                    "kind": "signoz/TablePanel"
+                    if panel.get("panelType") == "table"
+                    else "signoz/TimeSeriesPanel",
+                    "spec": {},
+                },
                 "links": [],
                 "queries": [
                     {
-                        "kind": "time_series",
+                        "kind": "scalar"
+                        if panel.get("panelType") == "table"
+                        else "time_series",
                         "spec": {
                             "plugin": {
                                 "kind": "signoz/BuilderQuery",
@@ -161,7 +205,7 @@ def _dashboard(definition: dict[str, Any]) -> dict[str, Any]:
                 "name": f"{definition['title']} [{ENVIRONMENT_TOKEN}]",
                 "description": definition["description"],
             },
-            "duration": "1h",
+            "duration": definition.get("duration", "1h"),
             "refreshInterval": "1m",
             "variables": [],
             "panels": panels,
@@ -238,7 +282,7 @@ def _alert(definition: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_assets(
-    asset_dir: str | Path,
+    asset_dir: str | Path, *, include_e2e: bool = False
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     catalog_path = Path(asset_dir) / "observability-catalog.json"
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
@@ -246,8 +290,14 @@ def load_assets(
         raise RuntimeError("SigNoz dashboard catalog is incomplete")
     if {item["slug"] for item in catalog["alerts"]} != REQUIRED_ALERT_SLUGS:
         raise RuntimeError("SigNoz alert catalog is incomplete")
+    definitions = list(catalog["dashboards"])
+    if include_e2e:
+        e2e = catalog.get("e2eDashboards", [])
+        if {item["slug"] for item in e2e} != E2E_DASHBOARD_SLUGS:
+            raise RuntimeError("SigNoz E2E dashboard catalog is incomplete")
+        definitions += e2e
     return (
-        [_dashboard(item) for item in catalog["dashboards"]],
+        [_dashboard(item) for item in definitions],
         [_alert(item) for item in catalog["alerts"]],
     )
 
@@ -342,7 +392,14 @@ def validate_asset_contract(
     cluster_name: str,
     channel_name: str,
 ) -> None:
-    if len(dashboards) != 3 or len(alerts) != 6:
+    e2e_count = sum(
+        1
+        for item in dashboards
+        if any(item.get("name", "").startswith(f"{slug}-") for slug in E2E_DASHBOARD_SLUGS)
+    )
+    if e2e_count not in (0, len(E2E_DASHBOARD_SLUGS)):
+        raise RuntimeError("SigNoz E2E dashboards must be provisioned together")
+    if len(dashboards) != 3 + e2e_count or len(alerts) != 6:
         raise RuntimeError("SigNoz asset count does not match the ORISO contract")
     encoded = json.dumps(
         {"dashboards": dashboards, "alerts": alerts}, sort_keys=True
@@ -696,6 +753,28 @@ def _wait_for_signal_data(
 
 def _query_contract(query: dict[str, Any]) -> dict[str, Any]:
     aggregations = query.get("aggregations", [])
+    if query.get("signal") == "traces":
+        if not aggregations:
+            raise RuntimeError("managed SigNoz query must contain an aggregation")
+        return {
+            "signal": "traces",
+            "disabled": query.get("disabled"),
+            "aggregations": [
+                (str(item.get("expression")), str(item.get("alias", "")))
+                for item in aggregations
+            ],
+            "filter": query.get("filter", {}).get("expression", ""),
+            "having": query.get("having", {}).get("expression", ""),
+            "limit": query.get("limit"),
+            "groupBy": sorted(
+                (
+                    str(item.get("name")),
+                    str(item.get("fieldContext", "")),
+                    str(item.get("fieldDataType", "")),
+                )
+                for item in query.get("groupBy", [])
+            ),
+        }
     if len(aggregations) != 1:
         raise RuntimeError("managed SigNoz query must contain exactly one aggregation")
     aggregation = aggregations[0]
@@ -982,6 +1061,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="In provision mode also prove queries, freshness, and separation",
     )
     parser.add_argument(
+        "--e2e-dashboards",
+        action="store_true",
+        default=os.environ.get("ORISO_E2E_DASHBOARDS", "false").lower() == "true",
+        help="Also manage the E2E test health and flaky dashboards (oriso-e2e spans)",
+    )
+    parser.add_argument(
         "--skip-telemetry",
         action="store_true",
         help="In check mode only compare stored objects; run no queries",
@@ -1003,7 +1088,7 @@ def main(argv: list[str] | None = None) -> int:
     if (args.mode == "test-rule") != bool(args.rule):
         raise RuntimeError("--rule is required with, and only with, --mode test-rule")
 
-    dashboards, alerts = load_assets(args.assets_dir)
+    dashboards, alerts = load_assets(args.assets_dir, include_e2e=args.e2e_dashboards)
     dashboards, alerts = materialize_assets(
         dashboards,
         alerts,
