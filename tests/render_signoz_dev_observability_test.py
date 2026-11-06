@@ -66,9 +66,9 @@ def assert_dev(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     # metrics have their own receiver and a pipeline that filters and relabels.
     collector_cm = docs[("ConfigMap", "caritas-signoz-otel-collector")]
     config = yaml.safe_load(next(iter(collector_cm["data"].values())))
-    assert set(config["receivers"]) == {"otlp", "otlp/rum"}, config["receivers"]
+    assert set(config["receivers"]) == {"otlp", "otlp/rum", "otlp/e2e"}, config["receivers"]
     assert config["receivers"]["otlp/rum"]["protocols"]["http"]["max_request_body_size"] == 65536
-    for name in ("traces", "metrics", "logs", "metrics/rum"):
+    for name in ("traces", "metrics", "logs", "metrics/rum", "traces/e2e"):
         pipeline = config["service"]["pipelines"][name]
         assert pipeline["processors"][0] == "memory_limiter", (name, pipeline)
     for name in ("traces", "metrics", "logs"):
@@ -126,9 +126,71 @@ def assert_dev(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
         assert "checksum/config" in annotations, name
 
 
+def assert_e2e_trace_ingest() -> None:
+    """Authenticated span ingest for the Dev nightly E2E run (ORISO-E2E#97)."""
+    docs = by_key(render("values-dev.yaml"))
+    ingress = docs[("Ingress", "caritas-signoz-e2e-ingress")]
+    rules = ingress["spec"]["rules"]
+    assert len(rules) == 1 and len(rules[0]["http"]["paths"]) == 1, rules
+    path = rules[0]["http"]["paths"][0]
+    assert (path["path"], path["pathType"]) == ("/signoz-e2e/v1/traces", "Exact")
+    assert path["backend"]["service"] == {"name": "caritas-signoz-otel-collector", "port": {"number": 4321}}
+    annotations = ingress["metadata"]["annotations"]
+    # The token is checked by ingress-nginx itself against a Secret named in values.
+    assert annotations["nginx.ingress.kubernetes.io/auth-type"] == "basic"
+    assert annotations["nginx.ingress.kubernetes.io/auth-secret"] == "signoz-e2e-ingest-auth"
+    assert annotations["nginx.ingress.kubernetes.io/auth-secret-type"] == "auth-file"
+    snippet = annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
+    assert "if ($request_method != POST) { return 405; }" in snippet
+    assert "$http_content_encoding" in snippet
+    assert "rewrite ^/signoz-e2e/v1/traces$ /v1/traces break;" in snippet
+    assert "nginx.ingress.kubernetes.io/rewrite-target" not in annotations
+    assert annotations["nginx.ingress.kubernetes.io/proxy-body-size"] == "256k"
+    assert "nginx.ingress.kubernetes.io/limit-rps" in annotations
+    # Dedicated receiver/pipeline: own port, body cap, filter, fixed environment, source tag.
+    collector_cm = docs[("ConfigMap", "caritas-signoz-otel-collector")]
+    config = yaml.safe_load(next(iter(collector_cm["data"].values())))
+    e2e_http = config["receivers"]["otlp/e2e"]["protocols"]["http"]
+    assert e2e_http["endpoint"] == "0.0.0.0:4321" and e2e_http["max_request_body_size"] == 262144, e2e_http
+    assert config["service"]["pipelines"]["traces"]["receivers"] == ["otlp"], "main pipeline must not take the E2E receiver"
+    pipeline = config["service"]["pipelines"]["traces/e2e"]
+    assert pipeline["receivers"] == ["otlp/e2e"], pipeline
+    procs = pipeline["processors"]
+    assert procs[0] == "memory_limiter" and procs.index("filter/e2e") < procs.index("transform/e2e"), procs
+    drop_rule = config["processors"]["filter/e2e"]["traces"]["span"]
+    assert drop_rule == ['resource.attributes["service.name"] != "oriso-e2e"'], drop_rule
+    statements = config["processors"]["transform/e2e"]["trace_statements"][0]
+    assert statements["context"] == "resource"
+    assert 'set(attributes["deployment.environment"], "${env:ORISO_DEPLOYMENT_ENVIRONMENT}")' in statements["statements"]
+    assert 'set(attributes["oriso.signal.source"], "e2e")' in statements["statements"]
+    assert env(docs[("Deployment", "caritas-signoz-otel-collector")])["ORISO_DEPLOYMENT_ENVIRONMENT"] == "dev"
+    service_ports = {p["name"]: p["port"] for p in docs[("Service", "caritas-signoz-otel-collector")]["spec"]["ports"]}
+    assert service_ports["otlp-e2e"] == 4321 and service_ports["otlp-http"] == 4318, service_ports
+    assert path["backend"]["service"]["port"]["number"] in service_ports.values()
+    error = render_dev_fails({"signoz": {"otelCollector": {"ports": {"otlp-e2e": {"enabled": False}}}}})
+    assert "e2eTraceIngest.enabled=true requires signoz.otelCollector.ports.otlp-e2e.enabled=true" in error, error
+    error = render_dev_fails({"signoz": {"otelCollector": {"ports": {"otlp-e2e": {"containerPort": 4318}}}}})
+    assert "otlp-e2e.containerPort must be 4321" in error, error
+    error = render_dev_fails({"signoz": {"otelCollector": {"ports": {"otlp-e2e": {"servicePort": 4318}}}}})
+    assert "otlp-e2e.servicePort conflicts" in error, error
+    error = render_dev_fails({"signoz": {"otelCollector": {"additionalEnvs": {"ORISO_DEPLOYMENT_ENVIRONMENT": "prod"}}}})
+    assert "ORISO_DEPLOYMENT_ENVIRONMENT must equal" in error, error
+    # Only the Secret name is rendered, never a credential.
+    assert "password" not in str(ingress).lower()
+    # Nothing else of the collector is exposed through this Ingress.
+    assert not any(k == "Secret" and "e2e" in n for k, n in docs), "chart must not create the token"
+
+    error = render_dev_fails({"global": {"observability": {"e2eTraceIngest": {"authSecret": ""}}}})
+    assert "e2eTraceIngest.authSecret must name an existing basic-auth Secret" in error, error
+    # Default off, and off without SigNoz.
+    assert "caritas-signoz-e2e-ingress" not in {n for _, n in by_key(render())}
+    off = render_dev_with({"global": {"observability": {"e2eTraceIngest": {"enabled": False}}}})
+    assert ("Ingress", "caritas-signoz-e2e-ingress") not in off
+
+
 def assert_default_off(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     names = {name for _, name in docs}
-    assert not any("data-protection" in name or "rum-ingress" in name for name in names), names
+    assert not any("data-protection" in name or "rum-ingress" in name or "e2e-ingress" in name for name in names), names
     for name in JAVA_SERVICES:
         variables = env(docs[("Deployment", name)])
         assert "OTEL_RESOURCE_ATTRIBUTES" not in variables, name
@@ -553,6 +615,7 @@ def assert_clickhouse_memory_on_dev() -> None:
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
+    assert_e2e_trace_ingest()
     assert_review_findings()
     assert_second_review_findings()
     assert_backup_is_atomic()

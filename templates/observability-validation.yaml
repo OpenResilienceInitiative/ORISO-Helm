@@ -49,6 +49,31 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- fail (printf "signoz.otelCollector.additionalEnvs.ORISO_DEPLOYMENT_ENVIRONMENT must equal global.observability.deploymentEnvironment (%q) when global.observability.webVitals.enabled=true" $environment) -}}
 {{- end -}}
 {{- end -}}
+{{- $e2eIngest := get (get .Values.global "observability" | default dict) "e2eTraceIngest" | default dict -}}
+{{- if and $signozEnabled (get $e2eIngest "enabled" | default false) -}}
+{{- if not (dig "otelCollector" "ports" "otlp-e2e" "enabled" false $signoz) -}}
+{{- fail "global.observability.e2eTraceIngest.enabled=true requires signoz.otelCollector.ports.otlp-e2e.enabled=true: the E2E ingress sends spans to that dedicated collector port" -}}
+{{- end -}}
+{{- $e2eContainerPort := dig "otelCollector" "ports" "otlp-e2e" "containerPort" 4321 $signoz -}}
+{{- if not (and (or (kindIs "float64" $e2eContainerPort) (kindIs "int" $e2eContainerPort) (kindIs "int64" $e2eContainerPort)) (eq (float64 $e2eContainerPort) 4321.0)) -}}
+{{- fail "signoz.otelCollector.ports.otlp-e2e.containerPort must be 4321: the dedicated E2E receiver listens on that port" -}}
+{{- end -}}
+{{- $e2ePort := dig "otelCollector" "ports" "otlp-e2e" "servicePort" 4321 $signoz -}}
+{{- if not (and (or (kindIs "float64" $e2ePort) (kindIs "int" $e2ePort) (kindIs "int64" $e2ePort)) (eq (float64 $e2ePort) (float64 (int $e2ePort))) (ge (int $e2ePort) 1) (le (int $e2ePort) 65535)) -}}
+{{- fail (printf "signoz.otelCollector.ports.otlp-e2e.servicePort must be a port number from 1 to 65535 (got %v)" $e2ePort) -}}
+{{- end -}}
+{{- $collectorPorts := dig "otelCollector" "ports" (dict) $signoz -}}
+{{- range $name, $port := $collectorPorts -}}
+{{- if and (ne $name "otlp-e2e") (get $port "enabled") (eq (toString (get $port "servicePort")) (toString $e2ePort)) (eq (get $port "protocol" | default "TCP") (get (get $collectorPorts "otlp-e2e") "protocol" | default "TCP")) -}}
+{{- fail (printf "signoz.otelCollector.ports.otlp-e2e.servicePort conflicts with enabled collector port %s" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- $e2eEnvs := get (get $signoz "otelCollector" | default dict) "additionalEnvs" | default dict -}}
+{{- $e2eEnvironment := get (get .Values.global "observability" | default dict) "deploymentEnvironment" | default "" -}}
+{{- if or (eq $e2eEnvironment "") (ne (get $e2eEnvs "ORISO_DEPLOYMENT_ENVIRONMENT" | default "") $e2eEnvironment) -}}
+{{- fail (printf "signoz.otelCollector.additionalEnvs.ORISO_DEPLOYMENT_ENVIRONMENT must equal global.observability.deploymentEnvironment (%q) when global.observability.e2eTraceIngest.enabled=true: the E2E pipeline stamps it on every span" $e2eEnvironment) -}}
+{{- end -}}
+{{- end -}}
 {{- if $collectorEnabled -}}
 {{- $globalObservability := get .Values.global "observability" | default dict -}}
 {{- if eq (get $collector "clusterName" | default "") "" -}}
