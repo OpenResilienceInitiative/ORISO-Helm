@@ -206,6 +206,32 @@ ClickHouse pod. For example:
 kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP TABLE IF EXISTS system.metric_log_0 SYNC"
 ```
 
+### system.trace_log
+
+Dev also turns `system.trace_log` off (`config.d/99-oriso-disable-trace-log.xml`).
+Measured read-only on Dev on 2026-11-06: 8.21 GiB active, 338 M rows, about
+1 GiB per day (the first day, 2026-11-03, was 5.6 GiB while the memory problems
+ran). It is ClickHouse's own sampling-profiler output, already limited to 7
+days by default, and no query in the retained `system.query_log` window
+(2026-11-03 to 2026-11-06) selects from it. SigNoz does not use it.
+
+The setting stops new rows, but the existing table stays on disk. After the
+rollout, the operator drops it by hand, using the same wait-and-confirm steps as
+`metric_log` above (rollout finished, configuration active, one pod at a time):
+
+```bash
+POD=chi-caritas-clickhouse-cluster-0-0-0
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse extract-from-config --config-file /etc/clickhouse-server/config.xml --key trace_log
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "SELECT name, formatReadableSize(total_bytes) FROM system.tables WHERE database = 'system' AND match(name, '^trace_log(_[0-9]+)?$')"
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP TABLE IF EXISTS system.trace_log SYNC"
+```
+
+The configuration command must print `Not found: trace_log` before the drop.
+Repeat for each ClickHouse pod. Afterwards `system.trace_log` must not exist
+and the Dev disk use of ClickHouse falls by about 8 GiB. To get the profiler
+data back (for example for a ClickHouse support case), remove the file from
+`values-dev.yaml` and upgrade.
+
 ## Rollback
 
 Turn single parts off in the generated overlay (`signozCollector.enabled`,
