@@ -142,14 +142,32 @@ never toggled** — there is no dev "encryption off" mode by design (see
 
 ### SigNoz by environment
 
-With `values-dev.yaml`, and `values-pre-dev.yaml` layered on top for Pre-Dev,
-`signoz.enabled=true` deploys SigNoz, enables application OTLP export by default,
-and serves the UI at `https://<global.domainName>/signoz/`. Set
-`signoz.orisoIngress.enabled=false` to suppress the ORISO UI route. The
-separately configured browser metrics route stays available. For an external
-collector in those environments, set
+With `values-dev.yaml`, `signoz.enabled=true` deploys SigNoz, enables
+application OTLP export by default, and serves the UI at
+`https://<global.domainName>/signoz/`. For an external collector, set
 `global.observability.otlpEnabled=true` and provide its HTTP host and port in
 `global.observability.otlpCollectorHost`.
+
+Layer `values-pre-dev.yaml` over `values-dev.yaml` for Pre-Dev. This keeps both
+chart-managed SigNoz UI ingresses off and the UI Service on `ClusterIP`. The
+separate browser metrics route stays available. Use the existing Pre-Dev
+Kubernetes context to open a loopback connection to SigNoz.
+
+```bash
+kubectl --context "$PRE_DEV_KUBE_CONTEXT" -n caritas port-forward \
+  --address=127.0.0.1 service/caritas-signoz 18080:8080
+```
+
+Open `http://127.0.0.1:18080/signoz/` and sign in with your existing SigNoz
+account. Later values and `--set` options take precedence, so check the final
+release inputs for any UI exposure overrides.
+
+After an authorized rollout, verify the applied Helm revision, the private
+Service and every ingress or gateway route to it. Check `/signoz/`, its
+JavaScript asset and the dashboard API from both the public host and loopback.
+The public app can return its own HTML for `/signoz/`, so check the service
+identity as well as HTTP status. Verify the RUM path independently.
+[Pre-Dev operations hardening](https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/304)
 
 Layer `values-prod.yaml` over the base values for production. With that overlay,
 `signoz.enabled=true` can prepare the internal SigNoz services while the Java
