@@ -942,8 +942,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         epilog=(
             "The API key is read only from the SIGNOZ_API_KEY environment "
             "variable, never from the command line, and is never printed. "
-            "Read-only workstation check: SIGNOZ_URL=<signoz base url> "
-            "SIGNOZ_API_KEY=<key> python3 files/signoz/signoz_observability.py "
+            "Read-only workstation check: python3 files/signoz/signoz_observability.py "
+            "--api-url <signoz base URL including /signoz> "
             "--mode check --environment dev --cluster-name oriso-dev. "
             "One synthetic notification for one catalog alert, no stored "
             "rule: --mode test-rule --rule <slug>."
