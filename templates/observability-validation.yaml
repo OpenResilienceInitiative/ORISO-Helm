@@ -59,11 +59,7 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- end -}}
 {{- end -}}
 {{- $orisoIngress := get $signoz "orisoIngress" | default dict -}}
-{{- $orisoIngressEnabled := true -}}
-{{- if hasKey $orisoIngress "enabled" -}}
-{{- $orisoIngressEnabled = get $orisoIngress "enabled" -}}
-{{- end -}}
-{{- if and $signozEnabled $orisoIngressEnabled -}}
+{{- if and $signozEnabled (dig "enabled" true $orisoIngress) -}}
 {{- $signozApp := get $signoz "signoz" | default dict -}}
 {{- $signozEnv := get $signozApp "env" | default dict -}}
 {{- $externalUrl := get $signozEnv "signoz_global_external__url" | default "" -}}

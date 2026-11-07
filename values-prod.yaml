@@ -29,7 +29,13 @@ global:
   # matrix.matrixServerName: REQUIRED at install (same host as the Matrix identity below)
   observability:
     otlpEnabled: false
+    # Installing SigNoz for preparation must leave application export off.
+    autoEnableWithSignoz: false
     deploymentEnvironment: "production"
+
+signoz:
+  orisoIngress:
+    enabled: false
 
 agencyService:
   springProfilesActive: "prod"
