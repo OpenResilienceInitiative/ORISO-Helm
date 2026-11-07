@@ -18,6 +18,24 @@ SigNoz database back. Collector internals: `signoz-k8s-infra.md`.
 | `signoz.orisoDataProtection` | default on | volumes on `Retain`, daily `signoz.db` backup |
 | `signoz.clickhouse.resources` | request 2 GiB, limit 4 GiB | ClickHouse cannot fill the worker |
 
+A deployed Helm revision can be healthy while running without the Dev
+observability overlay. Verify the overlay after every Dev install or upgrade:
+
+```bash
+helm get values caritas -n caritas --all -o yaml |
+  python3 scripts/observability_overlay.py values-dev.yaml --check-effective
+```
+
+The check compares the keys declared by the Dev observability overlay and
+prints only the paths of missing or different settings. A failure requires
+the rollout procedure below and a fresh runtime check.
+
+Before applying a prepared upgrade, run its server-side dry run with
+`--hide-secret -o json` and pipe the result through
+`jq -e '.config' | python3 scripts/observability_overlay.py values-dev.yaml --check-effective`.
+Use `set -o pipefail` and pass the same values files in the same order for the
+actual upgrade. Review the resource diff as well.
+
 ## Rollout
 
 Live Dev is deployed from `/root/ORISO-Helm` with a hand-kept `values.yaml`
