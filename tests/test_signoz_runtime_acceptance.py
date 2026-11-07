@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import unittest
 from copy import deepcopy
 from pathlib import Path
@@ -178,6 +179,89 @@ class ReadbackContractTest(unittest.TestCase):
                 "deployment/caritas-k8s-infra-otel-deployment",
             ),
         )
+
+
+class RuntimeReadinessContractTest(unittest.TestCase):
+    def statefulset(
+        self, name: str, owner_uid: str = "current-chi", replicas: int = 1, deleting: bool = False,
+    ) -> dict:
+        return {
+            "metadata": {
+                "name": name,
+                "deletionTimestamp": "2026-11-07T12:00:00Z" if deleting else None,
+                "ownerReferences": [{
+                    "kind": "ClickHouseInstallation",
+                    "name": "caritas-clickhouse",
+                    "uid": owner_uid,
+                    "controller": True,
+                }],
+            },
+            "spec": {"replicas": replicas},
+        }
+
+    def runner(self, statefulsets: list[dict], failing_rollout: str = "") -> mock.Mock:
+        runner = mock.Mock(spec=MODULE.Runner)
+
+        def run(command: list[str]) -> subprocess.CompletedProcess:
+            arguments = command[3:]
+            output = ""
+            if arguments == ["get", "chi", "caritas-clickhouse", "-o", "json"]:
+                output = json.dumps({"metadata": {"uid": "current-chi"}})
+            elif arguments == [
+                "get", "statefulset", "-l", "clickhouse.altinity.com/chi=caritas-clickhouse", "-o", "json",
+            ]:
+                output = json.dumps({"items": statefulsets})
+            elif failing_rollout and failing_rollout in arguments:
+                raise subprocess.CalledProcessError(1, command)
+            return subprocess.CompletedProcess(command, 0, stdout=output)
+
+        runner.run.side_effect = run
+        return runner
+
+    def checked_rollouts(self, runner: mock.Mock) -> list[str]:
+        commands = [call.args[0][3:] for call in runner.run.call_args_list]
+        return [command[2] for command in commands if command[:2] == ["rollout", "status"]]
+
+    def test_checks_all_actual_statefulsets_owned_by_the_current_installation(self) -> None:
+        runner = self.runner([
+            self.statefulset("chi-caritas-clickhouse-cluster-1-0"),
+            self.statefulset("orphaned-statefulset", owner_uid="previous-chi"),
+            self.statefulset("chi-caritas-clickhouse-cluster-0-0"),
+        ])
+        MODULE._check_runtime_readiness(runner, "caritas", "caritas", "15s")
+        self.assertEqual(self.checked_rollouts(runner), [
+            "deployment/caritas-clickhouse-operator",
+            "statefulset/chi-caritas-clickhouse-cluster-0-0",
+            "statefulset/chi-caritas-clickhouse-cluster-1-0",
+            "deployment/caritas-signoz-otel-collector",
+            "statefulset/caritas-signoz",
+        ])
+
+    def test_missing_or_foreign_only_clickhouse_statefulsets_fail(self) -> None:
+        for statefulsets in ([], [self.statefulset("orphaned-statefulset", owner_uid="previous-chi")]):
+            with self.subTest(statefulsets=statefulsets):
+                runner = self.runner(statefulsets)
+                with self.assertRaisesRegex(RuntimeError, "no owned StatefulSets"):
+                    MODULE._check_runtime_readiness(runner, "caritas", "caritas", "15s")
+
+    def test_deleting_or_scaled_to_zero_statefulset_fails_even_if_another_is_ready(self) -> None:
+        for statefulset in (
+            self.statefulset("retiring-shard", deleting=True),
+            self.statefulset("scaled-down-shard", replicas=0),
+        ):
+            with self.subTest(statefulset=statefulset):
+                runner = self.runner([self.statefulset("active-shard"), statefulset])
+                with self.assertRaisesRegex(RuntimeError, statefulset["metadata"]["name"]):
+                    MODULE._check_runtime_readiness(runner, "caritas", "caritas", "15s")
+
+    def test_failed_clickhouse_rollout_stops_before_collector_readiness(self) -> None:
+        target = "statefulset/chi-caritas-clickhouse-cluster-0-0"
+        runner = self.runner([self.statefulset("chi-caritas-clickhouse-cluster-0-0")], failing_rollout=target)
+        with self.assertRaises(subprocess.CalledProcessError):
+            MODULE._check_runtime_readiness(runner, "caritas", "caritas", "15s")
+        self.assertEqual(self.checked_rollouts(runner), [
+            "deployment/caritas-clickhouse-operator", target,
+        ])
 
 
 class CollectorPipelineContractTest(unittest.TestCase):
