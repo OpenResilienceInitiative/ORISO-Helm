@@ -72,7 +72,7 @@ the operator task ID and each ClickHouse pod's name, UID and container start
 time. Keep this baseline to confirm each pod restarted after the upgrade.
 
 ```bash
-CLICKHOUSE_TASK_BEFORE=$(kubectl -n caritas get clickhouseinstallation caritas-clickhouse -o jsonpath='{.status.taskID}')
+CLICKHOUSE_TASK_BEFORE=$(kubectl -n caritas get clickhouseinstallation caritas-clickhouse -o jsonpath='{.status.taskIDsStarted[0]}')
 test -n "$CLICKHOUSE_TASK_BEFORE"
 kubectl -n caritas get pods -o json | jq -er '
   .items[] | select(.metadata.name | startswith("chi-caritas-clickhouse-cluster-"))
@@ -194,20 +194,34 @@ Pausing only those merges for two minutes on 2026-11-03 took ClickHouse from 3.1
 to 0.43 cores and the errors from 6.45 per second to 0.
 
 The setting stops new rows, but an existing table keeps merging. After the
-upgrade, require a new completed operator task for the desired configuration.
-Use the fragment for the system log you changed:
+upgrade, require the completed configuration and the success log for the
+latest started operator task. Operator 0.21.2 can assign a different
+`status.taskID` when it writes the completed snapshot, so match the log
+against `taskIDsStarted[0]`. Use the fragment for the system log you changed:
 
 ```bash
+set -o pipefail
 LOG_FRAGMENT=config.d/99-oriso-disable-metric-log.xml
 # For trace_log, use config.d/99-oriso-disable-trace-log.xml.
-kubectl -n caritas get clickhouseinstallation caritas-clickhouse -o json |
-  jq -e --arg before "$CLICKHOUSE_TASK_BEFORE" --arg fragment "$LOG_FRAGMENT" '
+CLICKHOUSE_RECONCILE_TASK=$(
+  kubectl -n caritas get clickhouseinstallation caritas-clickhouse -o json |
+  jq -er --arg before "$CLICKHOUSE_TASK_BEFORE" --arg fragment "$LOG_FRAGMENT" '
     .status as $status | .spec.configuration.files[$fragment] as $desired
-    | $before != "" and $desired != null and $status.status == "Completed"
-      and $status.taskID != null and $status.taskID != $before
+    | ($status.taskIDsStarted // [])[0] as $started
+    | select($before != "" and $desired != null and $status.status == "Completed"
+      and $started != null and $started != "" and $started != $before
+      and $status.taskID != null
       and (($status.taskIDsCompleted // []) | index($status.taskID)) != null
-      and $status.normalizedCompleted.spec.configuration.files[$fragment] == $desired'
+      and $status.normalizedCompleted.spec.configuration.files[$fragment] == $desired)
+    | $started'
+) &&
+kubectl -n caritas logs deployment/caritas-clickhouse-operator -c operator \
+  --since-time="${UPGRADE_STARTED_AT:?Missing upgrade start time}" |
+  grep -F "caritas/caritas-clickhouse/$CLICKHOUSE_RECONCILE_TASK:reconcile completed successfully, task id: $CLICKHOUSE_RECONCILE_TASK"
 ```
+
+Stop if this check cannot find a success line for the exact task. A completed
+snapshot alone can also follow a failed reconciliation.
 
 Run the pod identity command from [Rollout](#rollout) again. For every pod,
 require `ready=true`, a new UID or container start time, and a start time
