@@ -63,7 +63,23 @@ print(len(drift), *drift, sep="\n")' | tee /root/observability-drift.out
 ```
 
 Stop unless the first line is `0`; otherwise add the listed paths' files with
-`-f` first. The upgrade commands check it themselves, and the live upgrade
+`-f` first. The first rollout restarts Keycloak, Synapse (`Recreate`, a short
+Matrix gap), Redis, the four Java services, Frontend and Admin. Announce it
+before starting the upgrade.
+
+Before an upgrade that disables or restores a ClickHouse system log, record
+each ClickHouse pod's name, UID and container start time. Keep this baseline
+to confirm each pod restarted after the upgrade.
+
+```bash
+kubectl -n caritas get pods -o json | jq -er '
+  .items[] | select(.metadata.name | startswith("chi-caritas-clickhouse-cluster-"))
+  | .metadata as $pod
+  | .status.containerStatuses[] | select(.name == "clickhouse")
+  | [$pod.name, $pod.uid, .state.running.startedAt, .ready] | @tsv'
+```
+
+Require a ready row with a start time for each ClickHouse pod. The live upgrade
 also needs a successful server-side dry run, whose output you read first:
 
 ```bash
@@ -76,9 +92,6 @@ test "$(head -n 1 /root/observability-drift.out)" = 0 && test -f /root/observabi
 helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
   --wait --wait-for-jobs --timeout 15m
 ```
-
-The first rollout restarts Keycloak, Synapse (`Recreate`, a short Matrix gap),
-Redis, the four Java services, Frontend and Admin. Announce it.
 
 The retain hook only sees volumes that exist when Helm renders. After an
 upgrade that adds ClickHouse shards or replicas, ZooKeeper or PostgreSQL
@@ -177,24 +190,14 @@ hit the memory limit about 6 times per second on Dev and used about 3 CPU cores.
 Pausing only those merges for two minutes on 2026-11-03 took ClickHouse from 3.17
 to 0.43 cores and the errors from 6.45 per second to 0.
 
-The setting stops new rows, but an existing table keeps merging. Before any
-upgrade that disables or restores a system log, record each ClickHouse pod's
-name, UID and ClickHouse container start time:
-
-```bash
-kubectl -n caritas get pods -o json | jq -r '
-  .items[] | select(.metadata.name | startswith("chi-caritas-clickhouse-cluster-"))
-  | .metadata as $pod
-  | .status.containerStatuses[] | select(.name == "clickhouse")
-  | [$pod.name, $pod.uid, .state.running.startedAt, .ready] | @tsv'
-```
-
-After the upgrade, wait for the operator to reconcile the ClickHouse
-installation and rerun the command. For each pod, require `ready=true` and a
-different UID or a later container start time. Helm can finish before the
-operator starts a restart. Updated configuration files can also appear while
-the old server is still running. Wait for every restart before checking the
-active files or dropping a table.
+The setting stops new rows, but an existing table keeps merging. After the
+upgrade, wait for the operator to reconcile the ClickHouse installation. Run
+the pod identity command from [Rollout](#rollout) again and compare it with the
+pre-upgrade baseline. For each pod, require `ready=true` and a different UID
+or a later container start time. Helm can finish before the operator starts a
+restart. Updated configuration files can also appear while the old server is
+still running. Wait for every restart before checking the active files or
+dropping a table.
 
 For every listed pod, confirm `metric_log` is absent from the active configuration,
 then inspect its local tables. ClickHouse may have renamed older versions with a
