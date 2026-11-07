@@ -20,6 +20,9 @@ SigNoz database back. Collector internals: `signoz-k8s-infra.md`.
 
 ## Rollout
 
+Before the first upgrade that renders the existing public alias, follow
+[Adopt the public Dev alias](#adopt-the-public-dev-alias).
+
 Live Dev is deployed from `/root/ORISO-Helm` with a hand-kept `values.yaml`
 that is older than `values.yaml.default`, and `values-dev.yaml` also carries
 deltas Dev does not run today (Matrix server name, dummy data). So the rollout
@@ -84,6 +87,73 @@ The retain hook only sees volumes that exist when Helm renders. After an
 upgrade that adds ClickHouse shards or replicas, ZooKeeper or PostgreSQL
 members, run the same `helm upgrade` once more, so the new volumes are switched
 to `Retain` too.
+
+### Adopt the public Dev alias
+
+The Dev overlay restores `https://signoz.oriso.org/` as a 302 redirect to
+`https://dev.oriso.org/signoz/`. A clean Dev install creates the Ingress.
+Certificate issuance requires the alias DNS to reach the Dev ingress
+controller and the `letsencrypt-prod` ClusterIssuer to be Ready. Dev already
+has the Ingress. Adopt it in the approved Dev upgrade window so the
+Certificate keeps the same owner UID.
+
+On the Dev master, with the same value files selected for the planned upgrade,
+check that the rendered Ingress matches the live route. Then dry-run a patch
+limited to the alias metadata. Include any additional approved value files in
+the render.
+
+```bash
+set -o pipefail
+alias_ingress=signoz-oriso-org-redirect
+test "$(kubectl -n caritas get ingress caritas-signoz-ingress \
+  -o jsonpath='{.spec.rules[0].host}')" = dev.oriso.org || exit 1
+alias_live=$(kubectl -n caritas get ingress "$alias_ingress" -o json) || exit 1
+alias_desired=$(helm template caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
+  --show-only templates/signoz/signoz-dev-alias-ingress.yaml |
+  python3 -c 'import json, sys, yaml; print(json.dumps(yaml.safe_load(sys.stdin)))') || exit 1
+alias_route() {
+  jq -cS '{apiVersion, kind, spec, name:.metadata.name, namespace:.metadata.namespace,
+    annotations:(.metadata.annotations | del(
+      .["meta.helm.sh/release-name"], .["meta.helm.sh/release-namespace"],
+      .["helm.sh/resource-policy"], .["kubectl.kubernetes.io/last-applied-configuration"]))}'
+}
+test "$(alias_route <<<"$alias_live")" = "$(alias_route <<<"$alias_desired")" || exit 1
+jq -e '
+  .metadata.deletionTimestamp == null and (.metadata.ownerReferences // [] | length == 0)
+  and (.metadata.labels["app.kubernetes.io/managed-by"] // "Helm") == "Helm"
+  and (.metadata.annotations["meta.helm.sh/release-name"] // "caritas") == "caritas"
+  and (.metadata.annotations["meta.helm.sh/release-namespace"] // "caritas") == "caritas"
+  and (.metadata.annotations["helm.sh/resource-policy"] // "keep") == "keep"
+' <<<"$alias_live" >/dev/null || exit 1
+alias_patch=$(jq -c '{metadata:{resourceVersion:.metadata.resourceVersion,
+  labels:{"app.kubernetes.io/managed-by":"Helm"},
+  annotations:{"meta.helm.sh/release-name":"caritas",
+    "meta.helm.sh/release-namespace":"caritas","helm.sh/resource-policy":"keep"}}}' <<<"$alias_live")
+kubectl -n caritas patch ingress "$alias_ingress" --type=merge --patch "$alias_patch" --dry-run=server
+```
+
+Record the Ingress and Certificate UIDs. After reviewing the patch, run the same
+patch command without the dry-run flag, then run the normal upgrade preflight.
+The resource version requires a fresh comparison if the live Ingress changes.
+The first upgrade requires this ownership metadata for the existing Ingress.
+The keep annotation is set in the same patch so a Helm rollback to an older
+revision preserves the Ingress and its Certificate owner.
+
+After the upgrade, verify that the Helm release manifest includes the alias,
+the Ingress and Ready Certificate retain their UIDs, and the Certificate still
+names that Ingress UID as its owner. Check both responses with certificate
+validation enabled:
+
+```bash
+curl -fsS -o /dev/null -w '%{http_code} %{redirect_url}\n' https://signoz.oriso.org/
+curl -fsSL -o /dev/null -w '%{http_code} %{url_effective}\n' https://signoz.oriso.org/
+```
+
+Expect 302 to `https://dev.oriso.org/signoz/` and then 200. If an upgrade stops
+after the patch, preserve the existing Ingress and verify both responses before
+retrying. The keep annotation also leaves the live Ingress in place when a
+later render omits the alias. Retire the alias through a separately reviewed
+removal of the Ingress and its public DNS record.
 
 ## Proof
 

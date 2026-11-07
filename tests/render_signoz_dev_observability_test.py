@@ -14,6 +14,7 @@ import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JAVA_SERVICES = ("userservice", "agencyservice", "tenantservice", "consultingtypeservice")
+DEV_ALIAS = ("Ingress", "signoz-oriso-org-redirect")
 
 
 def render(*overlays: str, release: str = "caritas", chart: str = CHART_DIR) -> list[dict[str, Any]]:
@@ -144,6 +145,58 @@ def render_dev_with(overlay: dict[str, Any]) -> dict[tuple[str, str], dict[str, 
         return by_key(render("values-dev.yaml", handle.name))
     finally:
         os.unlink(handle.name)
+
+
+def assert_dev_alias(
+    dev: dict[tuple[str, str], dict[str, Any]], defaults: dict[tuple[str, str], dict[str, Any]]
+) -> None:
+    alias = dev[DEV_ALIAS]
+    assert alias["metadata"]["namespace"] == "caritas"
+    assert alias["metadata"]["annotations"] == {
+        "cert-manager.io/cluster-issuer": "letsencrypt-prod",
+        "nginx.ingress.kubernetes.io/temporal-redirect": "https://dev.oriso.org/signoz/",
+        "helm.sh/resource-policy": "keep",
+    }
+    assert alias["spec"] == {
+        "ingressClassName": "nginx",
+        "rules": [{
+            "host": "signoz.oriso.org",
+            "http": {"paths": [{
+                "path": "/",
+                "pathType": "Prefix",
+                "backend": {"service": {"name": "caritas-signoz", "port": {"number": 8080}}},
+            }]},
+        }],
+        "tls": [{"hosts": ["signoz.oriso.org"], "secretName": "signoz-oriso-org-tls"}],
+    }
+    assert DEV_ALIAS not in defaults
+    assert DEV_ALIAS not in by_key(render("values-prod.yaml"))
+    # Pre-Dev inherits the alias flag from the first overlay.
+    assert DEV_ALIAS not in by_key(render("values-dev.yaml", "values-pre-dev.yaml"))
+    for override in (
+        {"signoz": {"orisoIngress": {"devAliasRedirect": False}}},
+        {"signoz": {"orisoIngress": {"enabled": False}}},
+        {"global": {"enableTls": False}},
+        {
+            "signoz": {"enabled": False},
+            "signozCollector": {"enabled": False},
+            "global": {"observability": {
+                "otlpEnabled": False,
+                "appMetrics": False,
+                "dbMetrics": False,
+                "webVitals": {"enabled": False},
+            }},
+        },
+        {
+            "global": {"observability": {"deploymentEnvironment": "production"}},
+            "signoz": {"otelCollector": {"additionalEnvs": {"ORISO_DEPLOYMENT_ENVIRONMENT": "production"}}},
+        },
+        {
+            "global": {"domainName": "predev.oriso.org"},
+            "signoz": {"signoz": {"env": {"signoz_global_external__url": "https://predev.oriso.org/signoz"}}},
+        },
+    ):
+        assert DEV_ALIAS not in render_dev_with(override), override
 
 
 def backup_source(docs: dict[tuple[str, str], dict[str, Any]]) -> str | None:
@@ -551,8 +604,11 @@ def assert_clickhouse_memory_on_dev() -> None:
 
 
 def main() -> None:
-    assert_dev(by_key(render("values-dev.yaml")))
-    assert_default_off(by_key(render()))
+    dev = by_key(render("values-dev.yaml"))
+    defaults = by_key(render())
+    assert_dev(dev)
+    assert_default_off(defaults)
+    assert_dev_alias(dev, defaults)
     assert_review_findings()
     assert_second_review_findings()
     assert_backup_is_atomic()
