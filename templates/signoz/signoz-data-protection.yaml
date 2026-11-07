@@ -156,6 +156,8 @@ data:
     for old in sorted(glob.glob("/backup/signoz-*.db.gz"))[:-keep]:
         os.remove(old)
     print("backups:", *sorted(os.listdir("/backup")), sep="\n  ")
+  restore.py: |
+    {{- .Files.Get "files/signoz/metadata_restore.py" | nindent 4 }}
 {{- if $pending }}
 ---
 apiVersion: v1

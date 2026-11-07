@@ -153,22 +153,54 @@ kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP 
 
 ## signoz.db backup and restore
 
-The CronJob `caritas-signoz-data-protection-backup` runs at 02:30 UTC and keeps
-14 gzipped copies in the claim `caritas-signoz-data-protection-backup`. Run one
-now with:
+By default, the CronJob `caritas-signoz-data-protection-backup` runs at 02:30
+UTC and keeps the 14 newest successful gzip archives in its backup claim.
+Confirm the selected Job completed and record the archive's UTC timestamp.
+The archive contains SigNoz accounts, credentials and configuration, so keep
+it on protected storage within the approved recovery environment.
+
+For an approved on-demand backup, confirm no backup is active and leave the
+full Job deadline before the next scheduled start. The scheduled and manual
+jobs share the same backup directory.
 
 ```bash
 kubectl -n caritas create job --from=cronjob/caritas-signoz-data-protection-backup signoz-backup-manual
 ```
 
-Restore (SigNoz down for about a minute):
+For an isolated SQLite restore, use a recovery pod with no service account
+token and the backup CronJob's pinned Python image. Run it as the user that
+will open the recovered database. Use these mounts:
+
+| Mount | Source | Access |
+|---|---|---|
+| `/backup` | `caritas-signoz-data-protection-backup` claim | Read-only |
+| `/scripts` | `caritas-signoz-data-protection` ConfigMap | Read-only |
+| `/restore` | Fresh recovery claim in the same namespace | Read-write |
+
+Schedule the recovery read away from the next backup window and wait for the
+current backup pod to finish. Keep the recovery claim detached from SigNoz
+while staging. Use the exact archive name from the selected backup.
 
 ```bash
-kubectl -n caritas scale statefulset caritas-signoz --replicas=0
-# start a pod on the same node that mounts both claims, then inside it:
-#   gunzip -c /backup/signoz-<stamp>.db.gz > /signoz/signoz.db && rm -f /signoz/signoz.db-wal /signoz/signoz.db-shm
-kubectl -n caritas scale statefulset caritas-signoz --replicas=1
+archive=/backup/signoz-YYYYMMDDTHHMMSSZ.db.gz
+python3 /scripts/restore.py "$archive" /restore
 ```
+
+The script consumes the full gzip stream, checks SQLite integrity and the
+SigNoz metadata tables, and publishes `/restore/signoz.db` as a private file
+with mode `0600`. Use a recovery filesystem that supports hard links and an
+empty destination. The script allows the filesystem's `lost+found` directory.
+A complete staged database and the successful exit status are the
+preconditions for the isolated application check.
+
+Start the matching SigNoz version against the recovery claim in an isolated
+stack with private UI access and outbound alert delivery blocked. Verify
+authorized sign-in and the expected dashboard and rule configuration. Record
+the selected archive, database check and application readback. Keep the active
+claim available for the separately approved cutover or rollback.
+
+The SQLite archive covers SigNoz metadata. ClickHouse signals have their own
+backup and recovery requirements.
 
 ## ClickHouse system logs
 

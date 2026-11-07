@@ -4,9 +4,13 @@ trace identity and sampling, browser Web Vitals (ORISO SigNoz plan, session 1)."
 
 from __future__ import annotations
 
+from contextlib import closing
 import os
+from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
+import sys
 import tempfile
 from typing import Any
 
@@ -281,32 +285,51 @@ def assert_second_review_findings() -> None:
 
 
 def assert_backup_is_atomic() -> None:
-    # Run the rendered backup script on a real SQLite file in a scratch dir.
-    import gzip
-    import sqlite3
     config = by_key(render("values-dev.yaml"))[("ConfigMap", "caritas-signoz-data-protection")]
     with tempfile.TemporaryDirectory() as root:
-        signoz, backup = os.path.join(root, "signoz"), os.path.join(root, "backup")
-        os.makedirs(signoz)
-        os.makedirs(backup)
-        db = sqlite3.connect(os.path.join(signoz, "signoz.db"))
-        db.execute("create table users (name text)")
-        db.execute("insert into users values ('admin')")
-        db.commit()
-        db.close()
-        stale = os.path.join(backup, ".signoz-20261017T000000Z.db.gz.part")
-        with open(stale, "wb") as handle:
-            handle.write(b"truncated")
-        script = config["data"]["backup.py"].replace("/signoz/", signoz + "/").replace("/backup", backup)
-        result = subprocess.run(["python3", "-c", script], env={**os.environ, "KEEP": "14"},
-                                capture_output=True, text=True, check=False)
+        signoz, backup, recovery = (Path(root) / name for name in ("signoz", "backup", "recovery"))
+        for directory in (signoz, backup, recovery):
+            directory.mkdir()
+        database = signoz / "signoz.db"
+        with closing(sqlite3.connect(database)) as writer:
+            assert writer.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+            writer.execute("PRAGMA wal_autocheckpoint=0")
+            writer.executescript("""
+                CREATE TABLE organizations (id TEXT PRIMARY KEY);
+                CREATE TABLE users (id TEXT PRIMARY KEY);
+                CREATE TABLE dashboard (id TEXT PRIMARY KEY);
+                CREATE TABLE rule (id TEXT PRIMARY KEY);
+                INSERT INTO users VALUES ('synthetic-admin');
+                INSERT INTO rule VALUES ('synthetic-rule');
+            """)
+            writer.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            writer.execute("INSERT INTO dashboard VALUES ('wal-only-dashboard')")
+            writer.commit()
+            # The current row is only in the active WAL, so copying signoz.db alone would lose it.
+            with closing(sqlite3.connect(f"{database.as_uri()}?mode=ro&immutable=1", uri=True)) as raw:
+                assert raw.execute("SELECT id FROM dashboard").fetchall() == []
+            (backup / ".signoz-20261017T000000Z.db.gz.part").write_bytes(b"truncated")
+            script = config["data"]["backup.py"].replace("/signoz/", str(signoz) + "/").replace("/backup", str(backup))
+            result = subprocess.run(
+                [sys.executable, "-c", script], env={**os.environ, "KEEP": "14"},
+                capture_output=True, text=True, check=False, timeout=15,
+            )
+            assert result.returncode == 0, result.stderr
+            assert writer.execute("SELECT id FROM dashboard").fetchall() == [("wal-only-dashboard",)]
+
+        files = sorted(backup.iterdir())
+        assert len(files) == 1 and files[0].name.startswith("signoz-") and files[0].name.endswith(".db.gz"), files
+        result = subprocess.run(
+            [sys.executable, "-c", config["data"]["restore.py"], str(files[0]), str(recovery)],
+            capture_output=True, text=True, check=False, timeout=15,
+        )
         assert result.returncode == 0, result.stderr
-        files = sorted(os.listdir(backup))
-        assert len(files) == 1 and files[0].startswith("signoz-") and files[0].endswith(".db.gz"), files
-        restored = os.path.join(root, "restored.db")
-        with gzip.open(os.path.join(backup, files[0]), "rb") as source, open(restored, "wb") as target:
-            target.write(source.read())
-        assert sqlite3.connect(restored).execute("select name from users").fetchall() == [("admin",)]
+        restored = recovery / "signoz.db"
+        with closing(sqlite3.connect(f"{restored.as_uri()}?mode=ro&immutable=1", uri=True)) as readback:
+            assert readback.execute("SELECT id FROM dashboard").fetchall() == [("wal-only-dashboard",)]
+            assert readback.execute("SELECT id FROM users").fetchall() == [("synthetic-admin",)]
+            assert readback.execute("SELECT id FROM rule").fetchall() == [("synthetic-rule",)]
+        assert sorted(path.name for path in recovery.iterdir()) == ["signoz.db"]
 
 
 def assert_long_release_name() -> None:
