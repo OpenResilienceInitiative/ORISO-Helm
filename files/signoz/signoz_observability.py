@@ -65,6 +65,7 @@ ALLOWED_GROUPS = {
     "test.case",
     "test.commit",
     "test.file",
+    "test.id",
     "test.project",
     "test.run.id",
     "test.status",
@@ -159,7 +160,10 @@ def _dashboard(definition: dict[str, Any]) -> dict[str, Any]:
         panels[panel_id] = {
             "kind": "Panel",
             "spec": {
-                "display": {"name": panel["title"], "description": ""},
+                "display": {
+                    "name": panel["title"],
+                    "description": panel.get("description", ""),
+                },
                 "plugin": {
                     "kind": "signoz/TablePanel"
                     if panel.get("panelType") == "table"

@@ -31,12 +31,18 @@ ORISO-E2E (`tests/support/otelReporter.ts`), see ORISO-E2E#97:
 
 - `ORISO E2E Test Health [<environment>]`: first-attempt outcomes over time, pass
   rate per test, tests with a failed first attempt, p95 duration, recent runs;
-- `ORISO E2E Flaky Tests [<environment>]`: a test is flaky when the same commit
-  (`test.commit`) has a pass and a fail; tests that passed only after a retry
-  (`test.flaky`); and one panel per seed test (ORISO-Frontend#1613, #1707, #1443,
-  ORISO-UserService#251, ORISO-Admin#1016) showing its first-seen time within the
-  selected time range, or no row when it was not seen in that range. Runs outside
-  the range are not counted, so no row does not mean the test never ran.
+- `ORISO E2E Flaky Tests [<environment>]` groups passes and unexpected failures
+  by the same Playwright test ID, project and full commit SHA. A timeout with a
+  failed span counts as a failure. The reporter's `test.flaky` flag also has its
+  own panel for passing retries. Test Health remains available for older spans.
+  The same-commit table requires the stable `test.id` from ORISO-E2E#110.
+- The five seed panels use the file and, where applicable, case names from
+  ORISO-Frontend#1613, #1707, #1443, ORISO-UserService#251 and ORISO-Admin#1016.
+  The Admin panel tracks the failing unit-test example named in its CI issue.
+  Each panel shows the earliest matching span in the selected time range.
+  A successful empty query means the seed was not seen in those spans.
+  The current Playwright reporter does not cover the cited Storybook, Vitest
+  or JUnit jobs. Their historical CI failures have separate evidence.
 
 The filter uses `deployment.environment = '<environment>'`, and the reporter sets
 that to the Playwright project name, so the panels fill for `dev` (project `dev`)

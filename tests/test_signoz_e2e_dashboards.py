@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
-import json
+import re
 import unittest
 from pathlib import Path
 
@@ -23,6 +23,7 @@ REPORTER_ATTRIBUTES = {
     "test.run.id",
     "test.case",
     "test.file",
+    "test.id",
     "test.project",
     "test.commit",
     "test.status",
@@ -93,16 +94,16 @@ class E2eDashboardTest(unittest.TestCase):
 
     def test_queries_only_use_attributes_the_reporter_exports(self) -> None:
         dashboards, _ = materialize(True)
-        encoded = json.dumps(e2e_only(dashboards))
-        import re
-
-        used = set(re.findall(r"\btest\.[a-z0-9_.]+", encoded))
+        used = set()
+        for query in MODULE.dashboard_builder_queries(e2e_only(dashboards)):
+            used.update(field["name"] for field in query["groupBy"] if field["name"].startswith("test."))
+            expressions = [query["filter"]["expression"]]
+            expressions.extend(aggregation["expression"] for aggregation in query["aggregations"])
+            for expression in expressions:
+                fields = re.sub(r"'(?:[^'\\]|\\.)*'", "", expression)
+                used.update(re.findall(r"\btest\.[a-z0-9_.]+", fields))
         self.assertTrue(used, "expected test.* attributes")
-        unknown = {
-            name for name in used if name.rstrip(".") not in REPORTER_ATTRIBUTES
-        }
-        # test.retry etc. are filters; anything else would silently return no rows.
-        self.assertEqual(unknown, set())
+        self.assertEqual(used - REPORTER_ATTRIBUTES, set())
 
     def test_flaky_means_pass_and_fail_on_the_same_commit(self) -> None:
         dashboards, _ = materialize(True)
@@ -110,13 +111,21 @@ class E2eDashboardTest(unittest.TestCase):
         query = MODULE.dashboard_panel_queries(flaky)["flaky-by-commit"][0]
         self.assertEqual(
             {item["name"] for item in query["groupBy"]},
-            {"test.file", "test.case", "test.commit"},
+            {"test.id", "test.project", "test.file", "test.case", "test.commit"},
+        )
+        self.assertEqual(
+            query["filter"]["expression"],
+            "deployment.environment = 'dev' AND service.name = 'oriso-e2e'"
+            " AND test.id EXISTS AND test.id != ''"
+            " AND test.project EXISTS AND test.project != ''"
+            " AND test.commit REGEXP '^[0-9a-fA-F]{40}$'"
+            " AND test.status IN ('passed', 'failed', 'timedOut')",
         )
         self.assertEqual(
             [(item["alias"], item["expression"]) for item in query["aggregations"]],
             [
-                ("passes", "countIf(test.status = 'passed')"),
-                ("fails", "countIf(test.status != 'passed')"),
+                ("passes", "countIf(test.status = 'passed' AND status_code = 1)"),
+                ("fails", "countIf(test.status IN ('failed', 'timedOut') AND status_code = 2)"),
             ],
         )
         self.assertEqual(query["having"]["expression"], "passes > 0 AND fails > 0")
@@ -137,9 +146,38 @@ class E2eDashboardTest(unittest.TestCase):
             "ORISO-Admin#1016",
         ):
             self.assertEqual(sum(seed in title for title in titles), 1, seed)
-        for panel_id, queries in MODULE.dashboard_panel_queries(flaky).items():
-            if panel_id.startswith("seed-"):
-                self.assertEqual(queries[0]["aggregations"][0]["expression"], "min(timestamp)")
+        selectors = {
+            "seed-1": "test.file = 'src/components/chatStage/ChatStage.stories.tsx'",
+            "seed-2": (
+                "test.file = 'src/practice/PracticeFlow.integration.test.tsx'"
+                " AND test.case IN ('banner Restart mid-flow: same guard, fresh case with the accept available again, tour back at step 1',"
+                " 'F1 without the team step (Träger switched it off): six steps, no team anchor, the same real actions')"
+            ),
+            "seed-3": (
+                "test.file = 'src/components/chatStage/ChatStage.stories.tsx'"
+                " AND test.case = '(r) New messages — writing: the arrow lights up'"
+            ),
+            "seed-4": (
+                "test.file = 'src/test/java/de/caritas/cob/userservice/api/service/statistics/event/"
+                "ArchiveOrDeleteSessionStatisticsEventTest.java'"
+            ),
+            "seed-5": (
+                "test.file = 'src/pages/Agency/Edit/index.test.tsx'"
+                " AND test.case = 'AgencyPageEdit no-topic activation confirm'"
+            ),
+        }
+        panels = MODULE.dashboard_panel_queries(flaky)
+        self.assertEqual(set(selectors), {key for key in panels if key.startswith("seed-")})
+        for panel_id, selector in selectors.items():
+            display = flaky["spec"]["panels"][panel_id]["spec"]["display"]
+            self.assertIn("not seen", display["name"])
+            self.assertIn("selected time range", display["description"])
+            query = panels[panel_id][0]
+            self.assertEqual(
+                query["filter"]["expression"],
+                "deployment.environment = 'dev' AND service.name = 'oriso-e2e' AND " + selector,
+            )
+            self.assertEqual(query["aggregations"][0]["expression"], "min(timestamp)")
 
     def test_tables_use_the_scalar_query_kind(self) -> None:
         dashboards, _ = materialize(True)
