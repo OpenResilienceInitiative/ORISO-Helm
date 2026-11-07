@@ -68,10 +68,12 @@ Matrix gap), Redis, the four Java services, Frontend and Admin. Announce it
 before starting the upgrade.
 
 Before an upgrade that disables or restores a ClickHouse system log, record
-each ClickHouse pod's name, UID and container start time. Keep this baseline
-to confirm each pod restarted after the upgrade.
+the operator task ID and each ClickHouse pod's name, UID and container start
+time. Keep this baseline to confirm each pod restarted after the upgrade.
 
 ```bash
+CLICKHOUSE_TASK_BEFORE=$(kubectl -n caritas get clickhouseinstallation caritas-clickhouse -o jsonpath='{.status.taskID}')
+test -n "$CLICKHOUSE_TASK_BEFORE"
 kubectl -n caritas get pods -o json | jq -er '
   .items[] | select(.metadata.name | startswith("chi-caritas-clickhouse-cluster-"))
   | .metadata as $pod
@@ -89,6 +91,7 @@ helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yam
   --dry-run=server > /root/observability-dry.out && touch /root/observability-dry.ok
 # read /root/observability-dry.out, then:
 test "$(head -n 1 /root/observability-drift.out)" = 0 && test -f /root/observability-dry.ok && \
+UPGRADE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) && \
 helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
   --wait --wait-for-jobs --timeout 15m
 ```
@@ -191,13 +194,27 @@ Pausing only those merges for two minutes on 2026-11-03 took ClickHouse from 3.1
 to 0.43 cores and the errors from 6.45 per second to 0.
 
 The setting stops new rows, but an existing table keeps merging. After the
-upgrade, wait for the operator to reconcile the ClickHouse installation. Run
-the pod identity command from [Rollout](#rollout) again and compare it with the
-pre-upgrade baseline. For each pod, require `ready=true` and a different UID
-or a later container start time. Helm can finish before the operator starts a
-restart. Updated configuration files can also appear while the old server is
-still running. Wait for every restart before checking the active files or
-dropping a table.
+upgrade, require a new completed operator task for the desired configuration.
+Use the fragment for the system log you changed:
+
+```bash
+LOG_FRAGMENT=config.d/99-oriso-disable-metric-log.xml
+# For trace_log, use config.d/99-oriso-disable-trace-log.xml.
+kubectl -n caritas get clickhouseinstallation caritas-clickhouse -o json |
+  jq -e --arg before "$CLICKHOUSE_TASK_BEFORE" --arg fragment "$LOG_FRAGMENT" '
+    .status as $status | .spec.configuration.files[$fragment] as $desired
+    | $before != "" and $desired != null and $status.status == "Completed"
+      and $status.taskID != null and $status.taskID != $before
+      and (($status.taskIDsCompleted // []) | index($status.taskID)) != null
+      and $status.normalizedCompleted.spec.configuration.files[$fragment] == $desired'
+```
+
+Run the pod identity command from [Rollout](#rollout) again. For every pod,
+require `ready=true`, a new UID or container start time, and a start time
+strictly later than `UPGRADE_STARTED_AT`. The operator task and pod checks must
+both pass before inspecting the active files or dropping a table. Helm can
+finish before reconciliation starts, and the config files can change before
+the running server loads them.
 
 For every listed pod, confirm `metric_log` is absent from the active configuration,
 then inspect its local tables. ClickHouse may have renamed older versions with a
