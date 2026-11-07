@@ -140,31 +140,39 @@ Overlays only change *test friction* and per-environment wiring. **Encryption is
 never toggled** — there is no dev "encryption off" mode by design (see
 `docs/infrastructure-report-2026-07.md` §7).
 
-### Prod telemetry (OTLP → SigNoz)
+### SigNoz by environment
 
-Prod telemetry export is off by default unless the bundled SigNoz dependency
-is enabled. Set `signoz.enabled=true` to deploy SigNoz with ORISO-Helm and
-automatically point the backend services at the in-cluster OTLP HTTP collector
-(`caritas-signoz-otel-collector.<namespace>:4318` for the default release
-name):
+With `values-dev.yaml`, `signoz.enabled=true` deploys SigNoz, enables
+application OTLP export by default, and serves the UI at
+`https://<global.domainName>/signoz/`. For an external collector, set
+`global.observability.otlpEnabled=true` and provide its HTTP host and port in
+`global.observability.otlpCollectorHost`.
+
+Layer `values-pre-dev.yaml` over `values-dev.yaml` for Pre-Dev. This keeps both
+chart-managed SigNoz UI ingresses off and the UI Service on `ClusterIP`. The
+separate browser metrics route stays available. Use the existing Pre-Dev
+Kubernetes context to open a loopback connection to SigNoz.
 
 ```bash
-helm dependency build .
-helm upgrade --install caritas ./ -n caritas --create-namespace \
-  --wait-for-jobs --timeout 15m \
-  -f values.yaml -f secrets.yaml \
-  --set signoz.enabled=true
+kubectl --context "$PRE_DEV_KUBE_CONTEXT" -n caritas port-forward \
+  --address=127.0.0.1 service/caritas-signoz 18080:8080
 ```
 
-The SigNoz UI is exposed at `https://signoz.<global.domainName>` by the parent
-chart ingress. If SigNoz is deployed somewhere else, leave `signoz.enabled=false`
-and set both `global.observability.otlpEnabled=true` and
-`global.observability.otlpCollectorHost=<collector-host>:4318`. No
-`secrets.yaml` change is required for the bundled default SigNoz install.
+Open `http://127.0.0.1:18080/signoz/` and sign in with your existing SigNoz
+account. Later values and `--set` options take precedence, so check the final
+release inputs for any UI exposure overrides.
 
-The KDG-safe pseudonymization pipeline that would make turning production
-telemetry on safe is built but also off by default
-(`global.observability.telemetryPseudonymizationEnabled`) — see
-`docs/observability-prod-pseudonymization.md` for exactly what is
-pseudonymized/dropped and the sign-off steps before either flag is flipped
-for prod.
+After an authorized rollout, verify the applied Helm revision, the private
+Service and every ingress or gateway route to it. Check `/signoz/`, its
+JavaScript asset and the dashboard API from both the public host and loopback.
+The public app can return its own HTML for `/signoz/`, so check the service
+identity as well as HTTP status. Verify the RUM path independently.
+[Pre-Dev operations hardening](https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/304)
+
+Layer `values-prod.yaml` over the base values for production. With that overlay,
+`signoz.enabled=true` can prepare the internal SigNoz services while the Java
+service OTLP exporters and the ORISO SigNoz ingress default to off. The
+historical pseudonymization pipeline in [Helm PR #65](https://github.com/OpenResilienceInitiative/ORISO-Helm/pull/65)
+targeted a previous collector template. The current chart needs a verified
+privacy pipeline, retention, backup and restore, and authenticated UI access
+before production activation. See [E2E issue #99, F.4](https://github.com/OpenResilienceInitiative/ORISO-E2E/issues/99).
