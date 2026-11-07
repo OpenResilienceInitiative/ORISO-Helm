@@ -216,8 +216,9 @@ days by default, and no query in the retained `system.query_log` window
 (2026-11-03 to 2026-11-06) selects from it. SigNoz does not use it.
 
 The setting stops new rows, but the existing table stays on disk. After the
-rollout, the operator drops it by hand, using the same wait-and-confirm steps as
-`metric_log` above (rollout finished, configuration active, one pod at a time):
+rollout and explicit approval for the table drop, the operator removes it by
+hand, using the same wait-and-confirm steps as `metric_log` above (rollout
+finished, configuration active, one pod at a time):
 
 ```bash
 POD=chi-caritas-clickhouse-cluster-0-0-0
@@ -228,9 +229,17 @@ kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP 
 
 The configuration command must print `Not found: trace_log` before the drop.
 Repeat for each ClickHouse pod. Afterwards `system.trace_log` must not exist
-and the Dev disk use of ClickHouse falls by about 8 GiB. To get the profiler
-data back (for example for a ClickHouse support case), remove the file from
-`values-dev.yaml` and upgrade.
+and the Dev disk use of ClickHouse falls by about 8 GiB. To resume profiler
+logging, set the contents of `config.d/99-oriso-disable-trace-log.xml` in
+`values-dev.yaml` to `<clickhouse/>`. Keeping the key with an empty config makes
+this an explicit overlay change that the drift check can verify.
+
+Regenerate the overlay with `python3 scripts/observability_overlay.py
+values-dev.yaml > /root/observability-dev.yaml` and rerun the rollout drift
+check. In the server-side dry run, confirm that the fragment has no
+`<trace_log remove="1"/>` directive. After the upgrade, verify that
+`clickhouse extract-from-config --config-file /etc/clickhouse-server/config.xml
+--key trace_log.table` returns `trace_log` on each ClickHouse pod.
 
 ## Rollback
 

@@ -82,7 +82,10 @@ def main() -> int:
             return 1
     # The default chart must keep writing it: removal is Dev-only.
     default = [d for d in render() if d.get("kind") == "ClickHouseInstallation"]
-    if default and DEV_TRACE_LOG_FILE in default[0]["spec"]["configuration"]["files"]:
+    if len(default) != 1:
+        print(f"expected one default ClickHouseInstallation, found {len(default)}", file=sys.stderr)
+        return 1
+    if DEV_TRACE_LOG_FILE in default[0]["spec"]["configuration"]["files"]:
         print("trace_log removal must not apply outside Dev", file=sys.stderr)
         return 1
     print("Dev ClickHouse system logs ok")
