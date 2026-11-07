@@ -105,6 +105,20 @@ kubectl get pv | grep -E 'signoz|clickhouse|zookeeper'   # RECLAIM POLICY = Reta
 `scripts/signoz_runtime_acceptance.py` (see `signoz-runtime-acceptance.md`)
 remains the full gate.
 
+## nginx metrics (ingress-nginx)
+
+The ingress controller runs in the namespace `ingress-nginx`, outside the Helm
+release. `global.observability.externalIngressNginxNamespace: ingress-nginx`
+(Dev) makes the cluster collector scrape its pod IPs on port 10254. The chart
+cannot switch metrics on in the controller: it must run with
+`--enable-metrics=true` (Dev does since 2026-11-06). The collector's cluster
+ClusterRole already allows `list`/`watch` on pods in all namespaces.
+
+After the rollout, in SigNoz open Metrics and search `nginx_ingress_controller_requests`;
+data from the last 5 minutes must appear. If it does not, check the controller
+args (`kubectl -n ingress-nginx get deploy ingress-nginx-controller -o yaml | grep enable-metrics`)
+and the collector log for `ingress-nginx` scrape errors.
+
 ## ClickHouse memory and old system tables
 
 ClickHouse ran without a memory limit and the kernel killed it on 2026-11-03 when
