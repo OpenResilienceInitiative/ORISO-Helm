@@ -177,15 +177,24 @@ hit the memory limit about 6 times per second on Dev and used about 3 CPU cores.
 Pausing only those merges for two minutes on 2026-11-03 took ClickHouse from 3.17
 to 0.43 cores and the errors from 6.45 per second to 0.
 
-The setting stops new rows, but an existing table keeps merging. Helm `--wait` does not wait for the
-ClickHouse operator, which restarts ClickHouse after the upgrade. Drop only after
-the restart is done and the configuration is active, otherwise the old writer can
-create the table again on its next flush:
+The setting stops new rows, but an existing table keeps merging. Before any
+upgrade that disables or restores a system log, record each ClickHouse pod's
+name, UID and ClickHouse container start time:
 
 ```bash
-kubectl -n caritas rollout status statefulset/chi-caritas-clickhouse-cluster-0-0 --timeout=10m
-kubectl -n caritas get pods -o name | grep '^pod/chi-caritas-clickhouse-cluster-'
+kubectl -n caritas get pods -o json | jq -r '
+  .items[] | select(.metadata.name | startswith("chi-caritas-clickhouse-cluster-"))
+  | .metadata as $pod
+  | .status.containerStatuses[] | select(.name == "clickhouse")
+  | [$pod.name, $pod.uid, .state.running.startedAt, .ready] | @tsv'
 ```
+
+After the upgrade, wait for the operator to reconcile the ClickHouse
+installation and rerun the command. For each pod, require `ready=true` and a
+different UID or a later container start time. Helm can finish before the
+operator starts a restart. Updated configuration files can also appear while
+the old server is still running. Wait for every restart before checking the
+active files or dropping a table.
 
 For every listed pod, confirm `metric_log` is absent from the active configuration,
 then inspect its local tables. ClickHouse may have renamed older versions with a
@@ -234,12 +243,20 @@ logging, set the contents of `config.d/99-oriso-disable-trace-log.xml` in
 `values-dev.yaml` to `<clickhouse/>`. Keeping the key with an empty config makes
 this an explicit overlay change that the drift check can verify.
 
-Regenerate the overlay with `python3 scripts/observability_overlay.py
-values-dev.yaml > /root/observability-dev.yaml` and rerun the rollout drift
-check. In the server-side dry run, confirm that the fragment has no
-`<trace_log remove="1"/>` directive. After the upgrade, verify that
-`clickhouse extract-from-config --config-file /etc/clickhouse-server/config.xml
---key trace_log.table` returns `trace_log` on each ClickHouse pod.
+Regenerate the overlay and rerun the rollout drift check:
+
+```bash
+python3 scripts/observability_overlay.py values-dev.yaml > /root/observability-dev.yaml
+```
+
+In the server-side dry run, confirm that the fragment has no
+`<trace_log remove="1"/>` directive. Record the pod identities before the
+upgrade and confirm each ClickHouse restart using the procedure above. Then
+verify that the active configuration reports `trace_log` on every pod:
+
+```bash
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse extract-from-config --config-file /etc/clickhouse-server/config.xml --key trace_log.table
+```
 
 ## Rollback
 
