@@ -153,28 +153,29 @@ disabled environment.
 
 The script runs from a chart checkout with the Python standard library only.
 The key is read from the environment, never from the command line, and is
-never printed. `SIGNOZ_URL` is the SigNoz base URL **including the `/signoz`
-path**: SigNoz `v0.135.1` serves every API route under the path of
+never printed. Pass the SigNoz base URL **including the `/signoz` path** with
+`--api-url` so a workstation's `SIGNOZ_API_URL` or `SIGNOZ_URL` cannot override
+the target. SigNoz `v0.135.1` serves every API route under the path of
 `signoz_global_external__url`, so `https://dev.oriso.org/signoz` through the
 ingress, or `http://localhost:8080/signoz` through a `kubectl port-forward` of
 the `caritas-signoz` service. Without the path every call returns 404.
 
 ```bash
-export SIGNOZ_URL=https://dev.oriso.org/signoz
+signoz_target=https://dev.oriso.org/signoz
 read -rs SIGNOZ_API_KEY && export SIGNOZ_API_KEY
 
 # Read-only, structural: compare stored objects with the catalog, run no queries.
 python3 files/signoz/signoz_observability.py --mode check \
-  --environment dev --cluster-name oriso-dev --skip-telemetry
+  --api-url "$signoz_target" --environment dev --cluster-name oriso-dev --skip-telemetry
 
 # Read-only, full: also execute every query, require fresh collector data,
 # and reject data from the other environment.
 python3 files/signoz/signoz_observability.py --mode check \
-  --environment dev --cluster-name oriso-dev
+  --api-url "$signoz_target" --environment dev --cluster-name oriso-dev
 
 # One synthetic notification for one catalog rule, no stored rule.
 python3 files/signoz/signoz_observability.py --mode test-rule --rule unencrypted-room \
-  --environment dev --cluster-name oriso-dev
+  --api-url "$signoz_target" --environment dev --cluster-name oriso-dev
 ```
 
 `--mode check` performs no writes. It fails on missing, obsolete, or disabled
