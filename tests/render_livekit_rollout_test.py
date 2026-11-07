@@ -74,6 +74,20 @@ def main() -> None:
     # Secret is expected here. The contract is asserted on pre-dev, which
     # carries the cutover.
 
+    pod = livekit["spec"]["template"]["spec"]
+    assert pod["hostNetwork"] is True
+    assert pod["dnsPolicy"] == "ClusterFirstWithHostNet"
+    config = next(
+        document
+        for document in documents
+        if document.get("kind") == "Secret"
+        and document.get("metadata", {}).get("name") == "livekit-config-runtime"
+    )
+    legacy_config = yaml.safe_load(config["stringData"]["config.yaml"])
+    assert legacy_config["webhook"]["urls"] == [
+        "http://matrixrtc-authorization-service:8080/sfu_webhook"
+    ]
+
     rolling = find_livekit(
         render(
             "--set",
