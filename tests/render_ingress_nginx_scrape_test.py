@@ -5,24 +5,23 @@ from __future__ import annotations
 
 import sys
 
-import yaml
-
 import render_signoz_k8s_infra_test as base
+
+COLLECTOR = "caritas-k8s-infra-otel-deployment"
+INGRESS_RECEIVER = "prometheus/oriso-ingress-nginx"
+
+
+def collector_config(items: list[dict]) -> dict:
+    return base.parse_config(
+        base.find(items, "ConfigMap", COLLECTOR),
+        "otel-deployment-config.yaml",
+    )
 
 
 def cluster_config(*extra: str) -> dict:
-    items = base.documents(
-        base.render(signoz_enabled=True, infra_enabled=True, extra=extra)
+    return collector_config(
+        base.documents(base.render(signoz_enabled=True, infra_enabled=True, extra=extra))
     )
-    maps = [
-        item
-        for item in items
-        if item.get("kind") == "ConfigMap"
-        and "prometheus/oriso-apps" in "".join((item.get("data") or {}).values())
-    ]
-    assert maps, "no rendered cluster collector ConfigMap"
-    text = next(v for v in maps[0]["data"].values() if "prometheus/oriso-apps" in v)
-    return yaml.safe_load(text)
 
 
 def dev_cluster_docs() -> list[dict]:
@@ -37,6 +36,15 @@ def dev_cluster_docs() -> list[dict]:
     )
 
 
+def assert_ingress_scrape(config: dict) -> None:
+    job = config["receivers"][INGRESS_RECEIVER]["config"]["scrape_configs"][0]
+    assert job["job_name"] == "ingress-nginx"
+    discovery = job["kubernetes_sd_configs"][0]
+    assert discovery["role"] == "pod"
+    assert discovery["namespaces"]["names"] == ["ingress-nginx"]
+    assert INGRESS_RECEIVER in config["service"]["pipelines"]["metrics/apps"]["receivers"]
+
+
 def main() -> None:
     metrics = ("--set", "global.observability.appMetrics=true")
     on = cluster_config(
@@ -44,37 +52,43 @@ def main() -> None:
         "--set-string",
         "global.observability.externalIngressNginxNamespace=ingress-nginx",
     )
-    job = on["receivers"]["prometheus/oriso-ingress-nginx"]["config"]["scrape_configs"][0]
-    assert job["job_name"] == "ingress-nginx"
-    assert job["kubernetes_sd_configs"][0]["namespaces"]["names"] == ["ingress-nginx"]
-    assert "prometheus/oriso-ingress-nginx" in on["service"]["pipelines"]["metrics/apps"]["receivers"]
+    assert_ingress_scrape(on)
 
     off = cluster_config(*metrics)
-    assert "prometheus/oriso-ingress-nginx" not in off["receivers"]
-    assert "prometheus/oriso-ingress-nginx" not in off["service"]["pipelines"]["metrics/apps"]["receivers"]
+    assert INGRESS_RECEIVER not in off["receivers"]
+    assert INGRESS_RECEIVER not in off["service"]["pipelines"]["metrics/apps"]["receivers"]
 
     without_app_metrics = cluster_config(
         "--set", "global.observability.dbMetrics=true",
         "--set-string", "global.observability.externalIngressNginxNamespace=ingress-nginx",
     )
-    assert "prometheus/oriso-ingress-nginx" not in without_app_metrics["receivers"]
+    assert INGRESS_RECEIVER not in without_app_metrics["receivers"]
     # Dev turns the scrape on, and the cluster collector may list/watch pods in
     # every namespace (the scrape discovers pods in ingress-nginx).
     docs = dev_cluster_docs()
-    dev_maps = [
-        d for d in docs
-        if d.get("kind") == "ConfigMap"
-        and "prometheus/oriso-ingress-nginx" in "".join((d.get("data") or {}).values())
-    ]
-    assert dev_maps, "values-dev.yaml must enable the ingress-nginx scrape"
-    roles = [
-        d for d in docs
-        if d.get("kind") == "ClusterRole" and d["metadata"]["name"] == "caritas-k8s-infra-otel-deployment-caritas"
-    ]
-    assert roles, "cluster collector ClusterRole missing"
-    pod_rules = [r for r in roles[0]["rules"] if "pods" in r.get("resources", [])]
-    assert pod_rules and {"list", "watch"} <= set(pod_rules[0]["verbs"]), "collector cannot list/watch pods"
-    print("PASS: ingress-nginx scrape is opt-in and needs appMetrics")
+    assert_ingress_scrape(collector_config(docs))
+    deployment = base.find(docs, "Deployment", COLLECTOR)
+    namespace = deployment["metadata"]["namespace"]
+    role_name = f"{COLLECTOR}-{namespace}"
+    role = base.find(docs, "ClusterRole", role_name)
+    assert any(
+        "" in rule.get("apiGroups", [])
+        and "pods" in rule.get("resources", [])
+        and {"list", "watch"} <= set(rule["verbs"])
+        for rule in role["rules"]
+    ), "collector cannot list/watch pods"
+    binding = base.find(docs, "ClusterRoleBinding", role_name)
+    assert binding["roleRef"] == {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "ClusterRole",
+        "name": role_name,
+    }
+    assert {
+        "kind": "ServiceAccount",
+        "name": deployment["spec"]["template"]["spec"]["serviceAccountName"],
+        "namespace": namespace,
+    } in binding["subjects"], "collector service account is missing from the binding"
+    print("PASS: Dev attaches the opt-in ingress-nginx scrape to its bound cluster collector")
 
 
 if __name__ == "__main__":
