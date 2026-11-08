@@ -29,12 +29,44 @@ global:
   # matrix.matrixServerName: REQUIRED at install (same host as the Matrix identity below)
   observability:
     otlpEnabled: false
-    # Installing SigNoz for preparation must leave application export off.
+    # Installing SigNoz for preparation leaves the signal producers off.
     autoEnableWithSignoz: false
+    otlpCollectorHost: ""
     deploymentEnvironment: "production"
+    appMetrics: false
+    dbMetrics: false
+    webVitals:
+      enabled: false
+    e2eTraceIngest:
+      enabled: false
+
+signozCollector:
+  enabled: false
 
 signoz:
   orisoIngress:
+    enabled: false
+  orisoObservability:
+    enabled: false
+  signoz:
+    ingress:
+      enabled: false
+    service:
+      type: ClusterIP
+  otelCollector:
+    replicaCount: 0
+    autoscaling:
+      enabled: false
+    ingress:
+      enabled: false
+    service:
+      type: ClusterIP
+    ports:
+      otlp-rum:
+        enabled: false
+      otlp-e2e:
+        enabled: false
+  signoz-otel-gateway:
     enabled: false
 
 agencyService:

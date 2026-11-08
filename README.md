@@ -170,9 +170,20 @@ identity as well as HTTP status. Verify the RUM path independently.
 [Pre-Dev operations hardening](https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/304)
 
 Layer `values-prod.yaml` over the base values for production. With that overlay,
-`signoz.enabled=true` can prepare the internal SigNoz services while the Java
-service OTLP exporters and the ORISO SigNoz ingress default to off. The
-historical pseudonymization pipeline in [Helm PR #65](https://github.com/OpenResilienceInitiative/ORISO-Helm/pull/65)
-targeted a previous collector template. The current chart needs a verified
-privacy pipeline, retention, backup and restore, and authenticated UI access
-before production activation. See [E2E issue #99, F.4](https://github.com/OpenResilienceInitiative/ORISO-E2E/issues/99).
+`signoz.enabled=true` prepares the internal UI and data stores. The bundled
+collector has zero replicas and the overlay disables its autoscaler, public
+ingresses, gateway, and Java, infrastructure and browser exporters. The UI and
+collector Services use `ClusterIP`.
+
+After the activation requirements are verified, local Java export needs
+`global.observability.otlpEnabled=true` and a positive
+`signoz.otelCollector.replicaCount`. An explicitly configured independent
+`global.observability.otlpCollectorHost` can receive Java export with the
+bundled collector still dormant. Local infrastructure and browser producers
+require a running bundled collector. Browser metrics also require the dedicated
+`signoz.otelCollector.ports.otlp-rum.enabled` Service port.
+
+Production activation requires a verified privacy pipeline on the current
+collector, retention, backup and restore, and authenticated UI access. The
+historical pseudonymization pipeline targeted an earlier collector.
+[Historical collector PR](https://github.com/OpenResilienceInitiative/ORISO-Helm/pull/65) · [Production acceptance](https://github.com/OpenResilienceInitiative/ORISO-E2E/issues/99)

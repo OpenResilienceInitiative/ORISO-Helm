@@ -40,9 +40,6 @@ global:
     matrixServerName: "predev.oriso.org"
 
 signoz:
-  # Operators use the internal Service over a loopback port-forward (ORISO-Helm#304).
-  orisoIngress:
-    enabled: false
   signoz:
     ingress:
       enabled: false
@@ -51,6 +48,9 @@ signoz:
     env:
       # Keep the /signoz base path for the internal UI.
       signoz_global_external__url: "https://predev.oriso.org/signoz"
+  # Operators use the internal Service over a loopback port-forward (ORISO-Helm#304).
+  orisoIngress:
+    enabled: false
   otelCollector:
     additionalEnvs:
       ORISO_DEPLOYMENT_ENVIRONMENT: "pre-dev"
