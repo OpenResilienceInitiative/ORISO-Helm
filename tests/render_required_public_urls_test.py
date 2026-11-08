@@ -285,7 +285,16 @@ def assert_public_urls_match(docs: list[dict], domain: str, explicit: dict, labe
 def test_committed_overlays_render_with_their_domain() -> None:
     for overlay, expected in OVERLAYS.items():
         docs = rendered(
-            helm_template("-f", os.path.join(CHART_DIR, overlay)), overlay
+            helm_template(
+                *(
+                    ("-f", os.path.join(CHART_DIR, "values-dev.yaml"))
+                    # Pre-Dev is deployed as an overlay on top of Dev.
+                    if overlay == "values-pre-dev.yaml"
+                    else ()
+                ),
+                "-f", os.path.join(CHART_DIR, overlay),
+            ),
+            overlay
         )
         assert_public_urls_match(docs, expected["domain"], expected["explicit"], overlay)
 

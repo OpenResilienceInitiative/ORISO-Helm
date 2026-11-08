@@ -30,6 +30,7 @@ class ReconcileClientsTest(unittest.TestCase):
         self.fail_mapping = False
         self.bad_claims = {}
         self.bad_claims_client = None
+        self.admin_permissions = False
         outer = self
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_): pass
@@ -57,6 +58,8 @@ class ReconcileClientsTest(unittest.TestCase):
                     elif values.get('client_id') != ['admin-cli'] or values.get('username') != ['master-recovery']:
                         status = 403
                     else: answer = {'access_token': 'fixture-master-session'}
+                elif path == '/admin/realms/online-beratung' and self.command == 'GET':
+                    answer = {'realm': 'online-beratung', 'adminPermissionsEnabled': outer.admin_permissions}
                 elif '/admin/realms/online-beratung/' in path:
                     key = path.split('/admin/realms/online-beratung/')[1]
                     parts = key.split('/')
@@ -224,6 +227,25 @@ class ReconcileClientsTest(unittest.TestCase):
             self.assertEqual({k:[r['name'] for r in v['mappings']] for k,v in mapping['clientMappings'].items()},
                              {'realm-management':['manage-realm']})
         self.assertNotIn('smtp-sync-fixture-secret-32-characters',result.stdout+result.stderr)
+
+    def test_native_admin_permissions_block_the_manage_realm_grant(self):
+        self.prepare();self.events.clear();self.admin_permissions=True
+        result=self.run_helper()
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('SMTP_SYNC_FGAP_ESCALATION',result.stdout+result.stderr)
+        self.assertEqual(self.mutations(),[])
+        self.assertNotIn('smtp-sync',self.clients)
+
+    def test_native_admin_permissions_leave_an_existing_smtp_sync_binding_alone(self):
+        # Changing the live binding is the boundary decision (Helm#367/#423), not this hook's.
+        self.prepare();self.assertEqual(self.run_helper().returncode,0)
+        existing=copy.deepcopy((self.clients['smtp-sync'],self.role_maps['sa-smtp-sync'],self.scope_maps['smtp-sync']))
+        self.events.clear();self.admin_permissions=True
+        result=self.run_helper()
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('SMTP_SYNC_FGAP_ESCALATION',result.stdout+result.stderr)
+        self.assertEqual(self.mutations(),[])
+        self.assertEqual((self.clients['smtp-sync'],self.role_maps['sa-smtp-sync'],self.scope_maps['smtp-sync']),existing)
 
     def test_smtp_sync_surplus_roles_are_removed(self):
         self.prepare();self.assertEqual(self.run_helper().returncode,0)

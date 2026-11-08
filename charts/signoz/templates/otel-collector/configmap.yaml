@@ -1,3 +1,9 @@
+{{- $orisoPolicy := fromYaml (.Files.Get "files/oriso-otel-collector-policy.yaml") -}}
+{{- $collectorConfig := mergeOverwrite (deepCopy .Values.otelCollector.config) $orisoPolicy -}}
+{{- $receivers := get $collectorConfig "receivers" | default dict -}}
+{{- $_ := unset $receivers "jaeger" -}}
+{{- $_ := unset $receivers "httplogreceiver/heroku" -}}
+{{- $_ := unset $receivers "httplogreceiver/json" -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -6,6 +12,6 @@ metadata:
     {{- include "otelCollector.labels" . | nindent 4 }}
 data:
   otel-collector-config.yaml: |-
-    {{- toYaml .Values.otelCollector.config | nindent 4 }}
+    {{- toYaml $collectorConfig | nindent 4 }}
   otel-collector-opamp-config.yaml: |-
     server_endpoint: "ws://{{ include "signoz.fullname" . }}:4320/v1/opamp"

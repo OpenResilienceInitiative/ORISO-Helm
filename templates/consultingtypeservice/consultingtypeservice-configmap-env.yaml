@@ -2,6 +2,7 @@
 {{- if eq $liquibaseChangeLog "classpath:db/changelog/db.changelog-master.xml" -}}
 {{- $liquibaseChangeLog = "classpath:db/changelog/consultingtypeservice-master.xml" -}}
 {{- end -}}
+{{- $scenarioEnabled := dig "taskIdentities" "enabled" false .Values.global.keycloak -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -14,6 +15,9 @@ data:
   SPRING_LIQUIBASE_CHANGE_LOG: {{ $liquibaseChangeLog | quote }}
   SPRING_LIQUIBASE_CHANGELOG: {{ $liquibaseChangeLog | quote }}
   SPRING_LIQUIBASE_CONTEXTS: {{ default "seed" .Values.consultingTypeService.liquibaseContexts | quote }}
+  # Frontend#1979: per-environment release toggles layered over the stored ones
+  # (`key=true,key2=false`). Empty keeps whatever MongoDB holds.
+  RELEASE_TOGGLE_OVERRIDES: {{ default "" .Values.consultingTypeService.releaseToggleOverrides | quote }}
   TENANT_SERVICE_API_URL: "http://tenantservice.{{ .Release.Namespace }}:8081"
   JAVA_OPTS: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
   SPRING_DATASOURCE_URL: "jdbc:mariadb://mariadb.{{ .Release.Namespace }}:3306/consultingtypeservice"
@@ -24,6 +28,17 @@ data:
   KEYCLOAK_RESOURCE: {{ .Values.consultingTypeService.keycloakResource }}
   KEYCLOAKSERVICE_ADMIN_CLIENTID: {{ .Values.global.keycloak.serviceAdminClientId }}
   KEYCLOAKSERVICE_APP_CLIENTID: {{ .Values.global.keycloak.serviceAppClientId }}
+  {{- if $scenarioEnabled }}
+  # Receiver-side pins for the task tokens issued by UserService. CTS does not
+  # receive client secrets because it only verifies incoming signed tokens.
+  TASK_IDENTITY_MODEL: "FIVE_ACTORS"
+  TASK_IDENTITY_REQUIRED_TASKS: "CONFIG_WIZARD,SMTP_SYNC,SYSTEM_EMAIL_DELIVERY"
+  TASK_IDENTITY_AUDIENCE: "consultingtypeservice"
+  IDENTITY_SETUP_CLIENT_ID: {{ dig "taskIdentities" "setup" "clientId" "" .Values.global.keycloak | quote }}
+  IDENTITY_SETUP_SERVICE_SUBJECT: {{ dig "taskIdentities" "setup" "serviceSubject" "" .Values.global.keycloak | quote }}
+  IDENTITY_MAIL_CLIENT_ID: {{ dig "taskIdentities" "mail" "clientId" "" .Values.global.keycloak | quote }}
+  IDENTITY_MAIL_SERVICE_SUBJECT: {{ dig "taskIdentities" "mail" "serviceSubject" "" .Values.global.keycloak | quote }}
+  {{- end }}
   # No push helper (Helm#420): the keycloak-reconcile-smtp Jobs pull saved settings and acknowledge.
   SMTP_RECONCILE_URL: ""
   SETTING_MAIN_TENANT_SUBDOMAIN_FOR_SINGLE_DOMAIN_MULTITENANCY: {{ .Values.global.keycloak.realm}}

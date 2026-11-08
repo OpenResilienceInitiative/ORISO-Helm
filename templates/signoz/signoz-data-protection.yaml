@@ -1,0 +1,384 @@
+{{- /*
+Keeps SigNoz data across chart mistakes (ORISO SigNoz plan, slice 1.1).
+
+On 2026-10-14 a Dev upgrade recreated the SigNoz volumes; the storage class
+reclaims with Delete, so users, API keys and dashboards were lost.
+
+- retain hook: switches the persistent volumes behind the SigNoz, ClickHouse
+  and ZooKeeper claims to reclaim policy Retain, so a deleted claim leaves its
+  volume (and the data) behind. Helm looks the volumes up at upgrade time and
+  grants the hook get/patch on exactly those volumes, only while the hook
+  runs; with nothing left to switch it renders nothing. A fresh install has
+  no bound volumes yet, so the first upgrade after it does the switch.
+- backup CronJob: copies signoz.db (users, API keys, dashboards, alerts) with
+  SQLite's online backup API into its own claim, which Helm never deletes.
+  It runs on the SigNoz pod's node because the volume is ReadWriteOnce.
+*/ -}}
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $dp := get $signoz "orisoDataProtection" | default dict -}}
+{{- if and (get $signoz "enabled" | default false) (get $dp "enabled" | default false) -}}
+{{- $name := printf "%s-signoz-data-protection" .Release.Name -}}
+{{- /* CronJob names may have 52 characters: the controller appends 11 for each Job. */ -}}
+{{- $cronName := printf "%s-backup" ($name | trunc 45 | trimSuffix "-") -}}
+{{- /* Job names and label values may have 63 characters; the suffix stays readable. */ -}}
+{{- $retainName := printf "%s-retain" ($name | trunc 56 | trimSuffix "-") -}}
+{{- /* The StatefulSet names, with the override rules of the vendored charts (signoz.fullname, common.names.fullname). */ -}}
+{{- $signozSts := include "oriso.signozFullname" . -}}
+{{- $chName := include "oriso.signozClickhouseFullname" . -}}
+{{- /* The claims holding signoz.db, derived like the SigNoz chart's StatefulSet: one per replica, or the
+shared existingClaim; none with PostgreSQL or without persistence. The backup copies ordinal 0's. */ -}}
+{{- $signozValues := get $signoz "signoz" | default dict -}}
+{{- $persistence := get $signozValues "persistence" | default dict -}}
+{{- $sqliteClaim := "" -}}
+{{- $sqliteClaims := list -}}
+{{- if not (dig "postgresql" "enabled" false $signoz) -}}
+{{- if get $persistence "existingClaim" -}}
+{{- $sqliteClaim = get $persistence "existingClaim" -}}
+{{- $sqliteClaims = list $sqliteClaim -}}
+{{- else if (hasKey $persistence "enabled" | ternary (get $persistence "enabled") true) -}}
+{{- $sqliteClaim = printf "signoz-db-%s-0" $signozSts -}}
+{{- range $member := until (int (get $signozValues "replicaCount" | default 1)) -}}
+{{- $sqliteClaims = append $sqliteClaims (printf "signoz-db-%s-%d" $signozSts $member) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /* All claims as <namespace>/<claim>, derived like the vendored charts: every
+ClickHouse shard and replica and every ZooKeeper member, in the namespace
+each chart uses; existingClaim wins, none without persistence. */ -}}
+{{- $clickhouse := get $signoz "clickhouse" | default dict -}}
+{{- $zookeeper := get $clickhouse "zookeeper" | default dict -}}
+{{- $chPersistence := get $clickhouse "persistence" | default dict -}}
+{{- $zkPersistence := get $zookeeper "persistence" | default dict -}}
+{{- $chNamespace := get $clickhouse "namespace" | default .Release.Namespace -}}
+{{- $zkNamespace := get $zookeeper "namespaceOverride" | default .Release.Namespace -}}
+{{- $zkName := get $zookeeper "nameOverride" | default "zookeeper" -}}
+{{- $zkFullname := get $zookeeper "fullnameOverride" | default (contains $zkName .Release.Name | ternary .Release.Name (printf "%s-%s" .Release.Name $zkName)) | trunc 63 | trimSuffix "-" -}}
+{{- /* PostgreSQL and ZooKeeper render existingClaim with tpl in their own chart context; do the same. */ -}}
+{{- $zkRoot := dict "Values" $zookeeper "Release" .Release "Chart" (dict "Name" "zookeeper") "Capabilities" .Capabilities "Template" .Template -}}
+{{- $layout := get $clickhouse "layout" | default dict -}}
+{{- $defaultClaims := list -}}
+{{- range $claim := $sqliteClaims -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" $.Release.Namespace $claim) -}}
+{{- end -}}
+{{- /* SigNoz on PostgreSQL keeps users, dashboards and alerts there instead of signoz.db. */ -}}
+{{- $postgres := get $signoz "postgresql" | default dict -}}
+{{- $pgPersistence := get $postgres "persistence" | default dict -}}
+{{- if and (get $postgres "enabled") (hasKey $pgPersistence "enabled" | ternary (get $pgPersistence "enabled") true) -}}
+{{- if get $pgPersistence "existingClaim" -}}
+{{- $pgRoot := dict "Values" $postgres "Release" .Release "Chart" (dict "Name" "postgresql") "Capabilities" .Capabilities "Template" .Template -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" .Release.Namespace (tpl (get $pgPersistence "existingClaim") $pgRoot)) -}}
+{{- else -}}
+{{- $pgName := get $postgres "nameOverride" | default "postgresql" -}}
+{{- $pgFullname := get $postgres "fullnameOverride" | default (contains $pgName .Release.Name | ternary .Release.Name (printf "%s-%s" .Release.Name $pgName)) | trunc 63 | trimSuffix "-" -}}
+{{- range $member := until (int (get $postgres "replicaCount" | default 1)) -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/pgdata-%s-%d" $.Release.Namespace $pgFullname $member) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if get $chPersistence "existingClaim" -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" $chNamespace (get $chPersistence "existingClaim")) -}}
+{{- else if (hasKey $chPersistence "enabled" | ternary (get $chPersistence "enabled") true) -}}
+{{- range $shard := until (int (get $layout "shardsCount" | default 1)) -}}
+{{- range $replica := until (int (get $layout "replicasCount" | default 1)) -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/data-volumeclaim-template-chi-%s-%s-%d-%d-0" $chNamespace $chName (get $clickhouse "cluster" | default "cluster") $shard $replica) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if (hasKey $zkPersistence "enabled" | ternary (get $zkPersistence "enabled") true) -}}
+{{- if get $zkPersistence "existingClaim" -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" $zkNamespace (tpl (get $zkPersistence "existingClaim") $zkRoot)) -}}
+{{- else -}}
+{{- range $member := until (int (get $zookeeper "replicaCount" | default 1)) -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/data-%s-%d" $zkNamespace $zkFullname $member) -}}
+{{- end -}}
+{{- end -}}
+{{- /* The dedicated transaction log, when ZooKeeper has one. */ -}}
+{{- $zkLog := get $zkPersistence "dataLogDir" | default dict -}}
+{{- if get $zkLog "existingClaim" -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" $zkNamespace (tpl (get $zkLog "existingClaim") $zkRoot)) -}}
+{{- else if get $zookeeper "dataLogDir" -}}
+{{- range $member := until (int (get $zookeeper "replicaCount" | default 1)) -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/data-log-%s-%d" $zkNamespace $zkFullname $member) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /* An explicit claims list names claims in the release namespace unless given as <namespace>/<claim>. */ -}}
+{{- $claims := list -}}
+{{- range $claim := get $dp "claims" | default $defaultClaims -}}
+{{- $claims = append $claims (contains "/" $claim | ternary $claim (printf "%s/%s" $.Release.Namespace $claim)) -}}
+{{- end -}}
+{{- $image := required "signoz.orisoDataProtection.image is required" (get $dp "image") -}}
+{{- $backup := get $dp "backup" | default dict -}}
+{{- $pending := list -}}
+{{- range $entry := $claims -}}
+{{- $pvc := lookup "v1" "PersistentVolumeClaim" (index (splitList "/" $entry) 0) (index (splitList "/" $entry) 1) -}}
+{{- $pvName := dig "spec" "volumeName" "" $pvc -}}
+{{- if $pvName -}}
+{{- $pv := lookup "v1" "PersistentVolume" "" $pvName -}}
+{{- if ne (dig "spec" "persistentVolumeReclaimPolicy" "" $pv) "Retain" -}}
+{{- $pending = append $pending $pvName -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # The claims whose volumes the retain hook keeps.
+    oriso.org/retain-claims: {{ join "," $claims | quote }}
+data:
+  backup.py: |
+    import glob, gzip, os, shutil, sqlite3, time
+    # Leftovers of an interrupted run never look like a finished backup.
+    for stale in glob.glob("/backup/.signoz-*"):
+        os.remove(stale)
+    src = sqlite3.connect("file:/signoz/signoz.db?mode=ro", uri=True)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    tmp = f"/backup/.signoz-{stamp}.db"
+    dst = sqlite3.connect(tmp)
+    src.backup(dst)
+    ok = dst.execute("PRAGMA integrity_check").fetchone()[0]
+    dst.close()
+    src.close()
+    if ok != "ok":
+        os.remove(tmp)
+        raise SystemExit(f"integrity_check failed: {ok}")
+    part = f"/backup/.signoz-{stamp}.db.gz.part"
+    with open(tmp, "rb") as f, gzip.open(part, "wb") as g:
+        shutil.copyfileobj(f, g)
+    with open(part, "rb") as f:
+        os.fsync(f.fileno())
+    os.replace(part, f"/backup/signoz-{stamp}.db.gz")
+    os.remove(tmp)
+    keep = int(os.environ["KEEP"])
+    for old in sorted(glob.glob("/backup/signoz-*.db.gz"))[:-keep]:
+        os.remove(old)
+    print("backups:", *sorted(os.listdir("/backup")), sep="\n  ")
+{{- if $pending }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $retainName }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ printf "%s-retain-%s" $name .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    resourceNames:
+      {{- toYaml $pending | nindent 6 }}
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-retain-%s" $name .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ printf "%s-retain-%s" $name .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $retainName }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $retainName }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app: {{ $retainName }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $retainName }}
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: retain
+          image: {{ $image | quote }}
+          command: ["python3", "-c"]
+          args:
+            - |
+              import json, os, ssl, urllib.request
+              sa = "/var/run/secrets/kubernetes.io/serviceaccount"
+              ctx = ssl.create_default_context(cafile=f"{sa}/ca.crt")
+              headers = {"Authorization": "Bearer " + open(f"{sa}/token").read(),
+                         "Content-Type": "application/merge-patch+json"}
+              for pv in os.environ["VOLUMES"].split():
+                  url = f"https://kubernetes.default.svc/api/v1/persistentvolumes/{pv}"
+                  body = json.dumps({"spec": {"persistentVolumeReclaimPolicy": "Retain"}}).encode()
+                  req = urllib.request.Request(url, data=body, method="PATCH", headers=headers)
+                  spec = json.load(urllib.request.urlopen(req, context=ctx, timeout=20))["spec"]
+                  print(pv, spec["claimRef"]["name"], spec["persistentVolumeReclaimPolicy"])
+          env:
+            - name: VOLUMES
+              value: {{ join " " $pending | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+{{- end }}
+{{- if and (get $backup "enabled" | default false) $sqliteClaim }}
+{{- /* A second pod can never mount a ReadWriteOncePod claim beside SigNoz, so the backup would stay Pending. */ -}}
+{{- $sqliteModes := get $persistence "accessModes" | default list -}}
+{{- if get $persistence "existingClaim" -}}
+{{- $sqliteModes = dig "spec" "accessModes" $sqliteModes (lookup "v1" "PersistentVolumeClaim" .Release.Namespace $sqliteClaim) -}}
+{{- end -}}
+{{- if has "ReadWriteOncePod" $sqliteModes -}}
+{{- fail "signoz.orisoDataProtection.backup needs the SQLite claim to allow a second pod: ReadWriteOncePod blocks it. Use ReadWriteOnce or set backup.enabled=false" -}}
+{{- end -}}
+{{- /* The backup claim uses the class of the SigNoz claim (global first, "-" = none, as in the
+SigNoz chart), else the class the SQLite claim really has (an existingClaim may carry one without
+any configured); a bound backup claim keeps its class, which Kubernetes does not allow to change. */ -}}
+{{- $backupClass := get (get .Values "global" | default dict) "storageClass" | default (get $persistence "storageClass") | default "" -}}
+{{- if not $backupClass -}}
+{{- $sourceClaim := lookup "v1" "PersistentVolumeClaim" .Release.Namespace $sqliteClaim -}}
+{{- $backupClass = dig "spec" "storageClassName" "" $sourceClaim -}}
+{{- end -}}
+{{- $existingBackup := lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "%s-backup" $name) -}}
+{{- if $existingBackup -}}
+{{- /* Keep the field exactly: an explicit "" must stay "", an absent field stays absent. */ -}}
+{{- $backupSpec := get $existingBackup "spec" | default dict -}}
+{{- $backupClass = hasKey $backupSpec "storageClassName" | ternary (get $backupSpec "storageClassName" | default "-") "" -}}
+{{- end }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-backup
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # Uninstalling the release must not take the backups with it.
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ get $backup "size" | default "1Gi" }}
+  {{- if eq $backupClass "-" }}
+  storageClassName: ""
+  {{- else if $backupClass }}
+  storageClassName: {{ $backupClass | quote }}
+  {{- end }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $cronName }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  schedule: {{ get $backup "schedule" | default "30 2 * * *" | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 900
+      template:
+        metadata:
+          labels:
+            app: {{ $cronName }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/component: {{ get $signozValues "name" | default "signoz" }}
+                      app.kubernetes.io/instance: {{ .Release.Name }}
+                      # The pod that has ordinal 0's ReadWriteOnce claim attached.
+                      statefulset.kubernetes.io/pod-name: {{ printf "%s-0" $signozSts }}
+          {{- /* The affinity puts the pod on the SigNoz node, so it needs the taints SigNoz tolerates there. */}}
+          {{- with get $signozValues "tolerations" }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # signoz.db and its WAL belong to root, like the SigNoz container.
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: {{ $image | quote }}
+              command: ["python3", "/scripts/backup.py"]
+              env:
+                - name: KEEP
+                  value: {{ get $backup "keep" | default 14 | toString | quote }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 128Mi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: signoz-db
+                  mountPath: /signoz
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: scripts
+              configMap:
+                name: {{ $name }}
+            - name: signoz-db
+              persistentVolumeClaim:
+                claimName: {{ $sqliteClaim }}
+            - name: backup
+              persistentVolumeClaim:
+                claimName: {{ $name }}-backup
+{{- end }}
+{{- end }}

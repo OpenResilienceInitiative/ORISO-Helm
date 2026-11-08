@@ -26,3 +26,12 @@ charts/signoz/charts/redpanda/charts/console/templates/NOTES.txt
 *.woff2
 *.eot
 *.otf
+# Never read at render time: templates only reach into files/ and
+# keycloak-resources/. Packaging them pushed the release secret past the
+# 1MiB limit on 2.0.13 (v42 refused by the API server).
+tests/
+scripts/
+runbooks/
+docs/
+demo-baseline/
+test-data/

@@ -18,6 +18,9 @@ spec:
         app: keycloak
       annotations:
         checksum/email-identity: {{ printf "%s\x00%s" (include "oriso.emailBrandingName" .) (include "oriso.emailLegalOrganisationName" .) | sha256sum | quote }}
+        {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
+        {{- include "oriso.appMetrics.podAnnotations" (dict "job" "keycloak" "port" 9000 "path" "/auth/metrics") | nindent 8 }}
+        {{- end }}
     spec:
       terminationGracePeriodSeconds: 60
       {{- if .Values.keycloakSecurityContext }}
@@ -38,6 +41,11 @@ spec:
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           ports:
             - containerPort: 8080
+            {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
+            # Management interface (metrics), cluster-internal only; no ingress routes it.
+            - name: management
+              containerPort: 9000
+            {{- end }}
           {{- if .Values.keycloakResources }}
           resources:
             {{- toYaml .Values.keycloakResources | nindent 12 }}
@@ -87,6 +95,14 @@ spec:
                   name: keycloak-secret-env
             - name: KC_HTTP_RELATIVE_PATH
               value: "/auth"
+            {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
+            # Served on the management port 9000 under the relative path: /auth/metrics.
+            - name: KC_METRICS_ENABLED
+              value: "true"
+            # Login/2FA event counters tagged by realm, IdP and client only, never by user.
+            - name: KC_EVENT_METRICS_USER_ENABLED
+              value: "true"
+            {{- end }}
             - name: KC_PROXY_HEADERS
               value: "xforwarded"
             - name: KC_HTTP_ENABLED

@@ -13,6 +13,9 @@ spec:
       app: admin
   template:
     metadata:
+      annotations:
+        # Runtime config is read at container start; roll pods when it changes.
+        checksum/config: {{ include (print $.Template.BasePath "/admin/admin-configmap.yaml") . | sha256sum }}
       labels:
         app: admin
         tier: frontend

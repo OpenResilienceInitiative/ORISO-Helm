@@ -46,6 +46,15 @@ spec:
               protocol: TCP
           env:
             {{- include "oriso.signozCollector.env" (dict "root" $ "component" "otel-deployment" "attrs" "signoz.component=$(SIGNOZ_COMPONENT),k8s.cluster.name=$(K8S_CLUSTER_NAME)") | nindent 12 }}
+            {{- if eq (include "oriso.dbMetrics.enabled" .) "true" }}
+            {{- range $store := list "mariadb" "mongodb" "rabbitmq" }}
+            - name: {{ printf "DBMON_%s_PASSWORD" (upper $store) }}
+              valueFrom:
+                secretKeyRef:
+                  name: oriso-db-monitoring
+                  key: {{ printf "%s-password" $store }}
+            {{- end }}
+            {{- end }}
           securityContext:
             runAsNonRoot: true
             allowPrivilegeEscalation: false
