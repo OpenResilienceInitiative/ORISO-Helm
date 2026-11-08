@@ -50,7 +50,7 @@ telemetry-dependent proof has its own switch:
 | Value | Default | Effect |
 |---|---|---|
 | `signoz.orisoObservability.enabled` | `false` | Render the ConfigMap and the hook Job. |
-| `signoz.orisoObservability.conformanceCheck` | `false` | Also execute every stored query, require fresh collector data, and reject data from the other environment. |
+| `signoz.orisoObservability.conformanceCheck` | `false` | Require fresh data and the declared grouping dimensions on every dashboard panel. Execute the alert queries and verify collector freshness and separation. |
 | `signoz.orisoObservability.channelName` | `oriso-alerts-slack` | Existing channel the rules route to. |
 | `signoz.orisoObservability.apiKeySecret.name` / `.key` | `""` / `apiKey` | Existing Secret with the SigNoz API key; the name is required when on. |
 
@@ -58,6 +58,10 @@ With `conformanceCheck` off, a hook run upserts dashboards and rules and reads
 every dashboard, rule, the channel, and the routes back against the catalog. It
 does not need telemetry to flow yet. Turn `conformanceCheck` on only after the
 UserService diagnostic metrics and the collectors are live in that environment.
+Exercise the approved scenarios for event-driven panels before running the full
+check. Each dashboard query needs a complete interval with a finite sample in the
+last 15 minutes. Every contributing series must have the panel's declared group
+keys. A numeric zero is valid.
 
 ## API key Secret (created out of band, never in values)
 
@@ -141,8 +145,8 @@ read -rs SIGNOZ_API_KEY && export SIGNOZ_API_KEY
 python3 files/signoz/signoz_observability.py --mode check \
   --environment dev --cluster-name oriso-dev --skip-telemetry
 
-# Read-only, full: also execute every query, require fresh collector data,
-# and reject data from the other environment.
+# Read-only, full: verify fresh grouped dashboard data, execute alert queries,
+# and check collector freshness and environment separation.
 python3 files/signoz/signoz_observability.py --mode check \
   --environment dev --cluster-name oriso-dev
 
