@@ -479,6 +479,76 @@ class CapacityContractTest(unittest.TestCase):
         self.assertEqual(MODULE.MIN_CLICKHOUSE_UNRESERVED_BYTES, capacity["target"])
 
 
+class JavaSignalContractTest(unittest.TestCase):
+    services = ("user-service", "agency-service", "tenant-service", "consulting-type-service")
+    signals = ("logs", "metrics", "traces", "logToTrace")
+
+    def setUp(self) -> None:
+        self.rows = [
+            {"service_name": service, "signal": signal, "samples": "1"}
+            for service in self.services for signal in self.signals
+        ]
+        self.runner = self.enterContext(mock.patch.object(MODULE, "Runner")).return_value
+        self.runner.run.side_effect = self.run_query
+        self.enterContext(mock.patch.object(MODULE, "_clickhouse_pods", return_value=["data-pod"]))
+
+    def run_query(self, command: list[str]) -> mock.Mock:
+        self.assertEqual(command[:7], ["kubectl", "-n", "caritas", "exec", "data-pod", "-c", "clickhouse"])
+        self.assertIn("JSONEachRow", command)
+        sql = command[-1]
+        self.assertIn("signoz_metrics.distributed_samples_v4", sql)
+        self.assertIn("(service_name, trace_id, span_id) GLOBAL IN", sql)
+        self.assertIn("resources_string['deployment.environment'] = 'dev'", sql)
+        return mock.Mock(stdout="\n".join(json.dumps(row) for row in self.rows))
+
+    def run_gate(self, *flags: str) -> dict:
+        argv = ["signoz_runtime_acceptance", "--namespace", "caritas", "--release", "caritas",
+                "--environment", "dev", *flags]
+        output = io.StringIO()
+        with mock.patch.object(MODULE.sys, "argv", argv), redirect_stdout(output):
+            MODULE.main()
+        return json.loads(output.getvalue())
+
+    def test_java_signal_diagnosis_reads_four_services_without_a_probe(self) -> None:
+        report = self.run_gate("--check-java-signals")
+
+        self.assertEqual(report["missing"], [])
+        self.assertEqual(report["services"]["user-service"], dict.fromkeys(self.signals, 1))
+        self.assertEqual((report["freshnessMinutes"], report["correlationMinutes"]), (15, 60))
+        self.runner.run.assert_called_once()
+
+    def test_java_signal_diagnosis_fails_with_the_exact_missing_pair(self) -> None:
+        self.rows = [row for row in self.rows if (
+            row["service_name"], row["signal"]
+        ) != ("tenant-service", "logToTrace")]
+
+        with self.assertRaisesRegex(RuntimeError, "tenant-service/logToTrace"):
+            self.run_gate("--check-java-signals")
+
+    def test_java_signal_diagnosis_rejects_ambiguous_counts(self) -> None:
+        self.rows.append(self.rows[0])
+
+        with self.assertRaisesRegex(RuntimeError, "invalid Java signal readback"):
+            self.run_gate("--check-java-signals")
+
+    def test_full_acceptance_requires_java_evidence_after_probe_cleanup(self) -> None:
+        for method in ("_check_runtime_readiness", "_check_collector_config", "_check_clickhouse_capacity",
+                       "_emit_signal", "_wait_for_readback", "_wait_for_infra_readback"):
+            self.enterContext(mock.patch.object(MODULE, method, return_value={}))
+        self.enterContext(mock.patch.object(MODULE, "_emit_infra_probes", return_value="log-probe"))
+        deleted = self.enterContext(mock.patch.object(MODULE, "_delete_probe_pod"))
+        self.rows = [row for row in self.rows if row["signal"] != "logToTrace"]
+
+        def query_after_cleanup(command: list[str]) -> mock.Mock:
+            deleted.assert_called_once_with(self.runner, "caritas", "log-probe")
+            return self.run_query(command)
+
+        self.runner.run.side_effect = query_after_cleanup
+
+        with self.assertRaisesRegex(RuntimeError, "user-service/logToTrace"):
+            self.run_gate("--cluster-name", "oriso-dev")
+
+
 class RunnerContractTest(unittest.TestCase):
     @mock.patch.object(MODULE.subprocess, "run")
     def test_local_runner_passes_command_once_to_subprocess(
