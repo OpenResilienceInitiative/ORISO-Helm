@@ -32,9 +32,9 @@
       "description": "Collector freshness, Kubernetes resource health, and ClickHouse capacity.",
       "panels": [
         {"id": "collector", "title": "Collector accepted metric points", "metric": "otelcol_receiver_accepted_metric_points", "timeAggregation": "rate", "spaceAggregation": "sum", "groupBy": ["service.name"], "clusterScoped": true},
-        {"id": "pod-cpu", "title": "Pod CPU utilization", "metric": "k8s.pod.cpu.utilization", "timeAggregation": "avg", "spaceAggregation": "max", "groupBy": ["k8s.namespace.name"], "clusterScoped": true},
+        {"id": "pod-cpu", "title": "Pod CPU usage (cores)", "metric": "k8s.pod.cpu.usage", "timeAggregation": "avg", "spaceAggregation": "max", "groupBy": ["k8s.namespace.name"], "clusterScoped": true},
         {"id": "pod-memory", "title": "Pod memory usage", "metric": "k8s.pod.memory.usage", "timeAggregation": "avg", "spaceAggregation": "sum", "groupBy": ["k8s.namespace.name"], "clusterScoped": true},
-        {"id": "node-condition", "title": "Node conditions", "metric": "k8s.node.condition", "timeAggregation": "latest", "spaceAggregation": "max", "groupBy": ["condition", "status"], "clusterScoped": true},
+        {"id": "node-condition", "title": "Node conditions", "metric": "k8s.node.condition", "timeAggregation": "latest", "spaceAggregation": "max", "groupBy": ["condition", "k8s.node.name"], "clusterScoped": true},
         {"id": "clickhouse-free", "title": "ClickHouse PVC available bytes", "metric": "k8s.volume.available", "timeAggregation": "latest", "spaceAggregation": "min", "groupBy": [], "clusterScoped": true, "filter": "k8s.persistentvolumeclaim.name CONTAINS 'clickhouse'"},
         {"id": "clickhouse-capacity", "title": "ClickHouse PVC capacity bytes", "metric": "k8s.volume.capacity", "timeAggregation": "latest", "spaceAggregation": "max", "groupBy": [], "clusterScoped": true, "filter": "k8s.persistentvolumeclaim.name CONTAINS 'clickhouse'"}
       ]

@@ -48,6 +48,7 @@ ALLOWED_GROUPS = {
     "encryption",
     "event_type",
     "k8s.namespace.name",
+    "k8s.node.name",
     "operation",
     "outcome",
     "resource",
