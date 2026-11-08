@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import secrets
 import shlex
 import subprocess
@@ -27,6 +28,10 @@ SUPPRESSED_LOG_BODY = "[ORISO log body suppressed by privacy policy]"
 # Match the managed ClickHouse capacity alert's 2 GiB floor.
 MIN_CLICKHOUSE_UNRESERVED_BYTES = 2 * 1024**3
 CLICKHOUSE_UNKNOWN_SPACE = 2**64 - 1
+CLICKHOUSE_LOG_TABLES = ("query_log", "text_log", "trace_log", "metric_log", "asynchronous_metric_log")
+CLICKHOUSE_LOG_RETENTION_DAYS = 3
+MAX_CLICKHOUSE_DISK_USED_PERCENT = 75
+MAX_CLICKHOUSE_LOG_BYTES = 10 * 1024**3
 JAVA_SERVICES = ("user-service", "agency-service", "tenant-service", "consulting-type-service")
 JAVA_SIGNALS = ("logs", "metrics", "traces", "logToTrace")
 JAVA_FRESHNESS_MINUTES = 15
@@ -788,6 +793,91 @@ def _check_clickhouse_capacity(runner: Runner, namespace: str, pod: str) -> None
         )
 
 
+def _clickhouse_byte_count(value: Any) -> int:
+    if isinstance(value, str) and value.isascii() and value.isdecimal():
+        value = int(value)
+    if type(value) is not int or not 0 <= value < CLICKHOUSE_UNKNOWN_SPACE:
+        raise ValueError("invalid ClickHouse byte count")
+    return value
+
+
+def _clickhouse_log_ttl_days(engine: str) -> int | None:
+    # Ignore keywords inside quotes. ClickHouse formats INTERVAL DAY as toIntervalDay.
+    unquoted = re.sub(
+        r"'(?:\\.|''|[^'\\])*'|`(?:\\.|``|[^`\\])*`" r'|"(?:\\.|""|[^"\\])*"',
+        "''",
+        engine,
+    )
+    definition = re.split(r"\s+SETTINGS\s+", unquoted, maxsplit=1)[0]
+    ttl = re.search(
+        r"\sTTL\s+event_date\s*\+\s*toIntervalDay\(([0-9]+)\)(?:\s+DELETE)?\s*$",
+        definition,
+    )
+    return int(ttl[1]) if ttl else None
+
+
+def _read_clickhouse_retention(runner: Runner, namespace: str, pod: str) -> dict[str, Any]:
+    def rows(query: str) -> list[dict[str, Any]]:
+        output = _clickhouse_query(runner, namespace, pod, query, "JSONEachRow")
+        return [json.loads(line) for line in output.splitlines()]
+
+    names = ", ".join(map(_sql_literal, CLICKHOUSE_LOG_TABLES))
+    family = f"^({'|'.join(CLICKHOUSE_LOG_TABLES)})(_[0-9]+)?$"
+    try:
+        [disk] = rows("SELECT type, total_space, free_space FROM system.disks WHERE name = 'default'")
+        total, free = map(_clickhouse_byte_count, (disk["total_space"], disk["free_space"]))
+        if disk["type"] != "Local" or total == 0 or free > total:
+            raise ValueError("invalid default local disk")
+        ttl_days = {}
+        for row in rows(
+            "SELECT name, engine_full FROM system.tables "
+            f"WHERE database = 'system' AND name IN ({names})"
+        ):
+            table = row["name"]
+            if table not in CLICKHOUSE_LOG_TABLES or table in ttl_days:
+                raise ValueError("unexpected system table")
+            ttl_days[table] = _clickhouse_log_ttl_days(row["engine_full"])
+        part_bytes = {}
+        for row in rows(
+            "SELECT table, sum(bytes_on_disk) AS active_bytes FROM system.parts "
+            f"WHERE active AND database = 'system' AND match(table, {_sql_literal(family)}) GROUP BY table"
+        ):
+            table = row["table"]
+            if not re.fullmatch(family, table) or table in part_bytes:
+                raise ValueError("unexpected system parts table")
+            part_bytes[table] = _clickhouse_byte_count(row["active_bytes"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError(f"ClickHouse retention metadata unreadable on pod {pod}") from error
+
+    failures = []
+    for table in CLICKHOUSE_LOG_TABLES:
+        days = ttl_days.get(table)
+        if table not in ttl_days:
+            failures.append(f"{table} is missing")
+        elif days is None:
+            failures.append(f"{table} has no supported unconditional deletion TTL")
+        elif days != CLICKHOUSE_LOG_RETENTION_DAYS:
+            failures.append(
+                f"{table} has a {days}-day deletion TTL. Expected {CLICKHOUSE_LOG_RETENTION_DAYS} days."
+            )
+    used = total - free
+    tracked_bytes = sum(part_bytes.values())
+    if used * 100 > total * MAX_CLICKHOUSE_DISK_USED_PERCENT:
+        failures.append(f"Disk use of {used}/{total} bytes exceeds {MAX_CLICKHOUSE_DISK_USED_PERCENT}%")
+    if tracked_bytes > MAX_CLICKHOUSE_LOG_BYTES:
+        failures.append(f"Active system log parts use {tracked_bytes} bytes. Limit is {MAX_CLICKHOUSE_LOG_BYTES}.")
+    return {
+        "diskTotalBytes": total,
+        "diskFreeBytes": free,
+        "diskUsedPercent": round(used * 100 / total, 2),
+        "deletionTtlDays": ttl_days,
+        "activeLogBytesByTable": part_bytes,
+        "trackedLogBytes": tracked_bytes,
+        "rotatedLogBytes": sum(size for table, size in part_bytes.items() if table not in CLICKHOUSE_LOG_TABLES),
+        "failures": failures,
+    }
+
+
 def _wait_for_readback(
     runner: Runner,
     namespace: str,
@@ -875,6 +965,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Read stored Java signals and correlation without creating acceptance probes",
     )
+    mode.add_argument(
+        "--check-clickhouse-retention",
+        action="store_true",
+        help="Read ClickHouse deletion TTLs and disk and system log usage without creating acceptance probes",
+    )
     return parser.parse_args()
 
 
@@ -886,6 +981,17 @@ def main() -> None:
         signals = _read_java_signals(runner, args.namespace, pod, args.environment)
         print(json.dumps(signals, indent=2, sort_keys=True))
         _require_java_signals(signals)
+        return
+
+    if args.check_clickhouse_retention:
+        pods = {
+            pod: _read_clickhouse_retention(runner, args.namespace, pod)
+            for pod in _clickhouse_pods(runner, args.namespace, args.release)
+        }
+        print(json.dumps({"environment": args.environment, "pods": pods}, indent=2, sort_keys=True))
+        failed = ", ".join(pod for pod, snapshot in pods.items() if snapshot["failures"])
+        if failed:
+            raise RuntimeError(f"ClickHouse retention conformance failed on {failed}")
         return
 
     require_k8s_infra = not args.skip_k8s_infra

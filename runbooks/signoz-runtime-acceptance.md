@@ -112,3 +112,29 @@ The 60-minute correlation requires matching trace and span IDs from the same
 service and deployment environment. The command exits 1 on missing signals or
 trace identity violations and returns aggregate counts. For release evidence,
 run the full command once the fresh window reflects the reviewed rollout.
+
+## Read ClickHouse retention and disk usage
+
+Run the metadata check against the target environment and its SSH host.
+
+```bash
+python3 scripts/signoz_runtime_acceptance.py \
+  --namespace caritas --release caritas --environment dev \
+  --ssh-host "$DEV_SIGNOZ_SSH_HOST" --check-clickhouse-retention
+```
+
+The check reads each data pod's installed metadata using SELECT queries.
+It applies the [ClickHouse conformance limits](https://github.com/OpenResilienceInitiative/ORISO-Helm/blob/d6de74b485410709d6d8885ee58ec57550bbe4c1/observability/signoz-conformance/contract.yaml#L77-L88).
+
+- Each canonical table needs an unconditional deletion TTL of three days on
+  `event_date`. The tables are `query_log`, `text_log`, `trace_log`, `metric_log`
+  and `asynchronous_metric_log`.
+- The five log families, including numbered rotations such as `trace_log_0`,
+  can use up to 10 GiB in active parts. The report shows the per-table bytes
+  and the total for numbered rotations separately.
+- The default local data disk can be up to 75 percent used. The check compares
+  exact bytes before rounding the displayed percentage.
+
+The command exits 1 on missing or unreadable metadata or a failed limit.
+The active acceptance command checks the 2 GiB unreserved-space floor
+independently before creating probes.

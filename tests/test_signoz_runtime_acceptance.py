@@ -605,6 +605,140 @@ class JavaSignalContractTest(unittest.TestCase):
             self.run_gate("--cluster-name", "oriso-dev")
 
 
+class ClickHouseRetentionContractTest(unittest.TestCase):
+    log_budget = 10 * 1024**3
+    disk_size = 40 * 1024**3
+    log_tables = ("query_log", "text_log", "trace_log", "metric_log", "asynchronous_metric_log")
+    engine = "MergeTree PARTITION BY event_date ORDER BY event_time"
+
+    def setUp(self) -> None:
+        self.disks = {
+            pod: [{"type": "Local", "total_space": str(self.disk_size), "free_space": self.disk_size // 4}]
+            for pod in ("clickhouse-b", "clickhouse-a")
+        }
+        self.tables = [
+            {"name": name, "engine_full": self.engine + " TTL event_date + toIntervalDay(3)"}
+            for name in self.log_tables
+        ]
+        self.parts = [
+            {"table": "query_log_4", "active_bytes": str(self.log_budget - 1)},
+            {"table": "trace_log", "active_bytes": 1},
+        ]
+        runner = self.enterContext(mock.patch.object(MODULE, "Runner")).return_value
+        runner.run.side_effect = self.run_kubectl
+        self.checked_disks = []
+
+    def run_kubectl(self, command: list[str]) -> mock.Mock:
+        if command[3:5] == ["get", "pods"]:
+            self.assertIn("clickhouse.altinity.com/chi=caritas-clickhouse", command[6])
+            return mock.Mock(stdout=json.dumps({"items": [
+                {"metadata": {"name": pod}, "status": {"conditions": [{"type": "Ready", "status": "True"}]}}
+                for pod in self.disks
+            ]}))
+        self.assertEqual(command[3:9], [
+            "exec", command[4], "-c", "clickhouse", "--", "clickhouse-client",
+        ])
+        self.assertIn("JSONEachRow", command)
+        sql = command[-1]
+        self.assertTrue(sql.startswith("SELECT "))
+        if "FROM system.disks" in sql:
+            self.assertIn("WHERE name = 'default'", sql)
+            self.checked_disks.append(command[4])
+            rows = self.disks[command[4]]
+        elif "FROM system.tables" in sql:
+            self.assertIn("engine_full", sql)
+            self.assertIn("database = 'system'", sql)
+            rows = self.tables
+        else:
+            self.assertIn("FROM system.parts", sql)
+            self.assertIn("WHERE active AND database = 'system'", sql)
+            self.assertIn("match(table, '^(" + "|".join(self.log_tables) + ")(_[0-9]+)?$')", sql)
+            rows = self.parts
+        return mock.Mock(stdout="\n".join(json.dumps(row) for row in rows))
+
+    def run_gate(self, *, failed: bool = False) -> dict:
+        argv = [
+            "signoz_runtime_acceptance", "--namespace", "caritas", "--release", "caritas",
+            "--environment", "dev", "--check-clickhouse-retention",
+        ]
+        output = io.StringIO()
+        with mock.patch.object(MODULE.sys, "argv", argv), redirect_stdout(output):
+            if failed:
+                with self.assertRaisesRegex(RuntimeError, "retention conformance failed"):
+                    MODULE.main()
+            else:
+                MODULE.main()
+        return json.loads(output.getvalue())
+
+    def test_checks_both_pods_and_accepts_exact_limits(self) -> None:
+        self.tables[0]["engine_full"] += " SETTINGS index_granularity = 8192"
+        report = self.run_gate()
+
+        self.assertEqual(self.checked_disks, ["clickhouse-a", "clickhouse-b"])
+        pod = report["pods"]["clickhouse-a"]
+        self.assertEqual(pod["deletionTtlDays"], dict.fromkeys(self.log_tables, 3))
+        self.assertEqual(pod["diskUsedPercent"], 75)
+        self.assertEqual(pod["trackedLogBytes"], self.log_budget)
+        self.assertEqual(pod["rotatedLogBytes"], self.log_budget - 1)
+        self.assertEqual(pod["failures"], [])
+
+    def test_compares_exact_bytes_and_reports_both_exceeded_limits(self) -> None:
+        self.disks["clickhouse-b"][0]["free_space"] -= 1
+        self.parts[1]["active_bytes"] += 1
+        report = self.run_gate(failed=True)
+
+        self.assertEqual(report["pods"]["clickhouse-a"]["trackedLogBytes"], self.log_budget + 1)
+        self.assertEqual(len(report["pods"]["clickhouse-a"]["failures"]), 1)
+        self.assertEqual(len(report["pods"]["clickhouse-b"]["failures"]), 2)
+        self.assertEqual(report["pods"]["clickhouse-b"]["diskFreeBytes"], self.disk_size // 4 - 1)
+
+    def test_missing_canonical_table_fails_even_when_a_rotation_exists(self) -> None:
+        self.tables.pop(0)
+        pod = self.run_gate(failed=True)["pods"]["clickhouse-a"]
+        self.assertIn("query_log", pod["failures"][0])
+        self.assertEqual(pod["rotatedLogBytes"], self.log_budget - 1)
+
+    def test_requires_the_exact_unconditional_deletion_ttl(self) -> None:
+        for ttl in (
+            " TTL event_date + toIntervalDay(7)",
+            " TTL event_date + toIntervalDay(3) TO VOLUME 'slow'",
+            " TTL event_date + toIntervalDay(3) DELETE WHERE event_time > now()",
+            " TTL event_date + toIntervalDay(3), event_date + toIntervalDay(4) TO VOLUME 'slow'",
+            " SETTINGS storage_policy = ' TTL event_date + toIntervalDay(3) '",
+        ):
+            with self.subTest(ttl=ttl):
+                self.tables[0]["engine_full"] = self.engine + ttl
+                pod = self.run_gate(failed=True)["pods"]["clickhouse-a"]
+                self.assertIn("query_log", pod["failures"][0])
+
+    def test_rejects_missing_duplicate_and_invalid_local_disk_readback(self) -> None:
+        disk = self.disks["clickhouse-a"][0]
+        for rows in (
+            [], [disk, disk], [dict(disk, type="ObjectStorage")], [dict(disk, total_space=0)],
+            [dict(disk, free_space=self.disk_size + 1)], [dict(disk, free_space=str(2**64 - 1))],
+        ):
+            with self.subTest(rows=rows):
+                self.disks["clickhouse-a"] = rows
+                with self.assertRaisesRegex(RuntimeError, "retention metadata unreadable on pod clickhouse-a"):
+                    self.run_gate()
+
+    def test_rejects_invalid_table_and_part_readback(self) -> None:
+        cases = (
+            (self.tables, self.tables[0]),
+            (self.parts, self.parts[0]),
+            (self.parts, {"table": "zookeeper_log", "active_bytes": 1}),
+            (self.parts, {"table": "text_log_8", "active_bytes": True}),
+        )
+        for rows, bad in cases:
+            with self.subTest(bad=bad):
+                rows.append(bad)
+                try:
+                    with self.assertRaisesRegex(RuntimeError, "retention metadata unreadable on pod clickhouse-a"):
+                        self.run_gate()
+                finally:
+                    rows.pop()
+
+
 class RunnerContractTest(unittest.TestCase):
     @mock.patch.object(MODULE.subprocess, "run")
     def test_local_runner_passes_command_once_to_subprocess(
