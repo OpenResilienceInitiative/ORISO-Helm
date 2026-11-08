@@ -258,22 +258,27 @@ ran). It is ClickHouse's own sampling-profiler output, already limited to 7
 days by default, and no query in the retained `system.query_log` window
 (2026-11-03 to 2026-11-06) selects from it. SigNoz does not use it.
 
-The setting stops new rows, but the existing table stays on disk. After the
-rollout and explicit approval for the table drop, the operator removes it by
-hand, using the same wait-and-confirm steps as `metric_log` above (rollout
-finished, configuration active, one pod at a time):
+The setting stops new rows and the existing table stays on disk. After the
+rollout, confirm the completed restart and active configuration on each pod
+using the wait-and-confirm steps for `metric_log` above. Run the read-only
+inspection first.
 
 ```bash
 POD=chi-caritas-clickhouse-cluster-0-0-0
 kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse extract-from-config --config-file /etc/clickhouse-server/config.xml --key trace_log
 kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "SELECT name, formatReadableSize(total_bytes) FROM system.tables WHERE database = 'system' AND match(name, '^trace_log(_[0-9]+)?$')"
+```
+
+The configuration command must print `Not found: trace_log`. After this
+readback and explicit approval for the table drop, run the removal separately.
+
+```bash
 kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP TABLE IF EXISTS system.trace_log SYNC"
 ```
 
-The configuration command must print `Not found: trace_log` before the drop.
-Repeat for each ClickHouse pod. Afterwards `system.trace_log` must not exist
-and the Dev disk use of ClickHouse falls by about 8 GiB. To resume profiler
-logging, set the contents of `config.d/99-oriso-disable-trace-log.xml` in
+Repeat the inspection and approved removal for each ClickHouse pod. Verify
+that `system.trace_log` is absent and check the available disk space. To resume
+profiler logging, set the contents of `config.d/99-oriso-disable-trace-log.xml` in
 `values-dev.yaml` to `<clickhouse/>`. Keeping the key with an empty config makes
 this an explicit overlay change that the drift check can verify.
 
