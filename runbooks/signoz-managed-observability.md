@@ -144,6 +144,15 @@ PASS: SigNoz dashboards, alerts, routes, queries, freshness, and environment sep
 
 The second line appears only with `conformanceCheck=true`.
 
+## Upgrading an existing Dev release
+
+Before the upgrade, confirm that `oriso-alerts-slack` exists in Dev SigNoz
+and that `signoz-observability-api-key` in the release namespace contains
+`apiKey`. Use the [Secret key-name check](#api-key-secret-created-out-of-band-never-in-values).
+If either prerequisite is missing, stage it through the approved setup or
+append `--set signoz.orisoObservability.enabled=false` after the Dev overlay
+for this upgrade. Remove the override after both prerequisites are present.
+
 ## Workstation commands
 
 The commands below are **Dev examples**. For another approved environment,
