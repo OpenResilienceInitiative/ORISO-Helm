@@ -69,26 +69,28 @@ Run `scripts/signoz_runtime_acceptance.py` as documented in
 `runbooks/signoz-runtime-acceptance.md`. Do not promote to Dev unless every
 positive signal count is non-zero and `forbiddenLogBody` is zero.
 
-If the infrastructure collectors overload the node or reject configuration,
-set `signozCollector.enabled=false` in the affected environment overlay and re-apply
-the chart. This disables infrastructure collection without removing the SigNoz
-backend or its retained ClickHouse volume. Capture collector logs and the failed
-acceptance JSON before rollback when safe to do so.
-
-This is a human-approved deployment step, not a CI step. Run it from the chart
-root of the reviewed revision, with the overlay of the affected environment:
+Capture collector logs and the failed acceptance JSON when safe to do so.
+For an approved collector shutdown, keep the SigNoz backend and its retained
+storage. Stage the collector and its dependent features off in the reviewed
+environment overlay.
 
 ```bash
-# PreDev; use values-dev.yaml and the Dev release/namespace for Dev.
-helm upgrade --install caritas ./ -n caritas --create-namespace \
-  --wait-for-jobs --timeout 15m \
-  -f values.yaml -f values-dev.yaml -f values-pre-dev.yaml -f secrets.yaml \
+collector_off=(
   --set signozCollector.enabled=false
+  --set global.observability.appMetrics=false
+  --set global.observability.dbMetrics=false
+  --set signoz.orisoObservability.enabled=false
+  --set signoz.orisoObservability.deploymentIdentity.enabled=false
+)
 ```
 
-To go back to the previously deployed revision instead of re-rendering:
+Append `"${collector_off[@]}"` to the Helm arguments in the
+[Dev rollout preflight](signoz-dev.md#rollout) or the reviewed Pre-Dev
+values layering for the affected release. For the Dev
+effective-values check, use an expectation file with the same staged values.
+For an approved removal of the two infrastructure collector workloads, add
+`--allow-remove-infra-collectors` to both calls of `preflight_signoz` on Dev.
+Use the same option on the Pre-Dev image check for that approved removal.
 
-```bash
-helm history caritas -n caritas
-helm rollback caritas <REVISION> -n caritas --wait-for-jobs --timeout 15m
-```
+If the plan uses a stored Helm revision, run the
+[stored revision check](signoz-dev.md#rollback) for that release and namespace.

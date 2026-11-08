@@ -30,12 +30,6 @@ The check compares the keys declared by the Dev observability overlay and
 prints only the paths of missing or different settings. A failure requires
 the rollout procedure below and a fresh runtime check.
 
-Before applying a prepared upgrade, run its server-side dry run with
-`--hide-secret -o json` and pipe the result through
-`jq -e '.config' | python3 scripts/observability_overlay.py values-dev.yaml --check-effective`.
-Use `set -o pipefail` and pass the same values files in the same order for the
-actual upgrade. Review the resource diff as well.
-
 ## Rollout
 
 Live Dev is deployed from `/root/ORISO-Helm` with a hand-kept `values.yaml`
@@ -80,19 +74,39 @@ drift = sorted(p for p in live if p not in planned or (p not in overlay and live
 print(len(drift), *drift, sep="\n")' | tee /root/observability-drift.out
 ```
 
-Stop unless the first line is `0`; otherwise add the listed paths' files with
-`-f` first. The upgrade commands check it themselves, and the live upgrade
-also needs a successful server-side dry run, whose output you read first:
+Resolve the listed paths before continuing. Use the approved ordered values
+files, image pin overrides and post-renderer for both the preview and upgrade.
+Dev's application images can be updated independently of Helm. The image check
+compares the current direct Helm-managed Deployments, StatefulSets, DaemonSets
+and CronJobs with the proposed manifest, including their init containers.
+
+Run this preflight on the Dev master. For a staged rollout, set
+`expected_observability` to the values file that declares its approved
+observability settings.
 
 ```bash
-rm -f /root/observability-dry.ok
-test "$(head -n 1 /root/observability-drift.out)" = 0 && \
-helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
-  --dry-run=server > /root/observability-dry.out && touch /root/observability-dry.ok
-# read /root/observability-dry.out, then:
-test "$(head -n 1 /root/observability-drift.out)" = 0 && test -f /root/observability-dry.ok && \
-helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
-  --wait --wait-for-jobs --timeout 15m
+helm_args=(caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml)
+# Include the approved additional -f and --post-renderer arguments here.
+expected_observability=values-dev.yaml
+preflight_signoz() (
+  set +x
+  set -uo pipefail
+  test "$(head -n 1 /root/observability-drift.out)" = 0 || exit 1
+  preview=$(helm upgrade "${helm_args[@]}" --dry-run=server --hide-secret -o json) || exit 1
+  printf '%s' "$preview" | jq -e '.config' |
+    python3 scripts/observability_overlay.py "$expected_observability" --check-effective || exit 1
+  printf '%s' "$preview" | jq -er '.manifest' |
+    python3 scripts/check_helm_workload_images.py --namespace caritas --release caritas "$@"
+)
+preflight_signoz
+```
+
+Review the object changes, ClickHouse installation, retained claims and hook
+Jobs separately. Keep image-only promotions outside the rollout window and
+repeat the preflight immediately before the approved upgrade in the same shell.
+
+```bash
+preflight_signoz && helm upgrade "${helm_args[@]}" --wait --wait-for-jobs --timeout 15m
 ```
 
 The first rollout restarts Keycloak, Synapse (`Recreate`, a short Matrix gap),
@@ -226,7 +240,22 @@ kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP 
 
 ## Rollback
 
-Turn single parts off in the generated overlay (`signozCollector.enabled`,
-`global.observability.webVitals.enabled`, `appMetrics`, `dbMetrics`) and
-upgrade again, or `helm rollback caritas <REVISION> -n caritas`. Rollback never
-deletes the retained volumes or the backup claim.
+For a targeted reversal, use the reviewed previous chart and overlay with the
+current image pins. Use the [rollout preflight](#rollout) for that forward
+upgrade. For an infrastructure collector reversal, follow the
+[collector rollback instructions](signoz-k8s-infra.md#release-gate-and-rollback).
+
+A Helm rollback reapplies the saved manifest. Check the approved target
+revision on the Dev master before using it.
+
+```bash
+set -o pipefail
+helm history caritas -n caritas
+helm get manifest caritas -n caritas --revision "${revision:?Set the approved target revision}" |
+  python3 scripts/check_helm_workload_images.py --namespace caritas --release caritas
+```
+
+An image mismatch requires the forward upgrade with the current pins. Apply
+the same check to the target of any automatic rollback before enabling it.
+Review the rollback's resource removals and hook Jobs separately, and require
+it to retain the SigNoz, ClickHouse, ZooKeeper and backup claims.
