@@ -381,6 +381,9 @@ livekit:
   deploymentStrategy: Recreate
   terminationGracePeriodSeconds: 60
   image: "docker.io/livekit/livekit-server:v1.13.5"
+  # Optional private signed-webhook receiver. Empty uses the chart's upstream
+  # MatrixRTC authorization Service in the same namespace.
+  legacyWebhookUrl: ""
   existingConfigSecret:
     # Pre-provision this Secret outside Helm for the same release-history boundary.
     name: "livekit-config-runtime"

@@ -57,6 +57,16 @@ def find_livekit(documents: list[dict]) -> dict:
     )
 
 
+def legacy_webhook_urls(documents: list[dict]) -> list[str]:
+    config = next(
+        document
+        for document in documents
+        if document.get("kind") == "Secret"
+        and document.get("metadata", {}).get("name") == "livekit-config-runtime"
+    )
+    return yaml.safe_load(config["stringData"]["config.yaml"])["webhook"]["urls"]
+
+
 def main() -> None:
     documents = render()
     livekit = find_livekit(documents)
@@ -77,16 +87,16 @@ def main() -> None:
     pod = livekit["spec"]["template"]["spec"]
     assert pod["hostNetwork"] is True
     assert pod["dnsPolicy"] == "ClusterFirstWithHostNet"
-    config = next(
-        document
-        for document in documents
-        if document.get("kind") == "Secret"
-        and document.get("metadata", {}).get("name") == "livekit-config-runtime"
+    default_webhook = ["http://matrixrtc-authorization-service:8080/sfu_webhook"]
+    assert legacy_webhook_urls(documents) == default_webhook
+    assert (
+        legacy_webhook_urls(render("--set", "livekit.legacyWebhookUrl=null"))
+        == default_webhook
     )
-    legacy_config = yaml.safe_load(config["stringData"]["config.yaml"])
-    assert legacy_config["webhook"]["urls"] == [
-        "http://matrixrtc-authorization-service:8080/sfu_webhook"
-    ]
+    private_receiver = "http://alternate-signed-receiver:8080/sfu_webhook"
+    assert legacy_webhook_urls(
+        render("--set-string", f"livekit.legacyWebhookUrl={private_receiver}")
+    ) == [private_receiver], "the configured private receiver must be rendered"
 
     rolling = find_livekit(
         render(
