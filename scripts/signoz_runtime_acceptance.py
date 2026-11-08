@@ -205,12 +205,15 @@ def build_java_signal_query(environment: str, end_ms: int) -> str:
     WHERE timestamp >= {correlation_ms * 1_000_000} AND timestamp < {end_ms * 1_000_000}
       AND resources_string['deployment.environment'] = {env} AND service_name IN ({services})
 ), recent_traces AS (
-    SELECT t.serviceName AS service_name, t.timestamp, toString(t.trace_id) AS trace_id, t.span_id
+    SELECT t.serviceName AS service_name, toString(t.trace_id) AS trace_id, t.span_id,
+        t.timestamp >= fromUnixTimestamp64Milli({fresh_ms}) AS is_fresh,
+        t.resources_string['deployment.environment'] AS deployment_environment,
+        lower(trimBoth(t.resources_string['service.version'], ' \\t\\n\\v\\f\\r')) AS normalized_version
     FROM signoz_traces.distributed_signoz_index_v3 AS t
     WHERE t.timestamp >= fromUnixTimestamp64Milli({correlation_ms})
       AND t.timestamp < fromUnixTimestamp64Milli({end_ms})
       AND t.ts_bucket_start BETWEEN {correlation_ms // 1000 - 1800} AND {end_ms // 1000}
-      AND t.resources_string['deployment.environment'] = {env} AND t.serviceName IN ({services})
+      AND t.serviceName IN ({services})
 ), metric_identities AS (
     SELECT DISTINCT env, temporality, metric_name, fingerprint,
         resource_attrs['service.name'] AS service_name
@@ -218,33 +221,39 @@ def build_java_signal_query(environment: str, end_ms: int) -> str:
     WHERE unix_milli >= {fresh_ms - 3_600_000} AND unix_milli < {end_ms}
       AND resource_attrs['deployment.environment'] = {env} AND service_name IN ({services})
 )
-SELECT signal, service_name, samples FROM (
-    SELECT 'logs' AS signal, service_name, countIf(timestamp >= {fresh_ms * 1_000_000}) AS samples
+SELECT signal, service_name, samples, wrong_environment, invalid_version FROM (
+    SELECT 'logs' AS signal, service_name, countIf(timestamp >= {fresh_ms * 1_000_000}) AS samples,
+        0 AS wrong_environment, 0 AS invalid_version
     FROM recent_logs GROUP BY service_name
     UNION ALL
     SELECT 'traces' AS signal, service_name,
-        countIf(timestamp >= fromUnixTimestamp64Milli({fresh_ms})) AS samples
+        countIf(is_fresh) AS samples,
+        countIf(is_fresh AND deployment_environment != {env}) AS wrong_environment,
+        countIf(is_fresh AND normalized_version IN ('', 'unknown')) AS invalid_version
     FROM recent_traces GROUP BY service_name
     UNION ALL
-    SELECT 'metrics' AS signal, i.service_name AS service_name, count() AS samples
+    SELECT 'metrics' AS signal, i.service_name AS service_name, count() AS samples,
+        0 AS wrong_environment, 0 AS invalid_version
     FROM signoz_metrics.distributed_samples_v4 AS s
     GLOBAL INNER JOIN metric_identities AS i USING (env, temporality, metric_name, fingerprint)
     WHERE s.unix_milli >= {fresh_ms} AND s.unix_milli < {end_ms}
       AND bitAnd(s.flags, 1) = 0 AND isFinite(s.value)
     GROUP BY i.service_name
     UNION ALL
-    SELECT 'logToTrace' AS signal, service_name, count() AS samples
+    SELECT 'logToTrace' AS signal, service_name, count() AS samples,
+        0 AS wrong_environment, 0 AS invalid_version
     FROM recent_logs
     WHERE length(trace_id) = 32 AND trace_id != '00000000000000000000000000000000'
       AND length(span_id) = 16 AND span_id != '0000000000000000'
       AND (service_name, trace_id, span_id) GLOBAL IN (
         SELECT DISTINCT service_name, trace_id, span_id FROM recent_traces
+        WHERE deployment_environment = {env}
       )
     GROUP BY service_name
 )
 ORDER BY signal, service_name
 SETTINGS max_execution_time = 8, max_rows_to_read = 2000000, max_bytes_to_read = 134217728,
-  timeout_overflow_mode = 'throw', read_overflow_mode = 'throw'"""
+  timeout_overflow_mode = 'throw', read_overflow_mode = 'throw', log_queries = 0"""
 
 
 def build_readback_queries(
@@ -695,26 +704,39 @@ def _query_integer(runner: Runner, namespace: str, pod: str, query: str) -> int:
     return int(_clickhouse_query(runner, namespace, pod, query, "TabSeparatedRaw"))
 
 
+def _parse_sample_count(value: Any) -> int:
+    if isinstance(value, str) and value.isdecimal():
+        value = int(value)
+    if type(value) is not int or value < 0:
+        raise ValueError
+    return value
+
+
 def _read_java_signals(runner: Runner, namespace: str, pod: str, environment: str) -> dict[str, Any]:
     end_ms = time.time_ns() // 1_000_000
     output = _clickhouse_query(
         runner, namespace, pod, build_java_signal_query(environment, end_ms), "JSONEachRow"
     )
     counts = {service: dict.fromkeys(JAVA_SIGNALS, 0) for service in JAVA_SERVICES}
+    trace_identity = {}
     seen = set()
     try:
         for line in output.splitlines():
             row = json.loads(line)
             service, signal = row["service_name"], row["signal"]
-            samples = row["samples"]
-            if isinstance(samples, str) and samples.isdecimal():
-                samples = int(samples)
+            samples = _parse_sample_count(row["samples"])
             pair = (service, signal)
-            if (
-                signal not in JAVA_SIGNALS or pair in seen
-                or type(samples) is not int or samples < 0
-            ):
+            if signal not in JAVA_SIGNALS or pair in seen:
                 raise ValueError
+            if signal == "traces":
+                wrong_environment = _parse_sample_count(row["wrong_environment"])
+                invalid_version = _parse_sample_count(row["invalid_version"])
+                if wrong_environment > samples or invalid_version > samples:
+                    raise ValueError
+                trace_identity[service] = {
+                    "wrongEnvironment": wrong_environment,
+                    "invalidVersion": invalid_version,
+                }
             counts[service][signal] = samples
             seen.add(pair)
     except (KeyError, TypeError, ValueError) as error:
@@ -725,6 +747,7 @@ def _read_java_signals(runner: Runner, namespace: str, pod: str, environment: st
         "freshnessMinutes": JAVA_FRESHNESS_MINUTES,
         "correlationMinutes": JAVA_CORRELATION_MINUTES,
         "services": counts,
+        "traceIdentity": trace_identity,
         "missing": [
             f"{service}/{signal}" for service, signals in counts.items()
             for signal, samples in signals.items() if samples == 0
@@ -733,8 +756,18 @@ def _read_java_signals(runner: Runner, namespace: str, pod: str, environment: st
 
 
 def _require_java_signals(report: dict[str, Any]) -> None:
+    failures = []
     if report["missing"]:
-        raise RuntimeError("Java signal readback missing " + ", ".join(report["missing"]))
+        failures.append("Java signal readback missing " + ", ".join(report["missing"]))
+    identity_mismatches = [
+        f"{service} ({counts['wrongEnvironment']} wrong environment, {counts['invalidVersion']} invalid version)"
+        for service, counts in report["traceIdentity"].items()
+        if counts["wrongEnvironment"] or counts["invalidVersion"]
+    ]
+    if identity_mismatches:
+        failures.append("Java trace identity mismatch for " + ", ".join(identity_mismatches))
+    if failures:
+        raise RuntimeError(". ".join(failures))
 
 
 def _check_clickhouse_capacity(runner: Runner, namespace: str, pod: str) -> None:

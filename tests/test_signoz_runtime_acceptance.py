@@ -488,6 +488,9 @@ class JavaSignalContractTest(unittest.TestCase):
             {"service_name": service, "signal": signal, "samples": "1"}
             for service in self.services for signal in self.signals
         ]
+        for row in self.rows:
+            if row["signal"] == "traces":
+                row.update(wrong_environment="0", invalid_version=0)
         self.runner = self.enterContext(mock.patch.object(MODULE, "Runner")).return_value
         self.runner.run.side_effect = self.run_query
         self.enterContext(mock.patch.object(MODULE, "_clickhouse_pods", return_value=["data-pod"]))
@@ -501,12 +504,16 @@ class JavaSignalContractTest(unittest.TestCase):
         self.assertIn("resources_string['deployment.environment'] = 'dev'", sql)
         return mock.Mock(stdout="\n".join(json.dumps(row) for row in self.rows))
 
-    def run_gate(self, *flags: str) -> dict:
+    def run_gate(self, *flags: str, failure: str | None = None) -> dict:
         argv = ["signoz_runtime_acceptance", "--namespace", "caritas", "--release", "caritas",
                 "--environment", "dev", *flags]
         output = io.StringIO()
         with mock.patch.object(MODULE.sys, "argv", argv), redirect_stdout(output):
-            MODULE.main()
+            if failure is None:
+                MODULE.main()
+            else:
+                with self.assertRaisesRegex(RuntimeError, failure):
+                    MODULE.main()
         return json.loads(output.getvalue())
 
     def test_java_signal_diagnosis_reads_four_services_without_a_probe(self) -> None:
@@ -514,6 +521,9 @@ class JavaSignalContractTest(unittest.TestCase):
 
         self.assertEqual(report["missing"], [])
         self.assertEqual(report["services"]["user-service"], dict.fromkeys(self.signals, 1))
+        self.assertEqual(report["traceIdentity"]["user-service"], {
+            "wrongEnvironment": 0, "invalidVersion": 0,
+        })
         self.assertEqual((report["freshnessMinutes"], report["correlationMinutes"]), (15, 60))
         self.runner.run.assert_called_once()
 
@@ -531,12 +541,51 @@ class JavaSignalContractTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "invalid Java signal readback"):
             self.run_gate("--check-java-signals")
 
+    def test_java_signal_diagnosis_fails_when_fresh_traces_have_bad_identity(self) -> None:
+        trace = next(row for row in self.rows if row["signal"] == "traces")
+        trace.update(samples="2", wrong_environment="1", invalid_version=1)
+        report = self.run_gate("--check-java-signals", failure="Java trace identity.*user-service")
+
+        self.assertEqual(report["missing"], [])
+        self.assertEqual(report["services"]["user-service"]["traces"], 2)
+        self.assertEqual(report["traceIdentity"]["user-service"], {
+            "wrongEnvironment": 1, "invalidVersion": 1,
+        })
+
+    def test_java_signal_diagnosis_requires_both_trace_identity_counts(self) -> None:
+        trace = next(row for row in self.rows if row["signal"] == "traces")
+        for key in ("wrong_environment", "invalid_version"):
+            with self.subTest(key=key):
+                original = trace.pop(key)
+                with self.assertRaisesRegex(RuntimeError, "invalid Java signal readback"):
+                    self.run_gate("--check-java-signals")
+                trace[key] = original
+
+    def test_java_signal_diagnosis_rejects_impossible_trace_identity_counts(self) -> None:
+        trace = next(row for row in self.rows if row["signal"] == "traces")
+        for invalid in (2, -1, True, "unknown"):
+            with self.subTest(invalid=invalid):
+                trace["invalid_version"] = invalid
+                with self.assertRaisesRegex(RuntimeError, "invalid Java signal readback"):
+                    self.run_gate("--check-java-signals")
+
+    def test_java_signal_diagnosis_treats_overlapping_violations_as_valid_counts(self) -> None:
+        trace = next(row for row in self.rows if row["signal"] == "traces")
+        trace.update(wrong_environment=1, invalid_version=1)
+
+        report = self.run_gate("--check-java-signals", failure="Java trace identity.*user-service")
+
+        self.assertEqual(report["traceIdentity"]["user-service"], {
+            "wrongEnvironment": 1, "invalidVersion": 1,
+        })
+
     def test_full_acceptance_requires_java_evidence_after_probe_cleanup(self) -> None:
         for method in ("_check_runtime_readiness", "_check_collector_config", "_check_clickhouse_capacity",
                        "_emit_signal", "_wait_for_readback", "_wait_for_infra_readback"):
             self.enterContext(mock.patch.object(MODULE, method, return_value={}))
         self.enterContext(mock.patch.object(MODULE, "_emit_infra_probes", return_value="log-probe"))
         deleted = self.enterContext(mock.patch.object(MODULE, "_delete_probe_pod"))
+        complete_rows = self.rows
         self.rows = [row for row in self.rows if row["signal"] != "logToTrace"]
 
         def query_after_cleanup(command: list[str]) -> mock.Mock:
@@ -546,6 +595,13 @@ class JavaSignalContractTest(unittest.TestCase):
         self.runner.run.side_effect = query_after_cleanup
 
         with self.assertRaisesRegex(RuntimeError, "user-service/logToTrace"):
+            self.run_gate("--cluster-name", "oriso-dev")
+
+        deleted.reset_mock()
+        self.rows = complete_rows
+        trace = next(row for row in self.rows if row["signal"] == "traces")
+        trace["invalid_version"] = 1
+        with self.assertRaisesRegex(RuntimeError, "Java trace identity.*user-service"):
             self.run_gate("--cluster-name", "oriso-dev")
 
 

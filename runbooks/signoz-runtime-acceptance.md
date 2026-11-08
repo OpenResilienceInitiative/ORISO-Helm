@@ -31,8 +31,9 @@ The command fails closed unless all of the following are true:
 - a representative nested ORISO JSON log is collected with trace correlation,
   while its free-text body and stack marker are provably absent.
 - all four Java services have fresh stored logs, metrics and traces with their
-  canonical service name and the expected deployment environment. Each service
-  also has a stored log whose trace ID and span ID match a span in that scope.
+  canonical service name and the expected deployment environment. Every fresh
+  span has a populated service version. Each service also has a stored log
+  whose trace ID and span ID match a span in that scope.
 
 The active probe contains only the service name `oriso-signoz-acceptance`, the
 deployment environment, and a random acceptance ID. It never contains user
@@ -101,7 +102,13 @@ python3 scripts/signoz_runtime_acceptance.py \
 
 The report counts actual log, metric and trace samples within 15 minutes for
 `user-service`, `agency-service`, `tenant-service` and `consulting-type-service`.
+For each service, every fresh trace row must carry the exact
+`deployment.environment` and a populated `service.version`. Missing, blank and
+`unknown` versions count as invalid. The report includes the fresh trace total
+and separate counts for wrong environments and invalid versions. Multiple
+populated versions can coexist during a rollout.
+
 The 60-minute correlation requires matching trace and span IDs from the same
-service and deployment environment. The query returns aggregate counts.
-The command exits 1 and names each missing service and signal. Use the full
-command for release evidence.
+service and deployment environment. The command exits 1 on missing signals or
+trace identity violations and returns aggregate counts. For release evidence,
+run the full command once the fresh window reflects the reviewed rollout.
