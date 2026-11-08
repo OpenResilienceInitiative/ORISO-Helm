@@ -38,14 +38,16 @@ rejects assets that mention user, room, IP, token, or message-content fields.
 ## Switch and what it costs
 
 Everything here is behind `signoz.orisoObservability.enabled`, default `false`
-in `values.yaml.default`; no environment overlay turns it on. Enabling it
+in `values.yaml.default`. The Dev overlay already enables it and names the
+`signoz-observability-api-key` Secret. Pre-Dev explicitly disables it. Enabling it
 requires `signoz.enabled=true` and `signozCollector.enabled=true`
 (`templates/observability-validation.yaml` fails the render otherwise).
 
 When it is on, the Job is a Helm post-install/post-upgrade hook. A failing hook
 fails the release, so a broken API key or an unreachable SigNoz blocks that
-deploy. That is why it stays off until the API key Secret exists, and why the
-telemetry-dependent proof has its own switch:
+deploy. On a first Dev install, explicitly override the Dev overlay to keep the
+hook off until the API key Secret exists. The telemetry-dependent proof has its
+own switch:
 
 | Value | Default | Effect |
 |---|---|---|
@@ -86,15 +88,34 @@ recreates every dashboard and rule with no further clicks.
 
 ## First installation in an environment
 
-1. Deploy SigNoz and the collectors with the switch still off. Run the active
-   ingestion gate from `runbooks/signoz-runtime-acceptance.md`.
-2. Create the `oriso-alerts-slack` Slack channel in SigNoz and an Editor-role
-   API key; store the key in a Secret in the release namespace.
-3. Run the read-only check below from a workstation (it fails on the missing
-   dashboards, which is expected before the first provisioning).
-4. Set `signoz.orisoObservability.enabled=true` and
-   `signoz.orisoObservability.apiKeySecret.name` in the environment's values
-   and upgrade:
+1. Deploy SigNoz and the collectors with provisioning explicitly disabled.
+   The Dev overlay turns it on, so put the override **after** the overlay:
+
+   ```bash
+   helm upgrade --install caritas . \
+     --namespace caritas --create-namespace \
+     -f values.yaml -f secrets.yaml -f <environment overlay> \
+     --set signoz.orisoObservability.enabled=false \
+     --wait-for-jobs --timeout 15m
+   ```
+
+   Run the active ingestion gate from `runbooks/signoz-runtime-acceptance.md`.
+2. Only for an environment approved for managed observability, create the
+   `oriso-alerts-slack` Slack channel in SigNoz and an Editor-role
+   API key; store the key under `apiKey` in a Secret in the release namespace.
+   For Dev, use the name `signoz-observability-api-key` from the overlay.
+3. For an approved environment, run the read-only check below from a workstation.
+   The example commands target Dev; for another approved environment use its own
+   SigNoz URL, deployment environment and collector cluster name. Missing
+   dashboards are expected before the first provisioning.
+4. For Dev, upgrade with the overlay and without the temporary `--set` override;
+   it already enables provisioning and names the Secret. For another environment,
+   enable provisioning only if it is approved for that environment: set
+   `signoz.orisoObservability.enabled=true` and
+   `signoz.orisoObservability.apiKeySecret.name` in that environment's values
+   before upgrading. Keep Pre-Dev and every other disabled environment at
+   `signoz.orisoObservability.enabled=false`; skip the channel, API key and
+   provisioning check there.
 
 ```bash
 helm upgrade --install caritas . \
@@ -123,32 +144,47 @@ PASS: SigNoz dashboards, alerts, routes, queries, freshness, and environment sep
 
 The second line appears only with `conformanceCheck=true`.
 
+## Upgrading an existing Dev release
+
+Before the upgrade, confirm that `oriso-alerts-slack` exists in Dev SigNoz
+and that `signoz-observability-api-key` in the release namespace contains
+`apiKey`. Use the [Secret key-name check](#api-key-secret-created-out-of-band-never-in-values).
+If either prerequisite is missing, stage it through the approved setup or
+append `--set signoz.orisoObservability.enabled=false` after the Dev overlay
+for this upgrade. Remove the override after both prerequisites are present.
+
 ## Workstation commands
+
+The commands below are **Dev examples**. For another approved environment,
+replace the URL, `--environment`, and `--cluster-name` with that target’s
+configured values before running them. Do not run provisioning checks for a
+disabled environment.
 
 The script runs from a chart checkout with the Python standard library only.
 The key is read from the environment, never from the command line, and is
-never printed. `SIGNOZ_URL` is the SigNoz base URL **including the `/signoz`
-path**: SigNoz `v0.135.1` serves every API route under the path of
+never printed. Pass the SigNoz base URL **including the `/signoz` path** with
+`--api-url` so a workstation's `SIGNOZ_API_URL` or `SIGNOZ_URL` cannot override
+the target. SigNoz `v0.135.1` serves every API route under the path of
 `signoz_global_external__url`, so `https://dev.oriso.org/signoz` through the
 ingress, or `http://localhost:8080/signoz` through a `kubectl port-forward` of
 the `caritas-signoz` service. Without the path every call returns 404.
 
 ```bash
-export SIGNOZ_URL=https://dev.oriso.org/signoz
+signoz_target=https://dev.oriso.org/signoz
 read -rs SIGNOZ_API_KEY && export SIGNOZ_API_KEY
 
 # Read-only, structural: compare stored objects with the catalog, run no queries.
 python3 files/signoz/signoz_observability.py --mode check \
-  --environment dev --cluster-name oriso-dev --skip-telemetry
+  --api-url "$signoz_target" --environment dev --cluster-name oriso-dev --skip-telemetry
 
 # Read-only, full: also execute every query, require fresh collector data,
 # and reject data from the other environment.
 python3 files/signoz/signoz_observability.py --mode check \
-  --environment dev --cluster-name oriso-dev
+  --api-url "$signoz_target" --environment dev --cluster-name oriso-dev
 
 # One synthetic notification for one catalog rule, no stored rule.
 python3 files/signoz/signoz_observability.py --mode test-rule --rule unencrypted-room \
-  --environment dev --cluster-name oriso-dev
+  --api-url "$signoz_target" --environment dev --cluster-name oriso-dev
 ```
 
 `--mode check` performs no writes. It fails on missing, obsolete, or disabled

@@ -40,6 +40,9 @@ global:
     matrixServerName: "predev.oriso.org"
 
 signoz:
+  # Dev enables managed provisioning; Pre-Dev has no provisioning key configured.
+  orisoObservability:
+    enabled: false
   signoz:
     env:
       # observability-validation.yaml requires it in sync with global.domainName.
