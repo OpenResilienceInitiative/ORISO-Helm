@@ -78,12 +78,25 @@ def assert_dev(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     assert rum["processors"].index("filter/rum") < rum["processors"].index("transform/rum")
     rum_filter = "\n".join(config["processors"]["filter/rum"]["metrics"]["metric"])
     assert "lcp|cls|inp|ttfb|fcp" in rum_filter and '"frontend"' in rum_filter
-    resource = config["processors"]["transform/rum"]["metric_statements"][0]
+    rum_statements = config["processors"]["transform/rum"]["metric_statements"]
+    resource = rum_statements[0]
     assert resource["context"] == "resource"
     assert resource["statements"][0] == 'keep_keys(attributes, ["service.name"])'
-    datapoint = config["processors"]["transform/rum"]["metric_statements"][1]
+    datapoint = rum_statements[1]
     assert datapoint["context"] == "datapoint"
     assert datapoint["statements"][0].startswith('keep_keys(attributes, ["url.path_template"')
+    assert datapoint.get("conditions") == ['metric.name != "login_failure"']
+    login = rum_statements[2]
+    assert login["context"] == "datapoint"
+    assert login["conditions"] == ['metric.name == "login_failure"']
+    assert login["statements"][0] == 'keep_keys(attributes, ["outcome", "transport", "stage"])'
+    login_values = {
+        "outcome": "credentials|otp_required|access_denied|account_disabled|setup_incomplete|rate_limited|unavailable",
+        "transport": "bad_request|unauthorized|network|too_many_requests|unexpected",
+        "stage": "password|otp",
+    }
+    for key, values in login_values.items():
+        assert any(f'IsMatch(attributes["{key}"], "^({values})$")' in line for line in login["statements"]), key
     collector_env = env(docs[("Deployment", "caritas-signoz-otel-collector")])
     assert collector_env["ORISO_DEPLOYMENT_ENVIRONMENT"] == "dev"
     collector = docs[("Deployment", "caritas-signoz-otel-collector")]

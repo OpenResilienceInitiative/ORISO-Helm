@@ -26,6 +26,8 @@ processors:
       - set(attributes["deployment.environment"], "${env:ORISO_DEPLOYMENT_ENVIRONMENT}")
       - set(attributes["oriso.signal.source"], "browser")
     - context: datapoint
+      conditions:
+      - metric.name != "login_failure"
       statements:
       - keep_keys(attributes, ["url.path_template", "outcome", "transport", "stage", "cause", "category"])
       - set(attributes["url.path_template"], "other") where attributes["url.path_template"] != nil and not IsString(attributes["url.path_template"])
@@ -42,6 +44,15 @@ processors:
       - set(attributes["stage"], "other") where attributes["stage"] != nil and not IsMatch(attributes["stage"], "^(password|otp)$")
       - set(attributes["cause"], "other") where attributes["cause"] != nil and not IsMatch(attributes["cause"], "^(MEGOLM_UNKNOWN_INBOUND_SESSION_ID|MEGOLM_KEY_WITHHELD|MEGOLM_KEY_WITHHELD_FOR_UNVERIFIED_DEVICE|OLM_UNKNOWN_MESSAGE_INDEX|HISTORICAL_MESSAGE_NO_KEY_BACKUP|HISTORICAL_MESSAGE_BACKUP_UNCONFIGURED|HISTORICAL_MESSAGE_WORKING_BACKUP|HISTORICAL_MESSAGE_USER_NOT_JOINED|SENDER_IDENTITY_PREVIOUSLY_VERIFIED|UNSIGNED_SENDER_DEVICE|UNKNOWN_SENDER_DEVICE|UNKNOWN_ERROR)$")
       - set(attributes["category"], "other") where attributes["category"] != nil and not IsMatch(attributes["category"], "^(withheld|bug)$")
+    # Keep the union of the Frontend and Admin login tracker values.
+    - context: datapoint
+      conditions:
+      - metric.name == "login_failure"
+      statements:
+      - keep_keys(attributes, ["outcome", "transport", "stage"])
+      - set(attributes["outcome"], "other") where attributes["outcome"] != nil and (not IsString(attributes["outcome"]) or not IsMatch(attributes["outcome"], "^(credentials|otp_required|access_denied|account_disabled|setup_incomplete|rate_limited|unavailable)$"))
+      - set(attributes["transport"], "other") where attributes["transport"] != nil and (not IsString(attributes["transport"]) or not IsMatch(attributes["transport"], "^(bad_request|unauthorized|network|too_many_requests|unexpected)$"))
+      - set(attributes["stage"], "other") where attributes["stage"] != nil and (not IsString(attributes["stage"]) or not IsMatch(attributes["stage"], "^(password|otp)$"))
 service:
   pipelines:
     metrics/rum:
