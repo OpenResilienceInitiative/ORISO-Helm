@@ -164,6 +164,7 @@ class HttpFlowTest(unittest.TestCase):
         env = {
             "SIGNOZ_URL": f"http://127.0.0.1:{self.server.server_port}",
             "SIGNOZ_API_KEY": "test-api-key",
+            "SIGNOZ_AGENT_FORWARDING": "false",
         }
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, env, clear=False):
@@ -225,6 +226,85 @@ class HttpFlowTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "created by hand"):
             self._main("--mode", "provision")
         self.assertEqual(self._counts(), (0, 0, 0, 0))
+
+    def test_agent_forwarding_applies_and_removes_routes_on_the_same_rules(self) -> None:
+        dev = ("--environment", "dev", "--cluster-name", "oriso-dev")
+        self.state.channels["agents"] = {"name": "oriso-alerts-agents", "type": "webhook"}
+        code, _ = self._main("--mode", "provision", *dev, "--agent-forwarding")
+        self.assertEqual(code, 0)
+        self.assertEqual(self._counts(), (3, 6, 0, 0))
+        rule_ids = set(self.state.rules)
+        slugs = set()
+        for rule in self.state.rules.values():
+            self.assertEqual(
+                rule["condition"]["thresholds"]["spec"][0]["channels"],
+                ["oriso-alerts-slack", "oriso-alerts-agents"],
+            )
+            self.assertEqual(rule["condition"]["compositeQuery"].get("unit", ""), "")
+            self.assertEqual(rule["annotations"]["oriso_forward_value"], "{{$value}}")
+            slugs.add(rule["labels"]["oriso_forward_rule"])
+        self.assertEqual(slugs, MODULE.REQUIRED_ALERT_SLUGS)
+
+        code, _ = self._main("--mode", "check", "--skip-telemetry", *dev, "--agent-forwarding")
+        self.assertEqual(code, 0)
+        code, printed = self._main(
+            "--mode", "test-rule", "--rule", "collector-staleness", *dev, "--agent-forwarding",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn("alertCount=1", printed)
+        self.assertIn("verify receipt", printed.lower())
+        test_rule, = self.state.test_rules
+        self.assertEqual(test_rule["labels"]["oriso_forward_rule"], "collector-staleness")
+        self.assertEqual(test_rule["annotations"]["oriso_forward_value"], "{{$value}}")
+        self.assertEqual(
+            test_rule["condition"]["thresholds"]["spec"][0]["channels"],
+            ["oriso-alerts-slack", "oriso-alerts-agents"],
+        )
+
+        del self.state.channels["agents"]
+        code, _ = self._main("--mode", "provision", *dev)
+        self.assertEqual(code, 0)
+        self.assertEqual(set(self.state.rules), rule_ids)
+        self.assertEqual(self._counts(), (3, 6, 0, 1))
+        for rule in self.state.rules.values():
+            self.assertEqual(rule["condition"]["thresholds"]["spec"][0]["channels"], ["oriso-alerts-slack"])
+            self.assertNotIn("oriso_forward_rule", rule["labels"])
+            self.assertNotIn("oriso_forward_value", rule["annotations"])
+
+    def test_agent_forwarding_preflights_the_webhook_and_dev_before_writes(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "only.*Dev"):
+            self._main("--mode", "provision", "--agent-forwarding")
+        dev = ("--environment", "dev", "--cluster-name", "oriso-dev")
+        for wrong_type in (None, "slack"):
+            with self.subTest(wrong_type=wrong_type):
+                if wrong_type:
+                    self.state.channels["agents"] = {"name": "oriso-alerts-agents", "type": wrong_type}
+                with self.assertRaisesRegex(RuntimeError, "oriso-alerts-agents.*webhook"):
+                    self._main("--mode", "provision", *dev, "--agent-forwarding")
+                self.assertEqual(self._counts(), (0, 0, 0, 0))
+
+    def test_agent_readback_rejects_emitter_and_route_drift(self) -> None:
+        dev = ("--environment", "dev", "--cluster-name", "oriso-dev", "--agent-forwarding")
+        self.state.channels["agents"] = {"name": "oriso-alerts-agents", "type": "webhook"}
+        for drift, expected_error in (
+            ("annotation", "forwarding fields"),
+            ("slug", "forwarding fields"),
+            ("unit", "unit"),
+            ("threshold", "route drift"),
+        ):
+            with self.subTest(drift=drift):
+                self._main("--mode", "provision", *dev)
+                rule = next(iter(self.state.rules.values()))
+                if drift == "annotation":
+                    rule["annotations"]["oriso_forward_value"] = "{{ $labels.instance }}"
+                elif drift == "slug":
+                    rule["labels"].pop("oriso_forward_rule")
+                elif drift == "unit":
+                    rule["condition"]["compositeQuery"]["unit"] = "percent"
+                else:
+                    rule["condition"]["thresholds"]["spec"].append({"channels": ["unreviewed"]})
+                with self.assertRaisesRegex(RuntimeError, expected_error):
+                    self._main("--mode", "check", "--skip-telemetry", *dev)
 
     def test_test_rule_without_series_reports_not_sent(self) -> None:
         self.state.test_rule_alert_count = 0

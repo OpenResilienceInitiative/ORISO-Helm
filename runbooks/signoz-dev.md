@@ -105,6 +105,110 @@ kubectl get pv | grep -E 'signoz|clickhouse|zookeeper'   # RECLAIM POLICY = Reta
 `scripts/signoz_runtime_acceptance.py` (see `signoz-runtime-acceptance.md`)
 remains the full gate.
 
+## Agent alert forwarding on Dev
+
+Use this path after the first confirmed Slack alert and after the
+Dreambau receiver, private encrypted route, and identities have been
+approved. Keep `oriso-alerts-slack` as the Slack channel. The managed
+SigNoz provisioner checks both channel names and types before it writes
+rules. [First Slack delivery](https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/468) · [Dreambau receiver](https://github.com/Storypapst/dreambau/pull/223)
+
+### Stage the authenticated webhook
+
+With agent forwarding off, mount the existing approved webhook Secret in
+the SigNoz application container. Append the following entries to any
+existing volume lists in the approved Dev override.
+
+```yaml
+signoz:
+  signoz:
+    additionalVolumeMounts:
+      - name: oriso-agent-webhook-auth
+        mountPath: /var/run/oriso-signoz-agent
+        readOnly: true
+    additionalVolumes:
+      - name: oriso-agent-webhook-auth
+        secret:
+          secretName: <approved-dev-webhook-secret>
+          defaultMode: 0444
+          items:
+            - key: token
+              path: token
+```
+
+Confirm the file is readable from the SigNoz container using a file
+existence or permission check. A SigNoz administrator creates
+`oriso-alerts-agents` through `POST /api/v1/channels` with the approved
+private endpoint and the mounted credential reference.
+
+```json
+{
+  "name": "oriso-alerts-agents",
+  "webhook_configs": [{
+    "url": "https://<approved-private-host>/signoz/alerts",
+    "send_resolved": false,
+    "http_config": {
+      "follow_redirects": false,
+      "authorization": {
+        "type": "Bearer",
+        "credentials_file": "/var/run/oriso-signoz-agent/token"
+      }
+    }
+  }]
+}
+```
+
+Use the file reference because SigNoz v0.135.1 stores inline credentials
+in the channel data that Viewers can read. Verify the approved endpoint,
+peer and authentication from the Dev route. [Pinned channel API](https://github.com/SigNoz/signoz/blob/v0.135.1/pkg/apiserver/signozapiserver/alertmanager.go#L13-L56) · [Pinned credential serialization](https://github.com/SigNoz/signoz/blob/v0.135.1/pkg/types/alertmanagertypes/config.go#L509-L515)
+
+### Enable and verify
+
+Supply a fixed service name for every catalog rule in the forwarder's
+`rule_services` map. The first four metrics are emitted by UserService.
+
+```json
+{
+  "rule_services": {
+    "provisioning-compensation-failure": "userservice",
+    "availability-store-failure": "userservice",
+    "notification-failure": "userservice",
+    "unencrypted-room": "userservice",
+    "clickhouse-capacity": "clickhouse",
+    "collector-staleness": "collector"
+  }
+}
+```
+
+Set `signoz.orisoObservability.agentForwarding=true` in the approved Dev
+override and run the managed provisioning Job. It keeps Slack in each
+managed threshold and adds the agent webhook. It emits the catalog rule
+slug and unitless value the receiver expects. On the workstation use the
+Dev API key from the approved secret source, then read back the rules.
+
+```sh
+python3 files/signoz/signoz_observability.py --mode check --skip-telemetry \
+  --api-url https://dev.oriso.org/signoz --environment dev --cluster-name oriso-dev \
+  --agent-forwarding
+```
+
+For the approved delivery test, choose a catalog rule with a numeric
+sample in Dev. Run `--mode test-rule --rule <slug> --agent-forwarding`
+with the same target arguments. A positive `alertCount` confirms rule
+evaluation. Verify the Slack message, the Buzz room entry, and the
+dedicated OpenClaw run separately. Check the delivered content for the
+expected rule, service and value. The generic SigNoz channel test lacks
+the catalog fields the receiver requires.
+
+### Restore Slack-only routing
+
+Set `agentForwarding=false` and run the managed provisioning Job again
+with `signoz.orisoObservability.enabled=true`. Confirm all six stored
+thresholds use Slack alone and the forwarding fields are absent. Check
+Slack delivery before retiring the webhook and the Secret mount. A flag
+change can alter the fingerprint of active alerts because their labels
+change.
+
 ## ClickHouse memory and old system tables
 
 ClickHouse ran without a memory limit and the kernel killed it on 2026-11-03 when

@@ -14,6 +14,18 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- $collectorEnabled := get $collector "enabled" | default false -}}
 {{- $signozEnabled := get $signoz "enabled" | default false -}}
 {{- $managed := get $signoz "orisoObservability" | default dict -}}
+{{- $globalObservability := get .Values.global "observability" | default dict -}}
+{{- if and (hasKey $managed "agentForwarding") (not (kindIs "bool" (get $managed "agentForwarding"))) -}}
+{{- fail "signoz.orisoObservability.agentForwarding must be a boolean" -}}
+{{- end -}}
+{{- if get $managed "agentForwarding" -}}
+{{- if not (get $managed "enabled" | default false) -}}
+{{- fail "signoz.orisoObservability.agentForwarding=true requires signoz.orisoObservability.enabled=true" -}}
+{{- end -}}
+{{- if ne (get $globalObservability "deploymentEnvironment" | default "") "dev" -}}
+{{- fail "signoz.orisoObservability.agentForwarding=true requires the dev observability environment" -}}
+{{- end -}}
+{{- end -}}
 {{- if get $managed "enabled" | default false -}}
 {{- if not $signozEnabled -}}
 {{- fail "signoz.orisoObservability.enabled=true requires signoz.enabled=true" -}}
@@ -50,7 +62,6 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- end -}}
 {{- end -}}
 {{- if $collectorEnabled -}}
-{{- $globalObservability := get .Values.global "observability" | default dict -}}
 {{- if eq (get $collector "clusterName" | default "") "" -}}
 {{- fail "signozCollector.clusterName is required when signozCollector is enabled" -}}
 {{- end -}}

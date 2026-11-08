@@ -59,6 +59,10 @@ spec:
                   key: {{ get $apiKeySecret "key" | default "apiKey" | quote }}
             - name: SIGNOZ_CHANNEL_NAME
               value: {{ get $managed "channelName" | default "oriso-alerts-slack" | quote }}
+            {{- if get $managed "agentForwarding" }}
+            - name: SIGNOZ_AGENT_FORWARDING
+              value: "true"
+            {{- end }}
             - name: ORISO_ASSETS_DIR
               value: /opt/oriso/signoz
             - name: ORISO_ENVIRONMENT

@@ -53,13 +53,16 @@ own switch:
 |---|---|---|
 | `signoz.orisoObservability.enabled` | `false` | Render the ConfigMap and the hook Job. |
 | `signoz.orisoObservability.conformanceCheck` | `false` | Also execute every stored query, require fresh collector data, and reject data from the other environment. |
-| `signoz.orisoObservability.channelName` | `oriso-alerts-slack` | Existing channel the rules route to. |
+| `signoz.orisoObservability.channelName` | `oriso-alerts-slack` | Existing Slack channel for the managed rules. |
+| `signoz.orisoObservability.agentForwarding` | `false` | Dev-only opt-in to the existing agent webhook alongside Slack. |
 | `signoz.orisoObservability.apiKeySecret.name` / `.key` | `""` / `apiKey` | Existing Secret with the SigNoz API key; the name is required when on. |
 
 With `conformanceCheck` off, a hook run upserts dashboards and rules and reads
 every dashboard, rule, the channel, and the routes back against the catalog. It
 does not need telemetry to flow yet. Turn `conformanceCheck` on only after the
 UserService diagnostic metrics and the collectors are live in that environment.
+
+The Dev runbook covers [staging, testing and disabling the agent webhook](signoz-dev.md#agent-alert-forwarding-on-dev).
 
 ## API key Secret (created out of band, never in values)
 

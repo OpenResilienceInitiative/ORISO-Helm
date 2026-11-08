@@ -210,6 +210,25 @@ def main() -> None:
     }
     assert dev_env["ORISO_ENVIRONMENT"]["value"] == "dev"
     assert dev_env["ORISO_CLUSTER_NAME"]["value"] == "oriso-dev"
+    assert "SIGNOZ_AGENT_FORWARDING" not in dev_env
+
+    agent_flag = ("--set", "signoz.orisoObservability.agentForwarding=true")
+    with_agents = render(enabled=True, environment="dev", cluster_name="oriso-dev", extra_args=agent_flag)
+    agent_job = find(with_agents, "Job", "caritas-signoz-observability")
+    agent_env = {
+        item["name"]: item
+        for item in agent_job["spec"]["template"]["spec"]["containers"][0]["env"]
+    }
+    assert agent_env["SIGNOZ_AGENT_FORWARDING"]["value"] == "true"
+    assert agent_env["SIGNOZ_CHANNEL_NAME"] == dev_env["SIGNOZ_CHANNEL_NAME"]
+    assert agent_env["SIGNOZ_API_KEY"] == dev_env["SIGNOZ_API_KEY"]
+
+    other_environment = render_result(enabled=True, extra_args=agent_flag)
+    assert other_environment.returncode != 0
+    assert "agentForwarding=true requires the dev observability environment" in other_environment.stderr
+    without_job = render_result(enabled=False, environment="dev", cluster_name="oriso-dev", extra_args=agent_flag)
+    assert without_job.returncode != 0
+    assert "agentForwarding=true requires signoz.orisoObservability.enabled=true" in without_job.stderr
 
     disabled_names = {
         (item.get("kind"), item.get("metadata", {}).get("name"))
