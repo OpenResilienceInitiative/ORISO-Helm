@@ -1,0 +1,19 @@
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- if dig "otelCollector" "privateOtlp" "enabled" false $signoz -}}
+{{- $observability := get .Values.global "observability" | default dict -}}
+{{- if not (get $signoz "enabled") -}}
+{{- fail "otelCollector.privateOtlp requires signoz.enabled=true" -}}
+{{- end -}}
+{{- if dig "webVitals" "enabled" false $observability -}}
+{{- fail "otelCollector.privateOtlp is incompatible with browser RUM ingress" -}}
+{{- end -}}
+{{- if dig "e2eTraceIngest" "enabled" false $observability -}}
+{{- fail "otelCollector.privateOtlp is incompatible with Dev E2E ingress" -}}
+{{- end -}}
+{{- if dig "enabled" false (get .Values "signozCollector" | default dict) -}}
+{{- fail "otelCollector.privateOtlp is incompatible with the infrastructure collector" -}}
+{{- end -}}
+{{- if dig "signoz-otel-gateway" "enabled" false $signoz -}}
+{{- fail "otelCollector.privateOtlp is incompatible with the vendor OTLP gateway" -}}
+{{- end -}}
+{{- end -}}

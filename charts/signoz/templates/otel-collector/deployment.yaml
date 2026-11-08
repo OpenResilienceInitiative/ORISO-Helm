@@ -1,3 +1,4 @@
+{{- $private := .Values.otelCollector.privateOtlp.enabled -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -30,6 +31,9 @@ spec:
         {{- include "otelCollector.selectorLabels" . | nindent 8 }}
         {{- with .Values.otelCollector.podLabels }}
           {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if $private }}
+        oriso.org/private-otlp: "true"
         {{- end }}
     spec:
       {{- with .Values.otelCollector.imagePullSecrets }}
@@ -77,8 +81,11 @@ spec:
         {{- end }}
       containers:
         - name: collector
-          image: {{ template "otelCollector.image" . }}
+          image: {{ if $private }}docker.io/signoz/signoz-otel-collector@sha256:7e4e539a73f1f88fbc1cd7e659ab3950908e83ce1f2a37a297452f910d072174{{ else }}{{ template "otelCollector.image" . }}{{ end }}
           imagePullPolicy: {{ .Values.otelCollector.image.pullPolicy }}
+          {{- if $private }}
+          command: ["/signoz-otel-collector"]
+          {{- else }}
           ports:
             {{- range $key, $port := .Values.otelCollector.ports }}
             {{- if $port.enabled }}
@@ -91,10 +98,13 @@ spec:
           command:
             - {{ . | quote }}
           {{- end }}
+          {{- end }}
           args:
             {{- if .Values.otelCollector.configMap.create }}
             - "--config=/conf/otel-collector-config.yaml"
+            {{- if not $private }}
             - "--manager-config=/conf/otel-collector-opamp-config.yaml"
+            {{- end }}
             - "--copy-path=/var/tmp/collector-config.yaml"
             {{- end }}
             {{- range .Values.otelCollector.command.extraArgs }}
@@ -149,12 +159,55 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.otelCollector.resources | nindent 12 }}
+        {{- if $private }}
+        - name: private-otlp
+          image: ghcr.io/nginx/nginx-unprivileged@sha256:44e74ca483234093081138b6d7b6f561d55557756a2deefc3a5056148defeb99
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/sbin/nginx"]
+          args: ["-c", "/conf/private-otlp.conf", "-g", "daemon off;"]
+          ports:
+            - name: otlp-guard
+              containerPort: 4322
+              protocol: TCP
+          readinessProbe:
+            httpGet: {path: /healthz, port: otlp-guard}
+          livenessProbe:
+            httpGet: {path: /healthz, port: otlp-guard}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: otel-collector-config-vol
+              mountPath: /conf
+              readOnly: true
+            - name: private-otlp-tmp
+              mountPath: /tmp
+        {{- end }}
       volumes:
         - name: otel-collector-config-vol
           configMap:
             name: {{ include "otelCollector.fullname" . }}
         {{- if .Values.otelCollector.extraVolumes }}
           {{ toYaml .Values.otelCollector.extraVolumes | nindent 8 }}
+        {{- end }}
+        {{- if $private }}
+        - name: private-otlp-tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Mi
         {{- end }}
 #        - secret:
 #            name: otel-collector-secrets
