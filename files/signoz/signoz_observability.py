@@ -27,6 +27,7 @@ ENVIRONMENT_TOKEN = "__ORISO_ENVIRONMENT__"
 ENVIRONMENT_SLUG_TOKEN = "__ORISO_ENVIRONMENT_SLUG__"
 CLUSTER_TOKEN = "__ORISO_CLUSTER_NAME__"
 CHANNEL_TOKEN = "__ORISO_CHANNEL_NAME__"
+DEPLOYMENT_IDENTITY_SLUG = "deployment-identity-mismatch"
 
 REQUIRED_DASHBOARD_SLUGS = {
     "oriso-live-chat",
@@ -238,7 +239,7 @@ def _alert(definition: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_assets(
-    asset_dir: str | Path,
+    asset_dir: str | Path, *, deployment_identity: bool | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     catalog_path = Path(asset_dir) / "observability-catalog.json"
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
@@ -246,10 +247,16 @@ def load_assets(
         raise RuntimeError("SigNoz dashboard catalog is incomplete")
     if {item["slug"] for item in catalog["alerts"]} != REQUIRED_ALERT_SLUGS:
         raise RuntimeError("SigNoz alert catalog is incomplete")
-    return (
-        [_dashboard(item) for item in catalog["dashboards"]],
-        [_alert(item) for item in catalog["alerts"]],
-    )
+    alerts = [_alert(item) for item in catalog["alerts"]]
+    if deployment_identity is not None:
+        definition = catalog.get("deploymentIdentityAlert")
+        if isinstance(definition, dict) and definition.get("slug") == DEPLOYMENT_IDENTITY_SLUG:
+            identity_alert = _alert(definition)
+            identity_alert["disabled"] = not deployment_identity
+            alerts.append(identity_alert)
+        elif deployment_identity:
+            raise RuntimeError("SigNoz deployment identity alert is missing from the catalog")
+    return [_dashboard(item) for item in catalog["dashboards"]], alerts
 
 
 def _replace_tokens(value: Any, replacements: dict[str, str]) -> Any:
@@ -342,7 +349,9 @@ def validate_asset_contract(
     cluster_name: str,
     channel_name: str,
 ) -> None:
-    if len(dashboards) != 3 or len(alerts) != 6:
+    slugs = {alert.get("_orisoSlug") for alert in alerts}
+    required = REQUIRED_ALERT_SLUGS | (slugs & {DEPLOYMENT_IDENTITY_SLUG})
+    if len(dashboards) != 3 or len(alerts) != len(required) or slugs != required:
         raise RuntimeError("SigNoz asset count does not match the ORISO contract")
     encoded = json.dumps(
         {"dashboards": dashboards, "alerts": alerts}, sort_keys=True
@@ -386,7 +395,7 @@ def validate_asset_contract(
     for alert in alerts:
         if alert.get("schemaVersion") != "v2alpha1" or alert.get("version") != "v5":
             raise RuntimeError(f"alert {alert.get('alert')} uses an obsolete schema")
-        if alert.get("disabled"):
+        if alert.get("disabled") and alert["_orisoSlug"] != DEPLOYMENT_IDENTITY_SLUG:
             raise RuntimeError(f"alert {alert.get('alert')} is disabled")
         if alert.get("notificationSettings", {}).get("groupBy") != ["environment"]:
             raise RuntimeError(
@@ -606,6 +615,8 @@ def build_test_rule(alerts: list[dict[str, Any]], slug: str) -> dict[str, Any]:
     if match is None:
         known = sorted(str(item.get("_orisoSlug")) for item in alerts)
         raise RuntimeError(f"unknown catalog alert {slug!r}; known: {known}")
+    if match.get("disabled"):
+        raise RuntimeError(f"catalog alert {slug!r} is disabled")
     payload = copy.deepcopy(match)
     payload.pop("_orisoSlug", None)
     payload["alert"] = f"{payload['alert']} [test]"
@@ -638,11 +649,16 @@ def upsert_alerts(client: SignozClient, alerts: list[dict[str, Any]]) -> None:
         payload = copy.deepcopy(alert)
         payload.pop("_orisoSlug", None)
         current = existing.get(alert["alert"])
+        if current and alert.get("_orisoSlug") == DEPLOYMENT_IDENTITY_SLUG:
+            if (current.get("labels") or {}).get("managed_by") != "oriso_helm":
+                if alert.get("disabled"):
+                    continue
+                raise RuntimeError("deployment identity alert name is already in use")
         if current:
             client.request(
                 "PUT", f"/api/v2/rules/{current['id']}", payload, expected=(204,)
             )
-        else:
+        elif not alert.get("disabled"):
             client.request("POST", "/api/v2/rules", payload, expected=(201,))
 
 
@@ -805,7 +821,7 @@ def validate_live_alert(
         current.get("alert") != expected["alert"]
         or current.get("schemaVersion") != "v2alpha1"
         or current.get("version") != "v5"
-        or current.get("disabled")
+        or bool(current.get("disabled")) != bool(expected.get("disabled"))
     ):
         raise RuntimeError(f"stored alert identity or state drift: {expected['alert']}")
     settings = current.get("notificationSettings", {})
@@ -886,6 +902,10 @@ def prove_conformance(
     freshness_window_minutes = 0
     for expected in alerts:
         current = listed_alerts.get(expected["alert"])
+        if expected.get("disabled") and (
+            not current or (current.get("labels") or {}).get("managed_by") != "oriso_helm"
+        ):
+            continue
         if not current:
             raise RuntimeError(
                 f"managed alert is missing, obsolete, or disabled: {expected['alert']}"
@@ -896,7 +916,7 @@ def prove_conformance(
             environment=environment,
             channel_name=channel_name,
         )
-        if telemetry:
+        if telemetry and not expected.get("disabled"):
             _execute_query(client, query)
         if expected.get("_orisoSlug") == "collector-staleness":
             freshness_query = query
@@ -982,6 +1002,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="In provision mode also prove queries, freshness, and separation",
     )
     parser.add_argument(
+        "--deployment-identity",
+        action="store_true",
+        default=os.environ.get("ORISO_DEPLOYMENT_IDENTITY_ENABLED", "false").lower() == "true",
+        help="Include the deployment identity rule for an enabled Dev or Pre-Dev observer",
+    )
+    parser.add_argument(
         "--skip-telemetry",
         action="store_true",
         help="In check mode only compare stored objects; run no queries",
@@ -1003,7 +1029,10 @@ def main(argv: list[str] | None = None) -> int:
     if (args.mode == "test-rule") != bool(args.rule):
         raise RuntimeError("--rule is required with, and only with, --mode test-rule")
 
-    dashboards, alerts = load_assets(args.assets_dir)
+    if args.deployment_identity and args.environment not in ("dev", "pre-dev"):
+        raise RuntimeError("deployment identity alerts require Dev or Pre-Dev")
+
+    dashboards, alerts = load_assets(args.assets_dir, deployment_identity=args.deployment_identity)
     dashboards, alerts = materialize_assets(
         dashboards,
         alerts,
