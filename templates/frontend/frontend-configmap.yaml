@@ -17,6 +17,10 @@ data:
   REACT_APP_KEYCLOAK_REALM: "{{ .Values.global.keycloak.realm }}"
   REACT_APP_PLATFORM_VERSION: {{ printf "v%s" (trimPrefix "v" .Chart.AppVersion) | quote }}
   VITE_PLATFORM_VERSION: {{ printf "v%s" (trimPrefix "v" .Chart.AppVersion) | quote }}
+  # Web Vitals to SigNoz (global.observability.webVitals); empty URL = off.
+  REACT_APP_OBSERVABILITY_ENABLED: {{ ne (include "oriso.webVitalsUrl" .) "" | toString | quote }}
+  REACT_APP_OTEL_METRICS_URL: {{ include "oriso.webVitalsUrl" . | quote }}
+  REACT_APP_OTEL_EXPORT_INTERVAL_MS: {{ include "oriso.webVitalsIntervalMillis" . | quote }}
   # Media downloads route through the content scanner only where one is
   # deployed. Empty means "no scanner": the client keeps the pre-scanner
   # behaviour instead of pointing at an endpoint that answers 404.

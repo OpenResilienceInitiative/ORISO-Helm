@@ -23,6 +23,9 @@ def render(overlay: str | None = None, *set_values: str) -> subprocess.Completed
         "--set-string", "userService.smtpUser=render-only-smtp-user",
         "--set-string", "userService.smtpPassword=render-only-smtp-password",
     ]
+    if overlay == "pre-dev":
+        # Pre-Dev is deployed as an overlay on top of Dev.
+        args.extend(["-f", os.path.join(CHART_DIR, "values-dev.yaml")])
     if overlay:
         args.extend(["-f", os.path.join(CHART_DIR, f"values-{overlay}.yaml")])
     for value in set_values:

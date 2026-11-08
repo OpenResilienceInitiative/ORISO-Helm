@@ -30,12 +30,20 @@ global:
     matrix: "matrix.your-domain.example.com"
     auth: "http://keycloak:8080/"
 
-  # OTLP export to SigNoz — auto-enabled when signoz.enabled=true; backend and agents below.
+  # OTLP signal export. SigNoz backend and collectors are configured below.
   observability:
     otlpEnabled: false
     autoEnableWithSignoz: true
-    deploymentEnvironment: "pre-dev"   # environment tag on exported signals
-    otlpCollectorHost: "" # optional external collector host:port when signoz.enabled=false
+    deploymentEnvironment: "pre-dev"
+    otlpCollectorHost: ""
+    # Application and data-store metrics require signozCollector.enabled=true.
+    appMetrics: false
+    dbMetrics: false
+    tracingSamplingProbability: ""
+    testRunBaggage: false
+    webVitals:
+      enabled: false
+      exportIntervalMillis: 60000
 
   acmedomainName: "acme.your-domain.example.com"
  #adminDomainName: "admin.your-domain.example.com"
@@ -106,6 +114,30 @@ global:
     serviceAppClientId: "app"
     serviceAdminClientId: "backend-admin"
     backendTechnicalClientId: "backend-technical"
+    # Task identities are an explicit, all-or-nothing UserService runtime cutover.
+    # Keep it disabled until the five Keycloak clients have been reconciled and
+    # their actual service-account subjects have been read back.
+    taskIdentities:
+      enabled: false
+      # First pass only: reconcile the five disabled Keycloak clients and read
+      # their generated service-account subjects from the hook output. The
+      # second pass supplies those immutable UUIDs and sets enabled=true.
+      provisionOnly: false
+      setup:
+        clientId: "backend-setup"
+        serviceSubject: ""
+      accountCreate:
+        clientId: "backend-account-create"
+        serviceSubject: ""
+      accountAdmin:
+        clientId: "backend-account-admin"
+        serviceSubject: ""
+      mail:
+        clientId: "backend-mail"
+        serviceSubject: ""
+      runtime:
+        clientId: "backend-runtime"
+        serviceSubject: ""
     backendServiceClients:
       # Existing realms: render ONLY the preparation Secret/Job (see runbook).
       # Never install/upgrade the whole chart with prepareOnly=true.
@@ -161,13 +193,55 @@ global:
 
 matrix:
   image: "matrixdotorg/synapse:v1.158.0"
+  # Synapse rc_login. All browser logins reach Synapse through UserService, so
+  # the address limit applies to the whole platform. failed_attempts is not set
+  # on purpose: it keeps Synapse's default and limits wrong passwords.
+  rateLimits:
+    loginAddress:
+      perSecond: 1
+      burstCount: 50
+    loginAccount:
+      perSecond: 0.1
+      burstCount: 20
+  # Per-IP limit at the ingress for logins from outside the cluster. Browsers do
+  # not log in here; they get their Matrix token from UserService.
+  loginRateLimit:
+    enabled: true
+    requestsPerMinute: 6
+    burstMultiplier: 2
+  # Enable only with the paired UserService v2 context consumer deployed.
+  # Provision a dedicated credential out of band; never put its value here.
+  groupPolicy:
+    enabled: false
+    existingSecret:
+      name: ""
+      tokenKey: "token"
+    tokenRevision: ""
   initImage: "busybox:1.38.0"
   replicas: 1
   postgresReplicas: 1
+  database:
+    # Synapse database: "sqlite3" (/data/homeserver.db on the matrix-synapse-data PVC)
+    # or "postgres" (the matrix-postgres StatefulSet). Switching moves no data; an
+    # existing install follows runbooks/matrix-sqlite-to-postgres.md.
+    # Keep SQLite by default for existing deployments and their Matrix users/history.
+    # For a planned user/data reset with a fresh Matrix database, explicitly set
+    # engine: postgres in the installation's values.yaml. Switching engines does
+    # not delete application/Keycloak users or migrate Matrix data.
+    # Already on PostgreSQL? Keep an explicit postgres override on every upgrade.
+    engine: "sqlite3"
+  # In-cluster Service name of the PostgreSQL StatefulSet (Service metadata.name and serviceName).
+  postgresServiceName: "matrix-postgres-service"
+  # Host Synapse and the PITR backup job connect to. Empty = postgresServiceName.
+  postgresHost: ""
   synapseServerName: "your-server.local"
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"
   matrixApiUrl: "http://matrix-synapse:8008"
+  # Largest chat upload the edge accepts on /_matrix (nginx size syntax; 10m is
+  # 10,485,760 bytes). Keep it at or above ATTACHMENT_MAX_SIZE_IN_MB in
+  # ORISO-Frontend (10,000,000 bytes) and below Synapse's max_upload_size (50M).
+  maxUploadSize: "10m"
   matrixServerName: "your-server.local"
   # Public IP exempt from Synapse rate limiting; set per environment (ADR-005).
   serverPublicIp: ""
@@ -275,8 +349,9 @@ matrixrtcLifecycle:
 matrixrtcAuth:
   replicas: 1
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
-  # Namespace of the ingress controller, needed by the NetworkPolicy.
-  ingressControllerNamespace: "ingress-nginx"
+  # Optional: namespace of the ingress controller for the call NetworkPolicies.
+  # Empty means "ingress-nginx". The release namespace is always admitted as well.
+  ingressControllerNamespace: ""
   bootstrap:
     enabled: true
     backoffLimit: 6
@@ -348,6 +423,10 @@ online-counseling-keycloak:
 agencyService:
   replicas: 1
   image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:dev"
+  # Deletion-log outbox (OBP 2.1 #130). With task identities on, an AgencyService image older
+  # than ORISO-AgencyService#356 refuses to start once DELETION_AUDIT_READ is required. Switch this
+  # on in the same release that deploys that image; until then the outbox stays unreadable.
+  deletionAuditOutboxEnabled: false
 
   keycloakResource: "agency-service"
 
@@ -372,6 +451,9 @@ consultingTypeService:
   consultingTypesJsonPath : "consulting-type-settings"
   liquibaseChangeLog: "classpath:db/changelog/consultingtypeservice-master.xml"
   liquibaseContexts: "seed"
+  # Release toggles served on top of the ones stored in MongoDB, e.g.
+  # "enableNewNotifications=true". Empty: the stored values apply unchanged.
+  releaseToggleOverrides: ""
   bootstrapTopics:
     enabled: true
 
@@ -531,16 +613,27 @@ ipAnonymizer:
   image: "ghcr.io/openresilienceinitiative/ip-anonymizer:latest"
 
 
-# ---------- Observability & Monitoring -------------------------------------------------------------------------------
-# SigNoz ships as two upstream charts and this chart mirrors that split:
-#   signoz:    backend — ClickHouse, query service, UI
-#   signozCollector: agents — node DaemonSet + cluster collector
-# Per-service OTLP export is global.observability near the top of this file.
-
-# SigNoz — set signoz.enabled=true to deploy it and auto-enable OTLP export.
+# ---------- Observability ----------------------------------------------------------------
+# SigNoz backend, collection agents, and optional ORISO dashboards/alerts.
 signoz:
   enabled: false
-  # UI is served at https://<global.domainName>/signoz — keep in sync per environment.
+  orisoObservability:
+    enabled: false
+    conformanceCheck: false
+    image: "python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844"
+    # Existing SigNoz Editor API-key Secret; required only when enabled.
+    apiKeySecret:
+      name: ""
+      key: apiKey
+    # Existing SigNoz notification channel; the chart does not create it.
+    channelName: "oriso-alerts-slack"
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 250m
+        memory: 128Mi
   signoz:
     env:
       signoz_global_external__url: "https://your-domain.example.com/signoz"
@@ -549,14 +642,47 @@ signoz:
   clickhouse:
     persistence:
       size: 20Gi
+  # Data protection (templates/signoz/signoz-data-protection.yaml): volumes
+  # switched to reclaim Retain after every upgrade, daily signoz.db backup.
+  orisoDataProtection:
+    enabled: true
+    image: "docker.io/library/python:3.13-alpine@sha256:79e7a9b9ff1cbceff819f856fb374477792a5967759d94df266de7b7b4120e6f"
+    backup:
+      enabled: true
+      schedule: "30 2 * * *"
+      keep: 14
+      size: 1Gi
+  # Collector resources and exposed protocols. The ORISO collector policy lives
+  # in charts/signoz/files/oriso-otel-collector-policy.yaml.
+  otelCollector:
+    additionalEnvs:
+      # Stamped onto browser metrics; must equal global.observability.deploymentEnvironment.
+      ORISO_DEPLOYMENT_ENVIRONMENT: ""
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 1Gi
+    ports:
+      jaeger-thrift:
+        enabled: false
+      jaeger-grpc:
+        enabled: false
+      logsheroku:
+        enabled: false
+      logsjson:
+        enabled: false
+      otlp-rum:
+        enabled: true
+        containerPort: 4319
+        servicePort: 4319
+        nodePort: ""
+        protocol: TCP
 
-# SigNoz collection agents — node DaemonSet (pod logs, host/kubelet metrics)
-# plus one cluster collector (workload objects, k8s events). Requires
-# signoz.enabled=true; observability-validation.yaml enforces that.
-# Pipelines, RBAC and hardening live in templates/signoz/ and files/signoz/.
+# SigNoz node and cluster collectors. Requires signoz.enabled=true.
 signozCollector:
   enabled: false
-  # Cluster identity tagged onto every exported signal; required when enabled.
   clusterName: ""
   image:
     repository: docker.io/otel/opentelemetry-collector-contrib
@@ -569,6 +695,12 @@ signozCollector:
     limits:
       cpu: 500m
       memory: 512Mi
+
+# Data store monitoring (global.observability.dbMetrics). The reconcile job uses
+# the stores' own images for MariaDB and MongoDB and this curl image for the
+# RabbitMQ management API.
+dbMonitoring:
+  curlImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Health Dashboard
 healthDashboard:

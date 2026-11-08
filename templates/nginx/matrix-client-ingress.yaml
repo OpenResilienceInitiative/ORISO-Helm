@@ -5,6 +5,8 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+    # Match the 10 MB limit promised by the chat attachment composer.
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ (.Values.matrix).maxUploadSize | default "10m" | quote }}
     # Matrix server delegation. Without it, anything doing federation
     # discovery for this server name falls back to the default port 8448,
     # which nothing listens on. lk-jwt-service validates the OpenID token
