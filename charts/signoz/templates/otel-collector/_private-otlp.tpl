@@ -78,7 +78,7 @@ receivers:
       http:
         endpoint: 127.0.0.1:4318
         max_request_body_size: {{ int $private.maxRequestBytes }}
-        compression_algorithms: [gzip]
+        compression_algorithms: ["", gzip]
 processors:
   {{- toYaml $processors | nindent 2 }}
 connectors:

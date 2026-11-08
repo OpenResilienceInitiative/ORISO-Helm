@@ -186,10 +186,12 @@ def verify_native(collector, proxy, config, sink, error, prefix):
                     return request(address, PROXY_PORT, path, body, custom, method)
 
                 status, body, _ = submit("/v1/traces", trace)
-                require(status == 200 and body in (b"", b"\x0a\x00"), "Valid trace lost its native success response")
+                require(status == 200 and body in (b"", b"\x0a\x00"),
+                        f"Valid trace lost its native success response: {status} {body[:160]!r}")
                 gzip_headers = {**headers, "Content-Encoding": "gzip"}
                 status, body, _ = submit("/v1/metrics", gzip.compress(metrics), gzip_headers)
-                require(status == 200 and body in (b"", b"\x0a\x00"), "Valid gzip gauge lost its native success response")
+                require(status == 200 and body in (b"", b"\x0a\x00"),
+                        f"Valid gzip gauge lost its native success response: {status} {body[:160]!r}")
                 require(submit("/v1/traces", denied)[0] == 200, "Synthetic filter drop did not return normally")
                 expect_error(submit("/v1/traces", MARKER.encode(), {"Content-Type": "application/json"}), 415, error)
                 expect_error(submit("/v1/traces", b"\x0a\xff" + MARKER.encode()), 400, error)

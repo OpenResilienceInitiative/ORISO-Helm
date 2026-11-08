@@ -69,7 +69,7 @@ class PrivateOtlpRenderTest(unittest.TestCase):
         self.assertEqual(set(config["receivers"]), {"otlp"})
         self.assertEqual(config["receivers"]["otlp"]["protocols"], {"http": {
             "endpoint": "127.0.0.1:4318", "max_request_body_size": BODY_LIMIT,
-            "compression_algorithms": ["gzip"],
+            "compression_algorithms": ["", "gzip"],
         }})
         self.assertEqual(set(config["extensions"]), {"health_check"})
         self.assertNotIn("otel-collector-opamp-config.yaml", manifest["data"])
