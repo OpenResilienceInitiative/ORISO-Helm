@@ -140,8 +140,13 @@ def assert_e2e_trace_ingest() -> None:
     annotations = ingress["metadata"]["annotations"]
     # The token is checked by ingress-nginx itself against a Secret named in values.
     assert annotations["nginx.ingress.kubernetes.io/auth-type"] == "basic"
-    assert annotations["nginx.ingress.kubernetes.io/auth-secret"] == "signoz-e2e-ingest-auth"
+    auth_secret = annotations["nginx.ingress.kubernetes.io/auth-secret"]
+    assert auth_secret == "signoz-e2e-ingest-auth"
     assert annotations["nginx.ingress.kubernetes.io/auth-secret-type"] == "auth-file"
+    rendered_ingress = str(ingress)
+    assert "password" not in rendered_ingress.lower()
+    assert not any(prefix in rendered_ingress for prefix in ("$2a$", "$2b$", "$2y$"))
+    assert ("Secret", auth_secret) not in docs, "chart must only reference the E2E authentication Secret"
     snippet = annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
     assert "if ($request_method != POST) { return 405; }" in snippet
     assert "$http_content_encoding" in snippet
@@ -185,11 +190,6 @@ def assert_e2e_trace_ingest() -> None:
     assert "otlp-e2e.servicePort conflicts" in error, error
     error = render_dev_fails({"signoz": {"otelCollector": {"additionalEnvs": {"ORISO_DEPLOYMENT_ENVIRONMENT": "prod"}}}})
     assert "ORISO_DEPLOYMENT_ENVIRONMENT must equal" in error, error
-    # Only the Secret name is rendered, never a credential.
-    assert "password" not in str(ingress).lower()
-    # Nothing else of the collector is exposed through this Ingress.
-    assert not any(k == "Secret" and "e2e" in n for k, n in docs), "chart must not create the token"
-
     error = render_dev_fails({"global": {"observability": {"e2eTraceIngest": {"authSecret": ""}}}})
     assert "e2eTraceIngest.authSecret must name an existing basic-auth Secret" in error, error
     # Default off, and off without SigNoz.
@@ -244,7 +244,7 @@ def assert_e2e_trace_ingest_scope() -> None:
                 "dbMetrics": False, "webVitals": {"enabled": False},
             }},
             "signozCollector": {"enabled": False},
-            "signoz": {"otelCollector": {"replicaCount": 0}},
+            "signoz": {"orisoObservability": {"enabled": False}, "otelCollector": {"replicaCount": 0}},
         }, "E2E trace ingest requires a running bundled SigNoz collector"),
     ]
     for overrides, message in invalid:
