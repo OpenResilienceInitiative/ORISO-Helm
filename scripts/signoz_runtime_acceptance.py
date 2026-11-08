@@ -24,6 +24,9 @@ import yaml
 SERVICE_NAME = "oriso-signoz-acceptance"
 METRIC_NAME = "oriso.signoz.acceptance"
 SUPPRESSED_LOG_BODY = "[ORISO log body suppressed by privacy policy]"
+# Match the managed ClickHouse capacity alert's 2 GiB floor.
+MIN_CLICKHOUSE_UNRESERVED_BYTES = 2 * 1024**3
+CLICKHOUSE_UNKNOWN_SPACE = 2**64 - 1
 CLICKHOUSE_EXPORTERS = {
     "traces": "clickhousetraces",
     "metrics": "signozclickhousemetrics",
@@ -533,28 +536,43 @@ def _delete_probe_pod(runner: Runner, namespace: str, pod_name: str) -> None:
     )
 
 
-def _clickhouse_pod(runner: Runner, namespace: str, release: str) -> str:
-    pod = _kubectl(
+def _clickhouse_pods(runner: Runner, namespace: str, release: str) -> list[str]:
+    output = _kubectl(
         runner,
         namespace,
         "get",
-        "pod",
+        "pods",
         "-l",
-        f"app.kubernetes.io/instance={release},app.kubernetes.io/component=clickhouse",
+        f"clickhouse.altinity.com/chi={release}-clickhouse,"
+        "app.kubernetes.io/component=clickhouse",
         "-o",
-        "jsonpath={.items[0].metadata.name}",
+        "json",
     )
-    if not pod:
-        raise RuntimeError("ClickHouse pod was not found")
-    return pod
+    pods = []
+    for item in json.loads(output)["items"]:
+        metadata = item["metadata"]
+        if metadata.get("deletionTimestamp"):
+            continue
+        name = metadata["name"]
+        if not any(
+            condition.get("type") == "Ready" and condition.get("status") == "True"
+            for condition in item.get("status", {}).get("conditions", [])
+        ):
+            raise RuntimeError(f"ClickHouse pod {name} is not ready")
+        pods.append(name)
+    if not pods:
+        raise RuntimeError("ClickHouse data pods were not found")
+    return sorted(pods)
 
 
-def _query_count(runner: Runner, namespace: str, pod: str, query: str) -> int:
+def _query_integer(runner: Runner, namespace: str, pod: str, query: str) -> int:
     output = _kubectl(
         runner,
         namespace,
         "exec",
         pod,
+        "-c",
+        "clickhouse",
         "--",
         "clickhouse-client",
         "--format",
@@ -562,24 +580,41 @@ def _query_count(runner: Runner, namespace: str, pod: str, query: str) -> int:
         "--query",
         query,
     )
-    return int(output.splitlines()[-1])
+    return int(output)
+
+
+def _check_clickhouse_capacity(runner: Runner, namespace: str, pod: str) -> None:
+    try:
+        available = _query_integer(
+            runner, namespace, pod,
+            "SELECT unreserved_space FROM system.disks WHERE name = 'default'",
+        )
+    except ValueError as error:
+        raise RuntimeError(f"ClickHouse capacity unreadable on pod {pod}") from error
+    # ClickHouse uses the maximum UInt64 when it cannot report available space.
+    if not 0 <= available < CLICKHOUSE_UNKNOWN_SPACE:
+        raise RuntimeError(f"ClickHouse capacity unreadable on pod {pod}")
+    if available < MIN_CLICKHOUSE_UNRESERVED_BYTES:
+        raise RuntimeError(
+            f"ClickHouse pod {pod} has {available} unreserved bytes. "
+            f"At least {MIN_CLICKHOUSE_UNRESERVED_BYTES} bytes are required."
+        )
 
 
 def _wait_for_readback(
     runner: Runner,
     namespace: str,
-    release: str,
+    pod: str,
     environment: str,
     acceptance_id: str,
     attempts: int,
     interval_seconds: float,
 ) -> dict[str, int]:
-    pod = _clickhouse_pod(runner, namespace, release)
     queries = build_readback_queries(environment, acceptance_id)
     counts: dict[str, int] = {}
     for attempt in range(1, attempts + 1):
         counts = {
-            signal: _query_count(runner, namespace, pod, query)
+            signal: _query_integer(runner, namespace, pod, query)
             for signal, query in queries.items()
         }
         missing = [signal for signal, count in counts.items() if count < 1]
@@ -596,7 +631,7 @@ def _wait_for_readback(
 def _wait_for_infra_readback(
     runner: Runner,
     namespace: str,
-    release: str,
+    pod: str,
     environment: str,
     cluster_name: str,
     acceptance_id: str,
@@ -605,7 +640,6 @@ def _wait_for_infra_readback(
     attempts: int,
     interval_seconds: float,
 ) -> dict[str, int]:
-    pod = _clickhouse_pod(runner, namespace, release)
     queries = build_infra_readback_queries(
         environment,
         cluster_name,
@@ -616,7 +650,7 @@ def _wait_for_infra_readback(
     counts: dict[str, int] = {}
     for attempt in range(1, attempts + 1):
         counts = {
-            signal: _query_count(runner, namespace, pod, query)
+            signal: _query_integer(runner, namespace, pod, query)
             for signal, query in queries.items()
         }
         failures = infra_readback_failures(counts)
@@ -675,9 +709,15 @@ def main() -> None:
         "k8sInfraReadiness": "passed" if require_k8s_infra else "skipped",
     }
     if args.skip_synthetic:
+        report["clickhouseCapacity"] = "skipped"
         report["syntheticReadback"] = "skipped"
         report["k8sInfraReadback"] = "skipped"
     else:
+        clickhouse_pods = _clickhouse_pods(runner, args.namespace, args.release)
+        for pod in clickhouse_pods:
+            _check_clickhouse_capacity(runner, args.namespace, pod)
+        readback_pod = clickhouse_pods[0]
+        report["clickhouseCapacity"] = "passed"
         acceptance_id = f"acceptance-{uuid.uuid4().hex}"
         timestamp_ns = time.time_ns()
         trace_id = secrets.token_hex(16)
@@ -701,7 +741,7 @@ def main() -> None:
         report["syntheticReadback"] = _wait_for_readback(
             runner,
             args.namespace,
-            args.release,
+            readback_pod,
             args.environment,
             acceptance_id,
             args.readback_attempts,
@@ -722,7 +762,7 @@ def main() -> None:
                 report["k8sInfraReadback"] = _wait_for_infra_readback(
                     runner,
                     args.namespace,
-                    args.release,
+                    readback_pod,
                     args.environment,
                     args.cluster_name,
                     acceptance_id,
