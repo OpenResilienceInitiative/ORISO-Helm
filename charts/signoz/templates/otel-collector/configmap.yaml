@@ -4,6 +4,14 @@
 {{- $_ := unset $receivers "jaeger" -}}
 {{- $_ := unset $receivers "httplogreceiver/heroku" -}}
 {{- $_ := unset $receivers "httplogreceiver/json" -}}
+{{- if not (dig "ports" "otlp-e2e" "enabled" false .Values.otelCollector) -}}
+{{- $_ := unset $receivers "otlp/e2e" -}}
+{{- $processors := get $collectorConfig "processors" | default dict -}}
+{{- $_ := unset $processors "filter/e2e" -}}
+{{- $_ := unset $processors "transform/e2e" -}}
+{{- $pipelines := dig "service" "pipelines" (dict) $collectorConfig -}}
+{{- $_ := unset $pipelines "traces/e2e" -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:

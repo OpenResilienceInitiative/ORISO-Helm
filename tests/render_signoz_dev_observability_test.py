@@ -132,6 +132,8 @@ def assert_e2e_trace_ingest() -> None:
     ingress = docs[("Ingress", "caritas-signoz-e2e-ingress")]
     rules = ingress["spec"]["rules"]
     assert len(rules) == 1 and len(rules[0]["http"]["paths"]) == 1, rules
+    assert rules[0]["host"] == "dev.oriso.org"
+    assert ingress["spec"]["tls"][0]["hosts"] == ["dev.oriso.org"]
     path = rules[0]["http"]["paths"][0]
     assert (path["path"], path["pathType"]) == ("/signoz-e2e/v1/traces", "Exact")
     assert path["backend"]["service"] == {"name": "caritas-signoz-otel-collector", "port": {"number": 4321}}
@@ -143,7 +145,9 @@ def assert_e2e_trace_ingest() -> None:
     snippet = annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
     assert "if ($request_method != POST) { return 405; }" in snippet
     assert "$http_content_encoding" in snippet
-    assert "rewrite ^/signoz-e2e/v1/traces$ /v1/traces break;" in snippet
+    rewrite = "rewrite ^/signoz-e2e/v1/traces$ /v1/traces break;"
+    exact_uri = 'if ($request_uri != "/signoz-e2e/v1/traces") { return 404; }'
+    assert exact_uri in snippet and snippet.index(exact_uri) < snippet.index(rewrite), snippet
     assert "nginx.ingress.kubernetes.io/rewrite-target" not in annotations
     assert annotations["nginx.ingress.kubernetes.io/proxy-body-size"] == "256k"
     assert "nginx.ingress.kubernetes.io/limit-rps" in annotations
@@ -164,9 +168,15 @@ def assert_e2e_trace_ingest() -> None:
     assert 'set(attributes["deployment.environment"], "${env:ORISO_DEPLOYMENT_ENVIRONMENT}")' in statements["statements"]
     assert 'set(attributes["oriso.signal.source"], "e2e")' in statements["statements"]
     assert env(docs[("Deployment", "caritas-signoz-otel-collector")])["ORISO_DEPLOYMENT_ENVIRONMENT"] == "dev"
-    service_ports = {p["name"]: p["port"] for p in docs[("Service", "caritas-signoz-otel-collector")]["spec"]["ports"]}
-    assert service_ports["otlp-e2e"] == 4321 and service_ports["otlp-http"] == 4318, service_ports
-    assert path["backend"]["service"]["port"]["number"] in service_ports.values()
+    service = docs[("Service", "caritas-signoz-otel-collector")]["spec"]
+    assert service["type"] == "ClusterIP"
+    service_ports = {port["name"]: port for port in service["ports"]}
+    assert service_ports["otlp-e2e"]["port"] == 4321 and service_ports["otlp-http"]["port"] == 4318, service_ports
+    assert service_ports["otlp-e2e"].get("protocol", "TCP") == "TCP"
+    assert path["backend"]["service"]["port"]["number"] == service_ports["otlp-e2e"]["port"]
+    collector = docs[("Deployment", "caritas-signoz-otel-collector")]["spec"]["template"]["spec"]["containers"][0]
+    port = next(port for port in collector["ports"] if port["name"] == "otlp-e2e")
+    assert port["containerPort"] == 4321 and port.get("protocol", "TCP") == "TCP", port
     error = render_dev_fails({"signoz": {"otelCollector": {"ports": {"otlp-e2e": {"enabled": False}}}}})
     assert "e2eTraceIngest.enabled=true requires signoz.otelCollector.ports.otlp-e2e.enabled=true" in error, error
     error = render_dev_fails({"signoz": {"otelCollector": {"ports": {"otlp-e2e": {"containerPort": 4318}}}}})
@@ -183,9 +193,63 @@ def assert_e2e_trace_ingest() -> None:
     error = render_dev_fails({"global": {"observability": {"e2eTraceIngest": {"authSecret": ""}}}})
     assert "e2eTraceIngest.authSecret must name an existing basic-auth Secret" in error, error
     # Default off, and off without SigNoz.
-    assert "caritas-signoz-e2e-ingress" not in {n for _, n in by_key(render())}
-    off = render_dev_with({"global": {"observability": {"e2eTraceIngest": {"enabled": False}}}})
-    assert ("Ingress", "caritas-signoz-e2e-ingress") not in off
+    assert ("Ingress", "caritas-signoz-e2e-ingress") not in by_key(render())
+
+
+def assert_e2e_ingest_disabled(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
+    assert ("Ingress", "caritas-signoz-e2e-ingress") not in docs
+    collector = "caritas-signoz-otel-collector"
+    service_ports = docs[("Service", collector)]["spec"]["ports"]
+    assert all(port["name"] != "otlp-e2e" for port in service_ports)
+    pod = docs[("Deployment", collector)]["spec"]["template"]["spec"]
+    assert all(port["name"] != "otlp-e2e" for port in pod["containers"][0]["ports"])
+    config = yaml.safe_load(docs[("ConfigMap", collector)]["data"]["otel-collector-config.yaml"])
+    assert "otlp/e2e" not in config["receivers"]
+    assert not {"filter/e2e", "transform/e2e"} & config["processors"].keys()
+    pipelines = config["service"]["pipelines"]
+    assert "traces/e2e" not in pipelines
+    assert {"traces", "metrics", "logs", "metrics/rum"} <= pipelines.keys()
+
+
+def assert_e2e_trace_ingest_scope() -> None:
+    assert_e2e_ingest_disabled(by_key(render("values-dev.yaml", "values-pre-dev.yaml")))
+    assert_e2e_ingest_disabled(render_dev_with({
+        "global": {"observability": {"e2eTraceIngest": {"enabled": False}}},
+        "signoz": {"otelCollector": {"ports": {"otlp-e2e": {"enabled": False}}}},
+    }))
+    invalid = [
+        ({"global": {"observability": {"e2eTraceIngest": {"enabled": False}}}},
+         "otlp-e2e.enabled=true requires global.observability.e2eTraceIngest.enabled=true"),
+        ({
+            "global": {"observability": {"deploymentEnvironment": "pre-dev"}},
+            "signoz": {"otelCollector": {"additionalEnvs": {"ORISO_DEPLOYMENT_ENVIRONMENT": "pre-dev"}}},
+        }, "E2E trace ingest requires the Dev environment and dev.oriso.org"),
+        ({
+            "global": {"domainName": "alternate.render.oriso.internal"},
+            "signoz": {"signoz": {"env": {
+                "signoz_global_external__url": "https://alternate.render.oriso.internal/signoz",
+            }}},
+        }, "E2E trace ingest requires the Dev environment and dev.oriso.org"),
+        ({"signoz": {"otelCollector": {"service": {"type": "NodePort"}}}},
+         "E2E trace ingest requires a ClusterIP collector Service"),
+        ({"signoz": {"otelCollector": {"service": {"type": "LoadBalancer"}}}},
+         "E2E trace ingest requires a ClusterIP collector Service"),
+        ({"signoz": {"otelCollector": {"ingress": {"enabled": True}}}},
+         "E2E trace ingest requires a ClusterIP collector Service"),
+        ({"signoz": {"otelCollector": {"ports": {"otlp-e2e": {"protocol": "UDP"}}}}},
+         "otlp-e2e.protocol must be TCP"),
+        ({
+            "global": {"observability": {
+                "otlpEnabled": False, "autoEnableWithSignoz": False, "appMetrics": False,
+                "dbMetrics": False, "webVitals": {"enabled": False},
+            }},
+            "signozCollector": {"enabled": False},
+            "signoz": {"otelCollector": {"replicaCount": 0}},
+        }, "E2E trace ingest requires a running bundled SigNoz collector"),
+    ]
+    for overrides, message in invalid:
+        error = render_dev_fails(overrides)
+        assert message in error, error
 
 
 def assert_default_off(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
@@ -615,9 +679,10 @@ def assert_clickhouse_memory_on_dev() -> None:
 def main() -> None:
     assert_dev(by_key(render("values-dev.yaml")))
     assert_default_off(by_key(render()))
-    assert_e2e_trace_ingest()
     assert_review_findings()
     assert_second_review_findings()
+    assert_e2e_trace_ingest()
+    assert_e2e_trace_ingest_scope()
     assert_backup_is_atomic()
     assert_long_release_name()
     assert_name_override_findings()

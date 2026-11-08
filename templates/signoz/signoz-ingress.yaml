@@ -124,9 +124,9 @@ metadata:
     nginx.ingress.kubernetes.io/auth-realm: "ORISO E2E trace ingest"
     nginx.ingress.kubernetes.io/proxy-body-size: "256k"
     nginx.ingress.kubernetes.io/limit-rps: "5"
-    # Same shape as the RUM rule: no rewrite-target annotation, which would turn
-    # every path of the host into a regex location.
+    # Other ingresses on the shared host can turn Exact into a regex location.
     nginx.ingress.kubernetes.io/configuration-snippet: |
+      if ($request_uri != "/signoz-e2e/v1/traces") { return 404; }
       if ($request_method != POST) { return 405; }
       if ($http_content_encoding != "") { return 415; }
       rewrite ^/signoz-e2e/v1/traces$ /v1/traces break;

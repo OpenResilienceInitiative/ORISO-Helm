@@ -57,11 +57,11 @@ signoz:
           <metric_log remove="1"/>
         </clickhouse>
   otelCollector:
-    additionalEnvs:
-      ORISO_DEPLOYMENT_ENVIRONMENT: "dev"
     ports:
       otlp-e2e:
         enabled: true
+    additionalEnvs:
+      ORISO_DEPLOYMENT_ENVIRONMENT: "dev"
 
 # Node agent (pod logs, host and kubelet metrics) and cluster collector.
 signozCollector:

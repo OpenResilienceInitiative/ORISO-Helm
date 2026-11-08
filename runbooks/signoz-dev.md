@@ -105,34 +105,6 @@ kubectl get pv | grep -E 'signoz|clickhouse|zookeeper'   # RECLAIM POLICY = Reta
 `scripts/signoz_runtime_acceptance.py` (see `signoz-runtime-acceptance.md`)
 remains the full gate.
 
-## E2E trace ingest (Dev nightly)
-
-The scheduled GitHub run (`nightly-dev-e2e`, ORISO-E2E#97) sends its test spans to
-`https://dev.oriso.org/signoz-e2e/v1/traces`. The route is off by default and on in
-`values-dev.yaml` (`global.observability.e2eTraceIngest`). ingress-nginx checks HTTP
-Basic credentials (user `e2e`) against a Secret, accepts only small uncompressed POSTs
-(256k, 5 requests per second) and forwards to the collector's `/v1/traces` on a dedicated receiver `otlp/e2e` (port 4321, 256k body cap), never the main OTLP port 4318. Its own pipeline `traces/e2e` keeps only spans whose resource `service.name` is `oriso-e2e`, overwrites `deployment.environment` with the collector's `ORISO_DEPLOYMENT_ENVIRONMENT` (`dev`) and adds `oriso.signal.source=e2e`, so a token holder cannot inject telemetry under another service name or environment. The collector port is enabled by `signoz.otelCollector.ports.otlp-e2e.enabled` (on in `values-dev.yaml`; the render fails if the route is on without it). The chart
-only references the Secret by name; it never creates or renders the token.
-
-The repo admin does this once, before the rollout that enables the route (steps only;
-generate the token yourself and do not paste it into a ticket or chat):
-
-1. Generate a long random token in your password manager.
-2. On the Dev master (`KUBECONFIG=/etc/rancher/k3s/k3s.yaml`), create the Secret
-   `signoz-e2e-ingest-auth` in namespace `caritas` with one key `auth` holding an
-   htpasswd line for user `e2e` (`htpasswd -nbB e2e '<token>'`, entered without
-   leaving it in shell history).
-3. In GitHub, repository ORISO-E2E, environment `dev-e2e`, add the secrets
-   `DEV_OTLP_TOKEN` (the token) and `DEV_OTLP_ENDPOINT`
-   (`https://dev.oriso.org/signoz-e2e/v1/traces`). The same environment also needs
-   `ORISO_TEST_ACCESS_TOKEN` and `TEST_ACCESS_IDENTITY` (as in `predev-e2e`).
-4. Roll out with the observability overlay (Rollout above), then run the workflow once
-   by hand (`workflow_dispatch`).
-
-Check: without credentials the route answers 401, a GET answers 405 or 401, and with
-the token a run shows `oriso-e2e` spans in SigNoz (filter by `oriso.signal.source=e2e`); a test span with another `service.name` must not appear. Rotate by replacing the Secret and
-`DEV_OTLP_TOKEN` together. To switch it off set `e2eTraceIngest.enabled: false`.
-
 ## ClickHouse memory and old system tables
 
 ClickHouse ran without a memory limit and the kernel killed it on 2026-11-03 when
@@ -240,3 +212,47 @@ Turn single parts off in the generated overlay (`signozCollector.enabled`,
 `global.observability.webVitals.enabled`, `appMetrics`, `dbMetrics`) and
 upgrade again, or `helm rollback caritas <REVISION> -n caritas`. Rollback never
 deletes the retained volumes or the backup claim.
+
+## E2E trace ingest (Dev nightly)
+
+The scheduled GitHub run (`nightly-dev-e2e`, ORISO-E2E#97) sends spans to
+`https://dev.oriso.org/signoz-e2e/v1/traces`. The chart enables it with
+`values-dev.yaml` and requires the `dev` environment and exact Dev hostname.
+Use both `global.observability.e2eTraceIngest.enabled` and
+`signoz.otelCollector.ports.otlp-e2e.enabled` for that release.
+
+The collector Service stays on `ClusterIP` with the vendored ingress off.
+ingress-nginx requires the exact request URI and HTTP Basic credentials
+(user `e2e`) from an existing Secret. It forwards small uncompressed POSTs
+at up to five requests per second to the dedicated TCP receiver on port
+4321. Both the ingress and receiver cap the body at 256 KiB.
+
+The dedicated trace pipeline keeps spans with resource
+`service.name=oriso-e2e`, stamps `deployment.environment=dev` from the
+collector environment and adds `oriso.signal.source=e2e`. The chart
+references the existing Secret by name.
+
+The repo admin does this once, before the rollout that enables the route (steps only;
+generate the token yourself and do not paste it into a ticket or chat):
+
+1. Generate a long random token in your password manager.
+2. On the Dev master (`KUBECONFIG=/etc/rancher/k3s/k3s.yaml`), create the Secret
+   `signoz-e2e-ingest-auth` in namespace `caritas` with one key `auth` holding an
+   htpasswd line for user `e2e` (`htpasswd -nbB e2e '<token>'`, entered without
+   leaving it in shell history).
+3. In GitHub, repository ORISO-E2E, environment `dev-e2e`, add the secrets
+   `DEV_OTLP_TOKEN` (the token) and `DEV_OTLP_ENDPOINT`
+   (`https://dev.oriso.org/signoz-e2e/v1/traces`). The same environment also needs
+   `ORISO_TEST_ACCESS_TOKEN` and `TEST_ACCESS_IDENTITY` (as in `predev-e2e`).
+4. Roll out with the observability overlay (Rollout above), then run the workflow once
+   by hand (`workflow_dispatch`).
+
+Verify HTTP 401 for an anonymous POST to the exact URI and rejection of GET
+and URI variants. With the scoped token, the Nightly report links stored
+`oriso-e2e` spans under `oriso.signal.source=e2e`. Verify the dedicated
+pipeline drops a synthetic span with another service name. Rotate the Secret
+and `DEV_OTLP_TOKEN` together.
+
+To disable the route, set both the route and dedicated Service-port flags to
+`false`. The chart removes the Ingress, Service port and dedicated receiver
+and pipeline. The updated collector configuration rolls its pods.
