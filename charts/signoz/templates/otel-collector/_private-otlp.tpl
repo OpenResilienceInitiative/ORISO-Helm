@@ -142,7 +142,8 @@ http {
     server {
         listen 4322;
         client_max_body_size {{ int .Values.otelCollector.privateOtlp.maxRequestBytes }};
-        error_page {{ untilStep 300 600 1 | join " " }} /_oriso_otlp_error;
+        # nginx reserves 499 for a disconnected client.
+        error_page {{ concat (untilStep 300 499 1) (untilStep 500 600 1) | join " " }} /_oriso_otlp_error;
 
         location = /_oriso_otlp_error {
             internal;
