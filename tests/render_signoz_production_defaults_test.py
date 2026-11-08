@@ -184,7 +184,9 @@ class SigNozExposureDefaults(unittest.TestCase):
         docs = render("values-dev.yaml")
         self.assert_export_flags(docs, "true")
         self.assertEqual(find(docs, "Deployment", COLLECTOR)["spec"]["replicas"], 1)
-        self.assertEqual(set(signoz_ingresses(docs)) - {E2E_INGRESS}, {UI_INGRESS, RUM_INGRESS})
+        # The dedicated ingest and the TLS alias have separate Dev contracts.
+        optional = {E2E_INGRESS, "signoz-oriso-org-redirect"}
+        self.assertEqual(set(signoz_ingresses(docs)) - optional, {UI_INGRESS, RUM_INGRESS})
 
     def test_predev_keeps_ui_private_even_with_inherited_public_settings(self):
         with NamedTemporaryFile(mode="w", suffix=".yaml", encoding="utf-8") as inherited:
