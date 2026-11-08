@@ -178,7 +178,7 @@ def assert_dev_alias(
         {"signoz": {"orisoIngress": {"enabled": False}}},
         {"global": {"enableTls": False}},
         {
-            "signoz": {"enabled": False},
+            "signoz": {"enabled": False, "orisoObservability": {"enabled": False}},
             "signozCollector": {"enabled": False},
             "global": {"observability": {
                 "otlpEnabled": False,
@@ -188,12 +188,18 @@ def assert_dev_alias(
             }},
         },
         {
-            "global": {"observability": {"deploymentEnvironment": "production"}},
-            "signoz": {"otelCollector": {"additionalEnvs": {"ORISO_DEPLOYMENT_ENVIRONMENT": "production"}}},
+            "global": {"observability": {"deploymentEnvironment": "production", "e2eTraceIngest": {"enabled": False}}},
+            "signoz": {"otelCollector": {
+                "additionalEnvs": {"ORISO_DEPLOYMENT_ENVIRONMENT": "production"},
+                "ports": {"otlp-e2e": {"enabled": False}},
+            }},
         },
         {
-            "global": {"domainName": "predev.oriso.org"},
-            "signoz": {"signoz": {"env": {"signoz_global_external__url": "https://predev.oriso.org/signoz"}}},
+            "global": {"domainName": "predev.oriso.org", "observability": {"e2eTraceIngest": {"enabled": False}}},
+            "signoz": {
+                "signoz": {"env": {"signoz_global_external__url": "https://predev.oriso.org/signoz"}},
+                "otelCollector": {"ports": {"otlp-e2e": {"enabled": False}}},
+            },
         },
     ):
         assert DEV_ALIAS not in render_dev_with(override), override
