@@ -90,6 +90,23 @@ processors:
       != nil
     - set(resource.attributes["service.name"], log.cache["serviceName"]) where log.cache["serviceName"]
       != nil
+    # Align each primary Java container with the service identity used for OTLP.
+    - set(resource.attributes["service.name"], "user-service")
+      where resource.attributes["k8s.deployment.name"] == "userservice"
+      and resource.attributes["k8s.container.name"] == "userservice"
+    - set(resource.attributes["service.name"], "agency-service")
+      where resource.attributes["k8s.deployment.name"] == "agencyservice"
+      and resource.attributes["k8s.container.name"] == "agencyservice"
+    - set(resource.attributes["service.name"], "tenant-service")
+      where resource.attributes["k8s.deployment.name"] == "tenantservice"
+      and resource.attributes["k8s.container.name"] == "tenantservice"
+    - set(resource.attributes["service.name"], "consulting-type-service")
+      where resource.attributes["k8s.deployment.name"] == "consultingtypeservice"
+      and resource.attributes["k8s.container.name"] == "consultingtypeservice"
+    - set(log.attributes["service.name"], resource.attributes["service.name"])
+      where IsString(resource.attributes["k8s.deployment.name"])
+      and resource.attributes["k8s.deployment.name"] == resource.attributes["k8s.container.name"]
+      and IsMatch(resource.attributes["k8s.deployment.name"], "^(userservice|agencyservice|tenantservice|consultingtypeservice)$")
     - set(resource.attributes["service.name"], resource.attributes["k8s.deployment.name"])
       where resource.attributes["service.name"] == nil and resource.attributes["k8s.deployment.name"]
       != nil
