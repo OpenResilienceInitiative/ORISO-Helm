@@ -98,6 +98,7 @@ class E2eDashboardTest(unittest.TestCase):
                 if query["signal"] == "logs":
                     ci_panels.add(panel)
                     self.assertIn("service.name = 'oriso-ci-tests'", expression)
+                    self.assertIn("oriso.signal.source = 'ci'", expression)
                     self.assertIn("test.evidence.origin = 'github-actions'", expression)
                     self.assertIn("test.status IN ('passed', 'failed')", expression)
                     self.assertIn("test.evidence.observed_at_ms > 0", expression)

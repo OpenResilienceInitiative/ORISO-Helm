@@ -74,7 +74,8 @@ ALLOWED_GROUPS = {
     "workflow",
 }
 CI_TEST_LOG_FILTER = (
-    "service.name = 'oriso-ci-tests' AND test.evidence.origin = 'github-actions'"
+    "service.name = 'oriso-ci-tests' AND oriso.signal.source = 'ci'"
+    " AND test.evidence.origin = 'github-actions'"
     " AND test.status IN ('passed', 'failed') AND test.evidence.observed_at_ms > 0"
     " AND test.id EXISTS AND test.id != '' AND test.job.id EXISTS AND test.job.id != ''"
     " AND ((test.repository = 'OpenResilienceInitiative/ORISO-Frontend'"

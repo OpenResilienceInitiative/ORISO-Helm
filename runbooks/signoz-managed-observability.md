@@ -57,9 +57,9 @@ panels read `oriso-ci-tests` logs from the separate native report exporter.
 The Playwright reporter sets `deployment.environment` to the project name.
 The runtime panels scope to that environment. The CI panels scope to the
 approved repository, framework and project combinations and to hosted,
-dated terminal results. CI report collection and the authenticated ingest
-route are separate from dashboard provisioning. The Dev nightly runtime
-gate remains in ORISO-E2E#97 D.4.
+dated terminal results marked by the dedicated collector. CI report
+collection and operator replay are separate from dashboard provisioning. The Dev nightly runtime gate
+remains in ORISO-E2E#97 D.4.
 
 It does **not** own the notification channel. The Slack channel
 `oriso-alerts-slack` (Slack `#oriso-alerts-and-webhooks`) is made by hand in
