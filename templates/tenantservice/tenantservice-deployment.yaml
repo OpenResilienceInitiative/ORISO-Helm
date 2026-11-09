@@ -174,11 +174,13 @@ spec:
               configMapKeyRef:
                 key: APP_BASE_URL
                 name: tenantservice-configmap-env
-          {{- if and $legacyDpaSigning.zone $legacyDpaSigning.from }}
+          {{- if and $legacyDpaSigning.zone $legacyDpaSigning.from $legacyDpaSigning.to }}
           - name: ORISO_DPA_LEGACY_SIGNING_ZONE
             value: {{ $legacyDpaSigning.zone | quote }}
           - name: ORISO_DPA_LEGACY_SIGNING_FROM
             value: {{ $legacyDpaSigning.from | quote }}
+          - name: ORISO_DPA_LEGACY_SIGNING_TO
+            value: {{ $legacyDpaSigning.to | quote }}
           {{- end }}
           - name: TECHNICAL_SERVICE_SUBJECT
             valueFrom:

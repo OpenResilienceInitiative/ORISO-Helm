@@ -22,6 +22,7 @@ FEATURE_FLAG = "FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED"
 DPA_SIGNING_ENV = {
     "ORISO_DPA_LEGACY_SIGNING_ZONE": "UTC",
     "ORISO_DPA_LEGACY_SIGNING_FROM": "2026-11-07T00:00:00",
+    "ORISO_DPA_LEGACY_SIGNING_TO": "2026-11-07T23:59:59",
 }
 
 
@@ -100,7 +101,7 @@ def verify(documents: list[dict], expected: str) -> None:
 
 
 def verify_legacy_signing_environment(chart: str) -> None:
-    """Check the environment defaults and the complete-pair opt-in contract."""
+    """Check the environment defaults and the complete-window opt-in contract."""
     def assert_environment(documents: list[dict], expected: dict[str, str]) -> None:
         deployment = named(documents, "Deployment", "tenantservice")
         entries = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
@@ -125,20 +126,27 @@ def verify_legacy_signing_environment(chart: str) -> None:
             extra_args=(
                 "--set-string", "tenantService.legacyDpaSigning.zone=Europe/Berlin",
                 "--set-string", "tenantService.legacyDpaSigning.from=2026-09-16T04:30:00",
+                "--set-string", "tenantService.legacyDpaSigning.to=2026-09-16T06:30:00",
             ),
         ),
         {
             "ORISO_DPA_LEGACY_SIGNING_ZONE": "Europe/Berlin",
             "ORISO_DPA_LEGACY_SIGNING_FROM": "2026-09-16T04:30:00",
+            "ORISO_DPA_LEGACY_SIGNING_TO": "2026-09-16T06:30:00",
         },
     )
 
-    for assignment in ("zone=UTC", "from=2026-11-07T00:00:00"):
+    assignments = ("zone=UTC", "from=2026-11-07T00:00:00", "to=2026-11-07T23:59:59")
+    for missing in assignments:
+        args = tuple(
+            arg for assignment in assignments if assignment != missing
+            for arg in ("--set-string", f"tenantService.legacyDpaSigning.{assignment}")
+        )
         assert_environment(
             render(
                 chart,
                 True,
-                extra_args=("--set-string", f"tenantService.legacyDpaSigning.{assignment}"),
+                extra_args=args,
             ),
             {},
         )
