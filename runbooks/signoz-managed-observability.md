@@ -98,7 +98,7 @@ the Pre-Dev overlay alone leaves SigNoz and the collector off).
    ```bash
    helm upgrade --install caritas . \
      --namespace caritas --create-namespace \
-     -f values.yaml -f secrets.yaml -f <environment overlay> \
+     -f values.yaml -f secrets.yaml <environment overlay> \
      --set signoz.orisoObservability.enabled=false \
      --wait-for-jobs --timeout 15m
    ```
@@ -124,7 +124,7 @@ the Pre-Dev overlay alone leaves SigNoz and the collector off).
 ```bash
 helm upgrade --install caritas . \
   --namespace caritas --create-namespace \
-  -f values.yaml -f secrets.yaml -f <environment overlay> \
+  -f values.yaml -f secrets.yaml <environment overlay> \
   --wait-for-jobs --timeout 15m
 ```
 
