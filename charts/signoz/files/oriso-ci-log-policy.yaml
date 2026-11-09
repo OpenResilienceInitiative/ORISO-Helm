@@ -22,7 +22,10 @@ processors:
           (attributes["test.repository"] == "OpenResilienceInitiative/ORISO-Admin" and
            attributes["test.framework"] == "vitest" and attributes["test.project"] == "unit") or
           (attributes["test.repository"] == "OpenResilienceInitiative/ORISO-UserService" and
-           attributes["test.framework"] == "surefire" and attributes["test.project"] == "unit")
+           attributes["test.framework"] == "surefire" and attributes["test.project"] == "unit") or
+          (attributes["test.repository"] == "OpenResilienceInitiative/ORISO-E2E" and
+           attributes["test.framework"] == "playwright" and attributes["test.project"] == "dev" and
+           attributes["test.file"] == "tests/smoke-crash.spec.ts")
         )
       - 'not IsString(attributes["test.commit"]) or not IsMatch(attributes["test.commit"], "^[0-9a-f]{40}$")'
       - 'not IsString(attributes["test.id"]) or not IsMatch(attributes["test.id"], "^[0-9a-f]{64}$")'
@@ -32,9 +35,11 @@ processors:
       - 'not IsInt(attributes["test.retry"]) or attributes["test.retry"] < 0'
       - 'not IsMatch(attributes["test.status"], "^(passed|failed|skipped|todo)$")'
       - >-
-        not IsString(attributes["test.file"]) or
-        not IsMatch(attributes["test.file"], "^src/[\\p{L}\\p{M}\\p{N}_./()\\[\\]-]{1,255}$") or
-        IsMatch(attributes["test.file"], "/\\.{1,2}(/|$)|//|/$")
+        attributes["test.framework"] != "playwright" and (
+          not IsString(attributes["test.file"]) or
+          not IsMatch(attributes["test.file"], "^src/[\\p{L}\\p{M}\\p{N}_./()\\[\\]-]{1,255}$") or
+          IsMatch(attributes["test.file"], "/\\.{1,2}(/|$)|//|/$")
+        )
       - >-
         not IsString(attributes["test.case"]) or
         not IsMatch(attributes["test.case"], "^[^\\p{Cc}@]{1,256}$") or

@@ -124,8 +124,9 @@ kubectl -n caritas port-forward --address 127.0.0.1 "pod/$collector_pod" 14331:4
 
 In another terminal, submit only the sanitized output of the approved
 [CI test exporter](https://github.com/OpenResilienceInitiative/ORISO-E2E/pull/117)
-for the verified GitHub run, job and test selectors. The reviewed case and
-file strings are source metadata. Keep report contents and application data
+for the verified GitHub run, job and test selectors. Use the attempt-specific
+sanitized JUnit artifact for the Dev nightly smoke cases. The reviewed case
+and file strings are source metadata. Keep report contents and application data
 out of them.
 
 ```bash
