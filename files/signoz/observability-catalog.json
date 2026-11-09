@@ -289,11 +289,11 @@
         },
         {
           "id": "seed-4",
-          "title": "Seed ORISO-UserService#251 ArchiveOrDeleteSessionStatistics: first seen (no row = not seen)",
+          "title": "Seed ORISO-UserService#251 ArchiveOrDeleteSessionStatistics payload: first seen (no row = not seen)",
           "signal": "traces",
           "panelType": "table",
-          "description": "The JUnit class tracked by ORISO-UserService#251. First seen is scoped to the selected time range. An empty result means this seed was not seen in the selected telemetry.",
-          "filter": "service.name = 'oriso-e2e' AND test.file = 'src/test/java/de/caritas/cob/userservice/api/service/statistics/event/ArchiveOrDeleteSessionStatisticsEventTest.java'",
+          "description": "The JUnit method getPayload_Should_ReturnValidJsonPayload tracked by ORISO-UserService#251. First seen is scoped to the selected time range. An empty result means this seed was not seen in the selected telemetry.",
+          "filter": "service.name = 'oriso-e2e' AND test.file = 'src/test/java/de/caritas/cob/userservice/api/service/statistics/event/ArchiveOrDeleteSessionStatisticsEventTest.java' AND test.case = 'getPayload_Should_ReturnValidJsonPayload'",
           "aggregations": [
             {
               "expression": "min(timestamp)",
@@ -311,11 +311,11 @@
         },
         {
           "id": "seed-5",
-          "title": "Seed ORISO-Admin#1016 AgencyPageEdit example: first seen (no row = not seen)",
+          "title": "Seed ORISO-Admin#1016 AgencyPageEdit confirmation suite: first seen (no row = not seen)",
           "signal": "traces",
           "panelType": "table",
-          "description": "The Admin unit test cited as a failure example in the full-suite CI issue ORISO-Admin#1016. First seen is scoped to the selected time range. An empty result means this seed was not seen in the selected telemetry.",
-          "filter": "service.name = 'oriso-e2e' AND test.file = 'src/pages/Agency/Edit/index.test.tsx' AND test.case = 'AgencyPageEdit no-topic activation confirm'",
+          "description": "The leaf test cases in the AgencyPageEdit no-topic activation confirmation suite cited by ORISO-Admin#1016. First seen is scoped to the selected time range. An empty result means this seed was not seen in the selected telemetry.",
+          "filter": "service.name = 'oriso-e2e' AND test.file = 'src/pages/Agency/Edit/index.test.tsx' AND test.case IN ('shows the confirm dialog and does not save when going live without a topic', 'keeps the form values and does not save when the no-topic dialog is cancelled', 'saves offline:false and empty topicIds when the no-topic dialog is confirmed', 'saves without a dialog when going live with a topic selected', 'does not warn when an already-online agency is saved without topics', 'shows the confirm dialog when an existing offline agency goes live without a topic', 'keeps the registration card in edit mode when the no-topic dialog is cancelled', 'saves the registration card online when the no-topic dialog is confirmed', 'saves without a dialog when an existing agency has a persisted topic')",
           "aggregations": [
             {
               "expression": "min(timestamp)",

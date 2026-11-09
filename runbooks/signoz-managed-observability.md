@@ -43,7 +43,8 @@ ORISO-E2E (`tests/support/otelReporter.ts`), see ORISO-E2E#97:
   The same-commit table requires the stable `test.id` from ORISO-E2E#110.
 - The five seed panels use the file and, where applicable, case names from
   ORISO-Frontend#1613, #1707, #1443, ORISO-UserService#251 and ORISO-Admin#1016.
-  The Admin panel tracks the failing unit-test example named in its CI issue.
+  The UserService seed tracks the named JUnit method. The Admin seed tracks
+  the leaf test cases of the no-topic activation confirmation suite.
   Each panel shows the earliest matching span in the selected time range.
   A successful empty query means the seed was not seen in those spans.
   The current Playwright reporter does not cover the cited Storybook, Vitest

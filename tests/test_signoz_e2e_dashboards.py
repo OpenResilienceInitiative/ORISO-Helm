@@ -198,6 +198,17 @@ class E2eDashboardTest(unittest.TestCase):
             "ORISO-Admin#1016",
         ):
             self.assertEqual(sum(seed in title for title in titles), 1, seed)
+        admin_confirmation_cases = (
+            "shows the confirm dialog and does not save when going live without a topic",
+            "keeps the form values and does not save when the no-topic dialog is cancelled",
+            "saves offline:false and empty topicIds when the no-topic dialog is confirmed",
+            "saves without a dialog when going live with a topic selected",
+            "does not warn when an already-online agency is saved without topics",
+            "shows the confirm dialog when an existing offline agency goes live without a topic",
+            "keeps the registration card in edit mode when the no-topic dialog is cancelled",
+            "saves the registration card online when the no-topic dialog is confirmed",
+            "saves without a dialog when an existing agency has a persisted topic",
+        )
         selectors = {
             "seed-1": "test.file = 'src/components/chatStage/ChatStage.stories.tsx'",
             "seed-2": (
@@ -212,24 +223,26 @@ class E2eDashboardTest(unittest.TestCase):
             "seed-4": (
                 "test.file = 'src/test/java/de/caritas/cob/userservice/api/service/statistics/event/"
                 "ArchiveOrDeleteSessionStatisticsEventTest.java'"
+                " AND test.case = 'getPayload_Should_ReturnValidJsonPayload'"
             ),
             "seed-5": (
                 "test.file = 'src/pages/Agency/Edit/index.test.tsx'"
-                " AND test.case = 'AgencyPageEdit no-topic activation confirm'"
+                " AND test.case IN (" + ", ".join(f"'{case}'" for case in admin_confirmation_cases) + ")"
             ),
         }
         panels = MODULE.dashboard_panel_queries(flaky)
         self.assertEqual(set(selectors), {key for key in panels if key.startswith("seed-")})
         for panel_id, selector in selectors.items():
-            display = flaky["spec"]["panels"][panel_id]["spec"]["display"]
-            self.assertIn("not seen", display["name"])
-            self.assertIn("selected time range", display["description"])
-            query = panels[panel_id][0]
-            self.assertEqual(
-                query["filter"]["expression"],
-                "deployment.environment = 'dev' AND service.name = 'oriso-e2e' AND " + selector,
-            )
-            self.assertEqual(query["aggregations"][0]["expression"], "min(timestamp)")
+            with self.subTest(panel_id=panel_id):
+                display = flaky["spec"]["panels"][panel_id]["spec"]["display"]
+                self.assertIn("not seen", display["name"])
+                self.assertIn("selected time range", display["description"])
+                query = panels[panel_id][0]
+                self.assertEqual(
+                    query["filter"]["expression"],
+                    "deployment.environment = 'dev' AND service.name = 'oriso-e2e' AND " + selector,
+                )
+                self.assertEqual(query["aggregations"][0]["expression"], "min(timestamp)")
 
     def test_tables_use_the_scalar_query_kind(self) -> None:
         dashboards, _ = materialize(True)
