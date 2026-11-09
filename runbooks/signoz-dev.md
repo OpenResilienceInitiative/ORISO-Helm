@@ -162,6 +162,11 @@ Use the file reference because SigNoz v0.135.1 stores inline credentials
 in the channel data that Viewers can read. Verify the approved endpoint,
 peer and authentication from the Dev route. [Pinned channel API](https://github.com/SigNoz/signoz/blob/v0.135.1/pkg/apiserver/signozapiserver/alertmanager.go#L13-L56) · [Pinned credential serialization](https://github.com/SigNoz/signoz/blob/v0.135.1/pkg/types/alertmanagertypes/config.go#L509-L515)
 
+After creating or updating a channel, allow an Alertmanager configuration
+sync before running the rule test. SigNoz v0.135.1 polls every minute by
+default. The channel list can show the saved route before the notifier has
+loaded it. [Pinned sync interval](https://github.com/SigNoz/signoz/blob/v0.135.1/pkg/alertmanager/config.go#L38-L44)
+
 ### Enable and verify
 
 Supply a fixed service name for every catalog rule in the forwarder's
