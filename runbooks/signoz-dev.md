@@ -154,16 +154,15 @@ kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP 
 ## ClickHouse internal log retention
 
 The Dev overlay sets a three-day deletion TTL for new `query_log`, `part_log`,
-`trace_log`, `asynchronous_metric_log`, `metric_log` and `zookeeper_log` tables.
-Layered Pre-Dev inherits it. `text_log` already has a three-day TTL in the chart.
-Writer removal files take precedence. This policy covers those seven system
-log families and leaves the retention of SigNoz signal tables independent.
+`trace_log`, `asynchronous_metric_log`, `metric_log`, `zookeeper_log`,
+`aggregated_zookeeper_log` and `processors_profile_log` tables. Layered Pre-Dev
+inherits it. `text_log` already has a three-day TTL in the chart. Later writer
+removal files take precedence.
 
 Restore writable headroom before the approved rollout. A changed engine
 definition can make ClickHouse rename the old table to `<name>_0` or a higher
 suffix at its next flush. The old table keeps its data and TTL. Restoring the
-previous definition can rotate again. The upgrade alone cannot demonstrate
-reclaimed storage.
+previous definition can rotate again. Measure storage reclamation separately.
 
 Before the upgrade, record ClickHouse pod identities, the newest successful
 backup and this read-only inventory for each data pod. After the operator
@@ -177,12 +176,20 @@ kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --readonly=1 -
 SELECT name, uuid, engine_full
 FROM system.tables
 WHERE database = 'system'
-  AND match(name, '^(query_log|part_log|text_log|trace_log|metric_log|asynchronous_metric_log|zookeeper_log)(_[0-9]+)?$')
+  AND replaceRegexpOne(name, '_[0-9]+$', '') IN (
+    'query_log', 'part_log', 'text_log', 'trace_log', 'metric_log',
+    'asynchronous_metric_log', 'zookeeper_log', 'aggregated_zookeeper_log',
+    'processors_profile_log'
+  )
 ORDER BY name;
 SELECT table, sum(bytes_on_disk) AS active_bytes
 FROM system.parts
 WHERE database = 'system' AND active
-  AND match(table, '^(query_log|part_log|text_log|trace_log|metric_log|asynchronous_metric_log|zookeeper_log)(_[0-9]+)?$')
+  AND replaceRegexpOne(table, '_[0-9]+$', '') IN (
+    'query_log', 'part_log', 'text_log', 'trace_log', 'metric_log',
+    'asynchronous_metric_log', 'zookeeper_log', 'aggregated_zookeeper_log',
+    'processors_profile_log'
+  )
 GROUP BY table ORDER BY table;
 SELECT name, total_space, unreserved_space FROM system.disks WHERE name = 'default';"
 ```

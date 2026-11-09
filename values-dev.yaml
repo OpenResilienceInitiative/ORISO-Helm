@@ -67,6 +67,12 @@ signoz:
           <zookeeper_log>
             <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
           </zookeeper_log>
+          <processors_profile_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </processors_profile_log>
+          <aggregated_zookeeper_log>
+            <ttl replace="1">event_date + INTERVAL 3 DAY</ttl>
+          </aggregated_zookeeper_log>
         </clickhouse>
       # Dev's wide metric_log schema caused repeated failed merges. Keep this
       # environment-specific until other SigNoz installations are measured.

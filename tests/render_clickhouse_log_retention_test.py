@@ -7,10 +7,12 @@ import xml.etree.ElementTree as ET
 from render_clickhouse_system_logs_test import render
 
 RETENTION_FILE = "config.d/98-oriso-system-log-retention.xml"
+AGGREGATED_LOG = "aggregated_zookeeper_log"
 LOG_TABLES = {
     "asynchronous_metric_log",
     "metric_log",
     "part_log",
+    "processors_profile_log",
     "query_log",
     "trace_log",
     "zookeeper_log",
@@ -27,7 +29,8 @@ def check_retention(documents):
     assert RETENTION_FILE in files, "ClickHouseInstallation is missing the retention file"
     root = ET.fromstring(files[RETENTION_FILE])
     assert root.tag == "clickhouse" and not root.attrib
-    assert sorted(log.tag for log in root) == sorted(LOG_TABLES)
+    expected_logs = LOG_TABLES | {AGGREGATED_LOG}
+    assert sorted(log.tag for log in root) == sorted(expected_logs), "Expected the full measured log set"
 
     operator_config, = (
         doc["data"]
@@ -35,7 +38,8 @@ def check_retention(documents):
         if doc["kind"] == "ConfigMap"
         and doc["metadata"]["name"] == "caritas-clickhouse-operator-etc-configd-files"
     )
-    for log in root:
+    for name in sorted(LOG_TABLES):
+        log = root.find(name)
         engine, = log
         assert not log.attrib and engine.tag == "engine" and engine.attrib == {"replace": "1"}, log.tag
         upstream, = (xml for name, xml in operator_config.items() if name.endswith(f"-{log.tag}.xml"))
@@ -47,6 +51,11 @@ def check_retention(documents):
             upstream_engine,
         )
         assert replacements == 1 and engine.text == expected, log.tag
+
+    aggregate = root.find(AGGREGATED_LOG)
+    ttl, = aggregate
+    assert not aggregate.attrib and ttl.tag == "ttl" and ttl.attrib == {"replace": "1"}
+    assert ttl.text == "event_date + INTERVAL 3 DAY"
 
     system_logs = ET.fromstring(files["config.d/system_log.xml"])
     assert system_logs.findtext("text_log/ttl") == "event_date + INTERVAL 3 DAY DELETE"
