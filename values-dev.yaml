@@ -45,6 +45,29 @@ signoz:
       limits:
         memory: 4Gi
     files:
+      # Apply per installation so the operator reconciles the changed files.
+      # Layered Pre-Dev inherits the policy. Later files may disable a writer.
+      config.d/98-oriso-system-log-retention.xml: |
+        <clickhouse>
+          <query_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </query_log>
+          <part_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </part_log>
+          <trace_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </trace_log>
+          <asynchronous_metric_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </asynchronous_metric_log>
+          <metric_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </metric_log>
+          <zookeeper_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </zookeeper_log>
+        </clickhouse>
       # Dev's wide metric_log schema caused repeated failed merges. Keep this
       # environment-specific until other SigNoz installations are measured.
       config.d/99-oriso-disable-metric-log.xml: |
