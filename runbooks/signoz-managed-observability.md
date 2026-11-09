@@ -212,9 +212,13 @@ the query returned no series and nothing was sent, so pick a rule whose metric
 already has data (`collector-staleness` and `clickhouse-capacity` use collector
 metrics).
 
-It validates the rule shape and configured channel, but does not prove Slack
-delivery. Confirm receipt of the test notification and one real managed-rule
-dispatch per environment out of band, and note both in the release evidence.
+The scheduled `collector-staleness` rule checks a five-minute rolling window
+with a one-minute absence interval. Verify a missing series through a No Data
+entry in the scheduled rule history and a corresponding Slack receipt.
+
+The one-off endpoint validates the rule shape and configured channel. Record
+receiver confirmation for the test notification and one scheduled dispatch
+per environment in the release evidence.
 
 ## Promotion
 
