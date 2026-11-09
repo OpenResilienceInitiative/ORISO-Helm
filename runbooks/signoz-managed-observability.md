@@ -73,6 +73,31 @@ also have a fixed `k8s.cluster.name` filter. Dashboard variables are absent,
 alert grouping is limited to the static `environment` label, and the program
 rejects assets that mention user, room, IP, token, or message-content fields.
 
+### Verify a Dev CI replay
+
+After the approved operator replay and Collector batch flush, pass the same
+sanitized exporter payload files to the read-only verifier. Use the existing
+Dev API key through the private `SIGNOZ_API_KEY` environment.
+
+```bash
+python3 files/signoz/verify_ci_replay.py storybook.otlp.json unit.otlp.json admin.otlp.json userservice.otlp.json
+```
+
+The verifier reads up to sixteen payload files and queries each job inside its
+recorded UTC evidence window. The bounded raw query selects only the CI
+fields and preserves the stored Float64 duration and nanosecond timestamps.
+The verifier checks the collector marker, scope, identity, outcome, retry
+and optional duration. It reports aggregate counts for exact,
+missing, duplicate, conflicting and unexpected rows. Warnings, cursors and
+invalid responses make the read inconclusive. A clean result needs exactly
+one stored row per expected test and both stored CI dashboard specifications
+to match the catalog.
+
+For a partial delivery or ambiguous request result, run the readback before
+considering a retry. Compare the saved dashboard panels in the replay window
+separately from the row and query-definition check.
+
+
 ## Switch and what it costs
 
 Everything here is behind `signoz.orisoObservability.enabled`, default `false`

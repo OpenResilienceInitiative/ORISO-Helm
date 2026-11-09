@@ -516,14 +516,15 @@ def validate_asset_contract(
 
 
 def build_query_range_payload(
-    query: dict[str, Any], *, start_ms: int, end_ms: int
+    query: dict[str, Any], *, start_ms: int, end_ms: int,
+    request_type: str = "time_series", query_type: str = "builder_query",
 ) -> dict[str, Any]:
     return {
         "schemaVersion": "v1",
         "start": start_ms,
         "end": end_ms,
-        "requestType": "time_series",
-        "compositeQuery": {"queries": [{"type": "builder_query", "spec": query}]},
+        "requestType": request_type,
+        "compositeQuery": {"queries": [{"type": query_type, "spec": query}]},
         "formatOptions": {"formatTableResultForUI": False, "fillGaps": False},
         "noCache": True,
     }
@@ -715,11 +716,21 @@ class SignozHttpError(RuntimeError):
         self.status = status
 
 
+class NoRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        return None
+
+
 class SignozClient:
-    def __init__(self, api_url: str, api_key: str, timeout: int = 20) -> None:
+    READ_LIMIT = 2 * 1024 * 1024
+
+    def __init__(
+        self, api_url: str, api_key: str, timeout: int = 20, *, read_only: bool = False,
+    ) -> None:
         self.api_url = api_url.rstrip("/") + "/"
         self.api_key = api_key
         self.timeout = timeout
+        self.reader = urllib.request.build_opener(NoRedirects()) if read_only else None
 
     def request(
         self,
@@ -728,6 +739,11 @@ class SignozClient:
         payload: dict[str, Any] | None = None,
         expected: tuple[int, ...] = (200,),
     ) -> Any:
+        if self.reader and not (
+            (method == "POST" and path == "/api/v5/query_range")
+            or (method == "GET" and re.fullmatch(r"/api/v2/dashboards(?:/[0-9a-f-]{36})?", path))
+        ):
+            raise RuntimeError("Only the query and dashboard reads are allowed")
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             urllib.parse.urljoin(self.api_url, path.lstrip("/")),
@@ -739,17 +755,23 @@ class SignozClient:
                 "SIGNOZ-API-KEY": self.api_key,
             },
         )
+        open_request = self.reader.open if self.reader else urllib.request.urlopen
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with open_request(request, timeout=self.timeout) as response:
                 status = response.status
-                raw = response.read()
+                raw = response.read(self.READ_LIMIT + 1) if self.reader else response.read()
+                if self.reader and len(raw) > self.READ_LIMIT:
+                    raise RuntimeError("SigNoz read response exceeds the size limit")
         except urllib.error.HTTPError as error:
+            if self.reader:
+                error.close()
+                raise SignozHttpError(method, path, error.code, "response body omitted") from None
             status = error.code
             raw = error.read()
         except urllib.error.URLError as error:
             raise RuntimeError(f"SigNoz API {method} {path} is unreachable") from error
         if status not in expected:
-            detail = raw.decode("utf-8", errors="replace")[:1000]
+            detail = "response body omitted" if self.reader else raw.decode("utf-8", errors="replace")[:1000]
             raise SignozHttpError(method, path, status, detail)
         if not raw:
             return None
