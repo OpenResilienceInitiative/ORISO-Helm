@@ -105,6 +105,12 @@ class E2eDashboardTest(unittest.TestCase):
                     self.assertIn("test.job.id EXISTS", expression)
                     self.assertIn("test.id EXISTS", expression)
                     self.assertIn("test.project IN ('unit', 'storybook (chromium)')", expression)
+                    self.assertIn(
+                        "(test.repository = 'OpenResilienceInitiative/ORISO-E2E'"
+                        " AND test.framework = 'playwright' AND test.project = 'dev'"
+                        " AND test.file = 'tests/smoke-crash.spec.ts')",
+                        expression,
+                    )
                     self.assertNotIn("deployment.environment", expression)
                 else:
                     self.assertEqual(query["signal"], "traces")

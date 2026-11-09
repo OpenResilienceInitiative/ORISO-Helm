@@ -83,7 +83,10 @@ CI_TEST_LOG_FILTER = (
     " OR (test.repository = 'OpenResilienceInitiative/ORISO-Admin'"
     " AND test.framework = 'vitest' AND test.project = 'unit')"
     " OR (test.repository = 'OpenResilienceInitiative/ORISO-UserService'"
-    " AND test.framework = 'surefire' AND test.project = 'unit'))"
+    " AND test.framework = 'surefire' AND test.project = 'unit')"
+    " OR (test.repository = 'OpenResilienceInitiative/ORISO-E2E'"
+    " AND test.framework = 'playwright' AND test.project = 'dev'"
+    " AND test.file = 'tests/smoke-crash.spec.ts'))"
 )
 FORBIDDEN_TERMS = {
     "access_token",
