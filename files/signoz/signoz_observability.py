@@ -68,10 +68,22 @@ ALLOWED_GROUPS = {
     "test.file",
     "test.id",
     "test.project",
+    "test.repository",
     "test.run.id",
     "test.status",
     "workflow",
 }
+CI_TEST_LOG_FILTER = (
+    "service.name = 'oriso-ci-tests' AND test.evidence.origin = 'github-actions'"
+    " AND test.status IN ('passed', 'failed') AND test.evidence.observed_at_ms > 0"
+    " AND test.id EXISTS AND test.id != '' AND test.job.id EXISTS AND test.job.id != ''"
+    " AND ((test.repository = 'OpenResilienceInitiative/ORISO-Frontend'"
+    " AND test.framework = 'vitest' AND test.project IN ('unit', 'storybook (chromium)'))"
+    " OR (test.repository = 'OpenResilienceInitiative/ORISO-Admin'"
+    " AND test.framework = 'vitest' AND test.project = 'unit')"
+    " OR (test.repository = 'OpenResilienceInitiative/ORISO-UserService'"
+    " AND test.framework = 'surefire' AND test.project = 'unit'))"
+)
 FORBIDDEN_TERMS = {
     "access_token",
     "client.address",
@@ -92,6 +104,9 @@ FORBIDDEN_TERMS = {
 
 
 def _scope_filter(definition: dict[str, Any]) -> str:
+    if definition.get("signal") == "logs":
+        selector = definition.get("filter")
+        return f"{CI_TEST_LOG_FILTER} AND ({selector})" if selector else CI_TEST_LOG_FILTER
     parts = [f"deployment.environment = '{ENVIRONMENT_TOKEN}'"]
     if definition.get("clusterScoped"):
         parts.append(f"k8s.cluster.name = '{CLUSTER_TOKEN}'")
@@ -107,11 +122,11 @@ def _group_by(names: Iterable[str], context: str = "attribute") -> list[dict[str
     ]
 
 
-def _trace_query(definition: dict[str, Any]) -> dict[str, Any]:
-    """Builder query over test spans (signal traces), one or more aggregations."""
+def _event_query(definition: dict[str, Any]) -> dict[str, Any]:
+    """Builder query over test spans or CI result logs."""
     query: dict[str, Any] = {
         "name": "A",
-        "signal": "traces",
+        "signal": definition["signal"],
         "source": "",
         "stepInterval": definition.get("stepInterval", 60),
         "aggregations": [
@@ -130,8 +145,8 @@ def _trace_query(definition: dict[str, Any]) -> dict[str, Any]:
 
 
 def _builder_query(definition: dict[str, Any]) -> dict[str, Any]:
-    if definition.get("signal") == "traces":
-        return _trace_query(definition)
+    if definition.get("signal") in {"traces", "logs"}:
+        return _event_query(definition)
     return {
         "name": "A",
         "signal": "metrics",
@@ -158,6 +173,9 @@ def _dashboard(definition: dict[str, Any]) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     for index, panel in enumerate(definition["panels"]):
         panel_id = panel["id"]
+        plugin_spec = {}
+        if "columnUnits" in panel:
+            plugin_spec["formatting"] = {"columnUnits": panel["columnUnits"]}
         panels[panel_id] = {
             "kind": "Panel",
             "spec": {
@@ -169,7 +187,7 @@ def _dashboard(definition: dict[str, Any]) -> dict[str, Any]:
                     "kind": "signoz/TablePanel"
                     if panel.get("panelType") == "table"
                     else "signoz/TimeSeriesPanel",
-                    "spec": {},
+                    "spec": plugin_spec,
                 },
                 "links": [],
                 "queries": [
@@ -389,6 +407,23 @@ def _panel_title(panel: Any) -> str:
     return str(panel.get("spec", {}).get("display", {}).get("name", ""))
 
 
+def _e2e_dashboard_names(environment: str) -> set[str]:
+    env_slug = environment.lower().replace("_", "-")
+    return {f"{slug}-{env_slug}" for slug in E2E_DASHBOARD_SLUGS}
+
+
+def _dashboard_filter_is_scoped(
+    dashboard: dict[str, Any], query: dict[str, Any], environment: str
+) -> bool:
+    expression = query.get("filter", {}).get("expression", "")
+    if query.get("signal") == "logs":
+        return dashboard.get("name") in _e2e_dashboard_names(environment) and (
+            expression == CI_TEST_LOG_FILTER
+            or (expression.startswith(f"{CI_TEST_LOG_FILTER} AND (") and expression.endswith(")"))
+        )
+    return f"deployment.environment = '{environment}'" in expression
+
+
 def validate_asset_contract(
     dashboards: list[dict[str, Any]],
     alerts: list[dict[str, Any]],
@@ -437,7 +472,9 @@ def validate_asset_contract(
                 f"dashboard {dashboard.get('name')} has no executable query"
             )
         for query in queries:
-            if environment_filter not in query.get("filter", {}).get("expression", ""):
+            if not _dashboard_filter_is_scoped(dashboard, query, environment):
+                if query.get("signal") == "logs":
+                    raise RuntimeError("CI log query is outside the allowed dashboard scope")
                 raise RuntimeError(f"dashboard query is not scoped to {environment}")
             groups = {item.get("name") for item in query.get("groupBy", [])}
             if not groups.issubset(ALLOWED_GROUPS):
@@ -859,11 +896,11 @@ def _wait_for_signal_data(
 
 def _query_contract(query: dict[str, Any]) -> dict[str, Any]:
     aggregations = query.get("aggregations", [])
-    if query.get("signal") == "traces":
+    if query.get("signal") in {"traces", "logs"}:
         if not aggregations:
             raise RuntimeError("managed SigNoz query must contain an aggregation")
         return {
-            "signal": "traces",
+            "signal": query["signal"],
             "disabled": query.get("disabled"),
             "aggregations": [
                 (str(item.get("expression")), str(item.get("alias", "")))
@@ -914,6 +951,11 @@ def _assert_no_protected_fields(value: Any, label: str) -> None:
         raise RuntimeError(f"{label} contains protected fields: {leaked}")
 
 
+def _panel_column_units(panel: dict[str, Any]) -> dict[str, str]:
+    plugin = panel.get("spec", {}).get("plugin", {})
+    return plugin.get("spec", {}).get("formatting", {}).get("columnUnits") or {}
+
+
 def validate_live_dashboard(
     current: dict[str, Any],
     expected: dict[str, Any],
@@ -954,6 +996,12 @@ def validate_live_dashboard(
             raise RuntimeError(
                 f"stored dashboard panel title drift: {expected['name']} / {panel_id}"
             )
+        if _panel_column_units(current_panel_specs[panel_id]) != _panel_column_units(
+            expected_panel_specs[panel_id]
+        ):
+            raise RuntimeError(
+                f"stored dashboard formatting drift: {expected['name']} / {panel_id}"
+            )
         current_panel_queries = current_panels[panel_id]
         if len(current_panel_queries) != len(expected_panel_queries):
             raise RuntimeError(
@@ -966,10 +1014,9 @@ def validate_live_dashboard(
                 raise RuntimeError(
                     f"stored dashboard query drift: {expected['name']} / {panel_id}"
                 )
-    environment_filter = f"deployment.environment = '{environment}'"
     for query in current_queries:
         contract = _query_contract(query)
-        if environment_filter not in contract["filter"]:
+        if not _dashboard_filter_is_scoped(current, query, environment):
             raise RuntimeError(f"stored dashboard query drift: {expected['name']}")
         if not {name for name, _, _ in contract["groupBy"]}.issubset(ALLOWED_GROUPS):
             raise RuntimeError(
@@ -1050,7 +1097,7 @@ def prove_conformance(
         item.get("name"): item
         for item in _list(client, "/api/v2/dashboards", "dashboards")
     }
-    optional_dashboards = {f"{slug}-{environment}" for slug in E2E_DASHBOARD_SLUGS}
+    optional_dashboards = _e2e_dashboard_names(environment)
     for expected in dashboards:
         listed = listed_dashboards.get(expected["name"])
         if not listed:

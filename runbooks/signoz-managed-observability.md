@@ -26,8 +26,9 @@ creates or updates:
 ### Optional: E2E test dashboards (off by default)
 
 With `signoz.orisoObservability.e2eDashboards=true` (default `false`) the same
-Job also manages two dashboards over the `oriso-e2e` test spans exported by
-ORISO-E2E (`tests/support/otelReporter.ts`), see ORISO-E2E#97:
+Job also manages the two test dashboards for ORISO-E2E#97. The Playwright
+panels read `oriso-e2e` spans from `tests/support/otelReporter.ts`. The CI
+panels read `oriso-ci-tests` logs from the separate native report exporter.
 
 - `ORISO E2E Test Health [<environment>]` counts each identified first-attempt
   run once per Playwright test and project. The pass rate uses Playwright's
@@ -41,20 +42,24 @@ ORISO-E2E (`tests/support/otelReporter.ts`), see ORISO-E2E#97:
   failed span counts as a failure. The reporter's `test.flaky` flag also has its
   own panel for passing retries. Test Health remains available for older spans.
   The same-commit table requires the stable `test.id` from ORISO-E2E#110.
-- The five seed panels use the file and, where applicable, case names from
+- The CI pass rate counts terminal outcomes per distinct GitHub job. A job
+  with a failed record counts once as failed. The CI same-commit table
+  requires a passing job and a separate failing job for the same repository,
+  project, test and checkout. A job with conflicting results does not count as
+  a passing or failing observation in that table.
+- The five seed panels match the exact source project, file and cases from
   ORISO-Frontend#1613, #1707, #1443, ORISO-UserService#251 and ORISO-Admin#1016.
-  The UserService seed tracks the named JUnit method. The Admin seed tracks
-  the leaf test cases of the no-topic activation confirmation suite.
-  Each panel shows the earliest matching span in the selected time range.
-  A successful empty query means the seed was not seen in those spans.
-  The current Playwright reporter does not cover the cited Storybook, Vitest
-  or JUnit jobs. Their historical CI failures have separate evidence.
+  They show the earliest dated CI observation in the selected time range.
+  The numeric field is the report window end in epoch milliseconds and the
+  table formats it as a date using the display time zone. An empty table
+  means there is no matching dated observation in the ingested results.
 
-The filter uses `deployment.environment = '<environment>'`, and the reporter sets
-that to the Playwright project name, so the panels fill for `dev` (project `dev`)
-and stay empty where the environment name and the project differ.
-Spans reach SigNoz only when a run sends them, see `docs/test-telemetry.md` in
-ORISO-E2E; there is no scheduled run yet (ORISO-E2E#97 D.4).
+The Playwright reporter sets `deployment.environment` to the project name.
+The runtime panels scope to that environment. The CI panels scope to the
+approved repository, framework and project combinations and to hosted,
+dated terminal results. CI report collection and the authenticated ingest
+route are separate from dashboard provisioning. The Dev nightly runtime
+gate remains in ORISO-E2E#97 D.4.
 
 It does **not** own the notification channel. The Slack channel
 `oriso-alerts-slack` (Slack `#oriso-alerts-and-webhooks`) is made by hand in

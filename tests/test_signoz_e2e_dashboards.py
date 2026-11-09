@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Contracts for the opt-in E2E dashboards over the oriso-e2e test spans (ORISO-E2E#97)."""
+"""Contracts for the opt-in E2E and CI test dashboards (ORISO-E2E#97)."""
 
 from __future__ import annotations
 
@@ -31,6 +31,15 @@ REPORTER_ATTRIBUTES = {
     "test.duration_ms",
     "test.flaky",
 }
+
+
+# Attributes used from the CI exporter in ORISO-E2E #117.
+CI_REPORTER_ATTRIBUTES = {
+    "test.repository", "test.framework", "test.project", "test.id",
+    "test.file", "test.case", "test.commit", "test.job.id", "test.status",
+    "test.evidence.origin", "test.evidence.observed_at_ms",
+}
+DATE_COLUMN = {"A.min(test.evidence.observed_at_ms)": "dateTimeAsIso"}
 
 
 def materialize(include_e2e: bool, environment: str = "dev"):
@@ -80,30 +89,72 @@ class E2eDashboardTest(unittest.TestCase):
                 channel_name="oriso-alerts-slack",
             )
 
-    def test_every_query_reads_test_spans_scoped_to_the_environment(self) -> None:
-        dashboards, _ = materialize(True)
-        queries = [
-            query for item in e2e_only(dashboards) for query in MODULE.dashboard_builder_queries(item)
-        ]
-        self.assertGreaterEqual(len(queries), 10)
-        for query in queries:
-            self.assertEqual(query["signal"], "traces")
-            expression = query["filter"]["expression"]
-            self.assertIn("deployment.environment = 'dev'", expression)
-            self.assertIn("service.name = 'oriso-e2e'", expression)
+    def test_runtime_and_ci_queries_use_distinct_scopes(self) -> None:
+        dashboards, alerts = materialize(True)
+        ci_panels = set()
+        for dashboard in e2e_only(dashboards):
+            for panel, (query,) in MODULE.dashboard_panel_queries(dashboard).items():
+                expression = query["filter"]["expression"]
+                if query["signal"] == "logs":
+                    ci_panels.add(panel)
+                    self.assertIn("service.name = 'oriso-ci-tests'", expression)
+                    self.assertIn("test.evidence.origin = 'github-actions'", expression)
+                    self.assertIn("test.status IN ('passed', 'failed')", expression)
+                    self.assertIn("test.evidence.observed_at_ms > 0", expression)
+                    self.assertIn("test.job.id EXISTS", expression)
+                    self.assertIn("test.id EXISTS", expression)
+                    self.assertIn("test.project IN ('unit', 'storybook (chromium)')", expression)
+                    self.assertNotIn("deployment.environment", expression)
+                else:
+                    self.assertEqual(query["signal"], "traces")
+                    self.assertIn("deployment.environment = 'dev'", expression)
+                    self.assertIn("service.name = 'oriso-e2e'", expression)
+        self.assertEqual(ci_panels, {
+            "ci-pass-rate", "ci-flaky-by-commit", "seed-1", "seed-2", "seed-3", "seed-4", "seed-5",
+        })
+        core = copy.deepcopy(dashboards)
+        MODULE.dashboard_builder_queries(core[0])[0]["signal"] = "logs"
+        with self.assertRaisesRegex(RuntimeError, "CI log query"):
+            MODULE.validate_asset_contract(core, alerts, environment="dev",
+                                           cluster_name="oriso-dev", channel_name="oriso-alerts-slack")
 
-    def test_queries_only_use_attributes_the_reporter_exports(self) -> None:
+    def test_queries_only_use_attributes_their_reporter_exports(self) -> None:
         dashboards, _ = materialize(True)
-        used = set()
+        used = {"traces": set(), "logs": set()}
         for query in MODULE.dashboard_builder_queries(e2e_only(dashboards)):
-            used.update(field["name"] for field in query["groupBy"] if field["name"].startswith("test."))
+            fields_used = used[query["signal"]]
+            fields_used.update(field["name"] for field in query["groupBy"] if field["name"].startswith("test."))
             expressions = [query["filter"]["expression"]]
             expressions.extend(aggregation["expression"] for aggregation in query["aggregations"])
             for expression in expressions:
                 fields = re.sub(r"'(?:[^'\\]|\\.)*'", "", expression)
-                used.update(re.findall(r"\btest\.[a-z0-9_.]+", fields))
-        self.assertTrue(used, "expected test.* attributes")
-        self.assertEqual(used - REPORTER_ATTRIBUTES, set())
+                fields_used.update(re.findall(r"\btest\.[a-z0-9_.]+", fields))
+        self.assertTrue(used["traces"] and used["logs"], "expected attributes for both signals")
+        self.assertEqual(used["traces"] - REPORTER_ATTRIBUTES, set())
+        self.assertEqual(used["logs"] - CI_REPORTER_ATTRIBUTES, set())
+
+    def test_ci_health_and_flaky_detection_deduplicate_job_outcomes(self) -> None:
+        dashboards, _ = materialize(True)
+        health, flaky = e2e_only(dashboards)
+        rate, = MODULE.dashboard_panel_queries(health)["ci-pass-rate"]
+        mixed, = MODULE.dashboard_panel_queries(flaky)["ci-flaky-by-commit"]
+        runs = "count_distinct(test.job.id)"
+        failed = "count_distinct_if(test.job.id, test.status = 'failed')"
+        passed = "count_distinct_if(test.job.id, test.status = 'passed')"
+        groups = ["test.repository", "test.project", "test.id", "test.file", "test.case"]
+        self.assertEqual([item["name"] for item in rate["groupBy"]], groups)
+        self.assertEqual([item["name"] for item in mixed["groupBy"]], groups + ["test.commit"])
+        self.assertEqual(rate["aggregations"], [
+            {"expression": f"({runs} - {failed}) * 100.0 / {runs}", "alias": "pass_rate_pct"},
+            {"expression": runs, "alias": "jobs"},
+        ])
+        self.assertEqual(mixed["aggregations"], [
+            {"expression": f"{runs} - {failed}", "alias": "passes"},
+            {"expression": f"{runs} - {passed}", "alias": "fails"},
+            {"expression": "min(test.evidence.observed_at_ms)", "alias": "first_seen"},
+        ])
+        self.assertEqual(mixed["having"]["expression"], "passes > 0 AND fails > 0")
+        self.assertIn("test.commit REGEXP '^[0-9a-f]{40}$'", mixed["filter"]["expression"])
 
     def test_health_counts_distinct_first_runs_by_test_identity_and_project(self) -> None:
         dashboards, _ = materialize(True)
@@ -230,19 +281,44 @@ class E2eDashboardTest(unittest.TestCase):
                 " AND test.case IN (" + ", ".join(f"'{case}'" for case in admin_confirmation_cases) + ")"
             ),
         }
+        identities = {
+            "seed-1": ("Frontend", "storybook (chromium)"),
+            "seed-2": ("Frontend", "unit"),
+            "seed-3": ("Frontend", "storybook (chromium)"),
+            "seed-4": ("UserService", "unit"),
+            "seed-5": ("Admin", "unit"),
+        }
         panels = MODULE.dashboard_panel_queries(flaky)
         self.assertEqual(set(selectors), {key for key in panels if key.startswith("seed-")})
         for panel_id, selector in selectors.items():
             with self.subTest(panel_id=panel_id):
-                display = flaky["spec"]["panels"][panel_id]["spec"]["display"]
-                self.assertIn("not seen", display["name"])
-                self.assertIn("selected time range", display["description"])
-                query = panels[panel_id][0]
-                self.assertEqual(
-                    query["filter"]["expression"],
-                    "deployment.environment = 'dev' AND service.name = 'oriso-e2e' AND " + selector,
-                )
-                self.assertEqual(query["aggregations"][0]["expression"], "min(timestamp)")
+                spec = flaky["spec"]["panels"][panel_id]["spec"]
+                self.assertIn("First Seen", spec["display"]["name"])
+                self.assertIn("selected time range", spec["display"]["description"])
+                repository, project = identities[panel_id]
+                query, = panels[panel_id]
+                self.assertEqual(query["signal"], "logs")
+                self.assertTrue(query["filter"]["expression"].endswith(
+                    f" AND (test.repository = 'OpenResilienceInitiative/ORISO-{repository}'"
+                    f" AND test.project = '{project}' AND {selector})"
+                ))
+                self.assertEqual(query["aggregations"], [
+                    {"expression": "min(test.evidence.observed_at_ms)", "alias": "first_seen"},
+                    {"expression": "count_distinct(test.job.id)", "alias": "jobs"},
+                ])
+                self.assertEqual(spec["plugin"]["spec"]["formatting"]["columnUnits"], DATE_COLUMN)
+
+    def test_stored_date_format_drift_is_detected(self) -> None:
+        dashboards, _ = materialize(True)
+        expected = next(item for item in dashboards if item["name"] == "oriso-e2e-flaky-dev")
+        drifted = copy.deepcopy(expected)
+        drifted["spec"]["panels"]["flaky-retry"]["spec"]["plugin"]["spec"]["formatting"] = {
+            "columnUnits": None, "decimalPrecision": "2",
+        }
+        MODULE.validate_live_dashboard(drifted, expected, environment="dev")
+        drifted["spec"]["panels"]["seed-4"]["spec"]["plugin"]["spec"].clear()
+        with self.assertRaisesRegex(RuntimeError, "formatting drift"):
+            MODULE.validate_live_dashboard(drifted, expected, environment="dev")
 
     def test_tables_use_the_scalar_query_kind(self) -> None:
         dashboards, _ = materialize(True)

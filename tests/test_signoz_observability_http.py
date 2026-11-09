@@ -125,12 +125,13 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/v5/query_range":
             self.state.queries += 1
             query = body["compositeQuery"]["queries"][0]["spec"]
-            if query["signal"] == "traces":
+            if query["signal"] in {"traces", "logs"}:
                 alias = query["aggregations"][0].get("alias", "")
-                self._send(200, self.state.trace_responses.get(alias, {
+                response = self.state.trace_responses.get(alias) if query["signal"] == "traces" else None
+                self._send(200, response or {
                     "type": "time_series",
                     "data": {"results": [{"queryName": query["name"], "aggregations": None}]},
-                }))
+                })
                 return
             expression = query["filter"]["expression"]
             metric = query["aggregations"][0]["metricName"]
