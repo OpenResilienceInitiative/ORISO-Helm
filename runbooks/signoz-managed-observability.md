@@ -29,8 +29,13 @@ With `signoz.orisoObservability.e2eDashboards=true` (default `false`) the same
 Job also manages two dashboards over the `oriso-e2e` test spans exported by
 ORISO-E2E (`tests/support/otelReporter.ts`), see ORISO-E2E#97:
 
-- `ORISO E2E Test Health [<environment>]`: first-attempt outcomes over time, pass
-  rate per test, tests with a failed first attempt, p95 duration, recent runs;
+- `ORISO E2E Test Health [<environment>]` counts each identified first-attempt
+  run once per Playwright test and project. The pass rate uses Playwright's
+  expected outcome, so an expected failure counts as a pass. A run with any
+  unexpected first attempt counts as unexpected. A blank test ID identifies
+  the separate legacy grouping by project, file and title. The rate requires
+  a recorded run ID. The other panels show stored attempt rows, durations and
+  recent runs.
 - `ORISO E2E Flaky Tests [<environment>]` groups passes and unexpected failures
   by the same Playwright test ID, project and full commit SHA. A timeout with a
   failed span counts as a failure. The reporter's `test.flaky` flag also has its

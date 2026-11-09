@@ -52,12 +52,13 @@
     {
       "slug": "oriso-e2e-test-health",
       "title": "ORISO E2E Test Health",
-      "description": "Pass rate per test over runs, from the oriso-e2e test spans. First attempts only (test.retry = 0), skipped tests excluded.",
+      "description": "First-attempt pass rate across distinct Playwright runs, using expected outcomes reported by oriso-e2e. A blank test ID marks a separate legacy group by project, file and title.",
       "duration": "7d",
       "panels": [
         {
           "id": "outcomes",
-          "title": "First-attempt outcomes over time",
+          "title": "Stored first-attempt rows over time",
+          "description": "Rows grouped by the raw Playwright result status.",
           "signal": "traces",
           "panelType": "timeseries",
           "filter": "service.name = 'oriso-e2e' AND test.status != 'skipped' AND test.retry = 0",
@@ -73,21 +74,24 @@
         },
         {
           "id": "pass-rate",
-          "title": "Pass rate per test",
+          "title": "First-attempt pass rate per test",
+          "description": "Each run counts once. An unexpected result makes the run unexpected, even if another copy reports an expected result. A blank test ID marks a legacy group by project, file and title.",
           "signal": "traces",
           "panelType": "table",
-          "filter": "service.name = 'oriso-e2e' AND test.status != 'skipped' AND test.retry = 0",
+          "filter": "service.name = 'oriso-e2e' AND test.run.id EXISTS AND test.run.id != '' AND test.project EXISTS AND test.project != '' AND test.retry = 0 AND test.status IN ('passed', 'failed', 'timedOut') AND status_code IN (1, 2)",
           "aggregations": [
             {
-              "expression": "countIf(test.status = 'passed') * 100 / count()",
+              "expression": "(count_distinct(test.run.id) - count_distinct_if(test.run.id, status_code = 2)) * 100.0 / count_distinct(test.run.id)",
               "alias": "pass_rate_pct"
             },
             {
-              "expression": "count()",
+              "expression": "count_distinct(test.run.id)",
               "alias": "runs"
             }
           ],
           "groupBy": [
+            "test.project",
+            "test.id",
             "test.file",
             "test.case"
           ],
@@ -95,30 +99,33 @@
         },
         {
           "id": "failing",
-          "title": "Tests with a failed first attempt",
+          "title": "Tests with unexpected first attempts",
+          "description": "Distinct runs with an unexpected first attempt. A blank test ID marks a legacy group by project, file and title.",
           "signal": "traces",
           "panelType": "table",
-          "filter": "service.name = 'oriso-e2e' AND test.status != 'skipped' AND test.retry = 0",
+          "filter": "service.name = 'oriso-e2e' AND test.run.id EXISTS AND test.run.id != '' AND test.project EXISTS AND test.project != '' AND test.retry = 0 AND test.status IN ('passed', 'failed', 'timedOut') AND status_code IN (1, 2)",
           "aggregations": [
             {
-              "expression": "countIf(test.status != 'passed')",
-              "alias": "failures"
+              "expression": "count_distinct_if(test.run.id, status_code = 2)",
+              "alias": "unexpected_runs"
             },
             {
-              "expression": "count()",
+              "expression": "count_distinct(test.run.id)",
               "alias": "runs"
             }
           ],
           "groupBy": [
+            "test.project",
+            "test.id",
             "test.file",
             "test.case"
           ],
-          "having": "failures > 0",
+          "having": "unexpected_runs > 0",
           "limit": 100
         },
         {
           "id": "duration",
-          "title": "Slowest tests (p95 duration, ms)",
+          "title": "p95 duration of stored first attempts (ms)",
           "signal": "traces",
           "panelType": "table",
           "filter": "service.name = 'oriso-e2e' AND test.status != 'skipped' AND test.retry = 0",
@@ -129,6 +136,8 @@
             }
           ],
           "groupBy": [
+            "test.project",
+            "test.id",
             "test.file",
             "test.case"
           ],
@@ -137,9 +146,10 @@
         {
           "id": "runs",
           "title": "Recent runs",
+          "description": "Stored Playwright attempt rows, including retries, with a recorded run ID.",
           "signal": "traces",
           "panelType": "table",
-          "filter": "service.name = 'oriso-e2e'",
+          "filter": "service.name = 'oriso-e2e' AND test.run.id EXISTS AND test.run.id != '' AND test.retry EXISTS AND test.status EXISTS",
           "aggregations": [
             {
               "expression": "min(timestamp)",
@@ -147,11 +157,11 @@
             },
             {
               "expression": "count()",
-              "alias": "tests"
+              "alias": "attempt_rows"
             },
             {
-              "expression": "countIf(test.status = 'failed' OR test.status = 'timedOut')",
-              "alias": "failed"
+              "expression": "countIf(status_code = 2)",
+              "alias": "unexpected_attempt_rows"
             }
           ],
           "groupBy": [

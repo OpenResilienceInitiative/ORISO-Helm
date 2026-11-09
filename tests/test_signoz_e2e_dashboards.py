@@ -105,6 +105,58 @@ class E2eDashboardTest(unittest.TestCase):
         self.assertTrue(used, "expected test.* attributes")
         self.assertEqual(used - REPORTER_ATTRIBUTES, set())
 
+    def test_health_counts_distinct_first_runs_by_test_identity_and_project(self) -> None:
+        dashboards, _ = materialize(True)
+        health = next(item for item in dashboards if item["name"] == "oriso-e2e-test-health-dev")
+        panels = MODULE.dashboard_panel_queries(health)
+        expected_filter = (
+            "deployment.environment = 'dev' AND service.name = 'oriso-e2e'"
+            " AND test.run.id EXISTS AND test.run.id != ''"
+            " AND test.project EXISTS AND test.project != ''"
+            " AND test.retry = 0 AND test.status IN ('passed', 'failed', 'timedOut')"
+            " AND status_code IN (1, 2)"
+        )
+        for panel in ("pass-rate", "failing"):
+            query = panels[panel][0]
+            self.assertEqual(query["filter"]["expression"], expected_filter)
+            self.assertEqual(
+                [field["name"] for field in query["groupBy"]],
+                ["test.project", "test.id", "test.file", "test.case"],
+            )
+            self.assertEqual(query["aggregations"][-1], {
+                "expression": "count_distinct(test.run.id)", "alias": "runs",
+            })
+
+        self.assertEqual(panels["pass-rate"][0]["aggregations"][0], {
+            "expression": (
+                "(count_distinct(test.run.id) - count_distinct_if(test.run.id, status_code = 2))"
+                " * 100.0 / count_distinct(test.run.id)"
+            ),
+            "alias": "pass_rate_pct",
+        })
+        self.assertEqual(panels["failing"][0]["aggregations"][0], {
+            "expression": "count_distinct_if(test.run.id, status_code = 2)",
+            "alias": "unexpected_runs",
+        })
+        self.assertEqual(panels["failing"][0]["having"]["expression"], "unexpected_runs > 0")
+        description = health["spec"]["panels"]["pass-rate"]["spec"]["display"]["description"]
+        self.assertIn("legacy", description)
+
+    def test_recent_runs_label_attempt_rows_and_exclude_unbound_spans(self) -> None:
+        dashboards, _ = materialize(True)
+        health = next(item for item in dashboards if item["name"] == "oriso-e2e-test-health-dev")
+        query = MODULE.dashboard_panel_queries(health)["runs"][0]
+        self.assertEqual(
+            query["filter"]["expression"],
+            "deployment.environment = 'dev' AND service.name = 'oriso-e2e'"
+            " AND test.run.id EXISTS AND test.run.id != '' AND test.retry EXISTS AND test.status EXISTS",
+        )
+        self.assertEqual(
+            [(item["alias"], item["expression"]) for item in query["aggregations"]],
+            [("started", "min(timestamp)"), ("attempt_rows", "count()"),
+             ("unexpected_attempt_rows", "countIf(status_code = 2)")],
+        )
+
     def test_flaky_means_pass_and_fail_on_the_same_commit(self) -> None:
         dashboards, _ = materialize(True)
         flaky = next(item for item in dashboards if item["name"] == "oriso-e2e-flaky-dev")
