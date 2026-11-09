@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import math
 import os
 import re
 import sys
@@ -487,6 +488,103 @@ def build_query_range_payload(
     }
 
 
+def _finite_number(value: Any) -> bool:
+    return type(value) is int or (type(value) is float and math.isfinite(value))
+
+
+def _current_panel_point(point: Any, start_ms: int, end_ms: int) -> bool:
+    if not isinstance(point, dict):
+        return False
+    timestamp = point.get("timestamp")
+    return (
+        type(timestamp) is int
+        and start_ms <= timestamp < end_ms
+        and point.get("partial", False) is False
+        and _finite_number(point.get("value"))
+    )
+
+
+def _dimension_has_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    return type(value) is bool or _finite_number(value)
+
+
+def _response_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError
+    return value
+
+
+def _validate_optional_series(series: dict[str, Any]) -> None:
+    for label in _response_list(series.get("labels")):
+        if not isinstance(label["key"]["name"], str) or "value" not in label:
+            raise ValueError
+    for point in _response_list(series["values"]):
+        value = point["value"]
+        if (
+            type(point["timestamp"]) is not int
+            or type(point.get("partial", False)) is not bool
+            or not (_finite_number(value) or value in ("NaN", "Inf", "-Inf"))
+        ):
+            raise ValueError
+
+
+def _validate_dashboard_result(
+    response: dict[str, Any], query: dict[str, Any], panel: str, start_ms: int, end_ms: int,
+    *, require_samples: bool,
+) -> None:
+    dimensions = {field["name"] for field in query.get("groupBy", [])}
+    try:
+        envelope = response["data"]
+        results = envelope["data"]["results"]
+        if envelope["type"] != "time_series" or not isinstance(results, list):
+            raise ValueError
+        result, = results
+        if result["queryName"] != query["name"]:
+            raise ValueError
+        buckets = _response_list(result["aggregations"])
+        if require_samples and not buckets:
+            raise RuntimeError(f"{panel}: no fresh numeric samples")
+
+        indexes = [bucket["index"] for bucket in buckets]
+        aggregation_count = len(query["aggregations"])
+        if (
+            any(type(index) is not int or not 0 <= index < aggregation_count for index in indexes)
+            or len(set(indexes)) != len(indexes)
+            or (require_samples and len(indexes) != aggregation_count)
+        ):
+            raise ValueError
+        for bucket in buckets:
+            series_list = _response_list(bucket["series"])
+            if not require_samples:
+                for series in series_list:
+                    _validate_optional_series(series)
+                continue
+            found = False
+            for series in series_list:
+                if not any(
+                    _current_panel_point(point, start_ms, end_ms)
+                    for point in _response_list(series["values"])
+                ):
+                    continue
+                found = True
+                present = {
+                    label["key"]["name"]
+                    for label in _response_list(series.get("labels"))
+                    if _dimension_has_value(label["value"])
+                }
+                missing = sorted(dimensions - present)
+                if missing:
+                    raise RuntimeError(f"{panel}: missing series dimensions {', '.join(missing)}")
+            if not found:
+                raise RuntimeError(f"{panel}: no fresh numeric samples")
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
+        raise RuntimeError(f"{panel}: unexpected SigNoz time-series result") from error
+
+
 def response_has_signal_data(response: Any) -> bool:
     if isinstance(response, dict):
         for key, value in response.items():
@@ -708,18 +806,22 @@ def upsert_alerts(client: SignozClient, alerts: list[dict[str, Any]]) -> None:
 
 
 def _execute_query(
-    client: SignozClient, query: dict[str, Any], *, minutes: int = 15
+    client: SignozClient, query: dict[str, Any], *, minutes: int = 15,
+    dashboard_panel: str | None = None, require_samples: bool = True,
 ) -> dict[str, Any]:
     end_ms = int(time.time() * 1000)
+    start_ms = end_ms - minutes * 60_000
     response = client.request(
         "POST",
         "/api/v5/query_range",
-        build_query_range_payload(
-            query, start_ms=end_ms - minutes * 60_000, end_ms=end_ms
-        ),
+        build_query_range_payload(query, start_ms=start_ms, end_ms=end_ms),
     )
     if not isinstance(response, dict) or response.get("status") != "success":
         raise RuntimeError("SigNoz query range did not return success")
+    if dashboard_panel is not None:
+        _validate_dashboard_result(
+            response, query, dashboard_panel, start_ms, end_ms, require_samples=require_samples,
+        )
     return response
 
 
@@ -933,10 +1035,9 @@ def prove_conformance(
 ) -> None:
     """Read every managed object back and compare it with the catalog.
 
-    With ``telemetry`` the proof also executes every stored query, requires
-    fresh collector data, and rejects data from the other environment. Without
-    it the proof is structural only, so a provisioning run does not depend on
-    telemetry that may not flow yet.
+    With ``telemetry`` the proof requires fresh grouped data on the core dashboards,
+    validates E2E query results, executes the alert queries, and verifies collector
+    freshness and environment separation. Without it the proof is structural only.
     """
     validate_asset_contract(
         dashboards,
@@ -949,6 +1050,7 @@ def prove_conformance(
         item.get("name"): item
         for item in _list(client, "/api/v2/dashboards", "dashboards")
     }
+    optional_dashboards = {f"{slug}-{environment}" for slug in E2E_DASHBOARD_SLUGS}
     for expected in dashboards:
         listed = listed_dashboards.get(expected["name"])
         if not listed:
@@ -958,11 +1060,14 @@ def prove_conformance(
             raise RuntimeError(
                 f"managed dashboard is not readable as v6: {expected['name']}"
             )
-        for query in validate_live_dashboard(
-            current, expected, environment=environment
-        ):
-            if telemetry:
-                _execute_query(client, query)
+        validate_live_dashboard(current, expected, environment=environment)
+        if telemetry:
+            for panel_id, queries in dashboard_panel_queries(current).items():
+                for query in queries:
+                    _execute_query(
+                        client, query, dashboard_panel=f"{expected['name']} / {panel_id}",
+                        require_samples=expected["name"] not in optional_dashboards,
+                    )
 
     listed_alerts = {item.get("alert"): item for item in _list(client, "/api/v2/rules")}
     freshness_query: dict[str, Any] | None = None

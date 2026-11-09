@@ -9,6 +9,7 @@ import io
 import json
 import os
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -40,6 +41,8 @@ class State:
         self.dashboards: dict[str, dict[str, Any]] = {}
         self.rules: dict[str, dict[str, Any]] = {}
         self.queries = 0
+        self.query_results: dict[str, list[dict[str, Any]]] = {}
+        self.trace_responses: dict[str, dict[str, Any]] = {}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -113,19 +116,34 @@ class Handler(BaseHTTPRequestHandler):
             self._send(201, self.state.rules[identifier])
         elif self.path == "/api/v5/query_range":
             self.state.queries += 1
-            expression = body["compositeQuery"]["queries"][0]["spec"]["filter"][
-                "expression"
-            ]
-            results: list[dict[str, Any]] = []
-            if "deployment.environment = 'pre-dev'" in expression:
-                results = [
-                    {
-                        "aggregations": [
-                            {"series": [{"values": [[1_750_000_000_000, 1.0]]}]}
-                        ]
-                    }
-                ]
-            self._send(200, {"data": {"results": results}})
+            query = body["compositeQuery"]["queries"][0]["spec"]
+            if query["signal"] == "traces":
+                alias = query["aggregations"][0].get("alias", "")
+                self._send(200, self.state.trace_responses.get(alias, {
+                    "type": "time_series",
+                    "data": {"results": [{"queryName": query["name"], "aggregations": None}]},
+                }))
+                return
+            expression = query["filter"]["expression"]
+            metric = query["aggregations"][0]["metricName"]
+            aggregations: list[dict[str, Any]] = []
+            if "deployment.environment = 'pre-dev'" in expression and "outcome = 'partial_failure'" not in expression:
+                aggregations = [{
+                    "index": 0, "series": [{
+                        "labels": [
+                            {"key": {"name": field["name"]}, "value": "fixture"}
+                            for field in query.get("groupBy", [])
+                        ],
+                        "values": [{
+                            "timestamp": body["end"] - 60_000,
+                            "value": 0 if metric == "oriso.live_chat.queue.visibility" else 1,
+                        }],
+                    }],
+                }]
+            results = self.state.query_results.get(
+                metric, [{"queryName": query["name"], "aggregations": aggregations}]
+            )
+            self._send(200, {"type": "time_series", "data": {"results": results}})
         else:
             self._send(404, {"error": "not found"})
 
@@ -202,6 +220,57 @@ class HttpFlowTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("environment separation for pre-dev", printed)
         self.assertEqual(self._counts(), (3, 6, 0, 0))
+
+    def test_full_check_rejects_an_empty_panel_and_unusable_points(self) -> None:
+        self._main("--mode", "provision")
+        before = self._counts()
+        now = time.time_ns() // 1_000_000
+        metric = "oriso.live_chat.queue.visibility"
+        for point in (
+            None,
+            {"timestamp": now - 60_000, "value": 1, "partial": True},
+            {"timestamp": now - 60_000, "value": None},
+            {"timestamp": now - 60_000, "value": "NaN"},
+            {"timestamp": now - 60_000, "value": True},
+            {"timestamp": now - 16 * 60_000, "value": 1},
+            {"timestamp": now + 60_000, "value": 1},
+        ):
+            with self.subTest(point=point):
+                aggregations = [] if point is None else [{"index": 0, "series": [{"values": [point]}]}]
+                self.state.query_results[metric] = [{"queryName": "A", "aggregations": aggregations}]
+                with self.assertRaisesRegex(RuntimeError, "oriso-live-chat-pre-dev / queue.*no fresh numeric"):
+                    self._main("--mode", "check")
+        self.assertEqual(self._counts(), before)
+
+    def test_full_check_requires_dimensions_on_each_contributing_series(self) -> None:
+        self._main("--mode", "provision")
+        fresh = time.time_ns() // 1_000_000 - 60_000
+        demand = {"key": {"name": "demand"}, "value": "sensitive-fixture"}
+        valid = {"key": {"name": "outcome"}, "value": "observed"}
+        for invalid in ([], [{"key": {"name": "outcome"}, "value": ""}]):
+            with self.subTest(invalid=invalid):
+                series = [
+                    {"labels": [demand, valid], "values": [{"timestamp": fresh, "value": 0}]},
+                    {"labels": [demand, *invalid], "values": [{"timestamp": fresh, "value": 1}]},
+                ]
+                self.state.query_results["oriso.live_chat.queue.visibility"] = [{
+                    "queryName": "A", "aggregations": [{"index": 0, "series": series}],
+                }]
+                with self.assertRaisesRegex(RuntimeError, "oriso-live-chat-pre-dev / queue.*outcome") as error:
+                    self._main("--mode", "check")
+                self.assertNotIn("sensitive-fixture", str(error.exception))
+
+    def test_full_check_rejects_evidence_for_the_wrong_query_or_aggregation(self) -> None:
+        self._main("--mode", "provision")
+        point = {"timestamp": time.time_ns() // 1_000_000 - 60_000, "value": 1}
+        for name, index in (("B", 0), ("A", 1), ("A", True)):
+            with self.subTest(name=name, index=index):
+                self.state.query_results["oriso.live_chat.queue.visibility"] = [{
+                    "queryName": name,
+                    "aggregations": [{"index": index, "series": [{"values": [point]}]}],
+                }]
+                with self.assertRaisesRegex(RuntimeError, "oriso-live-chat-pre-dev / queue.*unexpected"):
+                    self._main("--mode", "check")
 
     def test_workstation_check_is_read_only(self) -> None:
         self._main("--mode", "provision")
@@ -314,6 +383,50 @@ class HttpFlowTest(unittest.TestCase):
             channel_name="oriso-alerts-slack",
             telemetry=False,
         )
+
+    def test_full_check_accepts_quiet_e2e_queries_and_legacy_groups(self) -> None:
+        self.assertEqual(self._main("--mode", "provision", "--e2e-dashboards")[0], 0)
+        self.state.trace_responses["pass_rate_pct"] = {
+            "type": "time_series",
+            "data": {"results": [{"queryName": "A", "aggregations": [{
+                "index": 1,
+                "series": [{
+                    "labels": [{"key": {"name": "test.id"}, "value": None}],
+                    "values": [{"timestamp": 1_750_000_000_000, "value": 0, "partial": True}],
+                }],
+            }]}]},
+        }
+        code, printed = self._main("--mode", "check", "--e2e-dashboards")
+        self.assertEqual(code, 0)
+        self.assertIn("environment separation for pre-dev", printed)
+        self.assertEqual(self._counts(), (5, 6, 0, 0))
+
+        self.state.query_results["oriso.live_chat.queue.visibility"] = [{"queryName": "A", "aggregations": None}]
+        with self.assertRaisesRegex(RuntimeError, "oriso-live-chat-pre-dev / queue.*no fresh numeric"):
+            self._main("--mode", "check", "--e2e-dashboards")
+
+    def test_full_check_rejects_malformed_optional_e2e_results(self) -> None:
+        self.assertEqual(self._main("--mode", "provision", "--e2e-dashboards")[0], 0)
+        bad_results = (
+            {},
+            {"queryName": "wrong", "aggregations": None},
+            {"queryName": "A", "aggregations": {}},
+            {"queryName": "A", "aggregations": [{"index": 0, "series": []}, {"index": 0, "series": []}]},
+            {"queryName": "A", "aggregations": [{"index": 2, "series": []}]},
+            {"queryName": "A", "aggregations": [{"index": 0, "series": {}}]},
+            {"queryName": "A", "aggregations": [{"index": 0, "series": [{"values": "invalid"}]}]},
+            {"queryName": "A", "aggregations": [{"index": 0, "series": [
+                {"values": [{"timestamp": "invalid", "value": 0}]},
+            ]}]},
+        )
+        for result in bad_results:
+            with self.subTest(result=result):
+                self.state.trace_responses["pass_rate_pct"] = {
+                    "type": "time_series",
+                    "data": {"results": [result]},
+                }
+                with self.assertRaisesRegex(RuntimeError, "oriso-e2e-test-health-pre-dev / pass-rate: unexpected"):
+                    self._main("--mode", "check", "--e2e-dashboards")
 
     def test_e2e_dashboards_flag_reads_a_strict_true_from_the_environment(self) -> None:
         for value, expected in (
