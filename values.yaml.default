@@ -617,6 +617,9 @@ ipAnonymizer:
 # SigNoz backend, collection agents, and optional ORISO dashboards/alerts.
 signoz:
   enabled: false
+  # Separate Kubernetes identities for the protected Pre-Dev E2E workflow.
+  orisoPreDevE2EAccess:
+    enabled: false
   orisoObservability:
     enabled: false
     conformanceCheck: false
