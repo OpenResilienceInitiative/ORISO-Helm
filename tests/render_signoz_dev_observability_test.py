@@ -16,8 +16,13 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JAVA_SERVICES = ("userservice", "agencyservice", "tenantservice", "consultingtypeservice")
 
 
-def render(*overlays: str, release: str = "caritas", chart: str = CHART_DIR) -> list[dict[str, Any]]:
-    command = ["helm", "template", release, chart, "--namespace", "caritas"]
+def render(
+    *overlays: str,
+    release: str = "caritas",
+    chart: str = CHART_DIR,
+    helm_args: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    command = ["helm", "template", release, chart, "--namespace", "caritas", *helm_args]
     for values in (
         "values.yaml.default",
         "tests/fixtures/values-render-domain.yaml",
@@ -137,11 +142,13 @@ def assert_default_off(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     assert frontend["REACT_APP_OTEL_METRICS_URL"] == "" and frontend["REACT_APP_OBSERVABILITY_ENABLED"] == "false"
 
 
-def render_dev_with(overlay: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+def render_dev_with(
+    overlay: dict[str, Any], *helm_args: str, chart: str = CHART_DIR,
+) -> dict[tuple[str, str], dict[str, Any]]:
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
         yaml.safe_dump(overlay, handle)
     try:
-        return by_key(render("values-dev.yaml", handle.name))
+        return by_key(render("values-dev.yaml", handle.name, chart=chart, helm_args=helm_args))
     finally:
         os.unlink(handle.name)
 
@@ -185,11 +192,11 @@ def assert_review_findings() -> None:
     assert config.index("k8s.cronjob.name\"])") < config.index("k8s.job.name\"])"), "CronJob name before the generated Job name"
 
 
-def render_dev_fails(overlay: dict[str, Any]) -> str:
+def render_dev_fails(overlay: dict[str, Any], *helm_args: str, chart: str = CHART_DIR) -> str:
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
         yaml.safe_dump(overlay, handle)
     try:
-        render("values-dev.yaml", handle.name)
+        render("values-dev.yaml", handle.name, chart=chart, helm_args=helm_args)
     except AssertionError as error:
         return str(error)
     finally:
@@ -391,7 +398,7 @@ def assert_backup_storage_class() -> None:
     assert backup_claim_class(docs) == ""
     assert docs[("StatefulSet", "caritas-signoz")]["spec"]["volumeClaimTemplates"][0]["spec"]["storageClassName"] == ""
     # An existing claim keeps its class: storageClassName cannot change on a bound claim.
-    marker = '{{- $existingBackup := lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "%s-backup" $name) -}}'
+    marker = '{{- $existingBackup := lookup "v1" "PersistentVolumeClaim" .Release.Namespace $backupPVC -}}'
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
         yaml.safe_dump({"global": {"storageClass": "fast"}}, handle)
     try:
