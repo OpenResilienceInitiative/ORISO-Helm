@@ -180,18 +180,55 @@ checks that the replacement PV's claim reference matches the PVC's namespace,
 name and UID. With an override, a client-only render fails. The chart keeps
 rendering the original PVC, and the replacement remains independently managed.
 
-After the approved upgrade, read back the installed CronJob's target:
+Record the approved claim and UTC start time before the upgrade.
 
 ```bash
-kubectl -n caritas get cronjob caritas-signoz-data-protection-backup \
-  -o jsonpath='{.spec.jobTemplate.spec.template.spec.volumes[?(@.name=="backup")].persistentVolumeClaim.claimName}{"\n"}'
+backup_destination=signoz-backup-recovery
+backup_switch_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 ```
 
-Check that both claims are still present and the replacement PV still uses
-`Retain`. Confirm a new Job completes and verify its exact gzip archive and
-SQLite integrity in an isolated recovery environment. Use the backup claim
-recorded in the Job that produced the chosen archive for the `/backup` mount.
-The original claim name in the restore example is the default.
+After the upgrade and the next scheduled run, check that both claims are
+present and the replacement PV still uses `Retain`. Verify that the newest
+scheduled Job since the switch and the creation of the current PVC completed
+on the configured destination.
+
+```bash
+(
+  set -euo pipefail
+  cronjob=$(kubectl -n caritas get cronjob caritas-signoz-data-protection-backup -o json)
+  cronjob_uid=$(jq -er '.metadata.uid' <<<"$cronjob")
+  target=$(jq -er '.spec.jobTemplate.spec.template.spec.volumes[]
+    | select(.name == "backup").persistentVolumeClaim.claimName' <<<"$cronjob")
+  if test "$target" != "$backup_destination"; then
+    printf '%s\n' 'The installed CronJob uses a different backup destination' >&2
+    exit 1
+  fi
+  claim_created_at=$(kubectl -n caritas get pvc "$target" -o json |
+    jq -er 'select(.status.phase == "Bound").metadata.creationTimestamp')
+
+  kubectl -n caritas get jobs -o json |
+    jq -e --arg owner "$cronjob_uid" --arg target "$target" \
+      --arg switch_at "$backup_switch_started_at" --arg claim_at "$claim_created_at" '
+      [.items[]
+       | select(any(.metadata.ownerReferences[]?;
+                    .kind == "CronJob" and .controller == true and .uid == $owner))
+       | select(.metadata.creationTimestamp >= $switch_at
+                and .metadata.creationTimestamp >= $claim_at)]
+      | sort_by(.metadata.creationTimestamp, .metadata.name) | last
+      | . // error("No scheduled backup Job since the destination switch")
+      | if any(.spec.template.spec.volumes[]?;
+               .name == "backup" and .persistentVolumeClaim.claimName == $target
+               and (.persistentVolumeClaim.readOnly // false) == false)
+        then . else error("Latest backup Job uses a different destination") end
+      | if .status.completionTime
+           and any(.status.conditions[]?; .type == "Complete" and .status == "True")
+        then {job: .metadata.name, claim: $target, completed: .status.completionTime}
+        else error("Latest backup Job has not completed successfully") end'
+)
+```
+
+Verify the gzip archive produced by that Job and its SQLite integrity in an
+isolated recovery environment. Mount the reported claim at `/backup`.
 
 Clearing the override, or rolling back to a revision before the switch, can
 send subsequent Jobs to the original claim. Confirm that destination can
