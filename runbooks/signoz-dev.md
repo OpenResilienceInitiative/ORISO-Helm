@@ -41,20 +41,19 @@ takes only the observability keys, defaults included:
 ssh dev-server
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 cd /root/ORISO-Helm && git fetch origin && git checkout <merged dev commit>
-python3 scripts/observability_overlay.py values-dev.yaml > /root/observability-dev.yaml
+observability_file=/root/observability-dev.yaml
+python3 scripts/observability_overlay.py values-dev.yaml > "$observability_file"
+values_files=(values.yaml secrets.yaml "$observability_file")
 ```
 
-The upgrade below does not use `--reuse-values` on purpose: the chart directory's
-own `values.yaml` carries the live settings, and the release's user-supplied
-values are exactly `secrets.yaml` (checked on revision 41, 2026-10-17), plus
-the observability overlay once this rollout has run. If a later revision was
-upgraded with extra `-f` files, pass them too. Without them, their settings
-fall back to `values.yaml`.
+Pass the hand-kept `values.yaml` explicitly so Helm preserves base settings
+recorded as user-supplied in the installed revision. Add every other approved
+values file to `values_files` in its intended order. The drift check and both
+Helm commands use that same list.
 
-So, right before the upgrade, list every user-supplied value path that the
-planned `-f` files (`secrets.yaml`, then the overlay) would drop or change.
-Paths the new overlay sets are the intended change and only count when it
-drops them. It compares values without printing them:
+Before the upgrade, check for omitted user-supplied paths and for changes
+outside the observability projection. The check prints only the path count and
+the affected paths.
 
 ```bash
 helm get values caritas -n caritas -o json | python3 -c '
@@ -64,14 +63,14 @@ def leaves(d, p=""):
     for k, v in (d or {}).items():
         out.update(leaves(v, f"{p}.{k}") if isinstance(v, dict) and v else {f"{p}.{k}": v})
     return out
-files = ["secrets.yaml", "/root/observability-dev.yaml"]
+overlay_file, *files = sys.argv[1:]
 planned = {}
 for name in files:
     planned.update(leaves(yaml.safe_load(open(name))))
-overlay = leaves(yaml.safe_load(open(files[-1])))
+overlay = leaves(yaml.safe_load(open(overlay_file)))
 live = leaves(json.load(sys.stdin))
 drift = sorted(p for p in live if p not in planned or (p not in overlay and live[p] != planned[p]))
-print(len(drift), *drift, sep="\n")' | tee /root/observability-drift.out
+print(len(drift), *drift, sep="\n")' "$observability_file" "${values_files[@]}" | tee /root/observability-drift.out
 ```
 
 Resolve the listed paths before continuing. Use the approved ordered values
@@ -85,8 +84,11 @@ Run this preflight on the Dev master. For a staged rollout, set
 observability settings.
 
 ```bash
-helm_args=(caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml)
-# Include the approved additional -f and --post-renderer arguments here.
+helm_args=(caritas . -n caritas)
+for file in "${values_files[@]}"; do
+  helm_args+=(-f "$file")
+done
+# Include the approved image overrides and --post-renderer arguments here.
 expected_observability=values-dev.yaml
 preflight_signoz() (
   set +x
