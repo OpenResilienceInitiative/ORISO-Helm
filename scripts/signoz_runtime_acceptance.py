@@ -910,6 +910,14 @@ def _read_clickhouse_retention(runner: Runner, namespace: str, pod: str) -> dict
     }
 
 
+def _read_clickhouse_retention_pods(
+    runner: Runner, namespace: str, pods: list[str],
+) -> tuple[dict[str, dict[str, Any]], str]:
+    snapshots = {pod: _read_clickhouse_retention(runner, namespace, pod) for pod in pods}
+    failed = ", ".join(pod for pod, snapshot in snapshots.items() if snapshot["failures"])
+    return snapshots, failed
+
+
 def _wait_for_readback(
     runner: Runner,
     namespace: str,
@@ -1016,12 +1024,9 @@ def main() -> None:
         return
 
     if args.check_clickhouse_retention:
-        pods = {
-            pod: _read_clickhouse_retention(runner, args.namespace, pod)
-            for pod in _clickhouse_pods(runner, args.namespace, args.release)
-        }
-        print(json.dumps({"environment": args.environment, "pods": pods}, indent=2, sort_keys=True))
-        failed = ", ".join(pod for pod, snapshot in pods.items() if snapshot["failures"])
+        pods = _clickhouse_pods(runner, args.namespace, args.release)
+        snapshots, failed = _read_clickhouse_retention_pods(runner, args.namespace, pods)
+        print(json.dumps({"environment": args.environment, "pods": snapshots}, indent=2, sort_keys=True))
         if failed:
             raise RuntimeError(f"ClickHouse retention conformance failed on {failed}")
         return
@@ -1045,6 +1050,7 @@ def main() -> None:
         "readiness": "passed",
         "collectorPipeline": "passed",
         "k8sInfraReadiness": "passed" if require_k8s_infra else "skipped",
+        "clickhouseRetention": "skipped",
     }
     if args.skip_synthetic:
         report["clickhouseCapacity"] = "skipped"
@@ -1052,6 +1058,16 @@ def main() -> None:
         report["k8sInfraReadback"] = "skipped"
     else:
         clickhouse_pods = _clickhouse_pods(runner, args.namespace, args.release)
+        if require_k8s_infra:
+            snapshots, failed = _read_clickhouse_retention_pods(runner, args.namespace, clickhouse_pods)
+            report["clickhouseRetention"] = {
+                "status": "failed" if failed else "passed",
+                "pods": snapshots,
+            }
+            if failed:
+                report["clickhouseCapacity"] = "not_reached"
+                print(json.dumps(report, indent=2, sort_keys=True))
+                raise RuntimeError(f"ClickHouse retention conformance failed on {failed}")
         for pod in clickhouse_pods:
             _check_clickhouse_capacity(runner, args.namespace, pod)
         readback_pod = clickhouse_pods[0]

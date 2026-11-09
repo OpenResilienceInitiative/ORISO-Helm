@@ -19,8 +19,10 @@ The command fails closed unless all of the following are true:
 - the telemetry-store migration job completed;
 - the live collector configuration has OTLP HTTP and gRPC receivers plus a
   ClickHouse exporter in each trace, metric, and log pipeline;
-- every non-terminating ClickHouse data pod for the release is ready and has at
-  least 2 GiB of unreserved space on its default data disk before any probes run.
+- every non-terminating ClickHouse data pod for the release is ready and meets
+  the retention and disk limits below;
+- immediately before sending probes, every selected data pod has at least 2 GiB
+  of unreserved space on its default data disk.
 - a privacy-safe synthetic trace, metric, and correlated log can be sent to the
   in-cluster collector and read back from the corresponding ClickHouse tables.
 - the node-local and cluster-wide `k8s-infra` collectors are ready;
@@ -55,10 +57,13 @@ python3 scripts/signoz_runtime_acceptance.py \
 
 Repeat after the reviewed Dev promotion with `--environment dev`,
 `--cluster-name oriso-dev`, and the Dev host. The command prints a JSON result
-that can be attached to the PR or release evidence. A successful result sets
-`clickhouseCapacity` to `passed` and records positive trace, metric, and log
-counts under `syntheticReadback`. It also records positive infrastructure counts
-under `k8sInfraReadback` and exactly zero for `forbiddenLogBody`.
+that can be attached to the PR or release evidence. The full command records
+the per-pod storage report under `clickhouseRetention` and then checks
+`clickhouseCapacity`. A retention violation prints the per-pod failures and
+exits before creating any probe. A successful run records positive trace,
+metric, and log counts under `syntheticReadback`. It also records positive
+infrastructure counts under `k8sInfraReadback` and exactly zero for
+`forbiddenLogBody`.
 `javaSignals` records the stored Java telemetry evidence for the full gate.
 
 The gate creates short-lived `curlimages/curl` probe pods with `--rm`, one
@@ -81,13 +86,14 @@ python3 scripts/signoz_runtime_acceptance.py \
   --skip-synthetic
 ```
 
-Use this mode for rollout and pipeline diagnosis. It reports capacity and
-persistence as skipped. Release evidence requires the full command.
+Use this mode for rollout and pipeline diagnosis. It reports retention, capacity
+and persistence as skipped. Release evidence requires the full command.
 
 Use `--skip-k8s-infra` only when validating the backend-only repair before the
-stacked Kubernetes collection change is installed. Full PreDev and Dev evidence
-also requires infrastructure readiness, infrastructure readback and stored Java
-signal verification.
+stacked Kubernetes collection change is installed. That scope reports retention
+as skipped and still enforces the independent 2 GiB floor. Full PreDev and Dev
+evidence includes retention, infrastructure readiness and readback, and stored
+Java signal verification.
 
 ## Read stored Java signals
 
@@ -144,5 +150,8 @@ It applies the [ClickHouse conformance limits](https://github.com/OpenResilience
   exact bytes before rounding the displayed percentage.
 
 The command exits 1 on missing or unreadable metadata or a failed limit.
-The active acceptance command checks the 2 GiB unreserved-space floor
-independently before creating probes.
+The full acceptance command requires this same readback on all data pods
+before it checks the independent 2 GiB floor and creates probes.
+
+Record backup and restore evidence separately for the SQLite metadata and
+ClickHouse signal data. [Dev backup procedure](https://github.com/OpenResilienceInitiative/ORISO-Helm/blob/3302d946b1297043c27a9fa2ef521fb544d1d99f/runbooks/signoz-dev.md#replace-an-unavailable-sqlite-backup-destination) · [ClickHouse signal recovery](https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/499)

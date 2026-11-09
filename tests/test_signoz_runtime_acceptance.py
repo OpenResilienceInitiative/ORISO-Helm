@@ -347,6 +347,13 @@ class CapacityContractTest(unittest.TestCase):
         self.enterContext(mock.patch.object(MODULE, "_check_runtime_readiness"))
         self.enterContext(mock.patch.object(MODULE, "_check_collector_config"))
         self.emit = self.enterContext(mock.patch.object(MODULE, "_emit_signal"))
+        self.retention = self.enterContext(mock.patch.object(MODULE, "_read_clickhouse_retention"))
+        self.retention.side_effect = self.read_retention
+        self.infra = self.enterContext(mock.patch.object(MODULE, "_emit_infra_probes", return_value=None))
+        self.enterContext(mock.patch.object(MODULE, "_wait_for_infra_readback", return_value={}))
+        self.enterContext(mock.patch.object(MODULE, "_read_java_signals", return_value={
+            "missing": [], "traceIdentity": {},
+        }))
         self.readback = self.enterContext(mock.patch.object(MODULE, "_wait_for_readback"))
         self.readback.return_value = {"traces": 1, "metrics": 1, "logs": 1}
         self.runner = self.enterContext(mock.patch.object(MODULE, "Runner")).return_value
@@ -355,6 +362,19 @@ class CapacityContractTest(unittest.TestCase):
         self.not_ready = set()
         self.disks_checked = []
         self.include_orphan = False
+        self.retention_checked = []
+        self.retention_failures = dict.fromkeys(self.spaces, ())
+
+    def select_full_scope(self) -> None:
+        self.argv.remove("--skip-k8s-infra")
+        self.argv.extend(["--cluster-name", "oriso-dev"])
+
+    def read_retention(self, runner, namespace: str, pod: str) -> dict:
+        self.assertIs(runner, self.runner)
+        self.assertEqual(namespace, "caritas")
+        self.assertEqual(self.disks_checked, [])
+        self.retention_checked.append(pod)
+        return {"failures": list(self.retention_failures[pod])}
 
     def run_kubectl(self, command: list[str]) -> mock.Mock:
         if command[3:] == ["get", "chi", "caritas-clickhouse", "-o", "json"]:
@@ -427,8 +447,69 @@ class CapacityContractTest(unittest.TestCase):
         report = self.run_gate()
 
         self.assertEqual(report["clickhouseCapacity"], "passed")
+        self.assertEqual(report["clickhouseRetention"], "skipped")
+        self.retention.assert_not_called()
         self.assertEqual(self.emit.call_count, 3)
         self.assertEqual(self.readback.call_args.args[2], "clickhouse-a")
+
+    def test_full_scope_checks_retention_and_headroom_on_every_pod_before_writing(self) -> None:
+        self.select_full_scope()
+        pods = ["clickhouse-a", "clickhouse-b"]
+
+        def assert_preflight(*_args):
+            self.assertEqual(self.retention_checked, pods)
+            self.assertEqual(self.disks_checked, pods)
+
+        self.emit.side_effect = assert_preflight
+        report = self.run_gate()
+        self.assertEqual(report["clickhouseRetention"], {
+            "status": "passed", "pods": dict.fromkeys(pods, {"failures": []}),
+        })
+        self.assertEqual(report["clickhouseCapacity"], "passed")
+        self.assertEqual(self.emit.call_count, 3)
+        self.infra.assert_called_once()
+
+    def test_full_retention_failure_stops_before_any_probe(self) -> None:
+        self.select_full_scope()
+        self.retention_failures["clickhouse-b"] = ("trace_log has a 7-day deletion TTL.",)
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaisesRegex(
+            RuntimeError, "ClickHouse retention conformance failed on clickhouse-b",
+        ):
+            MODULE.main()
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["environment"], "dev")
+        self.assertEqual(report["clickhouseCapacity"], "not_reached")
+        self.assertEqual(report["clickhouseRetention"], {
+            "status": "failed",
+            "pods": {
+                "clickhouse-a": {"failures": []},
+                "clickhouse-b": {"failures": ["trace_log has a 7-day deletion TTL."]},
+            },
+        })
+        self.emit.assert_not_called()
+        self.infra.assert_not_called()
+        self.readback.assert_not_called()
+
+    def test_full_scope_still_requires_headroom_after_retention_passes(self) -> None:
+        self.select_full_scope()
+        self.spaces["clickhouse-b"] = str(self.minimum - 1)
+        with self.assertRaisesRegex(RuntimeError, "clickhouse-b has 2147483647 unreserved bytes"):
+            self.run_gate()
+
+        self.assertEqual(self.retention_checked, ["clickhouse-a", "clickhouse-b"])
+        self.emit.assert_not_called()
+        self.infra.assert_not_called()
+
+    def test_unreadable_full_retention_stops_before_any_probe(self) -> None:
+        self.select_full_scope()
+        self.retention.side_effect = RuntimeError("ClickHouse retention metadata unreadable")
+        with self.assertRaisesRegex(RuntimeError, "retention metadata unreadable"):
+            self.run_gate()
+
+        self.emit.assert_not_called()
+        self.infra.assert_not_called()
 
     def test_low_capacity_on_another_data_pod_stops_writes(self) -> None:
         self.spaces["clickhouse-b"] = str(self.minimum - 1)
@@ -465,10 +546,14 @@ class CapacityContractTest(unittest.TestCase):
         self.assertEqual(self.disks_checked, ["clickhouse-a", "clickhouse-b"])
 
     def test_readiness_only_skips_capacity_and_writes(self) -> None:
+        self.select_full_scope()
         self.argv.append("--skip-synthetic")
 
-        self.assertEqual(self.run_gate()["clickhouseCapacity"], "skipped")
+        report = self.run_gate()
+        self.assertEqual(report["clickhouseCapacity"], "skipped")
+        self.assertEqual(report["clickhouseRetention"], "skipped")
 
+        self.retention.assert_not_called()
         self.runner.run.assert_not_called()
         self.emit.assert_not_called()
 
@@ -580,6 +665,7 @@ class JavaSignalContractTest(unittest.TestCase):
         })
 
     def test_full_acceptance_requires_java_evidence_after_probe_cleanup(self) -> None:
+        self.enterContext(mock.patch.object(MODULE, "_read_clickhouse_retention", return_value={"failures": []}))
         for method in ("_check_runtime_readiness", "_check_collector_config", "_check_clickhouse_capacity",
                        "_emit_signal", "_wait_for_readback", "_wait_for_infra_readback"):
             self.enterContext(mock.patch.object(MODULE, method, return_value={}))
