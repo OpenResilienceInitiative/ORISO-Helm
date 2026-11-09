@@ -1069,6 +1069,9 @@ telemetryStoreMigrator:
 # @section -- Otel Collector
 # @default -- "Please checkout the default values in values.yml"
 otelCollector:
+  # Operator replay over a Pod port-forward on Dev. See runbooks/signoz-dev.md.
+  ciLogIngest:
+    enabled: false
   # otelCollector.name -- The name of the Otel Collector component.
   # @default -- "otel-collector"
   # @section -- Otel Collector

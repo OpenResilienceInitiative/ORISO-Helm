@@ -13,6 +13,22 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- $collector := get .Values "signozCollector" | default dict -}}
 {{- $collectorEnabled := get $collector "enabled" | default false -}}
 {{- $signozEnabled := get $signoz "enabled" | default false -}}
+{{- $ciLogIngest := dig "otelCollector" "ciLogIngest" "enabled" false $signoz -}}
+{{- if not (kindIs "bool" $ciLogIngest) -}}
+{{- fail "signoz.otelCollector.ciLogIngest.enabled must be a boolean" -}}
+{{- end -}}
+{{- if $ciLogIngest -}}
+{{- if not $signozEnabled -}}
+{{- fail "signoz.otelCollector.ciLogIngest.enabled=true requires signoz.enabled=true" -}}
+{{- end -}}
+{{- if not (dig "otelCollector" "configMap" "create" true $signoz) -}}
+{{- fail "signoz.otelCollector.ciLogIngest.enabled=true requires signoz.otelCollector.configMap.create=true" -}}
+{{- end -}}
+{{- $environment := get (get .Values.global "observability" | default dict) "deploymentEnvironment" | default "" -}}
+{{- if not (and (eq $environment "dev") (eq .Values.global.domainName "dev.oriso.org")) -}}
+{{- fail "signoz.otelCollector.ciLogIngest.enabled=true requires deploymentEnvironment=dev and domainName=dev.oriso.org" -}}
+{{- end -}}
+{{- end -}}
 {{- $managed := get $signoz "orisoObservability" | default dict -}}
 {{- if get $managed "enabled" | default false -}}
 {{- if not $signozEnabled -}}

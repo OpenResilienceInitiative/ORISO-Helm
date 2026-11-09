@@ -1,0 +1,90 @@
+# Optional Dev operator replay. A Pod port-forward reaches this listener
+# without publishing the port in the Collector Service.
+receivers:
+  otlp/ci-results:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4331
+        max_request_body_size: 262144
+processors:
+  filter/ci-results:
+    error_mode: propagate
+    logs:
+      log_record:
+      - 'resource.attributes["service.name"] != "oriso-ci-tests"'
+      - 'instrumentation_scope.name != "oriso.ci.test-results"'
+      - 'attributes["test.evidence.origin"] != "github-actions"'
+      - >-
+        not (
+          (attributes["test.repository"] == "OpenResilienceInitiative/ORISO-Frontend" and
+           attributes["test.framework"] == "vitest" and
+           (attributes["test.project"] == "unit" or attributes["test.project"] == "storybook (chromium)")) or
+          (attributes["test.repository"] == "OpenResilienceInitiative/ORISO-Admin" and
+           attributes["test.framework"] == "vitest" and attributes["test.project"] == "unit") or
+          (attributes["test.repository"] == "OpenResilienceInitiative/ORISO-UserService" and
+           attributes["test.framework"] == "surefire" and attributes["test.project"] == "unit")
+        )
+      - 'not IsString(attributes["test.commit"]) or not IsMatch(attributes["test.commit"], "^[0-9a-f]{40}$")'
+      - 'not IsString(attributes["test.id"]) or not IsMatch(attributes["test.id"], "^[0-9a-f]{64}$")'
+      - 'not IsString(attributes["test.run.id"]) or not IsMatch(attributes["test.run.id"], "^[1-9][0-9]{0,19}$")'
+      - 'not IsString(attributes["test.job.id"]) or not IsMatch(attributes["test.job.id"], "^[1-9][0-9]{0,19}$")'
+      - 'not IsInt(attributes["test.run.attempt"]) or attributes["test.run.attempt"] < 1'
+      - 'not IsInt(attributes["test.retry"]) or attributes["test.retry"] < 0'
+      - 'not IsMatch(attributes["test.status"], "^(passed|failed|skipped|todo)$")'
+      - >-
+        not IsString(attributes["test.file"]) or
+        not IsMatch(attributes["test.file"], "^src/[\\p{L}\\p{M}\\p{N}_./()\\[\\]-]{1,255}$") or
+        IsMatch(attributes["test.file"], "/\\.{1,2}(/|$)|//|/$")
+      - >-
+        not IsString(attributes["test.case"]) or
+        not IsMatch(attributes["test.case"], "^[^\\p{Cc}@]{1,256}$") or
+        IsMatch(attributes["test.case"], "://|\\b(?:[0-9]{1,3}\\.){3}[0-9]{1,3}\\b")
+      - >-
+        attributes["test.duration_ms"] != nil and (
+          not (IsInt(attributes["test.duration_ms"]) or IsDouble(attributes["test.duration_ms"])) or
+          not (Double(attributes["test.duration_ms"]) >= 0.0 and Double(attributes["test.duration_ms"]) < Double("Inf"))
+        )
+      # The exporter uses the evidence window end as the observed timestamp.
+      - 'not IsMatch(attributes["test.evidence.window.start"], "^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$")'
+      - 'not IsMatch(attributes["test.evidence.window.end"], "^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$")'
+      - 'observed_time_unix_nano != UnixNano(Time(attributes["test.evidence.window.end"], "%Y-%m-%dT%H:%M:%SZ", "UTC"))'
+      - 'observed_time_unix_nano < UnixNano(Time(attributes["test.evidence.window.start"], "%Y-%m-%dT%H:%M:%SZ", "UTC"))'
+      - 'not IsInt(attributes["test.evidence.observed_at_ms"]) or attributes["test.evidence.observed_at_ms"] != UnixMilli(observed_time)'
+  transform/ci-results:
+    error_mode: propagate
+    log_statements:
+    - context: resource
+      statements:
+      - 'keep_keys(attributes, ["service.name"])'
+      - 'set(dropped_attributes_count, 0)'
+      - 'set(schema_url, "")'
+    - context: scope
+      statements:
+      - 'delete_matching_keys(attributes, ".*")'
+      - 'set(dropped_attributes_count, 0)'
+      - 'set(version, "")'
+      - 'set(schema_url, "")'
+    - context: log
+      statements:
+      - >-
+        keep_keys(attributes, [
+          "test.repository", "test.framework", "test.project", "test.commit", "test.run.id", "test.run.attempt",
+          "test.job.id", "test.file", "test.case", "test.id", "test.status", "test.retry", "test.duration_ms",
+          "test.evidence.origin", "test.evidence.window.start", "test.evidence.window.end", "test.evidence.observed_at_ms"
+        ])
+      - 'set(attributes["oriso.signal.source"], "ci")'
+      - 'set(time_unix_nano, observed_time_unix_nano)'
+      - 'set(body, "")'
+      - 'set(event_name, "")'
+      - 'set(severity_text, "")'
+      - 'set(severity_number, 0)'
+      - 'set(flags, 0)'
+      - 'set(trace_id, TraceID(0x00000000000000000000000000000000))'
+      - 'set(span_id, SpanID(0x0000000000000000))'
+      - 'set(dropped_attributes_count, 0)'
+service:
+  pipelines:
+    logs/ci-results:
+      receivers: [otlp/ci-results]
+      processors: [memory_limiter, filter/ci-results, transform/ci-results, batch]
+      exporters: [clickhouselogsexporter, metadataexporter, signozmeter]
