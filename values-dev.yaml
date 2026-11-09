@@ -85,6 +85,10 @@ agencyService:
 tenantService:
   springProfilesActive: "dev"
   liquibaseContexts: "seed"
+  # Use the verified Dev UTC signing clock for this bounded history only.
+  legacyDpaSigning:
+    zone: "UTC"
+    from: "2026-11-07T00:00:00"
 consultingTypeService:
   liquibaseContexts: "seed"
   # Frontend#1979 (OBP 2.1 #101): e-mail notification settings are QA'd on Dev.
