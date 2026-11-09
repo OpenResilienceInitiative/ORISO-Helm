@@ -173,6 +173,38 @@ signoz:
       replacementClaim: signoz-backup-recovery
 ```
 
+Dev's `hcloud-volumes` StorageClass provisions PVs with `Delete`. After the
+approved mount check, set `Retain` on the PV bound to the approved replacement
+claim. The patch verifies the PV identity and revision before changing the
+reclaim policy.
+
+```bash
+backup_destination=signoz-backup-recovery
+(
+  set -euo pipefail
+  pvc=$(kubectl -n caritas get pvc "$backup_destination" -o json)
+  claim_uid=$(jq -er 'select(.status.phase == "Bound").metadata.uid' <<<"$pvc")
+  volume=$(jq -er '.spec.volumeName' <<<"$pvc")
+  pv=$(kubectl get pv "$volume" -o json)
+  patch=$(jq -ce --arg claim "$backup_destination" --arg uid "$claim_uid" '
+    select(.status.phase == "Bound" and .spec.claimRef.namespace == "caritas"
+           and .spec.claimRef.name == $claim and .spec.claimRef.uid == $uid)
+    | if .spec.persistentVolumeReclaimPolicy == "Retain" then []
+      elif .spec.persistentVolumeReclaimPolicy == "Delete" then [
+        {op: "test", path: "/metadata/uid", value: .metadata.uid},
+        {op: "test", path: "/metadata/resourceVersion", value: .metadata.resourceVersion},
+        {op: "test", path: "/spec/claimRef/uid", value: $uid},
+        {op: "replace", path: "/spec/persistentVolumeReclaimPolicy", value: "Retain"}
+      ] else error("Unexpected reclaim policy") end' <<<"$pv")
+  if test "$patch" != '[]'; then
+    kubectl patch pv "$volume" --type=json --patch "$patch"
+  fi
+  kubectl get pv "$volume" -o json |
+    jq -er --arg uid "$claim_uid" 'select(.spec.claimRef.uid == $uid)
+      | select(.spec.persistentVolumeReclaimPolicy == "Retain") | .spec.persistentVolumeReclaimPolicy'
+)
+```
+
 Use the Dev Helm upgrade procedure and start with `--dry-run=server`. Helm
 reads the original and replacement PVCs and the replacement PV. It requires
 the original PVC to belong to this release with the `keep` policy and
@@ -180,10 +212,9 @@ checks that the replacement PV's claim reference matches the PVC's namespace,
 name and UID. With an override, a client-only render fails. The chart keeps
 rendering the original PVC, and the replacement remains independently managed.
 
-Record the approved claim and UTC start time before the upgrade.
+Record the UTC start time before the upgrade.
 
 ```bash
-backup_destination=signoz-backup-recovery
 backup_switch_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 ```
 
