@@ -91,6 +91,10 @@ recreates every dashboard and rule with no further clicks.
 
 ## First installation in an environment
 
+`<environment overlay>` is the whole overlay chain: `-f values-dev.yaml` for Dev,
+`-f values-dev.yaml -f values-pre-dev.yaml` for Pre-Dev (Pre-Dev loads after Dev;
+the Pre-Dev overlay alone leaves SigNoz and the collector off).
+
 1. Deploy SigNoz and the collectors with provisioning explicitly disabled.
    The Dev overlay turns it on, so put the override **after** the overlay:
 
