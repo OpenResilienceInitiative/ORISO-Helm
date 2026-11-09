@@ -100,7 +100,7 @@ def _scope_filter(definition: dict[str, Any]) -> str:
     return " AND ".join(parts)
 
 
-def _group_by(names: Iterable[str], context: str = "tag") -> list[dict[str, str]]:
+def _group_by(names: Iterable[str], context: str = "attribute") -> list[dict[str, str]]:
     return [
         {"name": name, "fieldContext": context, "fieldDataType": "string"}
         for name in names
