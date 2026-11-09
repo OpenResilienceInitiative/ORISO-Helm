@@ -156,10 +156,11 @@ kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP 
 Keep the original Helm-owned backup claim and its PV for storage recovery.
 Provision a dedicated, empty, writable Filesystem PVC in `caritas` under the
 approved storage recovery procedure. With a `WaitForFirstConsumer` StorageClass,
-use an approved temporary consumer on the node where SigNoz ordinal 0 runs
-to bind and test the mount. Confirm the replacement is Bound to a Retain PV
-and can mount on the SQLite source's eligible nodes. Allow space for the
-uncompressed snapshot, the compressed copy in progress and retained archives.
+give an approved temporary consumer the backup CronJob's pod affinity and
+tolerations. The scheduler can then bind the claim on the node running SigNoz
+ordinal 0. Confirm the replacement is Bound to a Retain PV and can mount on
+the SQLite source's eligible nodes. Allow space for the uncompressed
+snapshot, the compressed copy in progress and retained archives.
 Wait for the temporary consumer and any active backup Job to finish before
 switching the destination.
 
