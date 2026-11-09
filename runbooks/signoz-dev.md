@@ -219,47 +219,22 @@ backup_switch_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 ```
 
 After the upgrade and the next scheduled run, check that both claims are
-present and the replacement PV still uses `Retain`. Verify that the newest
-scheduled Job since the switch and the creation of the current PVC completed
-on the configured destination.
+present. From the Helm checkout, read the archive receipt for the newest
+scheduled Job since the switch and the creation of the current PVC.
 
 ```bash
-(
-  set -euo pipefail
-  cronjob=$(kubectl -n caritas get cronjob caritas-signoz-data-protection-backup -o json)
-  cronjob_uid=$(jq -er '.metadata.uid' <<<"$cronjob")
-  target=$(jq -er '.spec.jobTemplate.spec.template.spec.volumes[]
-    | select(.name == "backup").persistentVolumeClaim.claimName' <<<"$cronjob")
-  if test "$target" != "$backup_destination"; then
-    printf '%s\n' 'The installed CronJob uses a different backup destination' >&2
-    exit 1
-  fi
-  claim_created_at=$(kubectl -n caritas get pvc "$target" -o json |
-    jq -er 'select(.status.phase == "Bound").metadata.creationTimestamp')
-
-  kubectl -n caritas get jobs -o json |
-    jq -e --arg owner "$cronjob_uid" --arg target "$target" \
-      --arg switch_at "$backup_switch_started_at" --arg claim_at "$claim_created_at" '
-      [.items[]
-       | select(any(.metadata.ownerReferences[]?;
-                    .kind == "CronJob" and .controller == true and .uid == $owner))
-       | select(.metadata.creationTimestamp >= $switch_at
-                and .metadata.creationTimestamp >= $claim_at)]
-      | sort_by(.metadata.creationTimestamp, .metadata.name) | last
-      | . // error("No scheduled backup Job since the destination switch")
-      | if any(.spec.template.spec.volumes[]?;
-               .name == "backup" and .persistentVolumeClaim.claimName == $target
-               and (.persistentVolumeClaim.readOnly // false) == false)
-        then . else error("Latest backup Job uses a different destination") end
-      | if .status.completionTime
-           and any(.status.conditions[]?; .type == "Complete" and .status == "True")
-        then {job: .metadata.name, claim: $target, completed: .status.completionTime}
-        else error("Latest backup Job has not completed successfully") end'
+backup_receipt=$(
+  python3 scripts/signoz_metadata_backup_receipt.py \
+    --namespace caritas --cronjob caritas-signoz-data-protection-backup \
+    --claim "$backup_destination" --since "$backup_switch_started_at" --require-retain
 )
 ```
 
-Verify the gzip archive produced by that Job and its SQLite integrity in an
-isolated recovery environment. Mount the reported claim at `/backup`.
+The readback checks the Bound Retain PV against the claim UID, then requires
+the selected Job and its successful backup Pod to use that destination.
+The newest scheduled run determines acceptance. A manual run or an earlier
+successful Job cannot satisfy it. Mount the reported claim at `/backup`
+and verify the reported archive using the isolated restore below.
 
 Clearing the override, or rolling back to a revision before the switch, can
 send subsequent Jobs to the original claim. Confirm that destination can
@@ -268,10 +243,21 @@ attach before reusing it. Keep both claims available for recovery.
 ## signoz.db backup and restore
 
 By default, the CronJob `caritas-signoz-data-protection-backup` runs at 02:30
-UTC and keeps the 14 newest successful gzip archives in its backup claim.
-Confirm the selected Job completed and record the archive's UTC timestamp.
+UTC and keeps 14 verified gzip archives in its backup claim. The producer
+checks the SQLite snapshot and gzip contents before publishing the archive,
+then records the archive name, Job UID, Pod UID, compressed byte count and
+SHA-256 in the backup container's Kubernetes termination message. It starts
+pruning only after the archive and receipt have been written. If the Pod is
+interrupted before Kubernetes records a successful exit, a published archive
+can still be checked by explicit path. A scheduled handoff requires the
+successful Pod receipt.
 The archive contains SigNoz accounts, credentials and configuration, so keep
 it on protected storage within the approved recovery environment.
+
+Finish active backup Jobs before rolling out this producer or rolling back to
+the legacy producer. The older script does not take the PVC lock. Retained
+Kubernetes Job history is shorter than archive retention, so older archives
+can be recovered by explicit path.
 
 For an approved on-demand backup, confirm no backup is active and leave the
 full Job deadline before the next scheduled start. The scheduled and manual
@@ -282,18 +268,34 @@ kubectl -n caritas create job --from=cronjob/caritas-signoz-data-protection-back
 ```
 
 For an isolated SQLite restore, use a recovery pod with no service account
-token and the backup CronJob's pinned Python image. Run it as the user that
-will open the recovered database. Use these mounts:
+token and the backup CronJob's pinned Python image. Run it as UID 0, the Dev
+SigNoz user and the owner of the new private archives. Use these mounts:
 
 | Mount | Source | Access |
 |---|---|---|
-| `/backup` | `caritas-signoz-data-protection-backup` claim | Read-only |
+| `/backup` | Claim from the receipt, or the claim holding the selected historical archive | Read-only |
 | `/scripts` | `caritas-signoz-data-protection` ConfigMap | Read-only |
 | `/restore` | Fresh recovery claim in the same namespace | Read-write |
 
 Schedule the recovery read away from the next backup window and wait for the
 current backup pod to finish. Keep the recovery claim detached from SigNoz
-while staging. Use the exact archive name from the selected backup.
+while staging. Use the successful readback's archive name, checksum and byte
+count. Set `recovery_pod` to the isolated Pod's name.
+
+```bash
+(
+  set -euo pipefail
+  archive=$(jq -er '.archive' <<<"$backup_receipt")
+  digest=$(jq -er '.sha256' <<<"$backup_receipt")
+  bytes=$(jq -er '.bytes' <<<"$backup_receipt")
+  kubectl -n caritas exec "$recovery_pod" -- python3 /scripts/restore.py \
+    "/backup/$archive" /restore --sha256 "$digest" --compressed-bytes "$bytes"
+)
+```
+
+For explicit recovery without a retained receipt, pass the exact archive
+path. The script verifies the embedded SHA-256 for newer names and also
+accepts older timestamp-only archives.
 
 ```bash
 archive=/backup/signoz-YYYYMMDDTHHMMSSZ.db.gz

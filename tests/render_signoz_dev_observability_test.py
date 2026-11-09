@@ -5,6 +5,9 @@ trace identity and sampling, browser Web Vitals (ORISO SigNoz plan, session 1)."
 from __future__ import annotations
 
 from contextlib import closing
+import fcntl
+import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -292,12 +295,41 @@ def assert_second_review_findings() -> None:
 
 
 def assert_backup_is_atomic() -> None:
-    config = by_key(render("values-dev.yaml"))[("ConfigMap", "caritas-signoz-data-protection")]
+    docs = by_key(render("values-dev.yaml"))
+    config = docs[("ConfigMap", "caritas-signoz-data-protection")]
+    cron = docs[("CronJob", "caritas-signoz-data-protection-backup")]
+    container = cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]
+    fields = {item["name"]: item["valueFrom"]["fieldRef"]["fieldPath"]
+              for item in container["env"] if "valueFrom" in item}
+    assert fields == {"JOB_UID": "metadata.labels['batch.kubernetes.io/controller-uid']",
+                      "POD_UID": "metadata.uid"}, fields
+    assert container["terminationMessagePolicy"] == "File"
+    job_uid = "75a198df-bb28-4e9e-9b0b-9e038b5d713f"
+    pod_uid = "cf829cd6-8339-4b58-a912-81a3ef109a57"
     with tempfile.TemporaryDirectory() as root:
-        signoz, backup, recovery = (Path(root) / name for name in ("signoz", "backup", "recovery"))
-        for directory in (signoz, backup, recovery):
+        signoz, backup, recovery, scripts = (
+            Path(root) / name for name in ("signoz", "backup", "recovery", "scripts")
+        )
+        for directory in (signoz, backup, recovery, scripts):
             directory.mkdir()
+        receipt_path = Path(root) / "termination-log"
         database = signoz / "signoz.db"
+        (scripts / "backup.py").write_text(
+            config["data"]["backup.py"]
+            .replace('"/signoz/signoz.db"', f'"{database}"')
+            .replace('"/backup"', f'"{backup}"')
+            .replace('"/dev/termination-log"', f'"{receipt_path}"'),
+            encoding="utf-8",
+        )
+        (scripts / "restore.py").write_text(config["data"]["restore.py"], encoding="utf-8")
+
+        def run_backup(uid: str, keep: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [sys.executable, str(scripts / "backup.py")],
+                env={**os.environ, "KEEP": keep, "JOB_UID": job_uid, "POD_UID": uid},
+                capture_output=True, text=True, check=False, timeout=15,
+            )
+
         with closing(sqlite3.connect(database)) as writer:
             assert writer.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
             writer.execute("PRAGMA wal_autocheckpoint=0")
@@ -315,19 +347,24 @@ def assert_backup_is_atomic() -> None:
             # The current row is only in the active WAL, so copying signoz.db alone would lose it.
             with closing(sqlite3.connect(f"{database.as_uri()}?mode=ro&immutable=1", uri=True)) as raw:
                 assert raw.execute("SELECT id FROM dashboard").fetchall() == []
-            (backup / ".signoz-20261017T000000Z.db.gz.part").write_bytes(b"truncated")
-            script = config["data"]["backup.py"].replace("/signoz/", str(signoz) + "/").replace("/backup", str(backup))
-            result = subprocess.run(
-                [sys.executable, "-c", script], env={**os.environ, "KEEP": "14"},
-                capture_output=True, text=True, check=False, timeout=15,
-            )
+            legacy_partial = backup / ".signoz-20261017T000000Z.db.gz.part"
+            legacy_partial.write_bytes(b"truncated")
+            result = run_backup(pod_uid, "14")
             assert result.returncode == 0, result.stderr
             assert writer.execute("SELECT id FROM dashboard").fetchall() == [("wal-only-dashboard",)]
 
-        files = sorted(backup.iterdir())
-        assert len(files) == 1 and files[0].name.startswith("signoz-") and files[0].name.endswith(".db.gz"), files
+        (archive,) = backup.glob("signoz-*.db.gz")
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
+        assert receipt == {"version": 1, "archive": archive.name, "jobUid": job_uid,
+                           "podUid": pod_uid, "sha256": checksum, "bytes": archive.stat().st_size}, receipt
+        assert archive.name.endswith(f"-{job_uid}-{pod_uid}-{checksum}.db.gz")
+        assert archive.stat().st_mode & 0o777 == 0o600
+        assert legacy_partial.read_bytes() == b"truncated"
+        assert not (backup / ".signoz_metadata_stage").exists()
         result = subprocess.run(
-            [sys.executable, "-c", config["data"]["restore.py"], str(files[0]), str(recovery)],
+            [sys.executable, str(scripts / "restore.py"), str(archive), str(recovery),
+             "--sha256", receipt["sha256"], "--compressed-bytes", str(receipt["bytes"])],
             capture_output=True, text=True, check=False, timeout=15,
         )
         assert result.returncode == 0, result.stderr
@@ -337,6 +374,27 @@ def assert_backup_is_atomic() -> None:
             assert readback.execute("SELECT id FROM users").fetchall() == [("synthetic-admin",)]
             assert readback.execute("SELECT id FROM rule").fetchall() == [("synthetic-rule",)]
         assert sorted(path.name for path in recovery.iterdir()) == ["signoz.db"]
+
+        receipt_path.unlink()
+        receipt_path.mkdir()
+        result = run_backup("cf829cd6-8339-4b58-a912-81a3ef109a58", "1")
+        assert result.returncode == 1, result.stdout
+        assert hashlib.sha256(archive.read_bytes()).hexdigest() == checksum
+        assert len(list(backup.glob("signoz-*.db.gz"))) == 2
+
+        receipt_path.rmdir()
+        next_pod = "cf829cd6-8339-4b58-a912-81a3ef109a59"
+        with (backup / ".signoz_backup.lock").open("r+b") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = run_backup(next_pod, "1")
+            assert result.returncode == 1 and "Another metadata backup" in result.stderr, result.stderr
+            assert not receipt_path.exists()
+
+        result = run_backup(next_pod, "1")
+        assert result.returncode == 0, result.stderr
+        (latest,) = backup.glob("signoz-*.db.gz")
+        assert json.loads(receipt_path.read_text(encoding="utf-8"))["archive"] == latest.name
+        assert latest != archive and legacy_partial.is_file()
 
 
 def assert_long_release_name() -> None:

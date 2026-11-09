@@ -130,32 +130,7 @@ metadata:
     oriso.org/retain-claims: {{ join "," $claims | quote }}
 data:
   backup.py: |
-    import glob, gzip, os, shutil, sqlite3, time
-    # Leftovers of an interrupted run never look like a finished backup.
-    for stale in glob.glob("/backup/.signoz-*"):
-        os.remove(stale)
-    src = sqlite3.connect("file:/signoz/signoz.db?mode=ro", uri=True)
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    tmp = f"/backup/.signoz-{stamp}.db"
-    dst = sqlite3.connect(tmp)
-    src.backup(dst)
-    ok = dst.execute("PRAGMA integrity_check").fetchone()[0]
-    dst.close()
-    src.close()
-    if ok != "ok":
-        os.remove(tmp)
-        raise SystemExit(f"integrity_check failed: {ok}")
-    part = f"/backup/.signoz-{stamp}.db.gz.part"
-    with open(tmp, "rb") as f, gzip.open(part, "wb") as g:
-        shutil.copyfileobj(f, g)
-    with open(part, "rb") as f:
-        os.fsync(f.fileno())
-    os.replace(part, f"/backup/signoz-{stamp}.db.gz")
-    os.remove(tmp)
-    keep = int(os.environ["KEEP"])
-    for old in sorted(glob.glob("/backup/signoz-*.db.gz"))[:-keep]:
-        os.remove(old)
-    print("backups:", *sorted(os.listdir("/backup")), sep="\n  ")
+    {{- .Files.Get "files/signoz/metadata_backup.py" | nindent 4 }}
   restore.py: |
     {{- .Files.Get "files/signoz/metadata_restore.py" | nindent 4 }}
 {{- if $pending }}
@@ -398,9 +373,18 @@ spec:
             - name: backup
               image: {{ $image | quote }}
               command: ["python3", "/scripts/backup.py"]
+              terminationMessagePolicy: File
               env:
                 - name: KEEP
                   value: {{ get $backup "keep" | default 14 | toString | quote }}
+                - name: JOB_UID
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.labels['batch.kubernetes.io/controller-uid']
+                - name: POD_UID
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.uid
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

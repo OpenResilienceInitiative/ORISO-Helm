@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import closing
 import errno
 import gzip
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
@@ -42,14 +43,14 @@ class MetadataRestoreTest(unittest.TestCase):
         self.archive = self.root / "signoz-20261107T023000Z.db.gz"
         self.archive.write_bytes(gzip.compress(database.read_bytes()))
 
-    def run_restore(self) -> subprocess.CompletedProcess[str]:
+    def run_restore(self, *options: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, str(RESTORE_SCRIPT), str(self.archive), str(self.destination)],
+            [sys.executable, str(RESTORE_SCRIPT), str(self.archive), str(self.destination), *options],
             capture_output=True, text=True, check=False, timeout=10,
         )
 
-    def assert_refused(self, message: str) -> None:
-        result = self.run_restore()
+    def assert_refused(self, message: str, *options: str) -> None:
+        result = self.run_restore(*options)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(result.stdout, "")
         self.assertIn(message, result.stderr)
@@ -81,6 +82,32 @@ class MetadataRestoreTest(unittest.TestCase):
     def test_truncated_gzip_leaves_no_published_database_or_staging_file(self) -> None:
         self.archive.write_bytes(self.archive.read_bytes()[:-4])
         self.assert_refused("complete gzip archive")
+        self.assertEqual(list(self.destination.iterdir()), [])
+
+    def test_refuses_a_valid_database_recompressed_under_an_attested_name(self) -> None:
+        original = self.archive.read_bytes()
+        digest = hashlib.sha256(original).hexdigest()
+        name = (
+            "signoz-20261107T023000Z-75a198df-bb28-4e9e-9b0b-9e038b5d713f"
+            f"-cf829cd6-8339-4b58-a912-81a3ef109a57-{digest}.db.gz"
+        )
+        self.archive = self.archive.rename(self.root / name)
+        database = self.root / "source.db"
+        with closing(sqlite3.connect(database)) as connection:
+            connection.execute("UPDATE dashboard SET id='different-dashboard'")
+            connection.commit()
+        self.archive.write_bytes(gzip.compress(database.read_bytes()))
+        self.assert_refused("SHA-256")
+        self.assert_refused("SHA-256", "--sha256", digest)
+        self.assertEqual(list(self.destination.iterdir()), [])
+
+    def test_refuses_a_receipt_with_the_wrong_compressed_byte_count(self) -> None:
+        contents = self.archive.read_bytes()
+        self.assert_refused(
+            "byte count",
+            "--sha256", hashlib.sha256(contents).hexdigest(),
+            "--compressed-bytes", str(len(contents) + 1),
+        )
         self.assertEqual(list(self.destination.iterdir()), [])
 
     def test_rejects_a_valid_sqlite_database_without_signoz_metadata(self) -> None:
