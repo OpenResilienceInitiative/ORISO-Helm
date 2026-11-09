@@ -608,7 +608,10 @@ class JavaSignalContractTest(unittest.TestCase):
 class ClickHouseRetentionContractTest(unittest.TestCase):
     log_budget = 10 * 1024**3
     disk_size = 40 * 1024**3
-    log_tables = ("query_log", "text_log", "trace_log", "metric_log", "asynchronous_metric_log")
+    log_tables = (
+        "query_log", "text_log", "trace_log", "metric_log", "asynchronous_metric_log",
+        "part_log", "zookeeper_log", "aggregated_zookeeper_log", "processors_profile_log",
+    )
     engine = "MergeTree PARTITION BY event_date ORDER BY event_time"
 
     def setUp(self) -> None:
@@ -627,18 +630,30 @@ class ClickHouseRetentionContractTest(unittest.TestCase):
         runner = self.enterContext(mock.patch.object(MODULE, "Runner")).return_value
         runner.run.side_effect = self.run_kubectl
         self.checked_disks = []
+        self.writer_snapshots = {
+            pod: [f"{'a' * 64}\tactive\tactive"] * 2 for pod in self.disks
+        }
 
-    def run_kubectl(self, command: list[str]) -> mock.Mock:
+    def run_kubectl(self, command: list[str], *, input_text: str | None = None) -> mock.Mock:
         if command[3:5] == ["get", "pods"]:
             self.assertIn("clickhouse.altinity.com/chi=caritas-clickhouse", command[6])
             return mock.Mock(stdout=json.dumps({"items": [
                 {"metadata": {"name": pod}, "status": {"conditions": [{"type": "Ready", "status": "True"}]}}
                 for pod in self.disks
             ]}))
+        if command[7:11] == ["-i", "--", "sh", "-s"]:
+            self.assertIn("MainConfigLoads", input_text)
+            pod = command[4]
+            index = self.writer_reads[pod]
+            self.writer_reads[pod] += 1
+            return mock.Mock(stdout=self.writer_snapshots[pod][index])
         self.assertEqual(command[3:9], [
             "exec", command[4], "-c", "clickhouse", "--", "clickhouse-client",
         ])
         self.assertIn("JSONEachRow", command)
+        self.assertIn("--readonly=1", command)
+        self.assertIn("--log_queries=0", command)
+        self.assertIn("127.0.0.1", command)
         sql = command[-1]
         self.assertTrue(sql.startswith("SELECT "))
         if "FROM system.disks" in sql:
@@ -657,6 +672,7 @@ class ClickHouseRetentionContractTest(unittest.TestCase):
         return mock.Mock(stdout="\n".join(json.dumps(row) for row in rows))
 
     def run_gate(self, *, failed: bool = False) -> dict:
+        self.writer_reads = dict.fromkeys(self.disks, 0)
         argv = [
             "signoz_runtime_acceptance", "--namespace", "caritas", "--release", "caritas",
             "--environment", "dev", "--check-clickhouse-retention",
@@ -681,6 +697,7 @@ class ClickHouseRetentionContractTest(unittest.TestCase):
         self.assertEqual(pod["trackedLogBytes"], self.log_budget)
         self.assertEqual(pod["rotatedLogBytes"], self.log_budget - 1)
         self.assertEqual(pod["failures"], [])
+        self.assertEqual(pod["logWriters"], {"metric_log": "active", "trace_log": "active"})
 
     def test_compares_exact_bytes_and_reports_both_exceeded_limits(self) -> None:
         self.disks["clickhouse-b"][0]["free_space"] -= 1
@@ -691,6 +708,53 @@ class ClickHouseRetentionContractTest(unittest.TestCase):
         self.assertEqual(len(report["pods"]["clickhouse-a"]["failures"]), 1)
         self.assertEqual(len(report["pods"]["clickhouse-b"]["failures"]), 2)
         self.assertEqual(report["pods"]["clickhouse-b"]["diskFreeBytes"], self.disk_size // 4 - 1)
+
+    def test_counts_all_nine_families_including_rotations(self) -> None:
+        self.parts = [
+            {"table": name, "active_bytes": 10} for name in self.log_tables
+        ] + [{"table": "zookeeper_log_7", "active_bytes": 15}]
+        pod = self.run_gate()["pods"]["clickhouse-a"]
+        self.assertEqual(pod["trackedLogBytes"], 105)
+        self.assertEqual(pod["rotatedLogBytes"], 15)
+        self.assertEqual(pod["activeLogBytesByTable"]["aggregated_zookeeper_log"], 10)
+        self.assertEqual(pod["activeLogBytesByTable"]["processors_profile_log"], 10)
+
+    def test_exempts_only_proven_disabled_writers_but_counts_all_of_their_bytes(self) -> None:
+        for pod in self.writer_snapshots:
+            self.writer_snapshots[pod] = [f"{'b' * 64}\tdisabled\tdisabled"] * 2
+        self.tables = [row for row in self.tables if row["name"] != "metric_log"]
+        trace = next(row for row in self.tables if row["name"] == "trace_log")
+        trace["engine_full"] = self.engine + " TTL event_date + toIntervalDay(7)"
+        self.parts = [
+            {"table": "trace_log", "active_bytes": 1024},
+            {"table": "metric_log_8", "active_bytes": self.log_budget - 1024},
+        ]
+        pod = self.run_gate()["pods"]["clickhouse-a"]
+        self.assertEqual(pod["logWriters"], {"metric_log": "disabled", "trace_log": "disabled"})
+        self.assertEqual(pod["deletionTtlDays"]["trace_log"], 7)
+        self.assertEqual(pod["trackedLogBytes"], self.log_budget)
+        self.assertEqual(pod["rotatedLogBytes"], self.log_budget - 1024)
+        self.assertEqual(pod["retainedDisabledLogBytes"], self.log_budget)
+
+        self.parts[0]["active_bytes"] += 1
+        failed = self.run_gate(failed=True)["pods"]["clickhouse-a"]
+        self.assertEqual(len(failed["failures"]), 1)
+        self.assertIn("Active system log parts use", failed["failures"][0])
+
+    def test_unknown_or_changed_writer_evidence_keeps_canonical_ttl_required(self) -> None:
+        for snapshots in (
+            ["unverified", "unverified"],
+            [f"{'a' * 64}\tdisabled\tdisabled", f"{'b' * 64}\tdisabled\tdisabled"],
+            [f"{'a' * 64}\tdisabled\tunverified"] * 2,
+        ):
+            with self.subTest(snapshots=snapshots):
+                self.writer_snapshots["clickhouse-a"] = snapshots
+                trace = next(row for row in self.tables if row["name"] == "trace_log")
+                trace["engine_full"] = self.engine + " TTL event_date + toIntervalDay(7)"
+                pod = self.run_gate(failed=True)["pods"]["clickhouse-a"]
+                self.assertEqual(pod["logWriters"]["trace_log"], "unverified")
+                self.assertIn("trace_log", pod["failures"][0])
+                self.assertEqual(pod["trackedLogBytes"], self.log_budget)
 
     def test_missing_canonical_table_fails_even_when_a_rotation_exists(self) -> None:
         self.tables.pop(0)
@@ -726,7 +790,7 @@ class ClickHouseRetentionContractTest(unittest.TestCase):
         cases = (
             (self.tables, self.tables[0]),
             (self.parts, self.parts[0]),
-            (self.parts, {"table": "zookeeper_log", "active_bytes": 1}),
+            (self.parts, {"table": "zookeeper_log_foreign", "active_bytes": 1}),
             (self.parts, {"table": "text_log_8", "active_bytes": True}),
         )
         for rows, bad in cases:

@@ -80,7 +80,7 @@ jobs:
           ORISO_DOCS_SOURCE_ROOT: ${{ runner.temp }}/oriso-docs-contract
         run: python -m unittest discover -s tests -p 'test_*.py'
 
-      - name: Run native ClickHouse Java signal contract
+      - name: Run native ClickHouse Java and retention contracts
         timeout-minutes: 5
         shell: bash
         run: |
@@ -97,6 +97,7 @@ jobs:
           unlink "$test_dir/$archive"
           "$test_dir/clickhouse" local --version
           CLICKHOUSE_BINARY="$test_dir/clickhouse" python tests/signoz_java_signal_clickhouse.py
+          CLICKHOUSE_BINARY="$test_dir/clickhouse" python tests/signoz_retention_clickhouse.py
           unlink "$test_dir/clickhouse"
           rmdir "$test_dir"
 

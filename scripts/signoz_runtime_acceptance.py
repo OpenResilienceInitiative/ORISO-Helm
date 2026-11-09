@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -28,7 +29,11 @@ SUPPRESSED_LOG_BODY = "[ORISO log body suppressed by privacy policy]"
 # Match the managed ClickHouse capacity alert's 2 GiB floor.
 MIN_CLICKHOUSE_UNRESERVED_BYTES = 2 * 1024**3
 CLICKHOUSE_UNKNOWN_SPACE = 2**64 - 1
-CLICKHOUSE_LOG_TABLES = ("query_log", "text_log", "trace_log", "metric_log", "asynchronous_metric_log")
+CLICKHOUSE_LOG_TABLES = (
+    "query_log", "text_log", "trace_log", "metric_log", "asynchronous_metric_log",
+    "part_log", "zookeeper_log", "aggregated_zookeeper_log", "processors_profile_log",
+)
+CLICKHOUSE_REMOVABLE_WRITERS = ("metric_log", "trace_log")
 CLICKHOUSE_LOG_RETENTION_DAYS = 3
 MAX_CLICKHOUSE_DISK_USED_PERCENT = 75
 MAX_CLICKHOUSE_LOG_BYTES = 10 * 1024**3
@@ -688,7 +693,13 @@ def _clickhouse_pods(runner: Runner, namespace: str, release: str) -> list[str]:
     return sorted(pods)
 
 
-def _clickhouse_query(runner: Runner, namespace: str, pod: str, query: str, output_format: str) -> str:
+def _clickhouse_query(
+    runner: Runner, namespace: str, pod: str, query: str, output_format: str, *, read_only: bool = False,
+) -> str:
+    options = (
+        ("--host", "127.0.0.1", "--readonly=1", "--log_queries=0", "--max_execution_time=5")
+        if read_only else ()
+    )
     return _kubectl(
         runner,
         namespace,
@@ -698,6 +709,7 @@ def _clickhouse_query(runner: Runner, namespace: str, pod: str, query: str, outp
         "clickhouse",
         "--",
         "clickhouse-client",
+        *options,
         "--format",
         output_format,
         "--query",
@@ -816,10 +828,18 @@ def _clickhouse_log_ttl_days(engine: str) -> int | None:
     return int(ttl[1]) if ttl else None
 
 
+def _clickhouse_writer_snapshot(runner: Runner, namespace: str, pod: str) -> str:
+    command = ["kubectl", "-n", namespace, "exec", pod, "-c", "clickhouse", "-i", "--", "sh", "-s"]
+    script = Path(__file__).with_name("signoz_clickhouse_writer_snapshot.sh").read_text(encoding="utf-8")
+    return runner.run(command, input_text=script).stdout.strip()
+
+
 def _read_clickhouse_retention(runner: Runner, namespace: str, pod: str) -> dict[str, Any]:
     def rows(query: str) -> list[dict[str, Any]]:
-        output = _clickhouse_query(runner, namespace, pod, query, "JSONEachRow")
+        output = _clickhouse_query(runner, namespace, pod, query, "JSONEachRow", read_only=True)
         return [json.loads(line) for line in output.splitlines()]
+
+    before = _clickhouse_writer_snapshot(runner, namespace, pod)
 
     names = ", ".join(map(_sql_literal, CLICKHOUSE_LOG_TABLES))
     family = f"^({'|'.join(CLICKHOUSE_LOG_TABLES)})(_[0-9]+)?$"
@@ -849,8 +869,15 @@ def _read_clickhouse_retention(runner: Runner, namespace: str, pod: str) -> dict
     except (KeyError, TypeError, ValueError) as error:
         raise RuntimeError(f"ClickHouse retention metadata unreadable on pod {pod}") from error
 
+    after = _clickhouse_writer_snapshot(runner, namespace, pod)
+    evidence = re.fullmatch(r"[0-9a-f]{64}\t(active|disabled|unverified)\t(active|disabled|unverified)", before)
+    states = evidence.groups() if evidence and before == after else ("unverified", "unverified")
+    writers = dict(zip(CLICKHOUSE_REMOVABLE_WRITERS, states, strict=True))
+
     failures = []
     for table in CLICKHOUSE_LOG_TABLES:
+        if writers.get(table) == "disabled":
+            continue
         days = ttl_days.get(table)
         if table not in ttl_days:
             failures.append(f"{table} is missing")
@@ -871,6 +898,11 @@ def _read_clickhouse_retention(runner: Runner, namespace: str, pod: str) -> dict
         "diskFreeBytes": free,
         "diskUsedPercent": round(used * 100 / total, 2),
         "deletionTtlDays": ttl_days,
+        "logWriters": writers,
+        "retainedDisabledLogBytes": sum(
+            size for table, size in part_bytes.items()
+            if writers.get(re.sub(r"_[0-9]+$", "", table)) == "disabled"
+        ),
         "activeLogBytesByTable": part_bytes,
         "trackedLogBytes": tracked_bytes,
         "rotatedLogBytes": sum(size for table, size in part_bytes.items() if table not in CLICKHOUSE_LOG_TABLES),

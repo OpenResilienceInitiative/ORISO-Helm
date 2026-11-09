@@ -126,12 +126,20 @@ python3 scripts/signoz_runtime_acceptance.py \
 The check reads each data pod's installed metadata using SELECT queries.
 It applies the [ClickHouse conformance limits](https://github.com/OpenResilienceInitiative/ORISO-Helm/blob/d6de74b485410709d6d8885ee58ec57550bbe4c1/observability/signoz-conformance/contract.yaml#L77-L88).
 
-- Each canonical table needs an unconditional deletion TTL of three days on
-  `event_date`. The tables are `query_log`, `text_log`, `trace_log`, `metric_log`
-  and `asynchronous_metric_log`.
-- The five log families, including numbered rotations such as `trace_log_0`,
-  can use up to 10 GiB in active parts. The report shows the per-table bytes
-  and the total for numbered rotations separately.
+- The canonical tables need an unconditional three-day deletion TTL on
+  `event_date`. The check covers `query_log`, `text_log`, `trace_log`,
+  `metric_log`, `asynchronous_metric_log`, `part_log`, `zookeeper_log`,
+  `aggregated_zookeeper_log` and `processors_profile_log`.
+- A verified `disabled` state exempts the canonical `metric_log` or `trace_log`
+  from the TTL check. The writer probe uses the installed Linux x86_64
+  ClickHouse 25.12.5.44 build, checks the current process before and after
+  reading metadata, and requires stable startup configuration and no live
+  collector for a removed writer. After a config reload or when evidence is
+  incomplete, the report shows `unverified` and the canonical TTL is required.
+- All nine log families can use up to 10 GiB in active parts. That total
+  includes numbered rotations such as `trace_log_0` and tables from disabled
+  writers. The report shows per-table bytes, the rotated footprint and the
+  retained disabled-writer footprint. The latter two can overlap.
 - The default local data disk can be up to 75 percent used. The check compares
   exact bytes before rounding the displayed percentage.
 
