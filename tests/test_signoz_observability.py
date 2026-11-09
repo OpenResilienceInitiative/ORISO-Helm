@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import unittest
@@ -65,6 +66,37 @@ class AssetContractTest(unittest.TestCase):
             cluster_name="oriso-predev",
             channel_name="oriso-alerts-slack",
         )
+
+    def test_supplemental_alert_keeps_its_slack_route_with_agent_forwarding(self) -> None:
+        dashboards, alerts = MODULE.load_assets(ASSETS)
+        supplemental = copy.deepcopy(alerts[0])
+        supplemental["_orisoSlug"] = "deployment-identity-mismatch"
+        supplemental["alert"] = "Deployment identity mismatch"
+        supplemental["condition"]["compositeQuery"]["unit"] = "count"
+        _, slack_only = MODULE.materialize_assets(
+            dashboards, [supplemental], environment="dev", cluster_name="oriso-dev",
+            channel_name="oriso-alerts-slack",
+        )
+        _, routed = MODULE.materialize_assets(
+            dashboards, [*alerts, supplemental], environment="dev", cluster_name="oriso-dev",
+            channel_name="oriso-alerts-slack", agent_forwarding=True,
+        )
+        self.assertEqual(
+            {alert["labels"]["oriso_forward_rule"] for alert in routed[:-1]},
+            MODULE.REQUIRED_ALERT_SLUGS,
+        )
+        self.assertEqual(routed[-1], slack_only[0])
+        MODULE.validate_live_alert(
+            routed[-1], slack_only[0], environment="dev", channel_name="oriso-alerts-slack",
+            agent_forwarding=True,
+        )
+        changed = copy.deepcopy(routed[-1])
+        changed["condition"]["thresholds"]["spec"][0]["channels"].append("oriso-alerts-agents")
+        with self.assertRaisesRegex(RuntimeError, "stored alert route drift"):
+            MODULE.validate_live_alert(
+                changed, slack_only[0], environment="dev", channel_name="oriso-alerts-slack",
+                agent_forwarding=True,
+            )
 
     def test_assets_are_native_current_signoz_schemas_and_environment_scoped(
         self,

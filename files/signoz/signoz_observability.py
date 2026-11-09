@@ -277,6 +277,10 @@ def _required_channels(channel_name: str, agent_forwarding: bool) -> dict[str, s
     return channels
 
 
+def _forwards_to_agents(slug: str, agent_forwarding: bool) -> bool:
+    return agent_forwarding and slug in REQUIRED_ALERT_SLUGS
+
+
 def materialize_assets(
     dashboards: list[dict[str, Any]],
     alerts: list[dict[str, Any]],
@@ -298,6 +302,8 @@ def materialize_assets(
     if agent_forwarding:
         channels = list(_required_channels(channel_name, agent_forwarding))
         for alert in materialized_alerts:
+            if not _forwards_to_agents(alert["_orisoSlug"], agent_forwarding):
+                continue
             alert["preferredChannels"] = channels.copy()
             condition = alert["condition"]
             # SigNoz formats $value with the composite query's unit.
@@ -409,7 +415,6 @@ def validate_asset_contract(
                     f"dashboard query has unbounded grouping: {sorted(groups)}"
                 )
 
-    expected_channels = list(_required_channels(channel_name, agent_forwarding))
     for alert in alerts:
         if alert.get("schemaVersion") != "v2alpha1" or alert.get("version") != "v5":
             raise RuntimeError(f"alert {alert.get('alert')} uses an obsolete schema")
@@ -426,6 +431,8 @@ def validate_asset_contract(
             raise RuntimeError(
                 f"alert {alert.get('alert')} is not scoped to {environment}"
             )
+        forwards = _forwards_to_agents(alert["_orisoSlug"], agent_forwarding)
+        expected_channels = list(_required_channels(channel_name, forwards))
         routes = [threshold.get("channels") for threshold in condition["thresholds"]["spec"]]
         if routes != [expected_channels]:
             raise RuntimeError(
@@ -435,10 +442,12 @@ def validate_asset_contract(
             raise RuntimeError(
                 f"alert {alert.get('alert')} has incorrect environment label"
             )
-        if agent_forwarding and (
-            alert["labels"].get(AGENT_RULE_LABEL) != alert["_orisoSlug"]
-            or alert["annotations"].get(AGENT_VALUE_ANNOTATION) != AGENT_VALUE_TEMPLATE
-            or composite.get("unit") not in (None, "")
+        rule_label = alert["_orisoSlug"] if forwards else None
+        value_annotation = AGENT_VALUE_TEMPLATE if forwards else None
+        if (
+            alert["labels"].get(AGENT_RULE_LABEL) != rule_label
+            or alert["annotations"].get(AGENT_VALUE_ANNOTATION) != value_annotation
+            or (forwards and composite.get("unit") not in (None, ""))
         ):
             raise RuntimeError(f"alert {alert['alert']} has invalid forwarding fields")
 
@@ -864,7 +873,8 @@ def validate_live_alert(
 
     current_condition = current["condition"]
     current_thresholds = current_condition["thresholds"]["spec"]
-    expected_channels = list(_required_channels(channel_name, agent_forwarding))
+    forwards = _forwards_to_agents(expected["_orisoSlug"], agent_forwarding)
+    expected_channels = list(_required_channels(channel_name, forwards))
     if [threshold.get("channels") for threshold in current_thresholds] != [expected_channels]:
         raise RuntimeError(f"stored alert route drift: {expected['alert']}")
     current_threshold = current_thresholds[0]
@@ -873,7 +883,7 @@ def validate_live_alert(
         if current_threshold.get(key) != expected_threshold.get(key):
             raise RuntimeError(f"stored alert threshold drift: {expected['alert']}")
     composite = current_condition["compositeQuery"]
-    if agent_forwarding and composite.get("unit") not in (None, ""):
+    if forwards and composite.get("unit") not in (None, ""):
         raise RuntimeError(f"stored alert forwarding unit drift: {expected['alert']}")
     current_query = composite["queries"][0]["spec"]
     expected_query = expected["condition"]["compositeQuery"]["queries"][0]["spec"]

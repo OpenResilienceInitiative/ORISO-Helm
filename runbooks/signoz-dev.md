@@ -181,10 +181,11 @@ Supply a fixed service name for every catalog rule in the forwarder's
 ```
 
 Set `signoz.orisoObservability.agentForwarding=true` in the approved Dev
-override and run the managed provisioning Job. It keeps Slack in each
-managed threshold and adds the agent webhook. It emits the catalog rule
-slug and unitless value the receiver expects. On the workstation use the
-Dev API key from the approved secret source, then read back the rules.
+override and run the managed provisioning Job. It adds the agent webhook
+alongside Slack for the six rules in the mapping above. It emits the
+catalog rule slug and unitless value the receiver expects. Additional
+managed rules keep their Slack route. On the workstation use the Dev API
+key from the approved secret source, then read back the rules.
 
 ```sh
 python3 files/signoz/signoz_observability.py --mode check --skip-telemetry \
