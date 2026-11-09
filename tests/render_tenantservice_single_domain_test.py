@@ -44,6 +44,7 @@ def render(
     overlays: tuple[str, ...] = (),
     extra_args: tuple[str, ...] = (),
 ) -> list[dict]:
+    """Render TenantService with the supplied layers and final Helm overrides."""
     overlay_args = [
         argument
         for overlay in overlays
@@ -98,8 +99,8 @@ def verify(documents: list[dict], expected: str) -> None:
     }
 
 
-
 def verify_legacy_signing_environment(chart: str) -> None:
+    """Check the environment defaults and the complete-pair opt-in contract."""
     def assert_environment(documents: list[dict], expected: dict[str, str]) -> None:
         deployment = named(documents, "Deployment", "tenantservice")
         entries = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
@@ -115,6 +116,22 @@ def verify_legacy_signing_environment(chart: str) -> None:
         ("values-prod.yaml",),
     ):
         assert_environment(render(chart, True, overlays), {})
+
+    assert_environment(
+        render(
+            chart,
+            True,
+            ("values-prod.yaml",),
+            extra_args=(
+                "--set-string", "tenantService.legacyDpaSigning.zone=Europe/Berlin",
+                "--set-string", "tenantService.legacyDpaSigning.from=2026-09-16T04:30:00",
+            ),
+        ),
+        {
+            "ORISO_DPA_LEGACY_SIGNING_ZONE": "Europe/Berlin",
+            "ORISO_DPA_LEGACY_SIGNING_FROM": "2026-09-16T04:30:00",
+        },
+    )
 
     for assignment in ("zone=UTC", "from=2026-11-07T00:00:00"):
         assert_environment(
@@ -136,7 +153,7 @@ def main() -> None:
         verify(render(chart, True), "true")
         verify(render(chart, False), "false")
         verify_legacy_signing_environment(chart)
-        print("PASS: TenantService uses the single-domain flag and only Dev's complete DPA signing window")
+        print("PASS: TenantService uses the single-domain flag and requires a complete DPA signing window")
     finally:
         shutil.rmtree(temporary_directory)
 
