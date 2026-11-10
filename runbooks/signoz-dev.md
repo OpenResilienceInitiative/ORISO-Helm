@@ -105,6 +105,20 @@ kubectl get pv | grep -E 'signoz|clickhouse|zookeeper'   # RECLAIM POLICY = Reta
 `scripts/signoz_runtime_acceptance.py` (see `signoz-runtime-acceptance.md`)
 remains the full gate.
 
+## nginx metrics (ingress-nginx)
+
+The ingress controller runs in the namespace `ingress-nginx`, outside the Helm
+release. `global.observability.externalIngressNginxNamespace: ingress-nginx`
+(Dev) makes the cluster collector scrape its pod IPs on port 10254. The chart
+cannot switch metrics on in the controller: it must run with
+`--enable-metrics=true` (Dev does since 2026-11-06). The collector's cluster
+ClusterRole already allows `list`/`watch` on pods in all namespaces.
+
+After the rollout, in SigNoz open Metrics and search `nginx_ingress_controller_requests`;
+data from the last 5 minutes must appear. If it does not, check the controller
+args (`kubectl -n ingress-nginx get deploy ingress-nginx-controller -o yaml | grep enable-metrics`)
+and the collector log for `ingress-nginx` scrape errors.
+
 ## ClickHouse memory and old system tables
 
 ClickHouse ran without a memory limit and the kernel killed it on 2026-11-03 when
@@ -150,6 +164,120 @@ pod. For example:
 ```bash
 kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP TABLE IF EXISTS system.trace_log_0 SYNC"
 ```
+
+## Replace an unavailable SQLite backup destination
+
+Keep the original Helm-owned backup claim and its PV for storage recovery.
+Provision a dedicated, empty, writable Filesystem PVC in `caritas` under the
+approved storage recovery procedure. With a `WaitForFirstConsumer` StorageClass,
+give an approved temporary consumer the backup CronJob's pod affinity and
+tolerations. The scheduler can then bind the claim on the node running SigNoz
+ordinal 0. Confirm the replacement is Bound to a Retain PV and can mount on
+the SQLite source's eligible nodes. Allow space for the uncompressed
+snapshot, the compressed copy in progress and retained archives.
+Wait for the temporary consumer and any active backup Job to finish before
+switching the destination.
+
+Set the replacement PVC name in the approved Dev values:
+
+```yaml
+signoz:
+  orisoDataProtection:
+    backup:
+      replacementClaim: signoz-backup-recovery
+```
+
+Dev's `hcloud-volumes` StorageClass provisions PVs with `Delete`. After the
+approved mount check, set `Retain` on the PV bound to the approved replacement
+claim. The patch verifies the PV identity and revision before changing the
+reclaim policy.
+
+```bash
+backup_destination=signoz-backup-recovery
+(
+  set -euo pipefail
+  pvc=$(kubectl -n caritas get pvc "$backup_destination" -o json)
+  claim_uid=$(jq -er 'select(.status.phase == "Bound").metadata.uid' <<<"$pvc")
+  volume=$(jq -er '.spec.volumeName' <<<"$pvc")
+  pv=$(kubectl get pv "$volume" -o json)
+  patch=$(jq -ce --arg claim "$backup_destination" --arg uid "$claim_uid" '
+    select(.status.phase == "Bound" and .spec.claimRef.namespace == "caritas"
+           and .spec.claimRef.name == $claim and .spec.claimRef.uid == $uid)
+    | if .spec.persistentVolumeReclaimPolicy == "Retain" then []
+      elif .spec.persistentVolumeReclaimPolicy == "Delete" then [
+        {op: "test", path: "/metadata/uid", value: .metadata.uid},
+        {op: "test", path: "/metadata/resourceVersion", value: .metadata.resourceVersion},
+        {op: "test", path: "/spec/claimRef/uid", value: $uid},
+        {op: "replace", path: "/spec/persistentVolumeReclaimPolicy", value: "Retain"}
+      ] else error("Unexpected reclaim policy") end' <<<"$pv")
+  if test "$patch" != '[]'; then
+    kubectl patch pv "$volume" --type=json --patch "$patch"
+  fi
+  kubectl get pv "$volume" -o json |
+    jq -er --arg uid "$claim_uid" 'select(.spec.claimRef.uid == $uid)
+      | select(.spec.persistentVolumeReclaimPolicy == "Retain") | .spec.persistentVolumeReclaimPolicy'
+)
+```
+
+Use the Dev Helm upgrade procedure and start with `--dry-run=server`. Helm
+reads the original and replacement PVCs and the replacement PV. It requires
+the original PVC to belong to this release with the `keep` policy and
+checks that the replacement PV's claim reference matches the PVC's namespace,
+name and UID. With an override, a client-only render fails. The chart keeps
+rendering the original PVC, and the replacement remains independently managed.
+
+Record the UTC start time before the upgrade.
+
+```bash
+backup_switch_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+```
+
+After the upgrade and the next scheduled run, check that both claims are
+present and the replacement PV still uses `Retain`. Verify that the newest
+scheduled Job since the switch and the creation of the current PVC completed
+on the configured destination.
+
+```bash
+(
+  set -euo pipefail
+  cronjob=$(kubectl -n caritas get cronjob caritas-signoz-data-protection-backup -o json)
+  cronjob_uid=$(jq -er '.metadata.uid' <<<"$cronjob")
+  target=$(jq -er '.spec.jobTemplate.spec.template.spec.volumes[]
+    | select(.name == "backup").persistentVolumeClaim.claimName' <<<"$cronjob")
+  if test "$target" != "$backup_destination"; then
+    printf '%s\n' 'The installed CronJob uses a different backup destination' >&2
+    exit 1
+  fi
+  claim_created_at=$(kubectl -n caritas get pvc "$target" -o json |
+    jq -er 'select(.status.phase == "Bound").metadata.creationTimestamp')
+
+  kubectl -n caritas get jobs -o json |
+    jq -e --arg owner "$cronjob_uid" --arg target "$target" \
+      --arg switch_at "$backup_switch_started_at" --arg claim_at "$claim_created_at" '
+      [.items[]
+       | select(any(.metadata.ownerReferences[]?;
+                    .kind == "CronJob" and .controller == true and .uid == $owner))
+       | select(.metadata.creationTimestamp >= $switch_at
+                and .metadata.creationTimestamp >= $claim_at)]
+      | sort_by(.metadata.creationTimestamp, .metadata.name) | last
+      | . // error("No scheduled backup Job since the destination switch")
+      | if any(.spec.template.spec.volumes[]?;
+               .name == "backup" and .persistentVolumeClaim.claimName == $target
+               and (.persistentVolumeClaim.readOnly // false) == false)
+        then . else error("Latest backup Job uses a different destination") end
+      | if .status.completionTime
+           and any(.status.conditions[]?; .type == "Complete" and .status == "True")
+        then {job: .metadata.name, claim: $target, completed: .status.completionTime}
+        else error("Latest backup Job has not completed successfully") end'
+)
+```
+
+Verify the gzip archive produced by that Job and its SQLite integrity in an
+isolated recovery environment. Mount the reported claim at `/backup`.
+
+Clearing the override, or rolling back to a revision before the switch, can
+send subsequent Jobs to the original claim. Confirm that destination can
+attach before reusing it. Keep both claims available for recovery.
 
 ## signoz.db backup and restore
 
