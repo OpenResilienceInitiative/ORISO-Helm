@@ -129,7 +129,10 @@ def assert_dev(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     assert "rewrite ^/signoz-rum/v1/metrics$ /v1/metrics break;" in annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
     assert annotations["nginx.ingress.kubernetes.io/proxy-body-size"] == "32k"
     assert "nginx.ingress.kubernetes.io/limit-rps" in annotations
-    assert "$http_content_encoding" in annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
+    assert (
+        'if ($http_content_encoding != "") { return 415; }'
+        in annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
+    )
     url = "https://dev.oriso.org/signoz-rum/v1/metrics"
     frontend = docs[("ConfigMap", "frontend-configmap")]["data"]
     admin = docs[("ConfigMap", "admin-configmap")]["data"]
@@ -163,7 +166,7 @@ def assert_e2e_trace_ingest() -> None:
     assert ("Secret", auth_secret) not in docs, "chart must only reference the E2E authentication Secret"
     snippet = annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
     assert "if ($request_method != POST) { return 405; }" in snippet
-    assert "$http_content_encoding" in snippet
+    assert 'if ($http_content_encoding != "") { return 415; }' in snippet
     rewrite = "rewrite ^/signoz-e2e/v1/traces$ /v1/traces break;"
     exact_uri = 'if ($request_uri != "/signoz-e2e/v1/traces") { return 404; }'
     assert exact_uri in snippet and snippet.index(exact_uri) < snippet.index(rewrite), snippet
