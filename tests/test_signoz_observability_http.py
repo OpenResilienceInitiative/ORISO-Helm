@@ -69,6 +69,15 @@ class Handler(BaseHTTPRequestHandler):
         self._send(403, {"error": "forbidden"})
         return False
 
+    def _store_dashboard(self, identifier: str, body: dict[str, Any], status: int) -> None:
+        # SigNoz v0.135.1 serializes legacy metric tag keys as attributes.
+        for query in MODULE.dashboard_builder_queries(body):
+            for group in query.get("groupBy", []):
+                if group.get("fieldContext") == "tag":
+                    group["fieldContext"] = "attribute"
+        self.state.dashboards[identifier] = {"id": identifier, **body}
+        self._send(status, self.state.dashboards[identifier])
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         if not self._require_key():
             return
@@ -105,8 +114,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif self.path == "/api/v2/dashboards":
             identifier = f"dashboard-{len(self.state.dashboards) + 1}"
-            self.state.dashboards[identifier] = {"id": identifier, **body}
-            self._send(201, self.state.dashboards[identifier])
+            self._store_dashboard(identifier, body, 201)
         elif self.path == "/api/v2/rules":
             identifier = f"rule-{len(self.state.rules) + 1}"
             self.state.rules[identifier] = {"id": identifier, **body}
@@ -138,8 +146,7 @@ class Handler(BaseHTTPRequestHandler):
             self.state.channel_writes += 1
             self._send(405, {"error": "channel writes are not allowed"})
         elif self.path.startswith("/api/v2/dashboards/"):
-            self.state.dashboards[identifier] = {"id": identifier, **body}
-            self._send(200, self.state.dashboards[identifier])
+            self._store_dashboard(identifier, body, 200)
         elif self.path.startswith("/api/v2/rules/"):
             self.state.rules[identifier] = {"id": identifier, **body}
             self._send(204)
@@ -190,6 +197,36 @@ class HttpFlowTest(unittest.TestCase):
             self.state.channel_writes,
             len(self.state.test_rules),
         )
+
+    def test_fake_backend_normalizes_legacy_tag_group_by_to_attribute(self) -> None:
+        # Guards the fake against drifting from SigNoz v0.135.1, which stores a
+        # legacy `tag` group-by field as an `attribute`.
+        import urllib.request
+
+        group = {"name": "k8s.pod.name", "fieldContext": "tag"}
+        dashboard = {
+            "title": "tag normalization",
+            "widgets": [
+                {"kind": "signoz/BuilderQuery", "spec": {"groupBy": [group]}}
+            ],
+        }
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/api/v2/dashboards",
+            data=json.dumps(dashboard).encode(),
+            headers={
+                "SIGNOZ-API-KEY": "test-api-key",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request) as response:
+            returned = json.load(response)
+        for stored in (returned, next(iter(self.state.dashboards.values()))):
+            queries = MODULE.dashboard_builder_queries(stored)
+            self.assertEqual(
+                [g["fieldContext"] for q in queries for g in q["groupBy"]],
+                ["attribute"],
+            )
 
     def test_provision_is_idempotent_and_never_writes_channels(self) -> None:
         for _ in range(2):
