@@ -33,6 +33,13 @@ global:
 
 signoz:
   enabled: true
+  # Dashboards and alert rules from files/signoz/observability-catalog.json, applied
+  # by a Helm hook. The Editor API-key Secret must exist before the upgrade:
+  # runbooks/signoz-managed-observability.md ("First installation").
+  orisoObservability:
+    enabled: true
+    apiKeySecret:
+      name: "signoz-observability-api-key"
   signoz:
     env:
       signoz_global_external__url: "https://dev.oriso.org/signoz"

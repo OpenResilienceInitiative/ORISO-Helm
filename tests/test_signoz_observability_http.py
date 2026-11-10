@@ -217,6 +217,36 @@ class HttpFlowTest(unittest.TestCase):
             len(self.state.test_rules),
         )
 
+    def test_fake_backend_normalizes_legacy_tag_group_by_to_attribute(self) -> None:
+        # Guards the fake against drifting from SigNoz v0.135.1, which stores a
+        # legacy `tag` group-by field as an `attribute`.
+        import urllib.request
+
+        group = {"name": "k8s.pod.name", "fieldContext": "tag"}
+        dashboard = {
+            "title": "tag normalization",
+            "widgets": [
+                {"kind": "signoz/BuilderQuery", "spec": {"groupBy": [group]}}
+            ],
+        }
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/api/v2/dashboards",
+            data=json.dumps(dashboard).encode(),
+            headers={
+                "SIGNOZ-API-KEY": "test-api-key",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request) as response:
+            returned = json.load(response)
+        for stored in (returned, next(iter(self.state.dashboards.values()))):
+            queries = MODULE.dashboard_builder_queries(stored)
+            self.assertEqual(
+                [g["fieldContext"] for q in queries for g in q["groupBy"]],
+                ["attribute"],
+            )
+
     def test_provision_is_idempotent_and_never_writes_channels(self) -> None:
         for _ in range(2):
             code, printed = self._main("--mode", "provision")

@@ -244,8 +244,11 @@ def _dashboard(definition: dict[str, Any]) -> dict[str, Any]:
 
 def _alert(definition: dict[str, Any]) -> dict[str, Any]:
     renotify_states = ["firing"]
+    absence_condition = {}
     if definition.get("notifyOnNoData"):
         renotify_states.append("nodata")
+        # SigNoz measures absence in minutes since the last evaluation with data.
+        absence_condition = {"alertOnAbsent": True, "absentFor": 1}
     query = _builder_query(definition)
     query.pop("groupBy", None)
     return {
@@ -283,6 +286,7 @@ def _alert(definition: dict[str, Any]) -> dict[str, Any]:
             "usePolicy": False,
         },
         "condition": {
+            **absence_condition,
             "selectedQueryName": "A",
             "compositeQuery": {
                 "panelType": "graph",
@@ -1076,16 +1080,24 @@ def validate_live_alert(
     ):
         raise RuntimeError(f"stored alert label drift: {expected['alert']}")
 
-    current_threshold = current["condition"]["thresholds"]["spec"][0]
-    expected_threshold = expected["condition"]["thresholds"]["spec"][0]
+    current_condition = current["condition"]
+    expected_condition = expected["condition"]
+    for key, default in (("alertOnAbsent", False), ("absentFor", 0)):
+        actual = current_condition.get(key, default)
+        desired = expected_condition.get(key, default)
+        if type(actual) is not type(desired) or actual != desired:
+            raise RuntimeError(f"stored alert absence drift ({key}): {expected['alert']}")
+
+    current_threshold = current_condition["thresholds"]["spec"][0]
+    expected_threshold = expected_condition["thresholds"]["spec"][0]
     for key in ("name", "target", "matchType", "op"):
         if current_threshold.get(key) != expected_threshold.get(key):
             raise RuntimeError(f"stored alert threshold drift: {expected['alert']}")
     if current_threshold.get("channels") != [channel_name]:
         raise RuntimeError(f"stored alert route drift: {expected['alert']}")
 
-    current_query = current["condition"]["compositeQuery"]["queries"][0]["spec"]
-    expected_query = expected["condition"]["compositeQuery"]["queries"][0]["spec"]
+    current_query = current_condition["compositeQuery"]["queries"][0]["spec"]
+    expected_query = expected_condition["compositeQuery"]["queries"][0]["spec"]
     if _query_contract(current_query) != _query_contract(expected_query):
         raise RuntimeError(f"stored alert query drift: {expected['alert']}")
     if f"deployment.environment = '{environment}'" not in current_query.get(
@@ -1203,8 +1215,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         epilog=(
             "The API key is read only from the SIGNOZ_API_KEY environment "
             "variable, never from the command line, and is never printed. "
-            "Read-only workstation check: SIGNOZ_URL=<signoz base url> "
-            "SIGNOZ_API_KEY=<key> python3 files/signoz/signoz_observability.py "
+            "Read-only workstation check: python3 files/signoz/signoz_observability.py "
+            "--api-url <signoz base URL including /signoz> "
             "--mode check --environment dev --cluster-name oriso-dev. "
             "One synthetic notification for one catalog alert, no stored "
             "rule: --mode test-rule --rule <slug>."

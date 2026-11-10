@@ -655,6 +655,8 @@ signoz:
       schedule: "30 2 * * *"
       keep: 14
       size: 1Gi
+      # Existing, separately provisioned PVC for a cluster-connected upgrade.
+      replacementClaim: ""
   # Collector resources and exposed protocols. The ORISO collector policy lives
   # in charts/signoz/files/oriso-otel-collector-policy.yaml.
   otelCollector:
