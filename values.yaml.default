@@ -38,6 +38,9 @@ global:
     otlpCollectorHost: ""
     # Application and data-store metrics require signozCollector.enabled=true.
     appMetrics: false
+    # Optional cluster-owned ingress-nginx controller to scrape. Environment
+    # overlays must opt in because this chart does not install the controller.
+    externalIngressNginxNamespace: ""
     dbMetrics: false
     tracingSamplingProbability: ""
     testRunBaggage: false
