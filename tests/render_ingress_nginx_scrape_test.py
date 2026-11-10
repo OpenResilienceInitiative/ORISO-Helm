@@ -36,6 +36,18 @@ def dev_cluster_docs() -> list[dict]:
     )
 
 
+def predev_cluster_docs() -> list[dict]:
+    return base.documents(
+        base.render(
+            signoz_enabled=True,
+            infra_enabled=True,
+            environment="pre-dev",
+            cluster_name="oriso-predev",
+            overlay="values-pre-dev.yaml",
+        )
+    )
+
+
 def assert_ingress_scrape(config: dict) -> None:
     job = config["receivers"][INGRESS_RECEIVER]["config"]["scrape_configs"][0]
     assert job["job_name"] == "ingress-nginx"
@@ -67,6 +79,11 @@ def main() -> None:
     # every namespace (the scrape discovers pods in ingress-nginx).
     docs = dev_cluster_docs()
     assert_ingress_scrape(collector_config(docs))
+    predev_config = collector_config(predev_cluster_docs())
+    assert INGRESS_RECEIVER not in predev_config["receivers"]
+    assert INGRESS_RECEIVER not in predev_config["service"]["pipelines"]["metrics/apps"][
+        "receivers"
+    ]
     deployment = base.find(docs, "Deployment", COLLECTOR)
     namespace = deployment["metadata"]["namespace"]
     role_name = f"{COLLECTOR}-{namespace}"
