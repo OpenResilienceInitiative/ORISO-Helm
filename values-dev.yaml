@@ -17,6 +17,11 @@ global:
     tracingSamplingProbability: "1.0"
     testRunBaggage: true
     appMetrics: true
+    # Cluster-wide ingress-nginx (not part of this chart) whose controller metrics
+    # the cluster collector scrapes on port 10254. The Dev controller runs with
+    # --enable-metrics=true (live change, verified 2026-11-06); on a cluster whose
+    # controller has metrics off the target just stays down.
+    externalIngressNginxNamespace: "ingress-nginx"
     dbMetrics: true
     webVitals:
       enabled: true
@@ -33,6 +38,13 @@ global:
 
 signoz:
   enabled: true
+  # Dashboards and alert rules from files/signoz/observability-catalog.json, applied
+  # by a Helm hook. The Editor API-key Secret must exist before the upgrade:
+  # runbooks/signoz-managed-observability.md ("First installation").
+  orisoObservability:
+    enabled: true
+    apiKeySecret:
+      name: "signoz-observability-api-key"
   signoz:
     env:
       signoz_global_external__url: "https://dev.oriso.org/signoz"

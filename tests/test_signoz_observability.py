@@ -434,6 +434,26 @@ class LiveConformanceContractTest(unittest.TestCase):
                 channel_name="oriso-alerts-slack",
             )
 
+    def test_collector_staleness_enables_and_checks_native_absence(self) -> None:
+        expected = next(alert for alert in self.alerts if alert["_orisoSlug"] == "collector-staleness")
+        self.assertIs(expected["condition"].get("alertOnAbsent"), True)
+        self.assertEqual(expected["condition"].get("absentFor"), 1)
+        for alert in self.alerts:
+            if alert is not expected:
+                self.assertNotIn("alertOnAbsent", alert["condition"])
+
+        for drift in ({"alertOnAbsent": False}, {"absentFor": 0}, {"absentFor": True}):
+            with self.subTest(drift=drift):
+                current = json.loads(json.dumps(expected))
+                current["condition"].update(drift)
+                with self.assertRaisesRegex(RuntimeError, "stored alert absence drift"):
+                    MODULE.validate_live_alert(
+                        current,
+                        expected,
+                        environment="pre-dev",
+                        channel_name="oriso-alerts-slack",
+                    )
+
     def test_live_dashboard_contract_rejects_queries_swapped_between_panels(
         self,
     ) -> None:

@@ -38,6 +38,9 @@ global:
     otlpCollectorHost: ""
     # Application and data-store metrics require signozCollector.enabled=true.
     appMetrics: false
+    # Optional cluster-owned ingress-nginx controller to scrape. Environment
+    # overlays must opt in because this chart does not install the controller.
+    externalIngressNginxNamespace: ""
     dbMetrics: false
     tracingSamplingProbability: ""
     testRunBaggage: false
@@ -652,6 +655,8 @@ signoz:
       schedule: "30 2 * * *"
       keep: 14
       size: 1Gi
+      # Existing, separately provisioned PVC for a cluster-connected upgrade.
+      replacementClaim: ""
   # Collector resources and exposed protocols. The ORISO collector policy lives
   # in charts/signoz/files/oriso-otel-collector-policy.yaml.
   otelCollector:

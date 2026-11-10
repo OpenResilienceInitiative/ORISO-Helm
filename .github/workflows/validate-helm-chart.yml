@@ -5,6 +5,8 @@ name: Validate Helm chart
 # that subchart is part of the SigNoz k8s-infra work and exists only on pre-dev.
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
   push:
     branches:
       - pre-dev
