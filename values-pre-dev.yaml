@@ -42,6 +42,12 @@ global:
     matrixServerName: "predev.oriso.org"
 
 signoz:
+  clickhouse:
+    files:
+      # Pre-Dev layers on Dev. Neutralize the two Dev-only writer removals
+      # with valid XML because the ClickHouse file map renders null verbatim.
+      config.d/99-oriso-disable-metric-log.xml: "<clickhouse/>"
+      config.d/99-oriso-disable-trace-log.xml: "<clickhouse/>"
   # Dev enables managed provisioning; Pre-Dev has no provisioning key configured.
   orisoObservability:
     enabled: false

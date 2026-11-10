@@ -63,6 +63,14 @@ signoz:
         <clickhouse>
           <metric_log remove="1"/>
         </clickhouse>
+      # Measured on Dev, 2026-11-06: system.trace_log is the largest system table
+      # (8.21 GiB, 338 M rows, about 1 GiB a day) and nothing reads it: no query
+      # in the retained system.query_log window (3 days) selects from it. It is
+      # ClickHouse's own profiler output; its docs say it is safe to drop.
+      config.d/99-oriso-disable-trace-log.xml: |
+        <clickhouse>
+          <trace_log remove="1"/>
+        </clickhouse>
   otelCollector:
     additionalEnvs:
       ORISO_DEPLOYMENT_ENVIRONMENT: "dev"
