@@ -181,6 +181,53 @@ pod. For example:
 kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP TABLE IF EXISTS system.trace_log_0 SYNC"
 ```
 
+## ClickHouse internal log retention
+
+The Dev overlay sets a three-day deletion TTL for new `query_log`, `part_log`,
+`trace_log`, `asynchronous_metric_log`, `metric_log`, `zookeeper_log`,
+`aggregated_zookeeper_log` and `processors_profile_log` tables. Layered Pre-Dev
+inherits it. `text_log` already has a three-day TTL in the chart. Later writer
+removal files take precedence.
+
+Restore writable headroom before the approved rollout. A changed engine
+definition can make ClickHouse rename the old table to `<name>_0` or a higher
+suffix at its next flush. The old table keeps its data and TTL. Restoring the
+previous definition can rotate again. Measure storage reclamation separately.
+
+Before the upgrade, record ClickHouse pod identities, the newest successful
+backup and this read-only inventory for each data pod. After the operator
+reconciles, verify a new Ready ClickHouse container and repeat the queries
+after the configured log flush intervals. Require a three-day deletion TTL
+for each enabled canonical writer, account for numbered tables and check
+actual unreserved space before acceptance probes.
+
+```bash
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --readonly=1 --multiquery --query "
+SELECT name, uuid, engine_full
+FROM system.tables
+WHERE database = 'system'
+  AND replaceRegexpOne(name, '_[0-9]+$', '') IN (
+    'query_log', 'part_log', 'text_log', 'trace_log', 'metric_log',
+    'asynchronous_metric_log', 'zookeeper_log', 'aggregated_zookeeper_log',
+    'processors_profile_log'
+  )
+ORDER BY name;
+SELECT table, sum(bytes_on_disk) AS active_bytes
+FROM system.parts
+WHERE database = 'system' AND active
+  AND replaceRegexpOne(table, '_[0-9]+$', '') IN (
+    'query_log', 'part_log', 'text_log', 'trace_log', 'metric_log',
+    'asynchronous_metric_log', 'zookeeper_log', 'aggregated_zookeeper_log',
+    'processors_profile_log'
+  )
+GROUP BY table ORDER BY table;
+SELECT name, total_space, unreserved_space FROM system.disks WHERE name = 'default';"
+```
+
+Check the recorded UUIDs to distinguish retained data from new canonical
+tables. Keep old tables until their TTL expires or the operator separately
+approves removal of specific obsolete tables.
+
 ## Replace an unavailable SQLite backup destination
 
 Keep the original Helm-owned backup claim and its PV for storage recovery.
