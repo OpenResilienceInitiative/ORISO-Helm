@@ -38,9 +38,6 @@ global:
     otlpCollectorHost: ""
     # Application and data-store metrics require signozCollector.enabled=true.
     appMetrics: false
-    # Optional cluster-owned ingress-nginx controller to scrape. Environment
-    # overlays must opt in because this chart does not install the controller.
-    externalIngressNginxNamespace: ""
     dbMetrics: false
     tracingSamplingProbability: ""
     testRunBaggage: false
@@ -355,13 +352,6 @@ matrixrtcAuth:
   # Optional: namespace of the ingress controller for the call NetworkPolicies.
   # Empty means "ingress-nginx". The release namespace is always admitted as well.
   ingressControllerNamespace: ""
-  # Optional: canonical IPv4 node CIDRs (/24 to /32, e.g. "10.0.0.5/32") of the LiveKit nodes that
-  # may send the signed /sfu_webhook callback to the authorization receiver.
-  # LiveKit uses hostNetwork, so some CNIs see its traffic as node traffic that the
-  # pod selector does not match across nodes. Every listed address also reaches
-  # the receiver's token endpoints directly, so list only LiveKit-eligible nodes.
-  # Empty keeps the pod-only boundary.
-  livekitNodeCidrs: []
   bootstrap:
     enabled: true
     backoffLimit: 6
@@ -630,28 +620,14 @@ ipAnonymizer:
 # SigNoz backend, collection agents, and optional ORISO dashboards/alerts.
 signoz:
   enabled: false
-  # Separate Kubernetes identities for the protected Pre-Dev E2E workflow.
-  orisoPreDevE2EAccess:
-    enabled: false
   orisoObservability:
     enabled: false
     conformanceCheck: false
-    deploymentIdentity:
-      enabled: false
-      # Approved deployment pin and runtime digest set for each Java workload.
-      expectedImages: {}
-    # Also provision the "E2E test health" and "E2E flaky" dashboards over the
-    # oriso-e2e test spans (ORISO-E2E#97). Needs signoz.orisoObservability.enabled.
-    e2eDashboards: false
     image: "python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844"
     # Existing SigNoz Editor API-key Secret; required only when enabled.
     apiKeySecret:
       name: ""
       key: apiKey
-    # Optional recurring RUM readback with a separate query-only API key.
-    browserVitalsCheck:
-      enabled: false
-      apiKeySecretName: ""
     # Existing SigNoz notification channel; the chart does not create it.
     channelName: "oriso-alerts-slack"
     resources:
@@ -679,8 +655,6 @@ signoz:
       schedule: "30 2 * * *"
       keep: 14
       size: 1Gi
-      # Existing, separately provisioned PVC for a cluster-connected upgrade.
-      replacementClaim: ""
   # Collector resources and exposed protocols. The ORISO collector policy lives
   # in charts/signoz/files/oriso-otel-collector-policy.yaml.
   otelCollector:
