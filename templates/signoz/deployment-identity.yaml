@@ -1,7 +1,11 @@
 {{- $signoz := get .Values "signoz" | default dict -}}
 {{- $managed := get $signoz "orisoObservability" | default dict -}}
 {{- $identity := get $managed "deploymentIdentity" | default dict -}}
-{{- if get $identity "enabled" }}
+{{- $enabled := get $identity "enabled" | default false -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "signoz.orisoObservability.deploymentIdentity.enabled must be a boolean" -}}
+{{- end -}}
+{{- if $enabled }}
 {{- if not (get $managed "enabled") }}
 {{- fail "signoz.orisoObservability.deploymentIdentity.enabled requires managed observability" }}
 {{- end }}
