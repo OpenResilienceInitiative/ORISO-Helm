@@ -289,6 +289,47 @@ The one-off endpoint validates the rule shape and configured channel. Record
 receiver confirmation for the test notification and one scheduled dispatch
 per environment in the release evidence.
 
+## Java deployment identity alert
+
+The optional observer and rule are disabled by default. Enable
+`signoz.orisoObservability.deploymentIdentity.enabled` in a reviewed Dev or
+Pre-Dev release with managed observability enabled. Keep the flag off until
+the approved release record has image pins for `agencyservice`,
+`consultingtypeservice`, `tenantservice`, and `userservice`. Configure
+`signoz.orisoObservability.deploymentIdentity.expectedImages` with one entry
+per workload. Each entry has an `image` reference pinned to `@sha256:…`
+and a nonempty `runtimeDigests` list of canonical `sha256:…` digests.
+
+Record the expected image from the approved rollout and its CI provenance
+before inspecting the target. Include the canonical runtime digests verified
+for the target platform. An OCI index may resolve to a different platform
+manifest digest. Keep the expectation current when an approved image-only
+rollout happens outside Helm. The installed Helm manifest can lag an
+image-only rollout.
+
+The CronJob runs every two minutes. Its Role can read the four Deployments
+and list Pods and ReplicaSets in the release namespace. The list requests
+select the four workload labels. The job checks the observed generation,
+replica counts, controller UIDs, active revision, and primary container image.
+It emits `oriso.deployment.identity.mismatch` with value 0 for a verified match
+or 1 for a verified mismatch. An incomplete rollout, missing primary container,
+or incomparable runtime ID produces `oriso.deployment.identity.unverified=1`
+and a failed observation Job. The metrics carry service, environment, and
+cluster only. Image digests and Pod identifiers stay out of SigNoz and Slack.
+
+After the authorized rollout, verify fresh samples for all four services in
+the target environment. Check the rule with `--mode check --deployment-identity`
+and inspect the current mismatch and unverified values. The managed rule
+uses the latest samples and a maximum across services in that environment and
+cluster. A separate authorized route test and a confirmed Slack receipt
+complete alert acceptance.
+
+To stop the observer, turn off `deploymentIdentity.enabled` while leaving
+the managed observability hook enabled for the upgrade. The hook disables
+the previously owned rule and preserves the six baseline rules. If the entire
+hook is disabled in the same upgrade, disable the rule in SigNoz during the
+approved rollback.
+
 ## Promotion
 
 Repeat the same gates per environment; each hook run is scoped to its own
