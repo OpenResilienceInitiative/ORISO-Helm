@@ -368,45 +368,14 @@ def _check_runtime_readiness(
     timeout: str,
     require_k8s_infra: bool = False,
 ) -> None:
-    chi_name = f"{release}-clickhouse"
-    chi = json.loads(_kubectl(runner, namespace, "get", "chi", chi_name, "-o", "json"))
-    installation = chi.get("metadata", {})
-    if installation.get("deletionTimestamp"):
-        raise RuntimeError(f"ClickHouseInstallation {chi_name} is deleting")
-    installation_uid = installation.get("uid")
-    if not installation_uid:
-        raise RuntimeError(f"ClickHouseInstallation {chi_name} has no UID")
+    statefulsets = _current_clickhouse_statefulsets(runner, namespace, release)
 
     _kubectl(
         runner, namespace, "rollout", "status", f"deployment/{release}-clickhouse-operator",
         f"--timeout={timeout}",
     )
-    statefulsets = json.loads(_kubectl(
-        runner, namespace, "get", "statefulset", "-l", f"clickhouse.altinity.com/chi={chi_name}",
-        "-o", "json",
-    ))["items"]
-    clickhouse_targets = []
-    for statefulset in statefulsets:
-        metadata = statefulset["metadata"]
-        if not any(
-            owner.get("controller") is True
-            and owner.get("kind") == "ClickHouseInstallation"
-            and owner.get("name") == chi_name
-            and owner.get("uid") == installation_uid
-            for owner in metadata.get("ownerReferences", [])
-        ):
-            continue
-        name = metadata["name"]
-        if metadata.get("deletionTimestamp"):
-            raise RuntimeError(f"ClickHouse StatefulSet {name} is deleting")
-        if statefulset["spec"].get("replicas", 1) < 1:
-            raise RuntimeError(f"ClickHouse StatefulSet {name} is scaled to zero")
-        clickhouse_targets.append(f"statefulset/{name}")
-    if not clickhouse_targets:
-        raise RuntimeError(f"ClickHouseInstallation {chi_name} has no owned StatefulSets")
-
     rollout_targets = (
-        *sorted(clickhouse_targets),
+        *(f"statefulset/{statefulset['metadata']['name']}" for statefulset in statefulsets),
         f"deployment/{release}-signoz-otel-collector",
         f"statefulset/{release}-signoz",
     )
@@ -432,6 +401,46 @@ def _check_runtime_readiness(
         "job/signoz-telemetrystore-migrator",
         f"--timeout={timeout}",
     )
+
+
+def _current_clickhouse_statefulsets(
+    runner: Runner, namespace: str, release: str,
+) -> list[dict[str, Any]]:
+    chi_name = f"{release}-clickhouse"
+    chi = json.loads(_kubectl(runner, namespace, "get", "chi", chi_name, "-o", "json"))
+    installation = chi.get("metadata", {})
+    if installation.get("deletionTimestamp"):
+        raise RuntimeError(f"ClickHouseInstallation {chi_name} is deleting")
+    installation_uid = installation.get("uid")
+    if not installation_uid:
+        raise RuntimeError(f"ClickHouseInstallation {chi_name} has no UID")
+
+    statefulsets = json.loads(_kubectl(
+        runner, namespace, "get", "statefulset", "-l", f"clickhouse.altinity.com/chi={chi_name}",
+        "-o", "json",
+    ))["items"]
+    owned_statefulsets = []
+    for statefulset in statefulsets:
+        metadata = statefulset["metadata"]
+        if not any(
+            owner.get("controller") is True
+            and owner.get("kind") == "ClickHouseInstallation"
+            and owner.get("name") == chi_name
+            and owner.get("uid") == installation_uid
+            for owner in metadata.get("ownerReferences", [])
+        ):
+            continue
+        name = metadata["name"]
+        if metadata.get("deletionTimestamp"):
+            raise RuntimeError(f"ClickHouse StatefulSet {name} is deleting")
+        if statefulset["spec"].get("replicas", 1) < 1:
+            raise RuntimeError(f"ClickHouse StatefulSet {name} is scaled to zero")
+        if not metadata.get("uid"):
+            raise RuntimeError(f"ClickHouse StatefulSet {name} has no UID")
+        owned_statefulsets.append(statefulset)
+    if not owned_statefulsets:
+        raise RuntimeError(f"ClickHouseInstallation {chi_name} has no owned StatefulSets")
+    return sorted(owned_statefulsets, key=lambda statefulset: statefulset["metadata"]["name"])
 
 
 def _check_collector_config(runner: Runner, namespace: str, release: str) -> None:
@@ -568,6 +577,10 @@ def _delete_probe_pod(runner: Runner, namespace: str, pod_name: str) -> None:
 
 
 def _clickhouse_pods(runner: Runner, namespace: str, release: str) -> list[str]:
+    statefulset_uids = {
+        statefulset["metadata"]["uid"]
+        for statefulset in _current_clickhouse_statefulsets(runner, namespace, release)
+    }
     output = _kubectl(
         runner,
         namespace,
@@ -583,6 +596,13 @@ def _clickhouse_pods(runner: Runner, namespace: str, release: str) -> list[str]:
     for item in json.loads(output)["items"]:
         metadata = item["metadata"]
         if metadata.get("deletionTimestamp"):
+            continue
+        if not any(
+            owner.get("controller") is True
+            and owner.get("kind") == "StatefulSet"
+            and owner.get("uid") in statefulset_uids
+            for owner in metadata.get("ownerReferences", [])
+        ):
             continue
         name = metadata["name"]
         if not any(

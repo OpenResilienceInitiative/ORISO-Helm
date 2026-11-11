@@ -190,6 +190,7 @@ class RuntimeReadinessContractTest(unittest.TestCase):
         return {
             "metadata": {
                 "name": name,
+                "uid": f"statefulset-{name}",
                 "deletionTimestamp": "2026-11-07T12:00:00Z" if deleting else None,
                 "ownerReferences": [{
                     "kind": "ClickHouseInstallation",
@@ -353,19 +354,59 @@ class CapacityContractTest(unittest.TestCase):
         self.spaces = {"clickhouse-b": str(self.minimum + 1), "clickhouse-a": str(self.minimum)}
         self.not_ready = set()
         self.disks_checked = []
+        self.include_orphan = False
 
     def run_kubectl(self, command: list[str]) -> mock.Mock:
-        if command[3:5] == ["get", "pods"]:
-            self.assertIn("clickhouse.altinity.com/chi=caritas-clickhouse", command[6])
+        if command[3:] == ["get", "chi", "caritas-clickhouse", "-o", "json"]:
+            return mock.Mock(stdout=json.dumps({"metadata": {"uid": "current-chi"}}))
+        if command[3:] == [
+            "get", "statefulset", "-l", "clickhouse.altinity.com/chi=caritas-clickhouse", "-o", "json",
+        ]:
             return mock.Mock(stdout=json.dumps({"items": [
                 {
-                    "metadata": {"name": name},
+                    "metadata": {
+                        "name": f"statefulset-{name}",
+                        "uid": f"statefulset-{name}",
+                        "ownerReferences": [{
+                            "kind": "ClickHouseInstallation",
+                            "name": "caritas-clickhouse",
+                            "uid": "current-chi",
+                            "controller": True,
+                        }],
+                    },
+                    "spec": {"replicas": 1},
+                }
+                for name in self.spaces
+            ]}))
+        if command[3:5] == ["get", "pods"]:
+            self.assertIn("clickhouse.altinity.com/chi=caritas-clickhouse", command[6])
+            items = [
+                {
+                    "metadata": {
+                        "name": name,
+                        "ownerReferences": [{
+                            "kind": "StatefulSet",
+                            "uid": f"statefulset-{name}",
+                            "controller": True,
+                        }],
+                    },
                     "status": {"conditions": [{
                         "type": "Ready", "status": "False" if name in self.not_ready else "True",
                     }]},
                 }
                 for name in self.spaces
-            ]}))
+            ]
+            if self.include_orphan:
+                items.append({
+                    "metadata": {
+                        "name": "orphaned-clickhouse",
+                        "ownerReferences": [{
+                            "kind": "StatefulSet", "uid": "previous-statefulset", "controller": True,
+                        }],
+                    },
+                    "status": {"conditions": [{"type": "Ready", "status": "False"}]},
+                })
+            return mock.Mock(stdout=json.dumps({"items": items}))
         self.assertEqual(command[3], "exec")
         self.assertIn("unreserved_space", command[-1])
         pod = command[4]
@@ -414,6 +455,14 @@ class CapacityContractTest(unittest.TestCase):
             self.run_gate()
 
         self.emit.assert_not_called()
+
+    def test_orphaned_clickhouse_pod_does_not_block_the_current_installation(self) -> None:
+        self.include_orphan = True
+
+        report = self.run_gate()
+
+        self.assertEqual(report["clickhouseCapacity"], "passed")
+        self.assertEqual(self.disks_checked, ["clickhouse-a", "clickhouse-b"])
 
     def test_readiness_only_skips_capacity_and_writes(self) -> None:
         self.argv.append("--skip-synthetic")
