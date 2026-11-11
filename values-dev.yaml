@@ -111,6 +111,8 @@ signoz:
         enabled: true
     additionalEnvs:
       ORISO_DEPLOYMENT_ENVIRONMENT: "dev"
+  orisoIngress:
+    devAliasRedirect: true
 
 # Node agent (pod logs, host and kubelet metrics) and cluster collector.
 signozCollector:

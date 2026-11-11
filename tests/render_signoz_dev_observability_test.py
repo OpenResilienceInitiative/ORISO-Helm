@@ -21,6 +21,7 @@ import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JAVA_SERVICES = ("userservice", "agencyservice", "tenantservice", "consultingtypeservice")
+DEV_ALIAS = ("Ingress", "signoz-oriso-org-redirect")
 
 
 def render(
@@ -99,12 +100,25 @@ def assert_dev(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     assert rum["processors"].index("filter/rum") < rum["processors"].index("transform/rum")
     rum_filter = "\n".join(config["processors"]["filter/rum"]["metrics"]["metric"])
     assert "lcp|cls|inp|ttfb|fcp" in rum_filter and '"frontend"' in rum_filter
-    resource = config["processors"]["transform/rum"]["metric_statements"][0]
+    rum_statements = config["processors"]["transform/rum"]["metric_statements"]
+    resource = rum_statements[0]
     assert resource["context"] == "resource"
     assert resource["statements"][0] == 'keep_keys(attributes, ["service.name"])'
-    datapoint = config["processors"]["transform/rum"]["metric_statements"][1]
+    datapoint = rum_statements[1]
     assert datapoint["context"] == "datapoint"
     assert datapoint["statements"][0].startswith('keep_keys(attributes, ["url.path_template"')
+    assert datapoint.get("conditions") == ['metric.name != "login_failure"']
+    login = rum_statements[2]
+    assert login["context"] == "datapoint"
+    assert login["conditions"] == ['metric.name == "login_failure"']
+    assert login["statements"][0] == 'keep_keys(attributes, ["outcome", "transport", "stage"])'
+    login_values = {
+        "outcome": "credentials|otp_required|access_denied|account_disabled|setup_incomplete|rate_limited|unavailable",
+        "transport": "bad_request|unauthorized|network|too_many_requests|unexpected",
+        "stage": "password|otp",
+    }
+    for key, values in login_values.items():
+        assert any(f'IsMatch(attributes["{key}"], "^({values})$")' in line for line in login["statements"]), key
     collector_env = env(docs[("Deployment", "caritas-signoz-otel-collector")])
     assert collector_env["ORISO_DEPLOYMENT_ENVIRONMENT"] == "dev"
     collector = docs[("Deployment", "caritas-signoz-otel-collector")]
@@ -300,6 +314,64 @@ def render_dev_with(
         return by_key(render("values-dev.yaml", handle.name, chart=chart, helm_args=helm_args))
     finally:
         os.unlink(handle.name)
+
+
+def assert_dev_alias(
+    dev: dict[tuple[str, str], dict[str, Any]], defaults: dict[tuple[str, str], dict[str, Any]]
+) -> None:
+    alias = dev[DEV_ALIAS]
+    assert alias["metadata"]["namespace"] == "caritas"
+    assert alias["metadata"]["annotations"] == {
+        "cert-manager.io/cluster-issuer": "letsencrypt-prod",
+        "nginx.ingress.kubernetes.io/temporal-redirect": "https://dev.oriso.org/signoz/",
+        "helm.sh/resource-policy": "keep",
+    }
+    assert alias["spec"] == {
+        "ingressClassName": "nginx",
+        "rules": [{
+            "host": "signoz.oriso.org",
+            "http": {"paths": [{
+                "path": "/",
+                "pathType": "Prefix",
+                "backend": {"service": {"name": "caritas-signoz", "port": {"number": 8080}}},
+            }]},
+        }],
+        "tls": [{"hosts": ["signoz.oriso.org"], "secretName": "signoz-oriso-org-tls"}],
+    }
+    assert DEV_ALIAS not in defaults
+    assert DEV_ALIAS not in by_key(render("values-prod.yaml"))
+    # Pre-Dev inherits the alias flag from the first overlay.
+    assert DEV_ALIAS not in by_key(render("values-dev.yaml", "values-pre-dev.yaml"))
+    for override in (
+        {"signoz": {"orisoIngress": {"devAliasRedirect": False}}},
+        {"signoz": {"orisoIngress": {"enabled": False}}},
+        {"global": {"enableTls": False}},
+        {
+            "signoz": {"enabled": False, "orisoObservability": {"enabled": False}},
+            "signozCollector": {"enabled": False},
+            "global": {"observability": {
+                "otlpEnabled": False,
+                "appMetrics": False,
+                "dbMetrics": False,
+                "webVitals": {"enabled": False},
+            }},
+        },
+        {
+            "global": {"observability": {"deploymentEnvironment": "production", "e2eTraceIngest": {"enabled": False}}},
+            "signoz": {"otelCollector": {
+                "additionalEnvs": {"ORISO_DEPLOYMENT_ENVIRONMENT": "production"},
+                "ports": {"otlp-e2e": {"enabled": False}},
+            }},
+        },
+        {
+            "global": {"domainName": "predev.oriso.org", "observability": {"e2eTraceIngest": {"enabled": False}}},
+            "signoz": {
+                "signoz": {"env": {"signoz_global_external__url": "https://predev.oriso.org/signoz"}},
+                "otelCollector": {"ports": {"otlp-e2e": {"enabled": False}}},
+            },
+        },
+    ):
+        assert DEV_ALIAS not in render_dev_with(override), override
 
 
 def backup_source(docs: dict[tuple[str, str], dict[str, Any]]) -> str | None:
@@ -781,8 +853,11 @@ def assert_clickhouse_memory_on_dev() -> None:
 
 
 def main() -> None:
-    assert_dev(by_key(render("values-dev.yaml")))
-    assert_default_off(by_key(render()))
+    dev = by_key(render("values-dev.yaml"))
+    defaults = by_key(render())
+    assert_dev(dev)
+    assert_default_off(defaults)
+    assert_dev_alias(dev, defaults)
     assert_review_findings()
     assert_second_review_findings()
     assert_e2e_trace_ingest()

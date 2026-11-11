@@ -131,6 +131,39 @@ class AssetContractTest(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, encoded)
 
+    def test_platform_cpu_panel_reads_the_emitted_cores_gauge(self) -> None:
+        platform = next(item for item in self.dashboards if item["name"] == "oriso-platform-health-pre-dev")
+        cpu = platform["spec"]["panels"]["pod-cpu"]
+        query, = MODULE.dashboard_builder_queries(cpu)
+        self.assertEqual(cpu["spec"]["display"]["name"], "Pod CPU usage (cores)")
+        self.assertEqual(query["aggregations"], [{
+            "metricName": "k8s.pod.cpu.usage",
+            "temporality": "",
+            "timeAggregation": "avg",
+            "spaceAggregation": "max",
+        }])
+        self.assertEqual([field["name"] for field in query["groupBy"]], ["k8s.namespace.name"])
+        self.assertEqual(
+            query["filter"]["expression"],
+            "deployment.environment = 'pre-dev' AND k8s.cluster.name = 'oriso-predev'",
+        )
+
+    def test_platform_node_condition_panel_preserves_each_node_status(self) -> None:
+        platform = next(item for item in self.dashboards if item["name"] == "oriso-platform-health-pre-dev")
+        node = platform["spec"]["panels"]["node-condition"]
+        query, = MODULE.dashboard_builder_queries(node)
+        self.assertEqual(query["aggregations"], [{
+            "metricName": "k8s.node.condition",
+            "temporality": "",
+            "timeAggregation": "latest",
+            "spaceAggregation": "max",
+        }])
+        self.assertEqual([field["name"] for field in query["groupBy"]], ["condition", "k8s.node.name"])
+        self.assertEqual(
+            query["filter"]["expression"],
+            "deployment.environment = 'pre-dev' AND k8s.cluster.name = 'oriso-predev'",
+        )
+
 
 class ApiPayloadContractTest(unittest.TestCase):
     def setUp(self) -> None:

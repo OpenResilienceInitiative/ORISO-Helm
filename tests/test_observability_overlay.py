@@ -26,6 +26,7 @@ class ObservabilityOverlayTest(unittest.TestCase):
         self.assertEqual(observability["deploymentEnvironment"], "dev")
         self.assertEqual(observability["tracingSamplingProbability"], "1.0")
         self.assertTrue(self.values["signoz"]["enabled"])
+        self.assertIs(self.values["signoz"]["orisoIngress"]["devAliasRedirect"], True)
         self.assertEqual(self.values["signozCollector"]["clusterName"], "oriso-dev")
 
     def test_defaults_missing_from_an_old_base_are_carried(self) -> None:
