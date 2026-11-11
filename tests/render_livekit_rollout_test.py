@@ -118,16 +118,33 @@ def main() -> None:
     node_rule = receiver_ingress(
         render(
             "--set-json",
-            'matrixrtcAuth.livekitNodeCidrs=["10.0.0.5/32","fd00::5/128"]',
+            'matrixrtcAuth.livekitNodeCidrs=["10.0.0.5/32","10.0.1.0/24","10.0.2.8/29"]',
         )
     )
     assert len(node_rule) == 1
     assert node_rule[0]["ports"] == [{"protocol": "TCP", "port": 8080}]
     assert [peer["ipBlock"] for peer in node_rule[0]["from"] if "ipBlock" in peer] == [
         {"cidr": "10.0.0.5/32"},
-        {"cidr": "fd00::5/128"},
+        {"cidr": "10.0.1.0/24"},
+        {"cidr": "10.0.2.8/29"},
     ]
-    for too_wide in ("0.0.0.0/0", "10.0.0.0/8", "10.0.0.5", "::/0"):
+    # Too wide, malformed, non-canonical (host bits or leading zeroes) or IPv6:
+    # each must fail the render instead of being widened or passed to the API.
+    for too_wide in (
+        "0.0.0.0/0",
+        "10.0.0.0/8",
+        "10.0.0.5",
+        "999.999.999.999/32",
+        "256.0.0.1/32",
+        "10.0.0.5/24",
+        "10.0.2.9/29",
+        "010.0.0.5/32",
+        "abcd/64",
+        ":::/64",
+        "::/0",
+        "fd00::/32",
+        "fd00::5/128",
+    ):
         rejected = run_helm(
             "--set-json", f'matrixrtcAuth.livekitNodeCidrs=["{too_wide}"]'
         )
