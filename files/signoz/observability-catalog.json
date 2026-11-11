@@ -40,6 +40,18 @@
       ]
     }
   ],
+  "deploymentIdentityAlert": {
+    "slug": "deployment-identity-mismatch",
+    "title": "A Java workload differs from its approved image",
+    "description": "A stable Java deployment or a comparable running image differs from the approved release.",
+    "metric": "oriso.deployment.identity.mismatch",
+    "timeAggregation": "latest",
+    "spaceAggregation": "max",
+    "op": "above",
+    "target": 0,
+    "severity": "critical",
+    "clusterScoped": true
+  },
   "alerts": [
     {"slug": "provisioning-compensation-failure", "title": "Provisioning compensation is incomplete", "description": "A UserService provisioning rollback left at least one resource unrepaired.", "metric": "userservice.provisioning.compensation.attempts", "timeAggregation": "rate", "spaceAggregation": "sum", "filter": "outcome = 'partial_failure'", "op": "above", "target": 0, "severity": "critical"},
     {"slug": "availability-store-failure", "title": "Live-chat availability store failed", "description": "Redis-backed live-chat availability operations are failing closed.", "metric": "oriso.live_chat.availability.store.operations", "timeAggregation": "rate", "spaceAggregation": "sum", "filter": "outcome = 'failure'", "op": "above", "target": 0, "severity": "critical"},
@@ -47,5 +59,366 @@
     {"slug": "unencrypted-room", "title": "An unencrypted Matrix room was created", "description": "At least one Matrix room creation completed without encryption enabled.", "metric": "oriso.matrix.room.creation", "timeAggregation": "rate", "spaceAggregation": "sum", "filter": "encryption = 'disabled'", "op": "above", "target": 0, "severity": "critical"},
     {"slug": "clickhouse-capacity", "title": "SigNoz ClickHouse capacity is low", "description": "Available space on a ClickHouse persistent volume is below 2 GiB.", "metric": "k8s.volume.available", "timeAggregation": "latest", "spaceAggregation": "min", "filter": "k8s.persistentvolumeclaim.name CONTAINS 'clickhouse'", "op": "below", "target": 2147483648, "severity": "critical", "clusterScoped": true},
     {"slug": "collector-staleness", "title": "SigNoz collector telemetry is stale", "description": "The ORISO Kubernetes collector is accepting no metric points or has stopped reporting.", "metric": "otelcol_receiver_accepted_metric_points", "timeAggregation": "rate", "spaceAggregation": "sum", "filter": "service.name = 'oriso-k8s-infra-cluster'", "op": "below", "target": 0.01, "severity": "critical", "clusterScoped": true, "notifyOnNoData": true}
+  ],
+  "e2eDashboards": [
+    {
+      "slug": "oriso-e2e-test-health",
+      "title": "ORISO E2E Test Health",
+      "description": "First-attempt pass rate across distinct Playwright runs, using expected outcomes reported by oriso-e2e. A blank test ID marks a separate legacy group by project, file and title. The CI job pass rate uses separately ingested Storybook, Vitest and Surefire results.",
+      "duration": "7d",
+      "panels": [
+        {
+          "id": "outcomes",
+          "title": "Stored first-attempt rows over time",
+          "description": "Rows grouped by the raw Playwright result status.",
+          "signal": "traces",
+          "panelType": "timeseries",
+          "filter": "service.name = 'oriso-e2e' AND test.status != 'skipped' AND test.retry = 0",
+          "aggregations": [
+            {
+              "expression": "count()"
+            }
+          ],
+          "groupBy": [
+            "test.status"
+          ],
+          "stepInterval": 3600
+        },
+        {
+          "id": "pass-rate",
+          "title": "First-attempt pass rate per test",
+          "description": "Each run counts once. An unexpected result makes the run unexpected, even if another copy reports an expected result. A blank test ID marks a legacy group by project, file and title.",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.run.id EXISTS AND test.run.id != '' AND test.project EXISTS AND test.project != '' AND test.retry = 0 AND test.status IN ('passed', 'failed', 'timedOut') AND status_code IN (1, 2)",
+          "aggregations": [
+            {
+              "expression": "(count_distinct(test.run.id) - count_distinct_if(test.run.id, status_code = 2)) * 100.0 / count_distinct(test.run.id)",
+              "alias": "pass_rate_pct"
+            },
+            {
+              "expression": "count_distinct(test.run.id)",
+              "alias": "runs"
+            }
+          ],
+          "groupBy": [
+            "test.project",
+            "test.id",
+            "test.file",
+            "test.case"
+          ],
+          "limit": 100
+        },
+        {
+          "id": "failing",
+          "title": "Tests with unexpected first attempts",
+          "description": "Distinct runs with an unexpected first attempt. A blank test ID marks a legacy group by project, file and title.",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.run.id EXISTS AND test.run.id != '' AND test.project EXISTS AND test.project != '' AND test.retry = 0 AND test.status IN ('passed', 'failed', 'timedOut') AND status_code IN (1, 2)",
+          "aggregations": [
+            {
+              "expression": "count_distinct_if(test.run.id, status_code = 2)",
+              "alias": "unexpected_runs"
+            },
+            {
+              "expression": "count_distinct(test.run.id)",
+              "alias": "runs"
+            }
+          ],
+          "groupBy": [
+            "test.project",
+            "test.id",
+            "test.file",
+            "test.case"
+          ],
+          "having": "unexpected_runs > 0",
+          "limit": 100
+        },
+        {
+          "id": "duration",
+          "title": "p95 duration of stored first attempts (ms)",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.status != 'skipped' AND test.retry = 0",
+          "aggregations": [
+            {
+              "expression": "p95(test.duration_ms)",
+              "alias": "p95_ms"
+            }
+          ],
+          "groupBy": [
+            "test.project",
+            "test.id",
+            "test.file",
+            "test.case"
+          ],
+          "limit": 100
+        },
+        {
+          "id": "runs",
+          "title": "Recent runs",
+          "description": "Stored Playwright attempt rows, including retries, with a recorded run ID.",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.run.id EXISTS AND test.run.id != '' AND test.retry EXISTS AND test.status EXISTS",
+          "aggregations": [
+            {
+              "expression": "min(timestamp)",
+              "alias": "started"
+            },
+            {
+              "expression": "count()",
+              "alias": "attempt_rows"
+            },
+            {
+              "expression": "countIf(status_code = 2)",
+              "alias": "unexpected_attempt_rows"
+            }
+          ],
+          "groupBy": [
+            "test.run.id"
+          ],
+          "limit": 100
+        },
+        {
+          "id": "ci-pass-rate",
+          "title": "CI terminal pass rate per test",
+          "description": "One observation per GitHub job and test. A job with any failed terminal record counts as failed. Skipped and todo results are outside the rate.",
+          "signal": "logs",
+          "panelType": "table",
+          "aggregations": [
+            {
+              "expression": "(count_distinct(test.job.id) - count_distinct_if(test.job.id, test.status = 'failed')) * 100.0 / count_distinct(test.job.id)",
+              "alias": "pass_rate_pct"
+            },
+            {
+              "expression": "count_distinct(test.job.id)",
+              "alias": "jobs"
+            }
+          ],
+          "groupBy": [
+            "test.repository",
+            "test.project",
+            "test.id",
+            "test.file",
+            "test.case"
+          ],
+          "limit": 100
+        }
+      ]
+    },
+    {
+      "slug": "oriso-e2e-flaky",
+      "title": "ORISO E2E Flaky Tests",
+      "description": "Playwright and CI results have separate same-commit tables. Historical seed tables show the earliest dated CI observation of the original tests in the selected time range.",
+      "duration": "7d",
+      "panels": [
+        {
+          "id": "flaky-by-commit",
+          "title": "Flaky: pass and fail on the same commit",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.id EXISTS AND test.id != '' AND test.project EXISTS AND test.project != '' AND test.commit REGEXP '^[0-9a-fA-F]{40}$' AND test.status IN ('passed', 'failed', 'timedOut')",
+          "aggregations": [
+            {
+              "expression": "countIf(test.status = 'passed' AND status_code = 1)",
+              "alias": "passes"
+            },
+            {
+              "expression": "countIf(test.status IN ('failed', 'timedOut') AND status_code = 2)",
+              "alias": "fails"
+            }
+          ],
+          "groupBy": [
+            "test.file",
+            "test.case",
+            "test.project",
+            "test.id",
+            "test.commit"
+          ],
+          "having": "passes > 0 AND fails > 0",
+          "limit": 100
+        },
+        {
+          "id": "flaky-retry",
+          "title": "Flaky: passed only after a retry (test.flaky)",
+          "signal": "traces",
+          "panelType": "table",
+          "filter": "service.name = 'oriso-e2e' AND test.flaky = 'true' AND test.status = 'passed'",
+          "aggregations": [
+            {
+              "expression": "count()",
+              "alias": "runs"
+            }
+          ],
+          "groupBy": [
+            "test.file",
+            "test.case"
+          ],
+          "limit": 100
+        },
+        {
+          "id": "ci-flaky-by-commit",
+          "title": "CI flaky tests on the same commit",
+          "description": "Requires a passing job and a separate failing job for the same CI test and checkout. Jobs with conflicting outcomes count toward neither result. First Seen is the earliest dated CI observation of the test and commit in the selected time range.",
+          "signal": "logs",
+          "panelType": "table",
+          "columnUnits": {
+            "A.min(test.evidence.observed_at_ms)": "dateTimeAsIso"
+          },
+          "filter": "test.commit REGEXP '^[0-9a-f]{40}$'",
+          "aggregations": [
+            {
+              "expression": "count_distinct(test.job.id) - count_distinct_if(test.job.id, test.status = 'failed')",
+              "alias": "passes"
+            },
+            {
+              "expression": "count_distinct(test.job.id) - count_distinct_if(test.job.id, test.status = 'passed')",
+              "alias": "fails"
+            },
+            {
+              "expression": "min(test.evidence.observed_at_ms)",
+              "alias": "first_seen"
+            }
+          ],
+          "groupBy": [
+            "test.repository",
+            "test.project",
+            "test.id",
+            "test.file",
+            "test.case",
+            "test.commit"
+          ],
+          "having": "passes > 0 AND fails > 0",
+          "limit": 100
+        },
+        {
+          "id": "seed-1",
+          "title": "Seed ORISO-Frontend#1613 ChatStage Storybook · First Seen",
+          "signal": "logs",
+          "panelType": "table",
+          "description": "ChatStage Storybook file tracked by ORISO-Frontend#1613. The date is the earliest completed CI observation window in the selected time range. An empty table means there is no matching dated CI observation in that range.",
+          "filter": "test.repository = 'OpenResilienceInitiative/ORISO-Frontend' AND test.project = 'storybook (chromium)' AND test.file = 'src/components/chatStage/ChatStage.stories.tsx'",
+          "aggregations": [
+            {
+              "expression": "min(test.evidence.observed_at_ms)",
+              "alias": "first_seen"
+            },
+            {
+              "expression": "count_distinct(test.job.id)",
+              "alias": "jobs"
+            }
+          ],
+          "groupBy": [
+            "test.case"
+          ],
+          "limit": 100,
+          "columnUnits": {
+            "A.min(test.evidence.observed_at_ms)": "dateTimeAsIso"
+          }
+        },
+        {
+          "id": "seed-2",
+          "title": "Seed ORISO-Frontend#1707 PracticeFlow · First Seen",
+          "signal": "logs",
+          "panelType": "table",
+          "description": "The two PracticeFlow integration cases named in ORISO-Frontend#1707. The date is the earliest completed CI observation window in the selected time range. An empty table means there is no matching dated CI observation in that range.",
+          "filter": "test.repository = 'OpenResilienceInitiative/ORISO-Frontend' AND test.project = 'unit' AND test.file = 'src/practice/PracticeFlow.integration.test.tsx' AND test.case IN ('banner Restart mid-flow: same guard, fresh case with the accept available again, tour back at step 1', 'F1 without the team step (Träger switched it off): six steps, no team anchor, the same real actions')",
+          "aggregations": [
+            {
+              "expression": "min(test.evidence.observed_at_ms)",
+              "alias": "first_seen"
+            },
+            {
+              "expression": "count_distinct(test.job.id)",
+              "alias": "jobs"
+            }
+          ],
+          "groupBy": [
+            "test.case"
+          ],
+          "limit": 100,
+          "columnUnits": {
+            "A.min(test.evidence.observed_at_ms)": "dateTimeAsIso"
+          }
+        },
+        {
+          "id": "seed-3",
+          "title": "Seed ORISO-Frontend#1443 New messages arrow · First Seen",
+          "signal": "logs",
+          "panelType": "table",
+          "description": "The specific ChatStage Storybook case named in ORISO-Frontend#1443. The date is the earliest completed CI observation window in the selected time range. An empty table means there is no matching dated CI observation in that range.",
+          "filter": "test.repository = 'OpenResilienceInitiative/ORISO-Frontend' AND test.project = 'storybook (chromium)' AND test.file = 'src/components/chatStage/ChatStage.stories.tsx' AND test.case = '(r) New messages — writing: the arrow lights up'",
+          "aggregations": [
+            {
+              "expression": "min(test.evidence.observed_at_ms)",
+              "alias": "first_seen"
+            },
+            {
+              "expression": "count_distinct(test.job.id)",
+              "alias": "jobs"
+            }
+          ],
+          "groupBy": [
+            "test.case"
+          ],
+          "limit": 100,
+          "columnUnits": {
+            "A.min(test.evidence.observed_at_ms)": "dateTimeAsIso"
+          }
+        },
+        {
+          "id": "seed-4",
+          "title": "Seed ORISO-UserService#251 ArchiveOrDeleteSessionStatistics payload · First Seen",
+          "signal": "logs",
+          "panelType": "table",
+          "description": "The JUnit method getPayload_Should_ReturnValidJsonPayload tracked by ORISO-UserService#251. The date is the earliest completed CI observation window in the selected time range. An empty table means there is no matching dated CI observation in that range.",
+          "filter": "test.repository = 'OpenResilienceInitiative/ORISO-UserService' AND test.project = 'unit' AND test.file = 'src/test/java/de/caritas/cob/userservice/api/service/statistics/event/ArchiveOrDeleteSessionStatisticsEventTest.java' AND test.case = 'getPayload_Should_ReturnValidJsonPayload'",
+          "aggregations": [
+            {
+              "expression": "min(test.evidence.observed_at_ms)",
+              "alias": "first_seen"
+            },
+            {
+              "expression": "count_distinct(test.job.id)",
+              "alias": "jobs"
+            }
+          ],
+          "groupBy": [
+            "test.case"
+          ],
+          "limit": 100,
+          "columnUnits": {
+            "A.min(test.evidence.observed_at_ms)": "dateTimeAsIso"
+          }
+        },
+        {
+          "id": "seed-5",
+          "title": "Seed ORISO-Admin#1016 AgencyPageEdit confirmation suite · First Seen",
+          "signal": "logs",
+          "panelType": "table",
+          "description": "The leaf test cases in the AgencyPageEdit no-topic activation confirmation suite cited by ORISO-Admin#1016. The date is the earliest completed CI observation window in the selected time range. An empty table means there is no matching dated CI observation in that range.",
+          "filter": "test.repository = 'OpenResilienceInitiative/ORISO-Admin' AND test.project = 'unit' AND test.file = 'src/pages/Agency/Edit/index.test.tsx' AND test.case IN ('shows the confirm dialog and does not save when going live without a topic', 'keeps the form values and does not save when the no-topic dialog is cancelled', 'saves offline:false and empty topicIds when the no-topic dialog is confirmed', 'saves without a dialog when going live with a topic selected', 'does not warn when an already-online agency is saved without topics', 'shows the confirm dialog when an existing offline agency goes live without a topic', 'keeps the registration card in edit mode when the no-topic dialog is cancelled', 'saves the registration card online when the no-topic dialog is confirmed', 'saves without a dialog when an existing agency has a persisted topic')",
+          "aggregations": [
+            {
+              "expression": "min(test.evidence.observed_at_ms)",
+              "alias": "first_seen"
+            },
+            {
+              "expression": "count_distinct(test.job.id)",
+              "alias": "jobs"
+            }
+          ],
+          "groupBy": [
+            "test.case"
+          ],
+          "limit": 100,
+          "columnUnits": {
+            "A.min(test.evidence.observed_at_ms)": "dateTimeAsIso"
+          }
+        }
+      ]
+    }
   ]
 }

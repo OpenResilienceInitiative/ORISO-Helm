@@ -63,7 +63,25 @@ print(len(drift), *drift, sep="\n")' | tee /root/observability-drift.out
 ```
 
 Stop unless the first line is `0`; otherwise add the listed paths' files with
-`-f` first. The upgrade commands check it themselves, and the live upgrade
+`-f` first. The first rollout restarts Keycloak, Synapse (`Recreate`, a short
+Matrix gap), Redis, the four Java services, Frontend and Admin. Announce it
+before starting the upgrade.
+
+Before an upgrade that disables or restores a ClickHouse system log, record
+the operator task ID and each ClickHouse pod's name, UID and container start
+time. Keep this baseline to confirm each pod restarted after the upgrade.
+
+```bash
+CLICKHOUSE_TASK_BEFORE=$(kubectl -n caritas get clickhouseinstallation caritas-clickhouse -o jsonpath='{.status.taskIDsStarted[0]}')
+test -n "$CLICKHOUSE_TASK_BEFORE"
+kubectl -n caritas get pods -o json | jq -er '
+  .items[] | select(.metadata.name | startswith("chi-caritas-clickhouse-cluster-"))
+  | .metadata as $pod
+  | .status.containerStatuses[] | select(.name == "clickhouse")
+  | [$pod.name, $pod.uid, .state.running.startedAt, .ready] | @tsv'
+```
+
+Require a ready row with a start time for each ClickHouse pod. The live upgrade
 also needs a successful server-side dry run, whose output you read first:
 
 ```bash
@@ -73,12 +91,10 @@ helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yam
   --dry-run=server > /root/observability-dry.out && touch /root/observability-dry.ok
 # read /root/observability-dry.out, then:
 test "$(head -n 1 /root/observability-drift.out)" = 0 && test -f /root/observability-dry.ok && \
+UPGRADE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) && \
 helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
   --wait --wait-for-jobs --timeout 15m
 ```
-
-The first rollout restarts Keycloak, Synapse (`Recreate`, a short Matrix gap),
-Redis, the four Java services, Frontend and Admin. Announce it.
 
 The retain hook only sees volumes that exist when Helm renders. After an
 upgrade that adds ClickHouse shards or replicas, ZooKeeper or PostgreSQL
@@ -104,6 +120,47 @@ kubectl get pv | grep -E 'signoz|clickhouse|zookeeper'   # RECLAIM POLICY = Reta
 
 `scripts/signoz_runtime_acceptance.py` (see `signoz-runtime-acceptance.md`)
 remains the full gate.
+
+## Replay reviewed CI test results
+
+The optional `signoz.otelCollector.ciLogIngest.enabled` flag defaults to
+`false`. Use a separately approved Dev overlay to enable it after the
+ClickHouse write check and backup gate pass. The collector listens on
+`127.0.0.1:4331` inside its Pod. A Kubernetes operator with access to
+`pods/portforward` can reach it through a numeric Pod port.
+
+Select a Ready Pod from the `caritas-signoz-otel-collector` Deployment that
+uses the chart ConfigMap. Check that the Pod has its own network namespace
+and review the running containers before forwarding. Keep the local forward
+and any SSH relay on loopback.
+
+```bash
+kubectl -n caritas port-forward --address 127.0.0.1 "pod/$collector_pod" 14331:4331
+```
+
+In another terminal, submit only the sanitized output of the approved
+[CI test exporter](https://github.com/OpenResilienceInitiative/ORISO-E2E/pull/117)
+for the verified GitHub run, job and test selectors. Use the attempt-specific
+sanitized JUnit artifact for the Dev nightly smoke cases. The reviewed case
+and file strings are source metadata. Keep report contents and application data
+out of them.
+
+```bash
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' --data-binary "@$sanitized_ci_payload" \
+  http://127.0.0.1:14331/v1/logs
+```
+
+After the batch flush, verify the exact run and job IDs, test IDs, statuses
+and observation times in stored logs where `oriso.signal.source = 'ci'`.
+Then check the matching CI dashboard window. The collector can return HTTP
+200 after dropping records. If a request was interrupted, check stored rows before
+replaying it. The collector marker records admission through the operator
+receiver. The operator verifies GitHub artifact provenance before sending.
+
+Close the tunnel after verification. Use the approved overlay with the flag
+set to `false` to retire the listener. Hosted GitHub Actions delivery needs
+its own approved network and identity setup.
 
 ## nginx metrics (ingress-nginx)
 
@@ -164,6 +221,53 @@ pod. For example:
 ```bash
 kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP TABLE IF EXISTS system.trace_log_0 SYNC"
 ```
+
+## ClickHouse internal log retention
+
+The Dev overlay sets a three-day deletion TTL for new `query_log`, `part_log`,
+`trace_log`, `asynchronous_metric_log`, `metric_log`, `zookeeper_log`,
+`aggregated_zookeeper_log` and `processors_profile_log` tables. Layered Pre-Dev
+inherits it. `text_log` already has a three-day TTL in the chart. Later writer
+removal files take precedence.
+
+Restore writable headroom before the approved rollout. A changed engine
+definition can make ClickHouse rename the old table to `<name>_0` or a higher
+suffix at its next flush. The old table keeps its data and TTL. Restoring the
+previous definition can rotate again. Measure storage reclamation separately.
+
+Before the upgrade, record ClickHouse pod identities, the newest successful
+backup and this read-only inventory for each data pod. After the operator
+reconciles, verify a new Ready ClickHouse container and repeat the queries
+after the configured log flush intervals. Require a three-day deletion TTL
+for each enabled canonical writer, account for numbered tables and check
+actual unreserved space before acceptance probes.
+
+```bash
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --readonly=1 --multiquery --query "
+SELECT name, uuid, engine_full
+FROM system.tables
+WHERE database = 'system'
+  AND replaceRegexpOne(name, '_[0-9]+$', '') IN (
+    'query_log', 'part_log', 'text_log', 'trace_log', 'metric_log',
+    'asynchronous_metric_log', 'zookeeper_log', 'aggregated_zookeeper_log',
+    'processors_profile_log'
+  )
+ORDER BY name;
+SELECT table, sum(bytes_on_disk) AS active_bytes
+FROM system.parts
+WHERE database = 'system' AND active
+  AND replaceRegexpOne(table, '_[0-9]+$', '') IN (
+    'query_log', 'part_log', 'text_log', 'trace_log', 'metric_log',
+    'asynchronous_metric_log', 'zookeeper_log', 'aggregated_zookeeper_log',
+    'processors_profile_log'
+  )
+GROUP BY table ORDER BY table;
+SELECT name, total_space, unreserved_space FROM system.disks WHERE name = 'default';"
+```
+
+Check the recorded UUIDs to distinguish retained data from new canonical
+tables. Keep old tables until their TTL expires or the operator separately
+approves removal of specific obsolete tables.
 
 ## Replace an unavailable SQLite backup destination
 
@@ -233,47 +337,22 @@ backup_switch_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 ```
 
 After the upgrade and the next scheduled run, check that both claims are
-present and the replacement PV still uses `Retain`. Verify that the newest
-scheduled Job since the switch and the creation of the current PVC completed
-on the configured destination.
+present. From the Helm checkout, read the archive receipt for the newest
+scheduled Job since the switch and the creation of the current PVC.
 
 ```bash
-(
-  set -euo pipefail
-  cronjob=$(kubectl -n caritas get cronjob caritas-signoz-data-protection-backup -o json)
-  cronjob_uid=$(jq -er '.metadata.uid' <<<"$cronjob")
-  target=$(jq -er '.spec.jobTemplate.spec.template.spec.volumes[]
-    | select(.name == "backup").persistentVolumeClaim.claimName' <<<"$cronjob")
-  if test "$target" != "$backup_destination"; then
-    printf '%s\n' 'The installed CronJob uses a different backup destination' >&2
-    exit 1
-  fi
-  claim_created_at=$(kubectl -n caritas get pvc "$target" -o json |
-    jq -er 'select(.status.phase == "Bound").metadata.creationTimestamp')
-
-  kubectl -n caritas get jobs -o json |
-    jq -e --arg owner "$cronjob_uid" --arg target "$target" \
-      --arg switch_at "$backup_switch_started_at" --arg claim_at "$claim_created_at" '
-      [.items[]
-       | select(any(.metadata.ownerReferences[]?;
-                    .kind == "CronJob" and .controller == true and .uid == $owner))
-       | select(.metadata.creationTimestamp >= $switch_at
-                and .metadata.creationTimestamp >= $claim_at)]
-      | sort_by(.metadata.creationTimestamp, .metadata.name) | last
-      | . // error("No scheduled backup Job since the destination switch")
-      | if any(.spec.template.spec.volumes[]?;
-               .name == "backup" and .persistentVolumeClaim.claimName == $target
-               and (.persistentVolumeClaim.readOnly // false) == false)
-        then . else error("Latest backup Job uses a different destination") end
-      | if .status.completionTime
-           and any(.status.conditions[]?; .type == "Complete" and .status == "True")
-        then {job: .metadata.name, claim: $target, completed: .status.completionTime}
-        else error("Latest backup Job has not completed successfully") end'
+backup_receipt=$(
+  python3 scripts/signoz_metadata_backup_receipt.py \
+    --namespace caritas --cronjob caritas-signoz-data-protection-backup \
+    --claim "$backup_destination" --since "$backup_switch_started_at" --require-retain
 )
 ```
 
-Verify the gzip archive produced by that Job and its SQLite integrity in an
-isolated recovery environment. Mount the reported claim at `/backup`.
+The readback checks the Bound Retain PV against the claim UID, then requires
+the selected Job and its successful backup Pod to use that destination.
+The newest scheduled run determines acceptance. A manual run or an earlier
+successful Job cannot satisfy it. Mount the reported claim at `/backup`
+and verify the reported archive using the isolated restore below.
 
 Clearing the override, or rolling back to a revision before the switch, can
 send subsequent Jobs to the original claim. Confirm that destination can
@@ -281,22 +360,81 @@ attach before reusing it. Keep both claims available for recovery.
 
 ## signoz.db backup and restore
 
-The CronJob `caritas-signoz-data-protection-backup` runs at 02:30 UTC and keeps
-14 gzipped copies in the claim `caritas-signoz-data-protection-backup`. Run one
-now with:
+By default, the CronJob `caritas-signoz-data-protection-backup` runs at 02:30
+UTC and keeps 14 verified gzip archives in its backup claim. The producer
+checks the SQLite snapshot and gzip contents before publishing the archive,
+then records the archive name, Job UID, Pod UID, compressed byte count and
+SHA-256 in the backup container's Kubernetes termination message. It starts
+pruning only after the archive and receipt have been written. If the Pod is
+interrupted before Kubernetes records a successful exit, a published archive
+can still be checked by explicit path. A scheduled handoff requires the
+successful Pod receipt.
+The archive contains SigNoz accounts, credentials and configuration, so keep
+it on protected storage within the approved recovery environment.
+
+Finish active backup Jobs before rolling out this producer or rolling back to
+the legacy producer. The older script does not take the PVC lock. Retained
+Kubernetes Job history is shorter than archive retention, so older archives
+can be recovered by explicit path.
+
+For an approved on-demand backup, confirm no backup is active and leave the
+full Job deadline before the next scheduled start. The scheduled and manual
+jobs share the same backup directory.
 
 ```bash
 kubectl -n caritas create job --from=cronjob/caritas-signoz-data-protection-backup signoz-backup-manual
 ```
 
-Restore (SigNoz down for about a minute):
+For an isolated SQLite restore, use a recovery pod with no service account
+token and the backup CronJob's pinned Python image. Run it as UID 0, the Dev
+SigNoz user and the owner of the new private archives. Use these mounts:
+
+| Mount | Source | Access |
+|---|---|---|
+| `/backup` | Claim from the receipt, or the claim holding the selected historical archive | Read-only |
+| `/scripts` | `caritas-signoz-data-protection` ConfigMap | Read-only |
+| `/restore` | Fresh recovery claim in the same namespace | Read-write |
+
+Schedule the recovery read away from the next backup window and wait for the
+current backup pod to finish. Keep the recovery claim detached from SigNoz
+while staging. Use the successful readback's archive name, checksum and byte
+count. Set `recovery_pod` to the isolated Pod's name.
 
 ```bash
-kubectl -n caritas scale statefulset caritas-signoz --replicas=0
-# start a pod on the same node that mounts both claims, then inside it:
-#   gunzip -c /backup/signoz-<stamp>.db.gz > /signoz/signoz.db && rm -f /signoz/signoz.db-wal /signoz/signoz.db-shm
-kubectl -n caritas scale statefulset caritas-signoz --replicas=1
+(
+  set -euo pipefail
+  archive=$(jq -er '.archive' <<<"$backup_receipt")
+  digest=$(jq -er '.sha256' <<<"$backup_receipt")
+  bytes=$(jq -er '.bytes' <<<"$backup_receipt")
+  kubectl -n caritas exec "$recovery_pod" -- python3 /scripts/restore.py \
+    "/backup/$archive" /restore --sha256 "$digest" --compressed-bytes "$bytes"
+)
 ```
+
+For explicit recovery without a retained receipt, pass the exact archive
+path. The script verifies the embedded SHA-256 for newer names and also
+accepts older timestamp-only archives.
+
+```bash
+archive=/backup/signoz-YYYYMMDDTHHMMSSZ.db.gz
+python3 /scripts/restore.py "$archive" /restore
+```
+
+The script consumes the full gzip stream, checks SQLite integrity and the
+SigNoz metadata tables, and publishes `/restore/signoz.db` as a private file
+with mode `0600`. Use a recovery filesystem that supports hard links and an
+empty destination. The script allows the filesystem's `lost+found` directory.
+A complete staged database and the successful exit status are the
+preconditions for the isolated application check.
+
+Start the matching SigNoz version against the recovery claim in an isolated
+stack with private UI access and outbound alert delivery blocked. Verify
+authorized sign-in and the expected dashboard and rule configuration. Record
+the selected archive, database check and application readback. Keep the active
+claim available for the separately approved cutover or rollback.
+
+The SQLite archive covers SigNoz metadata. ClickHouse signals have their own
+backup and recovery requirements.
 
 ## ClickHouse system logs
 
@@ -305,15 +443,42 @@ hit the memory limit about 6 times per second on Dev and used about 3 CPU cores.
 Pausing only those merges for two minutes on 2026-11-03 took ClickHouse from 3.17
 to 0.43 cores and the errors from 6.45 per second to 0.
 
-The setting stops new rows, but an existing table keeps merging. Helm `--wait` does not wait for the
-ClickHouse operator, which restarts ClickHouse after the upgrade. Drop only after
-the restart is done and the configuration is active, otherwise the old writer can
-create the table again on its next flush:
+The setting stops new rows, but an existing table keeps merging. After the
+upgrade, require the completed configuration and the success log for the
+latest started operator task. Operator 0.21.2 can assign a different
+`status.taskID` when it writes the completed snapshot, so match the log
+against `taskIDsStarted[0]`. Use the fragment for the system log you changed:
 
 ```bash
-kubectl -n caritas rollout status statefulset/chi-caritas-clickhouse-cluster-0-0 --timeout=10m
-kubectl -n caritas get pods -o name | grep '^pod/chi-caritas-clickhouse-cluster-'
+set -o pipefail
+LOG_FRAGMENT=config.d/99-oriso-disable-metric-log.xml
+# For trace_log, use config.d/99-oriso-disable-trace-log.xml.
+CLICKHOUSE_RECONCILE_TASK=$(
+  kubectl -n caritas get clickhouseinstallation caritas-clickhouse -o json |
+  jq -er --arg before "$CLICKHOUSE_TASK_BEFORE" --arg fragment "$LOG_FRAGMENT" '
+    .status as $status | .spec.configuration.files[$fragment] as $desired
+    | ($status.taskIDsStarted // [])[0] as $started
+    | select($before != "" and $desired != null and $status.status == "Completed"
+      and $started != null and $started != "" and $started != $before
+      and $status.taskID != null
+      and (($status.taskIDsCompleted // []) | index($status.taskID)) != null
+      and $status.normalizedCompleted.spec.configuration.files[$fragment] == $desired)
+    | $started'
+) &&
+kubectl -n caritas logs deployment/caritas-clickhouse-operator -c operator \
+  --since-time="${UPGRADE_STARTED_AT:?Missing upgrade start time}" |
+  grep -F "caritas/caritas-clickhouse/$CLICKHOUSE_RECONCILE_TASK:reconcile completed successfully, task id: $CLICKHOUSE_RECONCILE_TASK"
 ```
+
+Stop if this check cannot find a success line for the exact task. A completed
+snapshot alone can also follow a failed reconciliation.
+
+Run the pod identity command from [Rollout](#rollout) again. For every pod,
+require `ready=true`, a new UID or container start time, and a start time
+strictly later than `UPGRADE_STARTED_AT`. The operator task and pod checks must
+both pass before inspecting the active files or dropping a table. Helm can
+finish before reconciliation starts, and the config files can change before
+the running server loads them.
 
 For every listed pod, confirm `metric_log` is absent from the active configuration,
 then inspect its local tables. ClickHouse may have renamed older versions with a
@@ -332,6 +497,54 @@ ClickHouse pod. For example:
 
 ```bash
 kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP TABLE IF EXISTS system.metric_log_0 SYNC"
+```
+
+### system.trace_log
+
+Dev also turns `system.trace_log` off (`config.d/99-oriso-disable-trace-log.xml`).
+Measured read-only on Dev on 2026-11-06: 8.21 GiB active, 338 M rows, about
+1 GiB per day (the first day, 2026-11-03, was 5.6 GiB while the memory problems
+ran). It is ClickHouse's own sampling-profiler output, already limited to 7
+days by default, and no query in the retained `system.query_log` window
+(2026-11-03 to 2026-11-06) selects from it. SigNoz does not use it.
+
+The setting stops new rows and the existing table stays on disk. After the
+rollout, confirm the completed restart and active configuration on each pod
+using the wait-and-confirm steps for `metric_log` above. Run the read-only
+inspection first.
+
+```bash
+POD=chi-caritas-clickhouse-cluster-0-0-0
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse extract-from-config --config-file /etc/clickhouse-server/config.xml --key trace_log
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "SELECT name, formatReadableSize(total_bytes) FROM system.tables WHERE database = 'system' AND match(name, '^trace_log(_[0-9]+)?$')"
+```
+
+The configuration command must print `Not found: trace_log`. After this
+readback and explicit approval for the table drop, run the removal separately.
+
+```bash
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP TABLE IF EXISTS system.trace_log SYNC"
+```
+
+Repeat the inspection and approved removal for each ClickHouse pod. Verify
+that `system.trace_log` is absent and check the available disk space. To resume
+profiler logging, set the contents of `config.d/99-oriso-disable-trace-log.xml` in
+`values-dev.yaml` to `<clickhouse/>`. Keeping the key with an empty config makes
+this an explicit overlay change that the drift check can verify.
+
+Regenerate the overlay and rerun the rollout drift check:
+
+```bash
+python3 scripts/observability_overlay.py values-dev.yaml > /root/observability-dev.yaml
+```
+
+In the server-side dry run, confirm that the fragment has no
+`<trace_log remove="1"/>` directive. Record the pod identities before the
+upgrade and confirm each ClickHouse restart using the procedure above. Then
+verify that the active configuration reports `trace_log` on every pod:
+
+```bash
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse extract-from-config --config-file /etc/clickhouse-server/config.xml --key trace_log.table
 ```
 
 ## Rollback

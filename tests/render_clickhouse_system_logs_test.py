@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render guard: Dev ClickHouse must not write system.metric_log."""
+"""Render guard: Dev ClickHouse must not write system.metric_log or system.trace_log."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import yaml
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURE_DOMAIN = "render.oriso.internal"
 DEV_METRIC_LOG_FILE = "config.d/99-oriso-disable-metric-log.xml"
+DEV_TRACE_LOG_FILE = "config.d/99-oriso-disable-trace-log.xml"
 HELM_TIMEOUT_SECONDS = 180
 
 
@@ -73,11 +74,40 @@ def main() -> int:
         return 1
     files = installations[0]["spec"]["configuration"]["files"]
     # Parse the XML so a commented-out element cannot satisfy the check.
-    root = ET.fromstring(files.get(DEV_METRIC_LOG_FILE, "<clickhouse/>"))
-    metric_logs = root.findall("metric_log")
-    if len(metric_logs) != 1 or metric_logs[0].get("remove") != "1":
-        print(f'{DEV_METRIC_LOG_FILE} must contain <metric_log remove="1"/>', file=sys.stderr)
+    dev_log_files = ((DEV_METRIC_LOG_FILE, "metric_log"), (DEV_TRACE_LOG_FILE, "trace_log"))
+    for file_name, element in dev_log_files:
+        root = ET.fromstring(files.get(file_name, "<clickhouse/>"))
+        found = root.findall(element)
+        if len(found) != 1 or found[0].get("remove") != "1":
+            print(f'{file_name} must contain <{element} remove="1"/>', file=sys.stderr)
+            return 1
+    # The default chart must keep writing it: removal is Dev-only.
+    default = [d for d in render() if d.get("kind") == "ClickHouseInstallation"]
+    if len(default) != 1:
+        print(f"expected one default ClickHouseInstallation, found {len(default)}", file=sys.stderr)
         return 1
+    if any(file_name in default[0]["spec"]["configuration"]["files"] for file_name, _ in dev_log_files):
+        print("Dev writer removals must be absent from the default chart", file=sys.stderr)
+        return 1
+
+    # Pre-Dev uses the Dev overlay first. Inspect that actual installation.
+    predev = [
+        d for d in render("values-dev.yaml", "values-pre-dev.yaml")
+        if d.get("kind") == "ClickHouseInstallation"
+    ]
+    if len(predev) != 1:
+        print(f"expected one Pre-Dev ClickHouseInstallation, found {len(predev)}", file=sys.stderr)
+        return 1
+    predev_files = predev[0]["spec"]["configuration"]["files"]
+    for file_name, _ in dev_log_files:
+        content = predev_files.get(file_name, "<clickhouse/>")
+        if not isinstance(content, str):
+            print(f"{file_name} must be valid XML in Pre-Dev", file=sys.stderr)
+            return 1
+        root = ET.fromstring(content)
+        if root.tag != "clickhouse" or root.attrib or len(root):
+            print(f"{file_name} must leave the Pre-Dev writer configuration intact", file=sys.stderr)
+            return 1
     print("Dev ClickHouse system logs ok")
     return 0
 

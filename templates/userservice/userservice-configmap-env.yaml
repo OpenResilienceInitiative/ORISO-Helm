@@ -125,6 +125,9 @@ data:
   MESSAGE_SERVICE_API_URL: "http://messageservice.{{ .Release.Namespace }}:8080"
   MAIL_SERVICE_API_URL: "http://mailservice.{{ .Release.Namespace }}:8080"
   CONSULTING_TYPE_SERVICE_API_URL: "http://consultingtypeservice.{{ .Release.Namespace }}:8080"
+  # UserService supplies the authorized management tenant internally. The short
+  # service name is necessary: the topic service interprets dotted hosts as tenant domains.
+  CONSULTING_TYPE_SERVICE_SCOPED_API_URL: "http://consultingtypeservice:8080"
   APPOINTMENT_SERVICE_API_URL: "http://appointmentservice.{{ .Release.Namespace }}:8080"
   # Mail-link base URLs (Magic Link, password reset, account invite). Always
   # rendered: an explicit userService.* value wins and is validated, an empty
