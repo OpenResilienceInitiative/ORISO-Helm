@@ -352,6 +352,13 @@ matrixrtcAuth:
   # Optional: namespace of the ingress controller for the call NetworkPolicies.
   # Empty means "ingress-nginx". The release namespace is always admitted as well.
   ingressControllerNamespace: ""
+  # Optional: node addresses (CIDR, e.g. "10.0.0.5/32") of the LiveKit nodes that
+  # may send the signed /sfu_webhook callback to the authorization receiver.
+  # LiveKit uses hostNetwork, so some CNIs see its traffic as node traffic that the
+  # pod selector does not match across nodes. Every listed address also reaches
+  # the receiver's token endpoints directly, so list only LiveKit-eligible nodes.
+  # Empty keeps the pod-only boundary.
+  livekitNodeCidrs: []
   bootstrap:
     enabled: true
     backoffLimit: 6

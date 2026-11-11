@@ -67,6 +67,17 @@ def legacy_webhook_urls(documents: list[dict]) -> list[str]:
     return yaml.safe_load(config["stringData"]["config.yaml"])["webhook"]["urls"]
 
 
+def receiver_ingress(documents: list[dict]) -> list[dict]:
+    policy = next(
+        document
+        for document in documents
+        if document.get("kind") == "NetworkPolicy"
+        and document.get("metadata", {}).get("name")
+        == "matrixrtc-authorization-service"
+    )
+    return policy["spec"]["ingress"]
+
+
 def main() -> None:
     documents = render()
     livekit = find_livekit(documents)
@@ -97,6 +108,31 @@ def main() -> None:
     assert legacy_webhook_urls(
         render("--set-string", f"livekit.legacyWebhookUrl={private_receiver}")
     ) == [private_receiver], "the configured private receiver must be rendered"
+
+    # LiveKit is host-network: across nodes some CNIs see its webhook as node
+    # traffic. The receiver admits only the pods by default and the exact
+    # LiveKit node addresses an operator lists, on the receiver port only.
+    pod_only = receiver_ingress(documents)
+    assert len(pod_only) == 1
+    assert all("ipBlock" not in peer for peer in pod_only[0]["from"])
+    node_rule = receiver_ingress(
+        render(
+            "--set-json",
+            'matrixrtcAuth.livekitNodeCidrs=["10.0.0.5/32","fd00::5/128"]',
+        )
+    )
+    assert len(node_rule) == 1
+    assert node_rule[0]["ports"] == [{"protocol": "TCP", "port": 8080}]
+    assert [peer["ipBlock"] for peer in node_rule[0]["from"] if "ipBlock" in peer] == [
+        {"cidr": "10.0.0.5/32"},
+        {"cidr": "fd00::5/128"},
+    ]
+    for too_wide in ("0.0.0.0/0", "10.0.0.0/8", "10.0.0.5", "::/0"):
+        rejected = run_helm(
+            "--set-json", f'matrixrtcAuth.livekitNodeCidrs=["{too_wide}"]'
+        )
+        assert rejected.returncode != 0, too_wide
+        assert "matrixrtcAuth.livekitNodeCidrs entry" in rejected.stderr, too_wide
 
     rolling = find_livekit(
         render(
