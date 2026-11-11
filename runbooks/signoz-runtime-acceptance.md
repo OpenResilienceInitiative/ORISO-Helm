@@ -19,6 +19,8 @@ The command fails closed unless all of the following are true:
 - the telemetry-store migration job completed;
 - the live collector configuration has OTLP HTTP and gRPC receivers plus a
   ClickHouse exporter in each trace, metric, and log pipeline;
+- every non-terminating ClickHouse data pod for the release is ready and has at
+  least 2 GiB of unreserved space on its default data disk before any probes run.
 - a privacy-safe synthetic trace, metric, and correlated log can be sent to the
   in-cluster collector and read back from the corresponding ClickHouse tables.
 - the node-local and cluster-wide `k8s-infra` collectors are ready;
@@ -49,10 +51,10 @@ python3 scripts/signoz_runtime_acceptance.py \
 
 Repeat after the reviewed Dev promotion with `--environment dev`,
 `--cluster-name oriso-dev`, and the Dev host. The command prints a JSON result
-that can be attached to the PR or release evidence. A successful result contains
-positive counts for `traces`, `metrics`, and `logs` under `syntheticReadback`,
-positive infrastructure signal counts under `k8sInfraReadback`, and exactly
-zero for `forbiddenLogBody`.
+that can be attached to the PR or release evidence. A successful result sets
+`clickhouseCapacity` to `passed` and records positive trace, metric, and log
+counts under `syntheticReadback`. It also records positive infrastructure counts
+under `k8sInfraReadback` and exactly zero for `forbiddenLogBody`.
 
 The gate creates short-lived `curlimages/curl` probe pods with `--rm`, one
 short-lived BusyBox log probe, and one namespaced synthetic Kubernetes Event.
@@ -74,8 +76,8 @@ python3 scripts/signoz_runtime_acceptance.py \
   --skip-synthetic
 ```
 
-This weaker mode is useful while diagnosing a rollout, but it is not sufficient
-release evidence.
+Use this mode for rollout and pipeline diagnosis. It reports capacity and
+persistence as skipped. Release evidence requires the full command.
 
 Use `--skip-k8s-infra` only when validating the backend-only repair before the
 stacked Kubernetes collection change is installed. That mode omits both

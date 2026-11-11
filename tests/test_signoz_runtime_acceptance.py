@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import subprocess
 import unittest
+from contextlib import redirect_stdout
 from copy import deepcopy
 from pathlib import Path
 from unittest import mock
@@ -188,6 +190,7 @@ class RuntimeReadinessContractTest(unittest.TestCase):
         return {
             "metadata": {
                 "name": name,
+                "uid": f"statefulset-{name}",
                 "deletionTimestamp": "2026-11-07T12:00:00Z" if deleting else None,
                 "ownerReferences": [{
                     "kind": "ClickHouseInstallation",
@@ -330,6 +333,150 @@ class CollectorPipelineContractTest(unittest.TestCase):
                 config["service"]["pipelines"][signal]["exporters"] = []
                 with self.assertRaisesRegex(RuntimeError, f"{signal}.*ClickHouse exporter"):
                     MODULE.validate_collector_config(config)
+
+
+class CapacityContractTest(unittest.TestCase):
+    minimum = 2 * 1024**3
+
+    def setUp(self) -> None:
+        self.argv = [
+            "signoz_runtime_acceptance", "--namespace", "caritas", "--release", "caritas",
+            "--environment", "dev", "--skip-k8s-infra",
+        ]
+        self.enterContext(mock.patch.object(MODULE.sys, "argv", self.argv))
+        self.enterContext(mock.patch.object(MODULE, "_check_runtime_readiness"))
+        self.enterContext(mock.patch.object(MODULE, "_check_collector_config"))
+        self.emit = self.enterContext(mock.patch.object(MODULE, "_emit_signal"))
+        self.readback = self.enterContext(mock.patch.object(MODULE, "_wait_for_readback"))
+        self.readback.return_value = {"traces": 1, "metrics": 1, "logs": 1}
+        self.runner = self.enterContext(mock.patch.object(MODULE, "Runner")).return_value
+        self.runner.run.side_effect = self.run_kubectl
+        self.spaces = {"clickhouse-b": str(self.minimum + 1), "clickhouse-a": str(self.minimum)}
+        self.not_ready = set()
+        self.disks_checked = []
+        self.include_orphan = False
+
+    def run_kubectl(self, command: list[str]) -> mock.Mock:
+        if command[3:] == ["get", "chi", "caritas-clickhouse", "-o", "json"]:
+            return mock.Mock(stdout=json.dumps({"metadata": {"uid": "current-chi"}}))
+        if command[3:] == [
+            "get", "statefulset", "-l", "clickhouse.altinity.com/chi=caritas-clickhouse", "-o", "json",
+        ]:
+            return mock.Mock(stdout=json.dumps({"items": [
+                {
+                    "metadata": {
+                        "name": f"statefulset-{name}",
+                        "uid": f"statefulset-{name}",
+                        "ownerReferences": [{
+                            "kind": "ClickHouseInstallation",
+                            "name": "caritas-clickhouse",
+                            "uid": "current-chi",
+                            "controller": True,
+                        }],
+                    },
+                    "spec": {"replicas": 1},
+                }
+                for name in self.spaces
+            ]}))
+        if command[3:5] == ["get", "pods"]:
+            self.assertIn("clickhouse.altinity.com/chi=caritas-clickhouse", command[6])
+            items = [
+                {
+                    "metadata": {
+                        "name": name,
+                        "ownerReferences": [{
+                            "kind": "StatefulSet",
+                            "uid": f"statefulset-{name}",
+                            "controller": True,
+                        }],
+                    },
+                    "status": {"conditions": [{
+                        "type": "Ready", "status": "False" if name in self.not_ready else "True",
+                    }]},
+                }
+                for name in self.spaces
+            ]
+            if self.include_orphan:
+                items.append({
+                    "metadata": {
+                        "name": "orphaned-clickhouse",
+                        "ownerReferences": [{
+                            "kind": "StatefulSet", "uid": "previous-statefulset", "controller": True,
+                        }],
+                    },
+                    "status": {"conditions": [{"type": "Ready", "status": "False"}]},
+                })
+            return mock.Mock(stdout=json.dumps({"items": items}))
+        self.assertEqual(command[3], "exec")
+        self.assertIn("unreserved_space", command[-1])
+        pod = command[4]
+        self.disks_checked.append(pod)
+        return mock.Mock(stdout=self.spaces[pod])
+
+    def run_gate(self) -> dict:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            MODULE.main()
+        return json.loads(output.getvalue())
+
+    def test_every_data_pod_is_checked_before_writing_and_exact_limit_passes(self) -> None:
+        def assert_preflight(*_args):
+            self.assertEqual(self.disks_checked, ["clickhouse-a", "clickhouse-b"])
+
+        self.emit.side_effect = assert_preflight
+        report = self.run_gate()
+
+        self.assertEqual(report["clickhouseCapacity"], "passed")
+        self.assertEqual(self.emit.call_count, 3)
+        self.assertEqual(self.readback.call_args.args[2], "clickhouse-a")
+
+    def test_low_capacity_on_another_data_pod_stops_writes(self) -> None:
+        self.spaces["clickhouse-b"] = str(self.minimum - 1)
+
+        with self.assertRaisesRegex(RuntimeError, "clickhouse-b has 2147483647 unreserved bytes"):
+            self.run_gate()
+
+        self.emit.assert_not_called()
+        self.readback.assert_not_called()
+
+    def test_unreadable_capacity_stops_writes(self) -> None:
+        for invalid in ("", "unknown", "2147483648\n2147483648", str(2**64 - 1)):
+            with self.subTest(invalid=invalid):
+                self.spaces["clickhouse-a"] = invalid
+                with self.assertRaisesRegex(RuntimeError, "capacity unreadable.*clickhouse-a"):
+                    self.run_gate()
+
+        self.emit.assert_not_called()
+
+    def test_unready_data_pod_stops_writes(self) -> None:
+        self.not_ready.add("clickhouse-b")
+
+        with self.assertRaisesRegex(RuntimeError, "clickhouse-b is not ready"):
+            self.run_gate()
+
+        self.emit.assert_not_called()
+
+    def test_orphaned_clickhouse_pod_does_not_block_the_current_installation(self) -> None:
+        self.include_orphan = True
+
+        report = self.run_gate()
+
+        self.assertEqual(report["clickhouseCapacity"], "passed")
+        self.assertEqual(self.disks_checked, ["clickhouse-a", "clickhouse-b"])
+
+    def test_readiness_only_skips_capacity_and_writes(self) -> None:
+        self.argv.append("--skip-synthetic")
+
+        self.assertEqual(self.run_gate()["clickhouseCapacity"], "skipped")
+
+        self.runner.run.assert_not_called()
+        self.emit.assert_not_called()
+
+    def test_capacity_floor_matches_the_managed_alert(self) -> None:
+        catalog = SCRIPT.parents[1] / "files/signoz/observability-catalog.json"
+        alerts = json.loads(catalog.read_text(encoding="utf-8"))["alerts"]
+        capacity = next(alert for alert in alerts if alert["slug"] == "clickhouse-capacity")
+        self.assertEqual(MODULE.MIN_CLICKHOUSE_UNRESERVED_BYTES, capacity["target"])
 
 
 class RunnerContractTest(unittest.TestCase):
