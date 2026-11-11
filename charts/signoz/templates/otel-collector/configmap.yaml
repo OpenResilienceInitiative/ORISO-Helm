@@ -7,6 +7,9 @@
 {{- end -}}
 {{- $orisoPolicy := fromYaml (.Files.Get "files/oriso-otel-collector-policy.yaml") -}}
 {{- $collectorConfig := mergeOverwrite (deepCopy .Values.otelCollector.config) $orisoPolicy -}}
+{{- if .Values.otelCollector.ciLogIngest.enabled -}}
+{{- $_ := mergeOverwrite $collectorConfig (fromYaml (.Files.Get "files/oriso-ci-log-policy.yaml")) -}}
+{{- end -}}
 {{- $receivers := get $collectorConfig "receivers" | default dict -}}
 {{- $_ := unset $receivers "jaeger" -}}
 {{- $_ := unset $receivers "httplogreceiver/heroku" -}}

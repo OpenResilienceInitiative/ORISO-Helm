@@ -121,6 +121,47 @@ kubectl get pv | grep -E 'signoz|clickhouse|zookeeper'   # RECLAIM POLICY = Reta
 `scripts/signoz_runtime_acceptance.py` (see `signoz-runtime-acceptance.md`)
 remains the full gate.
 
+## Replay reviewed CI test results
+
+The optional `signoz.otelCollector.ciLogIngest.enabled` flag defaults to
+`false`. Use a separately approved Dev overlay to enable it after the
+ClickHouse write check and backup gate pass. The collector listens on
+`127.0.0.1:4331` inside its Pod. A Kubernetes operator with access to
+`pods/portforward` can reach it through a numeric Pod port.
+
+Select a Ready Pod from the `caritas-signoz-otel-collector` Deployment that
+uses the chart ConfigMap. Check that the Pod has its own network namespace
+and review the running containers before forwarding. Keep the local forward
+and any SSH relay on loopback.
+
+```bash
+kubectl -n caritas port-forward --address 127.0.0.1 "pod/$collector_pod" 14331:4331
+```
+
+In another terminal, submit only the sanitized output of the approved
+[CI test exporter](https://github.com/OpenResilienceInitiative/ORISO-E2E/pull/117)
+for the verified GitHub run, job and test selectors. Use the attempt-specific
+sanitized JUnit artifact for the Dev nightly smoke cases. The reviewed case
+and file strings are source metadata. Keep report contents and application data
+out of them.
+
+```bash
+curl --fail --silent --show-error \
+  -H 'Content-Type: application/json' --data-binary "@$sanitized_ci_payload" \
+  http://127.0.0.1:14331/v1/logs
+```
+
+After the batch flush, verify the exact run and job IDs, test IDs, statuses
+and observation times in stored logs where `oriso.signal.source = 'ci'`.
+Then check the matching CI dashboard window. The collector can return HTTP
+200 after dropping records. If a request was interrupted, check stored rows before
+replaying it. The collector marker records admission through the operator
+receiver. The operator verifies GitHub artifact provenance before sending.
+
+Close the tunnel after verification. Use the approved overlay with the flag
+set to `false` to retire the listener. Hosted GitHub Actions delivery needs
+its own approved network and identity setup.
+
 ## nginx metrics (ingress-nginx)
 
 The ingress controller runs in the namespace `ingress-nginx`, outside the Helm
