@@ -251,7 +251,7 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call:dev"
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.15"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Storybook is a development surface and stays absent unless an environment
@@ -323,7 +323,7 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "dev"
+  imageVersion: "2.0.15"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -375,10 +375,10 @@ matrixrtcAuth:
   # The dev branch tracks the dev tag; release branches pin these by digest
   # because they are the LiveKit authorization boundary.
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:dev"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.14"
     pullPolicy: ""
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:dev"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.14"
     pullPolicy: ""
   service:
     port: 3010
@@ -413,7 +413,7 @@ online-counseling-redis:
 # Keycloak
 online-counseling-keycloak:
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
-  imageVersion: "dev"
+  imageVersion: "2.0.14"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
@@ -435,7 +435,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:dev"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.15"
   # Deletion-log outbox (OBP 2.1 #130). With task identities on, an AgencyService image older
   # than ORISO-AgencyService#356 refuses to start once DELETION_AUDIT_READ is required. Switch this
   # on in the same release that deploys that image; until then the outbox stays unreadable.
@@ -456,7 +456,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "dev"
+  imageVersion: "2.0.15"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -487,7 +487,7 @@ tenantService:
   systemEmailDeliveryServiceClient: ""
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "dev"
+  imageVersion: "2.0.15"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -523,7 +523,7 @@ userService:
     requestsPerSecond: 5
     burstMultiplier: 2
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:dev"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.15"
   serviceURL: "http://userservice:8080"
 
   keycloakResource: "user-service"
@@ -612,7 +612,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:dev"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.15"
 
 nginxController:
   enabled: true
@@ -623,7 +623,7 @@ nginxController:
 ipAnonymizer:
   enabled: false
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:latest"
+  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:2.0.13"
 
 
 # ---------- Observability ----------------------------------------------------------------
@@ -740,7 +740,7 @@ healthDashboard:
     authSecret: "health-dashboard-basic-auth"
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: dev
+    tag: "2.0.14"
     pullPolicy: ""
   replicas: 1
   namespace: ""

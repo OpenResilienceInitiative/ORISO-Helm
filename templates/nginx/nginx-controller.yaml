@@ -28,7 +28,8 @@ spec:
       serviceAccountName: ingress-nginx
       containers:
         - name: controller
-          image: registry.k8s.io/ingress-nginx/controller:v1.12.2
+          # v1.14.x supports Kubernetes 1.30-1.34 (v1.12.x ended at 1.32). Pinned by digest.
+          image: registry.k8s.io/ingress-nginx/controller:v1.14.5@sha256:af3312d040dbe8d503001a1094b248e8be372f70f317a4bc35f81fb312bff3a8
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           args:
             - /nginx-ingress-controller
