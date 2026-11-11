@@ -134,6 +134,11 @@ agencyService:
 tenantService:
   springProfilesActive: "dev"
   liquibaseContexts: "seed"
+  # The verified legacy Dev UTC writer signed the retained QA fixture on this day.
+  legacyDpaSigning:
+    zone: "UTC"
+    from: "2026-11-07T00:00:00"
+    to: "2026-11-07T23:59:59"
 consultingTypeService:
   liquibaseContexts: "seed"
   # Frontend#1979 (OBP 2.1 #101): e-mail notification settings are QA'd on Dev.

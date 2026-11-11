@@ -80,6 +80,8 @@ agencyService:
   springProfilesActive: "prod"
 tenantService:
   springProfilesActive: "prod"
+  # Pre-Dev layers over Dev and has no verified legacy signing window.
+  legacyDpaSigning: null
 consultingTypeService:
   # tests/render_release_toggle_overrides_test.py: the e-mail notification
   # switch (Frontend#1979) is QA'd on Dev only; Pre-Dev keeps what MongoDB stores.
