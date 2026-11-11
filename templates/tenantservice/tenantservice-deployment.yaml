@@ -1,4 +1,5 @@
 {{- $scenarioEnabled := dig "taskIdentities" "enabled" false .Values.global.keycloak -}}
+{{- $legacyDpaSigning := .Values.tenantService.legacyDpaSigning | default dict -}}
 # TenantService Deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -173,6 +174,14 @@ spec:
               configMapKeyRef:
                 key: APP_BASE_URL
                 name: tenantservice-configmap-env
+          {{- if and $legacyDpaSigning.zone $legacyDpaSigning.from $legacyDpaSigning.to }}
+          - name: ORISO_DPA_LEGACY_SIGNING_ZONE
+            value: {{ $legacyDpaSigning.zone | quote }}
+          - name: ORISO_DPA_LEGACY_SIGNING_FROM
+            value: {{ $legacyDpaSigning.from | quote }}
+          - name: ORISO_DPA_LEGACY_SIGNING_TO
+            value: {{ $legacyDpaSigning.to | quote }}
+          {{- end }}
           - name: TECHNICAL_SERVICE_SUBJECT
             valueFrom:
               configMapKeyRef:

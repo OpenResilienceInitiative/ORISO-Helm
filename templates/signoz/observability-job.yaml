@@ -1,16 +1,10 @@
 {{- $signoz := get .Values "signoz" | default dict -}}
 {{- $managed := get $signoz "orisoObservability" | default dict -}}
+{{- $deploymentIdentity := get $managed "deploymentIdentity" | default dict -}}
 {{- if and (get $signoz "enabled" | default false) (get $managed "enabled" | default false) }}
 {{- $name := printf "%s-signoz-observability" .Release.Name -}}
 {{- $apiKeySecret := get $managed "apiKeySecret" | default dict -}}
 {{- $collector := get .Values "signozCollector" | default dict -}}
-{{- $signozApp := get $signoz "signoz" | default dict -}}
-{{- $signozService := get $signozApp "service" | default dict -}}
-{{- $signozServicePort := get $signozService "port" | default 8080 -}}
-{{- /* SigNoz serves its API under the path of its external URL (StripPrefix
-in v0.135.1), so the in-cluster base URL carries that path too. */ -}}
-{{- $signozEnv := get $signozApp "env" | default dict -}}
-{{- $signozBasePath := (urlParse (get $signozEnv "signoz_global_external__url" | default "")).path | trimSuffix "/" -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -51,7 +45,7 @@ spec:
             - provision
           env:
             - name: SIGNOZ_API_URL
-              value: {{ printf "http://%s:%v%s" (include "oriso.signozServiceName" .) $signozServicePort $signozBasePath | quote }}
+              value: {{ include "oriso.signozInternalApiUrl" . | quote }}
             - name: SIGNOZ_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -65,8 +59,12 @@ spec:
               value: {{ .Values.global.observability.deploymentEnvironment | quote }}
             - name: ORISO_CLUSTER_NAME
               value: {{ get $collector "clusterName" | quote }}
+            - name: ORISO_E2E_DASHBOARDS
+              value: {{ get $managed "e2eDashboards" | default false | quote }}
             - name: ORISO_CONFORMANCE_CHECK
               value: {{ get $managed "conformanceCheck" | default false | quote }}
+            - name: ORISO_DEPLOYMENT_IDENTITY_ENABLED
+              value: {{ get $deploymentIdentity "enabled" | default false | quote }}
           resources:
 {{ get $managed "resources" | default dict | toYaml | nindent 12 }}
           securityContext:

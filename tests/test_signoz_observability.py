@@ -90,6 +90,29 @@ class AssetContractTest(unittest.TestCase):
                 "deployment.environment = 'pre-dev'", query["filter"]["expression"]
             )
 
+    def test_deployment_identity_uses_a_current_scoped_gauge(self) -> None:
+        dashboards, alerts = MODULE.load_assets(ASSETS, deployment_identity=True)
+        dashboards, alerts = MODULE.materialize_assets(
+            dashboards, alerts, environment="dev", cluster_name="oriso-dev",
+            channel_name="oriso-alerts-slack",
+        )
+        MODULE.validate_asset_contract(
+            dashboards, alerts, environment="dev", cluster_name="oriso-dev",
+            channel_name="oriso-alerts-slack",
+        )
+        alert = next(item for item in alerts if item["_orisoSlug"] == "deployment-identity-mismatch")
+        self.assertFalse(alert["disabled"])
+        query = alert["condition"]["compositeQuery"]["queries"][0]["spec"]
+        self.assertEqual(query["aggregations"], [{
+            "metricName": "oriso.deployment.identity.mismatch",
+            "temporality": "", "timeAggregation": "latest", "spaceAggregation": "max",
+        }])
+        self.assertIn("deployment.environment = 'dev'", query["filter"]["expression"])
+        self.assertIn("k8s.cluster.name = 'oriso-dev'", query["filter"]["expression"])
+        threshold = alert["condition"]["thresholds"]["spec"][0]
+        self.assertEqual((threshold["op"], threshold["target"]), ("above", 0))
+        self.assertEqual(threshold["channels"], ["oriso-alerts-slack"])
+
     def test_assets_never_expose_protected_identifiers_or_content(self) -> None:
         encoded = json.dumps(
             {"dashboards": self.dashboards, "alerts": self.alerts},
@@ -107,6 +130,39 @@ class AssetContractTest(unittest.TestCase):
             "password",
         ):
             self.assertNotIn(forbidden, encoded)
+
+    def test_platform_cpu_panel_reads_the_emitted_cores_gauge(self) -> None:
+        platform = next(item for item in self.dashboards if item["name"] == "oriso-platform-health-pre-dev")
+        cpu = platform["spec"]["panels"]["pod-cpu"]
+        query, = MODULE.dashboard_builder_queries(cpu)
+        self.assertEqual(cpu["spec"]["display"]["name"], "Pod CPU usage (cores)")
+        self.assertEqual(query["aggregations"], [{
+            "metricName": "k8s.pod.cpu.usage",
+            "temporality": "",
+            "timeAggregation": "avg",
+            "spaceAggregation": "max",
+        }])
+        self.assertEqual([field["name"] for field in query["groupBy"]], ["k8s.namespace.name"])
+        self.assertEqual(
+            query["filter"]["expression"],
+            "deployment.environment = 'pre-dev' AND k8s.cluster.name = 'oriso-predev'",
+        )
+
+    def test_platform_node_condition_panel_preserves_each_node_status(self) -> None:
+        platform = next(item for item in self.dashboards if item["name"] == "oriso-platform-health-pre-dev")
+        node = platform["spec"]["panels"]["node-condition"]
+        query, = MODULE.dashboard_builder_queries(node)
+        self.assertEqual(query["aggregations"], [{
+            "metricName": "k8s.node.condition",
+            "temporality": "",
+            "timeAggregation": "latest",
+            "spaceAggregation": "max",
+        }])
+        self.assertEqual([field["name"] for field in query["groupBy"]], ["condition", "k8s.node.name"])
+        self.assertEqual(
+            query["filter"]["expression"],
+            "deployment.environment = 'pre-dev' AND k8s.cluster.name = 'oriso-predev'",
+        )
 
 
 class ApiPayloadContractTest(unittest.TestCase):
@@ -330,6 +386,33 @@ class UpsertContractTest(unittest.TestCase):
             if method == "POST" and path == "/api/v2/rules"
         ]
         self.assertTrue(all("_orisoSlug" not in payload for payload in rule_payloads))
+
+    def test_disabled_identity_rule_is_only_reconciled_when_owned(self) -> None:
+        _, alerts = MODULE.load_assets(ASSETS, deployment_identity=False)
+        _, alerts = MODULE.materialize_assets(
+            [], alerts, environment="dev", cluster_name="oriso-dev",
+            channel_name="oriso-alerts-slack",
+        )
+        alert = next(item for item in alerts if item["_orisoSlug"] == "deployment-identity-mismatch")
+        self.assertTrue(alert["disabled"])
+        with self.assertRaisesRegex(RuntimeError, "disabled"):
+            MODULE.build_test_rule([alert], "deployment-identity-mismatch")
+
+        listing = ("GET", "/api/v2/rules")
+        for records in ([], [{"id": "manual", "alert": alert["alert"]}]):
+            client = self.Client({listing: {"status": "success", "data": records}})
+            MODULE.upsert_alerts(client, [alert])
+            self.assertEqual([method for method, *_ in client.calls], ["GET"])
+
+        current = {
+            "id": "managed", "alert": alert["alert"], "labels": {"managed_by": "oriso_helm"},
+        }
+        client = self.Client({listing: {"status": "success", "data": [current]}})
+        MODULE.upsert_alerts(client, [alert])
+        method, path, payload, _ = client.calls[-1]
+        self.assertEqual((method, path), ("PUT", "/api/v2/rules/managed"))
+        self.assertTrue(payload["disabled"])
+        self.assertNotIn("_orisoSlug", payload)
 
     def test_missing_channel_is_reported_not_created(self) -> None:
         client = self.Client(

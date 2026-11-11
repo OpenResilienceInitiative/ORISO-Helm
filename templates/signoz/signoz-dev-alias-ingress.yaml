@@ -1,0 +1,34 @@
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $ingress := get $signoz "orisoIngress" | default dict -}}
+{{- $observability := get .Values.global "observability" | default dict -}}
+{{- $isDev := and (eq .Values.global.domainName "dev.oriso.org") (eq (get $observability "deploymentEnvironment") "dev") -}}
+{{- if and $isDev .Values.global.enableTls (get $signoz "enabled") (dig "enabled" true $ingress) (get $ingress "devAliasRedirect") -}}
+{{- $service := get (get $signoz "signoz" | default dict) "service" | default dict -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  # Preserve the live Ingress name and its Certificate owner reference.
+  name: signoz-oriso-org-redirect
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/temporal-redirect: "https://dev.oriso.org/signoz/"
+    # Retain the Certificate owner when rolling back to an older chart.
+    helm.sh/resource-policy: keep
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: signoz.oriso.org
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "oriso.signozServiceName" . }}
+                port:
+                  number: {{ get $service "port" | default 8080 }}
+  tls:
+    - hosts: [signoz.oriso.org]
+      secretName: signoz-oriso-org-tls
+{{- end }}
