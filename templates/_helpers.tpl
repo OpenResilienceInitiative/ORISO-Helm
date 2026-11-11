@@ -12,6 +12,11 @@ scripts/cutover-release-preflight.py, not by a plain `helm upgrade`.
 {{- required (printf "%s must be set" $valueName) (index . 1) -}}
 {{- end -}}
 
+{{/* Name of the private Service for the upstream MatrixRTC authorization deployment. */}}
+{{- define "oriso.matrixrtcAuthorizationServiceName" -}}
+matrixrtc-authorization-service
+{{- end -}}
+
 {{/* Mandatory installation identity shared by UserService and Keycloak. */}}
 {{- define "oriso.emailBrandingName" -}}
 {{- $name := toString (.Values.global.emailBrandingName | default "") | trim -}}

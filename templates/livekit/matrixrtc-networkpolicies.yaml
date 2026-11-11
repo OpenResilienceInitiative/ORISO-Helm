@@ -93,6 +93,37 @@ spec:
         - podSelector:
             matchLabels:
               app: livekit
+        {{- /*
+          LiveKit runs with hostNetwork, so CNIs that treat host-network traffic as
+          node traffic do not match the podSelector above once LiveKit and this
+          receiver run on different nodes; the signed /sfu_webhook callbacks are
+          then dropped. Operators may admit the exact LiveKit node addresses here.
+          Port 8080 also serves the token endpoints the policy gateway fronts, so
+          every listed address bypasses that gateway: list only nodes eligible for
+          LiveKit, never a cluster-wide or catch-all range. Empty keeps the
+          pod-only boundary.
+        */}}
+        {{- range $cidr := (.Values.matrixrtcAuth.livekitNodeCidrs | default list) }}
+        {{- $value := toString $cidr | trim }}
+        {{- /*
+          Canonical IPv4 only, as StrictIPCIDRValidation expects: octets 0-255
+          without leading zeroes, prefix /24 to /32, and no host bits set. A
+          non-canonical entry fails instead of being widened or narrowed.
+        */}}
+        {{- $octet := "(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])" }}
+        {{- $error := printf "matrixrtcAuth.livekitNodeCidrs entry %q must be a canonical IPv4 CIDR from /24 to /32 (no host bits set, no leading zeroes) naming LiveKit nodes, for example 10.0.0.5/32" $value }}
+        {{- if not (regexMatch (printf "^%s(\\.%s){3}/(2[4-9]|3[0-2])$" $octet $octet) $value) }}
+        {{- fail $error }}
+        {{- end }}
+        {{- $address := splitList "/" $value }}
+        {{- $lastOctet := atoi (index (splitList "." (index $address 0)) 3) }}
+        {{- $blockSize := index (list 256 128 64 32 16 8 4 2 1) (sub (atoi (index $address 1)) 24) }}
+        {{- if ne (mod $lastOctet $blockSize) 0 }}
+        {{- fail $error }}
+        {{- end }}
+        - ipBlock:
+            cidr: {{ $value | quote }}
+        {{- end }}
       ports:
         - protocol: TCP
           port: 8080

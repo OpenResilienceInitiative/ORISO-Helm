@@ -370,12 +370,43 @@ def _check_runtime_readiness(
 ) -> None:
     chi_name = f"{release}-clickhouse"
     chi = json.loads(_kubectl(runner, namespace, "get", "chi", chi_name, "-o", "json"))
-    if chi.get("metadata", {}).get("deletionTimestamp"):
+    installation = chi.get("metadata", {})
+    if installation.get("deletionTimestamp"):
         raise RuntimeError(f"ClickHouseInstallation {chi_name} is deleting")
+    installation_uid = installation.get("uid")
+    if not installation_uid:
+        raise RuntimeError(f"ClickHouseInstallation {chi_name} has no UID")
+
+    _kubectl(
+        runner, namespace, "rollout", "status", f"deployment/{release}-clickhouse-operator",
+        f"--timeout={timeout}",
+    )
+    statefulsets = json.loads(_kubectl(
+        runner, namespace, "get", "statefulset", "-l", f"clickhouse.altinity.com/chi={chi_name}",
+        "-o", "json",
+    ))["items"]
+    clickhouse_targets = []
+    for statefulset in statefulsets:
+        metadata = statefulset["metadata"]
+        if not any(
+            owner.get("controller") is True
+            and owner.get("kind") == "ClickHouseInstallation"
+            and owner.get("name") == chi_name
+            and owner.get("uid") == installation_uid
+            for owner in metadata.get("ownerReferences", [])
+        ):
+            continue
+        name = metadata["name"]
+        if metadata.get("deletionTimestamp"):
+            raise RuntimeError(f"ClickHouse StatefulSet {name} is deleting")
+        if statefulset["spec"].get("replicas", 1) < 1:
+            raise RuntimeError(f"ClickHouse StatefulSet {name} is scaled to zero")
+        clickhouse_targets.append(f"statefulset/{name}")
+    if not clickhouse_targets:
+        raise RuntimeError(f"ClickHouseInstallation {chi_name} has no owned StatefulSets")
 
     rollout_targets = (
-        f"deployment/{release}-clickhouse-operator",
-        f"statefulset/{release}-clickhouse-cluster-0-0",
+        *sorted(clickhouse_targets),
         f"deployment/{release}-signoz-otel-collector",
         f"statefulset/{release}-signoz",
     )
