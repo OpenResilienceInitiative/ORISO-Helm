@@ -307,3 +307,59 @@ rules, or routes.
 
 Do not delete the API key Secret during rollback. Rotate the key through the
 normal secret-management process if it may be exposed.
+
+## Read stored browser Web Vitals
+
+Run the read-only check against the direct SigNoz API URL for the intended
+environment. It uses the existing `SIGNOZ_URL` and `SIGNOZ_API_KEY` settings
+and queries the stored browser samples independently of the managed assets.
+
+```bash
+# Record the start before the Frontend and Admin browser checks.
+web_vitals_since_ms=$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')
+
+# Run after the browser activity and its metric export interval.
+python3 files/signoz/signoz_observability.py --mode check-browser-vitals \
+  --environment dev --since-unix-ms "$web_vitals_since_ms"
+```
+
+The report lists stored sample counts and the latest timestamp for LCP, CLS,
+INP, TTFB and FCP separately for `frontend` and `admin`. The window starts at
+the later of the supplied timestamp and 30 minutes ago. A CLS value of zero
+is valid. The other four metrics need a positive histogram observation count.
+Missing evidence produces exit code 1 and names the affected app and metric.
+
+Periodic exports can repeat a measurement from an open tab. For the signed-in
+Dev acceptance, review the browser activity and requests alongside the stored
+LCP readback for both applications.
+
+### Schedule the stored-sample check
+
+The chart keeps the schedule off by default. Enable it in the intended
+environment's final values overlay after the reviewed RUM rollout, capacity
+recovery and a successful one-shot check with that environment's credential.
+Reference an existing Secret with a dedicated, approved SigNoz Viewer API key
+in its `apiKey` entry. The provisioning job has its own credential.
+
+```yaml
+signoz:
+  orisoObservability:
+    browserVitalsCheck:
+      enabled: true
+      apiKeySecretName: signoz-browser-vitals-reader
+```
+
+The CronJob uses the internal SigNoz API and checks the most recent 30 minutes
+every five minutes. It keeps the last three successful Jobs and the last six
+failed Jobs. Each run logs the aggregate evidence or the query failure.
+Managed dashboard and alert provisioning has its own enable flag.
+
+After enablement, inspect two successive scheduled Jobs for the intended
+release and check each report for both applications.
+
+```bash
+kubectl -n caritas get jobs \
+  -l app.kubernetes.io/name=signoz-browser-vitals,app.kubernetes.io/instance=caritas \
+  --sort-by=.metadata.creationTimestamp
+kubectl -n caritas logs "job/${job_name:?Set the observed Job name}" -c check-browser-vitals
+```

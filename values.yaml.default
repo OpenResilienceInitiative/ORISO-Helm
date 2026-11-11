@@ -38,6 +38,9 @@ global:
     otlpCollectorHost: ""
     # Application and data-store metrics require signozCollector.enabled=true.
     appMetrics: false
+    # Optional cluster-owned ingress-nginx controller to scrape. Environment
+    # overlays must opt in because this chart does not install the controller.
+    externalIngressNginxNamespace: ""
     dbMetrics: false
     tracingSamplingProbability: ""
     testRunBaggage: false
@@ -352,6 +355,13 @@ matrixrtcAuth:
   # Optional: namespace of the ingress controller for the call NetworkPolicies.
   # Empty means "ingress-nginx". The release namespace is always admitted as well.
   ingressControllerNamespace: ""
+  # Optional: canonical IPv4 node CIDRs (/24 to /32, e.g. "10.0.0.5/32") of the LiveKit nodes that
+  # may send the signed /sfu_webhook callback to the authorization receiver.
+  # LiveKit uses hostNetwork, so some CNIs see its traffic as node traffic that the
+  # pod selector does not match across nodes. Every listed address also reaches
+  # the receiver's token endpoints directly, so list only LiveKit-eligible nodes.
+  # Empty keeps the pod-only boundary.
+  livekitNodeCidrs: []
   bootstrap:
     enabled: true
     backoffLimit: 6
@@ -381,6 +391,9 @@ livekit:
   deploymentStrategy: Recreate
   terminationGracePeriodSeconds: 60
   image: "docker.io/livekit/livekit-server:v1.13.5"
+  # Optional private signed-webhook receiver. Empty uses the chart's upstream
+  # MatrixRTC authorization Service in the same namespace.
+  legacyWebhookUrl: ""
   existingConfigSecret:
     # Pre-provision this Secret outside Helm for the same release-history boundary.
     name: "livekit-config-runtime"
@@ -628,6 +641,10 @@ signoz:
     apiKeySecret:
       name: ""
       key: apiKey
+    # Optional recurring RUM readback with a separate query-only API key.
+    browserVitalsCheck:
+      enabled: false
+      apiKeySecretName: ""
     # Existing SigNoz notification channel; the chart does not create it.
     channelName: "oriso-alerts-slack"
     resources:
