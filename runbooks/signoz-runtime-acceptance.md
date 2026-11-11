@@ -30,6 +30,10 @@ The command fails closed unless all of the following are true:
 - a synthetic Kubernetes Event is collected;
 - a representative nested ORISO JSON log is collected with trace correlation,
   while its free-text body and stack marker are provably absent.
+- all four Java services have fresh stored logs, metrics and traces with their
+  canonical service name and the expected deployment environment. Every fresh
+  span has a populated service version. Each service also has a stored log
+  whose trace ID and span ID match a span in that scope.
 
 The active probe contains only the service name `oriso-signoz-acceptance`, the
 deployment environment, and a random acceptance ID. It never contains user
@@ -55,6 +59,7 @@ that can be attached to the PR or release evidence. A successful result sets
 `clickhouseCapacity` to `passed` and records positive trace, metric, and log
 counts under `syntheticReadback`. It also records positive infrastructure counts
 under `k8sInfraReadback` and exactly zero for `forbiddenLogBody`.
+`javaSignals` records the stored Java telemetry evidence for the full gate.
 
 The gate creates short-lived `curlimages/curl` probe pods with `--rm`, one
 short-lived BusyBox log probe, and one namespaced synthetic Kubernetes Event.
@@ -80,6 +85,30 @@ Use this mode for rollout and pipeline diagnosis. It reports capacity and
 persistence as skipped. Release evidence requires the full command.
 
 Use `--skip-k8s-infra` only when validating the backend-only repair before the
-stacked Kubernetes collection change is installed. That mode omits both
-infrastructure collector readiness and infrastructure readback, so it is also
-not sufficient as final PreDev or Dev evidence.
+stacked Kubernetes collection change is installed. Full PreDev and Dev evidence
+also requires infrastructure readiness, infrastructure readback and stored Java
+signal verification.
+
+## Read stored Java signals
+
+Use the read-only mode to inspect the same stored Java signal contract on its
+own. Set `DEV_SIGNOZ_SSH_HOST` to the intended Dev SSH host.
+
+```bash
+python3 scripts/signoz_runtime_acceptance.py \
+  --namespace caritas --release caritas --environment dev \
+  --ssh-host "$DEV_SIGNOZ_SSH_HOST" --check-java-signals
+```
+
+The report counts actual log, metric and trace samples within 15 minutes for
+`user-service`, `agency-service`, `tenant-service` and `consulting-type-service`.
+For each service, every fresh trace row must carry the exact
+`deployment.environment` and a populated `service.version`. Missing, blank and
+`unknown` versions count as invalid. The report includes the fresh trace total
+and separate counts for wrong environments and invalid versions. Multiple
+populated versions can coexist during a rollout.
+
+The 60-minute correlation requires matching trace and span IDs from the same
+service and deployment environment. The command exits 1 on missing signals or
+trace identity violations and returns aggregate counts. For release evidence,
+run the full command once the fresh window reflects the reviewed rollout.
