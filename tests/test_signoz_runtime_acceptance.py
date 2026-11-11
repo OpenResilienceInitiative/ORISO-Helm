@@ -721,10 +721,41 @@ class ClickHouseRetentionContractTest(unittest.TestCase):
         }
 
     def run_kubectl(self, command: list[str], *, input_text: str | None = None) -> mock.Mock:
+        if command[3:] == ["get", "chi", "caritas-clickhouse", "-o", "json"]:
+            return mock.Mock(stdout=json.dumps({"metadata": {"uid": "current-chi"}}))
+        if command[3:] == [
+            "get", "statefulset", "-l", "clickhouse.altinity.com/chi=caritas-clickhouse", "-o", "json",
+        ]:
+            return mock.Mock(stdout=json.dumps({"items": [
+                {
+                    "metadata": {
+                        "name": f"statefulset-{pod}",
+                        "uid": f"statefulset-{pod}",
+                        "ownerReferences": [{
+                            "kind": "ClickHouseInstallation",
+                            "name": "caritas-clickhouse",
+                            "uid": "current-chi",
+                            "controller": True,
+                        }],
+                    },
+                    "spec": {"replicas": 1},
+                }
+                for pod in self.disks
+            ]}))
         if command[3:5] == ["get", "pods"]:
             self.assertIn("clickhouse.altinity.com/chi=caritas-clickhouse", command[6])
             return mock.Mock(stdout=json.dumps({"items": [
-                {"metadata": {"name": pod}, "status": {"conditions": [{"type": "Ready", "status": "True"}]}}
+                {
+                    "metadata": {
+                        "name": pod,
+                        "ownerReferences": [{
+                            "kind": "StatefulSet",
+                            "uid": f"statefulset-{pod}",
+                            "controller": True,
+                        }],
+                    },
+                    "status": {"conditions": [{"type": "Ready", "status": "True"}]},
+                }
                 for pod in self.disks
             ]}))
         if command[7:11] == ["-i", "--", "sh", "-s"]:
