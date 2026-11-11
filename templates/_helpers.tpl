@@ -12,6 +12,11 @@ scripts/cutover-release-preflight.py, not by a plain `helm upgrade`.
 {{- required (printf "%s must be set" $valueName) (index . 1) -}}
 {{- end -}}
 
+{{/* Name of the private Service for the upstream MatrixRTC authorization deployment. */}}
+{{- define "oriso.matrixrtcAuthorizationServiceName" -}}
+matrixrtc-authorization-service
+{{- end -}}
+
 {{/* Mandatory installation identity shared by UserService and Keycloak. */}}
 {{- define "oriso.emailBrandingName" -}}
 {{- $name := toString (.Values.global.emailBrandingName | default "") | trim -}}
@@ -185,6 +190,16 @@ the bundled SigNoz chart is enabled, use its in-cluster collector service.
 {{- define "oriso.signozServiceName" -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
 {{- default (include "oriso.signozFullname" .) (get $signoz "orisoServiceNameOverride" | default "") -}}
+{{- end -}}
+
+{{- define "oriso.signozInternalApiUrl" -}}
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $app := get $signoz "signoz" | default dict -}}
+{{- $service := get $app "service" | default dict -}}
+{{- $env := get $app "env" | default dict -}}
+{{- /* SigNoz v0.135.1 strips the external URL path from API routes. */ -}}
+{{- $path := (urlParse (get $env "signoz_global_external__url" | default "")).path | trimSuffix "/" -}}
+{{- printf "http://%s:%v%s" (include "oriso.signozServiceName" .) (get $service "port" | default 8080) $path -}}
 {{- end -}}
 
 {{- /* The vendored chart's otelCollector.fullname. */ -}}

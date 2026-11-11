@@ -40,6 +40,11 @@ class State:
         self.dashboards: dict[str, dict[str, Any]] = {}
         self.rules: dict[str, dict[str, Any]] = {}
         self.queries = 0
+        self.browser_vitals_queries: list[dict[str, Any]] = []
+        self.browser_vitals_response: dict[str, Any] = {}
+        self.browser_vitals_status = 200
+        self.redirect_browser_vitals = False
+        self.redirect_requests = 0
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -69,7 +74,18 @@ class Handler(BaseHTTPRequestHandler):
         self._send(403, {"error": "forbidden"})
         return False
 
+    def _store_dashboard(self, identifier: str, body: dict[str, Any], status: int) -> None:
+        # SigNoz v0.135.1 serializes legacy metric tag keys as attributes.
+        for query in MODULE.dashboard_builder_queries(body):
+            for group in query.get("groupBy", []):
+                if group.get("fieldContext") == "tag":
+                    group["fieldContext"] = "attribute"
+        self.state.dashboards[identifier] = {"id": identifier, **body}
+        self._send(status, self.state.dashboards[identifier])
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        if self.path == "/redirect-target":
+            self.state.redirect_requests += 1
         if not self._require_key():
             return
         if self.path == "/api/v1/channels":
@@ -105,14 +121,22 @@ class Handler(BaseHTTPRequestHandler):
             )
         elif self.path == "/api/v2/dashboards":
             identifier = f"dashboard-{len(self.state.dashboards) + 1}"
-            self.state.dashboards[identifier] = {"id": identifier, **body}
-            self._send(201, self.state.dashboards[identifier])
+            self._store_dashboard(identifier, body, 201)
         elif self.path == "/api/v2/rules":
             identifier = f"rule-{len(self.state.rules) + 1}"
             self.state.rules[identifier] = {"id": identifier, **body}
             self._send(201, self.state.rules[identifier])
         elif self.path == "/api/v5/query_range":
             self.state.queries += 1
+            if body.get("requestType") == "raw":
+                self.state.browser_vitals_queries.append(body)
+                if self.state.redirect_browser_vitals:
+                    self.send_response(302)
+                    self.send_header("Location", "/redirect-target")
+                    self.end_headers()
+                else:
+                    self._send(self.state.browser_vitals_status, self.state.browser_vitals_response)
+                return
             expression = body["compositeQuery"]["queries"][0]["spec"]["filter"][
                 "expression"
             ]
@@ -138,8 +162,7 @@ class Handler(BaseHTTPRequestHandler):
             self.state.channel_writes += 1
             self._send(405, {"error": "channel writes are not allowed"})
         elif self.path.startswith("/api/v2/dashboards/"):
-            self.state.dashboards[identifier] = {"id": identifier, **body}
-            self._send(200, self.state.dashboards[identifier])
+            self._store_dashboard(identifier, body, 200)
         elif self.path.startswith("/api/v2/rules/"):
             self.state.rules[identifier] = {"id": identifier, **body}
             self._send(204)
@@ -148,6 +171,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class HttpFlowTest(unittest.TestCase):
+    now_ms = 1_750_000_000_000
+
     def setUp(self) -> None:
         self.state = State()
         handler = type("BoundHandler", (Handler,), {"state": self.state})
@@ -191,6 +216,36 @@ class HttpFlowTest(unittest.TestCase):
             len(self.state.test_rules),
         )
 
+    def test_fake_backend_normalizes_legacy_tag_group_by_to_attribute(self) -> None:
+        # Guards the fake against drifting from SigNoz v0.135.1, which stores a
+        # legacy `tag` group-by field as an `attribute`.
+        import urllib.request
+
+        group = {"name": "k8s.pod.name", "fieldContext": "tag"}
+        dashboard = {
+            "title": "tag normalization",
+            "widgets": [
+                {"kind": "signoz/BuilderQuery", "spec": {"groupBy": [group]}}
+            ],
+        }
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self.server.server_port}/api/v2/dashboards",
+            data=json.dumps(dashboard).encode(),
+            headers={
+                "SIGNOZ-API-KEY": "test-api-key",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request) as response:
+            returned = json.load(response)
+        for stored in (returned, next(iter(self.state.dashboards.values()))):
+            queries = MODULE.dashboard_builder_queries(stored)
+            self.assertEqual(
+                [g["fieldContext"] for q in queries for g in q["groupBy"]],
+                ["attribute"],
+            )
+
     def test_provision_is_idempotent_and_never_writes_channels(self) -> None:
         for _ in range(2):
             code, printed = self._main("--mode", "provision")
@@ -219,6 +274,104 @@ class HttpFlowTest(unittest.TestCase):
             sort_keys=True,
         )
         self.assertEqual(before, after)
+
+    def _browser_vitals_response(self) -> dict[str, Any]:
+        rows = [
+            {"data": {
+                "service_name": service,
+                "metric_name": metric,
+                "samples": 1,
+                "latest_ms": self.now_ms - 1,
+            }}
+            for service in ("frontend", "admin")
+            for metric in ("lcp.count", "cls", "inp.count", "ttfb.count", "fcp.count")
+        ]
+        return {"type": "raw", "data": {"results": [{
+            "queryName": "BrowserVitals", "rows": rows, "nextCursor": "",
+        }]}}
+
+    def _browser_vitals(self, *argv: str) -> tuple[int, str]:
+        with mock.patch.object(MODULE.time, "time", return_value=self.now_ms / 1000):
+            return self._main(
+                "--mode", "check-browser-vitals", "--environment", "dev",
+                "--cluster-name", "", "--assets-dir", "/missing-assets", *argv,
+            )
+
+    def test_browser_vitals_checks_both_apps_after_the_requested_start(self) -> None:
+        self.state.browser_vitals_response = self._browser_vitals_response()
+        self.state.channels.clear()
+        since = self.now_ms - 120_000
+
+        code, printed = self._browser_vitals("--since-unix-ms", str(since))
+
+        self.assertEqual(code, 0)
+        report = json.loads(printed)
+        self.assertEqual(report["missing"], [])
+        self.assertEqual(report["services"]["admin"]["cls"]["samples"], 1)
+        request, = self.state.browser_vitals_queries
+        self.assertEqual((request["start"], request["end"]), (since, self.now_ms))
+        query, = request["compositeQuery"]["queries"]
+        self.assertEqual(query["type"], "clickhouse_sql")
+        sql = query["spec"]["query"]
+        self.assertIn("resource_attrs['deployment.environment'] = 'dev'", sql)
+        self.assertIn("resource_attrs['oriso.signal.source'] = 'browser'", sql)
+        self.assertEqual(self._counts(), (0, 0, 0, 0))
+
+    def test_browser_vitals_fails_when_only_one_app_has_a_required_metric(self) -> None:
+        response = self._browser_vitals_response()
+        rows = response["data"]["results"][0]["rows"]
+        rows[:] = [row for row in rows if (
+            row["data"]["service_name"], row["data"]["metric_name"]
+        ) != ("admin", "inp.count")]
+        self.state.browser_vitals_response = response
+
+        code, printed = self._browser_vitals()
+
+        self.assertEqual(code, 1)
+        report = json.loads(printed)
+        self.assertEqual(report["missing"], ["admin/inp"])
+        self.assertEqual(report["startUnixMs"], self.now_ms - 30 * 60_000)
+
+    def test_browser_vitals_rejects_partial_duplicate_and_stale_evidence(self) -> None:
+        for defect in ("warning", "duplicate", "stale", "foreign"):
+            with self.subTest(defect=defect):
+                response = self._browser_vitals_response()
+                rows = response["data"]["results"][0]["rows"]
+                if defect == "warning":
+                    response["warning"] = ["partial result"]
+                elif defect == "duplicate":
+                    rows.append(rows[0])
+                elif defect == "stale":
+                    rows[0]["data"]["latest_ms"] = self.now_ms - 30 * 60_000 - 1
+                else:
+                    rows[0]["data"]["service_name"] = "foreign-service"
+                self.state.browser_vitals_response = response
+                with self.assertRaisesRegex(RuntimeError, "incomplete browser vitals evidence"):
+                    self._browser_vitals()
+
+    def test_browser_vitals_does_not_forward_the_api_key_on_redirect(self) -> None:
+        self.state.redirect_browser_vitals = True
+
+        with self.assertRaisesRegex(RuntimeError, "returned 302"):
+            self._browser_vitals()
+
+        self.assertEqual(self.state.redirect_requests, 0)
+
+    def test_browser_vitals_reports_http_status_without_logging_response_detail(self) -> None:
+        self.state.browser_vitals_status = 403
+        self.state.browser_vitals_response = {"error": "DO-NOT-PRINT test-api-key"}
+
+        with self.assertRaisesRegex(RuntimeError, "returned 403") as failure:
+            self._browser_vitals()
+
+        self.assertNotIn("DO-NOT-PRINT", str(failure.exception))
+        self.assertNotIn("test-api-key", str(failure.exception))
+
+    def test_browser_vitals_refuses_a_future_window_before_querying(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "timestamp before now"):
+            self._browser_vitals("--since-unix-ms", str(self.now_ms + 1))
+
+        self.assertEqual(self.state.browser_vitals_queries, [])
 
     def test_provision_stops_before_writing_when_the_channel_is_missing(self) -> None:
         self.state.channels.clear()

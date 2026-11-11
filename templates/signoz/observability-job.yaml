@@ -5,13 +5,6 @@
 {{- $name := printf "%s-signoz-observability" .Release.Name -}}
 {{- $apiKeySecret := get $managed "apiKeySecret" | default dict -}}
 {{- $collector := get .Values "signozCollector" | default dict -}}
-{{- $signozApp := get $signoz "signoz" | default dict -}}
-{{- $signozService := get $signozApp "service" | default dict -}}
-{{- $signozServicePort := get $signozService "port" | default 8080 -}}
-{{- /* SigNoz serves its API under the path of its external URL (StripPrefix
-in v0.135.1), so the in-cluster base URL carries that path too. */ -}}
-{{- $signozEnv := get $signozApp "env" | default dict -}}
-{{- $signozBasePath := (urlParse (get $signozEnv "signoz_global_external__url" | default "")).path | trimSuffix "/" -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -52,7 +45,7 @@ spec:
             - provision
           env:
             - name: SIGNOZ_API_URL
-              value: {{ printf "http://%s:%v%s" (include "oriso.signozServiceName" .) $signozServicePort $signozBasePath | quote }}
+              value: {{ include "oriso.signozInternalApiUrl" . | quote }}
             - name: SIGNOZ_API_KEY
               valueFrom:
                 secretKeyRef:

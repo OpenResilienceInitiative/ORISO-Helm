@@ -56,6 +56,13 @@ replaces the body with:
 Free-text messages, stack traces, request correlation IDs, email addresses,
 tokens, and every unlisted log attribute are not exported.
 
+The primary containers of the four Java deployments use the same service
+names for logs, traces and metrics. New agent logs carry `user-service`,
+`agency-service`, `tenant-service` or `consulting-type-service` on the
+resource and the log record. Earlier structured logs use `users`, `agencies`,
+`tenants` or `consultingtypes`, and earlier plain logs can carry the
+Kubernetes deployment name.
+
 The transformation fails closed per record, not per batch. `error_mode` is
 `ignore`, so a statement that fails on one record — truncated JSON, a
 non-hexadecimal trace id — is logged and skipped, and the unconditional body
