@@ -28,6 +28,17 @@ ENVIRONMENT_SLUG_TOKEN = "__ORISO_ENVIRONMENT_SLUG__"
 CLUSTER_TOKEN = "__ORISO_CLUSTER_NAME__"
 CHANNEL_TOKEN = "__ORISO_CHANNEL_NAME__"
 
+BROWSER_VITALS_SERVICES = ("frontend", "admin")
+# SigNoz stores histogram observations under .count and the CLS gauge under cls.
+BROWSER_VITALS_METRICS = {
+    "lcp": "lcp.count",
+    "cls": "cls",
+    "inp": "inp.count",
+    "ttfb": "ttfb.count",
+    "fcp": "fcp.count",
+}
+BROWSER_VITALS_LOOKBACK_MS = 30 * 60_000
+
 REQUIRED_DASHBOARD_SLUGS = {
     "oriso-live-chat",
     "oriso-service-reliability",
@@ -519,11 +530,19 @@ class SignozHttpError(RuntimeError):
         self.status = status
 
 
+class _RejectRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+
 class SignozClient:
-    def __init__(self, api_url: str, api_key: str, timeout: int = 20) -> None:
+    def __init__(
+        self, api_url: str, api_key: str, timeout: int = 20, *, reject_redirects: bool = False
+    ) -> None:
         self.api_url = api_url.rstrip("/") + "/"
         self.api_key = api_key
         self.timeout = timeout
+        self._opener = urllib.request.build_opener(_RejectRedirect()) if reject_redirects else None
 
     def request(
         self,
@@ -543,8 +562,9 @@ class SignozClient:
                 "SIGNOZ-API-KEY": self.api_key,
             },
         )
+        open_url = self._opener.open if self._opener is not None else urllib.request.urlopen
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with open_url(request, timeout=self.timeout) as response:
                 status = response.status
                 raw = response.read()
         except urllib.error.HTTPError as error:
@@ -664,6 +684,100 @@ def _execute_query(
     if not isinstance(response, dict) or response.get("status") != "success":
         raise RuntimeError("SigNoz query range did not return success")
     return response
+
+
+def _browser_vitals_sql(environment: str, start_ms: int, end_ms: int) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", environment):
+        raise RuntimeError("Invalid browser vitals environment")
+    metrics = ", ".join(f"'{name}'" for name in BROWSER_VITALS_METRICS.values())
+    services = ", ".join(f"'{name}'" for name in BROWSER_VITALS_SERVICES)
+    # The exporter stores one series identity per hour. Only sample time proves freshness.
+    return f"""WITH identities AS (
+  SELECT DISTINCT env, temporality, metric_name, fingerprint,
+    resource_attrs['service.name'] AS service_name
+  FROM signoz_metrics.distributed_time_series_v4
+  WHERE metric_name IN ({metrics})
+    AND unix_milli >= {start_ms - 3_600_000} AND unix_milli < {end_ms}
+    AND resource_attrs['deployment.environment'] = '{environment}'
+    AND resource_attrs['oriso.signal.source'] = 'browser'
+    AND service_name IN ({services})
+)
+SELECT i.service_name AS service_name, s.metric_name AS metric_name,
+  count() AS samples, max(s.unix_milli) AS latest_ms
+FROM signoz_metrics.distributed_samples_v4 AS s
+GLOBAL INNER JOIN identities AS i USING (env, temporality, metric_name, fingerprint)
+WHERE s.metric_name IN ({metrics}) AND s.unix_milli >= {start_ms} AND s.unix_milli < {end_ms}
+  AND bitAnd(s.flags, 1) = 0 AND isFinite(s.value)
+  AND (s.value > 0 OR (s.metric_name = 'cls' AND s.value = 0))
+GROUP BY i.service_name, s.metric_name
+ORDER BY i.service_name, s.metric_name
+SETTINGS max_execution_time = 8, max_rows_to_read = 2000000, max_bytes_to_read = 134217728,
+  timeout_overflow_mode = 'throw', read_overflow_mode = 'throw'"""
+
+
+def _check_browser_vitals(
+    client: SignozClient, environment: str, since_unix_ms: int | None
+) -> int:
+    end_ms = int(time.time() * 1000)
+    if since_unix_ms is not None and not 0 <= since_unix_ms < end_ms:
+        raise RuntimeError("--since-unix-ms must be a nonnegative timestamp before now")
+    start_ms = max(end_ms - BROWSER_VITALS_LOOKBACK_MS, since_unix_ms or 0)
+    query_name = "BrowserVitals"
+    payload = {
+        "start": start_ms,
+        "end": end_ms,
+        "requestType": "raw",
+        "noCache": True,
+        "compositeQuery": {"queries": [{
+            "type": "clickhouse_sql",
+            "spec": {
+                "name": query_name,
+                "query": _browser_vitals_sql(environment, start_ms, end_ms),
+            },
+        }]},
+    }
+    services: dict[str, dict[str, Any]] = {
+        name: dict.fromkeys(BROWSER_VITALS_METRICS) for name in BROWSER_VITALS_SERVICES
+    }
+    names = {stored: metric for metric, stored in BROWSER_VITALS_METRICS.items()}
+    try:
+        response = client.request("POST", "/api/v5/query_range", payload)
+        envelope = response["data"]
+        inner = envelope["data"]
+        result, = inner["results"]
+        rows = result["rows"]
+        if rows is None:
+            rows = []
+        if (
+            response["status"] != "success" or envelope["type"] != "raw"
+            or result["queryName"] != query_name or result["nextCursor"] != ""
+            or not isinstance(rows, list)
+            or any(part.get("warning") or part.get("warnings") for part in (response, envelope, inner, result))
+        ):
+            raise ValueError
+        for row in rows:
+            data = row["data"]
+            readings = services[data["service_name"]]
+            metric = names[data["metric_name"]]
+            samples, latest = data["samples"], data["latest_ms"]
+            if (
+                readings[metric] is not None or type(samples) is not int or samples < 1
+                or type(latest) is not int or not start_ms <= latest < end_ms
+            ):
+                raise ValueError
+            readings[metric] = {"samples": samples, "latestUnixMs": latest}
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("SigNoz returned incomplete browser vitals evidence") from error
+
+    missing = [
+        f"{name}/{metric}" for name, readings in services.items()
+        for metric, evidence in readings.items() if evidence is None
+    ]
+    print(json.dumps({
+        "environment": environment, "startUnixMs": start_ms, "endUnixMs": end_ms,
+        "services": services, "missing": missing,
+    }, indent=2, sort_keys=True))
+    return int(bool(missing))
 
 
 def eval_window_minutes(alert: dict[str, Any]) -> int:
@@ -962,7 +1076,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--mode", choices=("provision", "check", "test-rule"), default="check"
+        "--mode", choices=("provision", "check", "test-rule", "check-browser-vitals"), default="check"
     )
     parser.add_argument(
         "--rule", default="", help="Catalog alert slug for --mode test-rule"
@@ -978,6 +1092,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--environment", default=os.environ.get("ORISO_ENVIRONMENT", "")
+    )
+    parser.add_argument(
+        "--since-unix-ms", type=int,
+        help="Limit the browser vitals check to samples at or after this Unix timestamp in milliseconds",
     )
     parser.add_argument(
         "--cluster-name", default=os.environ.get("ORISO_CLUSTER_NAME", "")
@@ -1007,13 +1125,22 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     if not args.api_key:
         raise RuntimeError("SIGNOZ_API_KEY environment variable is required")
-    for name in ("api_url", "assets_dir", "environment", "cluster_name"):
+    browser_check = args.mode == "check-browser-vitals"
+    required = ("api_url", "environment") if browser_check else (
+        "api_url", "assets_dir", "environment", "cluster_name"
+    )
+    for name in required:
         if not getattr(args, name):
             raise RuntimeError(f"--{name.replace('_', '-')} is required")
-    if args.mode == "provision" and args.skip_telemetry:
+    if args.mode in {"provision", "check-browser-vitals"} and args.skip_telemetry:
         raise RuntimeError("--skip-telemetry applies to --mode check only")
     if (args.mode == "test-rule") != bool(args.rule):
         raise RuntimeError("--rule is required with, and only with, --mode test-rule")
+    if args.since_unix_ms is not None and not browser_check:
+        raise RuntimeError("--since-unix-ms applies to --mode check-browser-vitals only")
+    if browser_check:
+        client = SignozClient(args.api_url, args.api_key, reject_redirects=True)
+        return _check_browser_vitals(client, args.environment, args.since_unix_ms)
 
     dashboards, alerts = load_assets(args.assets_dir)
     dashboards, alerts = materialize_assets(

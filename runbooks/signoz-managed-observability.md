@@ -238,3 +238,28 @@ rules, or routes.
 
 Do not delete the API key Secret during rollback. Rotate the key through the
 normal secret-management process if it may be exposed.
+
+## Read stored browser Web Vitals
+
+Run the read-only check against the direct SigNoz API URL for the intended
+environment. It uses the existing `SIGNOZ_URL` and `SIGNOZ_API_KEY` settings
+and queries the stored browser samples independently of the managed assets.
+
+```bash
+# Record the start before the Frontend and Admin browser checks.
+web_vitals_since_ms=$(python3 -c 'import time; print(time.time_ns() // 1_000_000)')
+
+# Run after the browser activity and its metric export interval.
+python3 files/signoz/signoz_observability.py --mode check-browser-vitals \
+  --environment dev --since-unix-ms "$web_vitals_since_ms"
+```
+
+The report lists stored sample counts and the latest timestamp for LCP, CLS,
+INP, TTFB and FCP separately for `frontend` and `admin`. The window starts at
+the later of the supplied timestamp and 30 minutes ago. A CLS value of zero
+is valid. The other four metrics need a positive histogram observation count.
+Missing evidence produces exit code 1 and names the affected app and metric.
+
+Periodic exports can repeat a measurement from an open tab. For the signed-in
+Dev acceptance, review the browser activity and requests alongside the stored
+LCP readback for both applications.
