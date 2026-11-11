@@ -212,6 +212,10 @@ def assert_e2e_trace_ingest() -> None:
     assert "otlp-e2e.containerPort must be 4321" in error, error
     error = render_dev_fails({"signoz": {"otelCollector": {"ports": {"otlp-e2e": {"servicePort": 4318}}}}})
     assert "otlp-e2e.servicePort conflicts" in error, error
+    error = render_dev_fails({"signoz": {"otelCollector": {"configMap": {"create": False}}}})
+    assert "e2eTraceIngest.enabled=true requires signoz.otelCollector.configMap.create=true" in error, error
+    error = render_dev_fails({"signoz": {"otelCollector": {"command": {"extraArgs": ["--config=/unreviewed.yaml"]}}}})
+    assert "e2eTraceIngest.enabled=true forbids --config" in error, error
     error = render_dev_fails({"signoz": {"otelCollector": {"additionalEnvs": {"ORISO_DEPLOYMENT_ENVIRONMENT": "prod"}}}})
     assert "ORISO_DEPLOYMENT_ENVIRONMENT must equal" in error, error
     error = render_dev_fails({"global": {"observability": {"e2eTraceIngest": {"authSecret": ""}}}})

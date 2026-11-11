@@ -88,6 +88,14 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- if or (ne $e2eEnvironment "dev") (ne .Values.global.domainName "dev.oriso.org") -}}
 {{- fail "E2E trace ingest requires the Dev environment and dev.oriso.org" -}}
 {{- end -}}
+{{- if not (dig "configMap" "create" true $e2eCollector) -}}
+{{- fail "global.observability.e2eTraceIngest.enabled=true requires signoz.otelCollector.configMap.create=true: without the chart-managed ConfigMap the collector runs the image configuration and the E2E receiver on port 4321 does not exist" -}}
+{{- end -}}
+{{- range (dig "command" "extraArgs" (list) $e2eCollector) -}}
+{{- if hasPrefix "--config" (toString .) -}}
+{{- fail "global.observability.e2eTraceIngest.enabled=true forbids --config in signoz.otelCollector.command.extraArgs: the collector must load the chart-managed E2E policy" -}}
+{{- end -}}
+{{- end -}}
 {{- if not $e2ePortEnabled -}}
 {{- fail "global.observability.e2eTraceIngest.enabled=true requires signoz.otelCollector.ports.otlp-e2e.enabled=true: the E2E ingress sends spans to that dedicated collector port" -}}
 {{- end -}}

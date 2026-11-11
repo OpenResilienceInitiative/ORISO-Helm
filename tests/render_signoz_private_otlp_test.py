@@ -135,7 +135,7 @@ class PrivateOtlpRenderTest(unittest.TestCase):
             (("global", "observability", "webVitals", "enabled"), True, "RUM"),
             # A complete E2E ingress (with its auth Secret), so only the
             # private-OTLP incompatibility guard can reject the render.
-            (("global", "observability", "e2eTraceIngest"), {"enabled": True, "authSecret": "e2e-trace-ingest-auth"}, "E2E"),
+            (("global", "observability", "e2eTraceIngest"), {"enabled": True, "authSecret": "e2e-trace-ingest-auth"}, "otelCollector.privateOtlp is incompatible with Dev E2E ingress"),
             (("signozCollector", "enabled"), True, "infrastructure"),
         )
         for path, value, message in cases:
