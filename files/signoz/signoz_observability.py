@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import math
 import os
 import re
 import sys
@@ -45,6 +46,13 @@ REQUIRED_DASHBOARD_SLUGS = {
     "oriso-service-reliability",
     "oriso-platform-health",
 }
+# Opt-in dashboards over the oriso-e2e test spans (ORISO-E2E#97). They are only
+# provisioned with ORISO_E2E_DASHBOARDS=true and are all-or-nothing.
+E2E_DASHBOARD_SLUGS = {
+    "oriso-e2e-test-health",
+    "oriso-e2e-flaky",
+}
+E2E_SERVICE = "oriso-e2e"
 REQUIRED_ALERT_SLUGS = {
     "provisioning-compensation-failure",
     "availability-store-failure",
@@ -67,8 +75,31 @@ ALLOWED_GROUPS = {
     "side_effect",
     "stage",
     "status",
+    "test.case",
+    "test.commit",
+    "test.file",
+    "test.id",
+    "test.project",
+    "test.repository",
+    "test.run.id",
+    "test.status",
     "workflow",
 }
+CI_TEST_LOG_FILTER = (
+    "service.name = 'oriso-ci-tests' AND oriso.signal.source = 'ci'"
+    " AND test.evidence.origin = 'github-actions'"
+    " AND test.status IN ('passed', 'failed') AND test.evidence.observed_at_ms > 0"
+    " AND test.id EXISTS AND test.id != '' AND test.job.id EXISTS AND test.job.id != ''"
+    " AND ((test.repository = 'OpenResilienceInitiative/ORISO-Frontend'"
+    " AND test.framework = 'vitest' AND test.project IN ('unit', 'storybook (chromium)'))"
+    " OR (test.repository = 'OpenResilienceInitiative/ORISO-Admin'"
+    " AND test.framework = 'vitest' AND test.project = 'unit')"
+    " OR (test.repository = 'OpenResilienceInitiative/ORISO-UserService'"
+    " AND test.framework = 'surefire' AND test.project = 'unit')"
+    " OR (test.repository = 'OpenResilienceInitiative/ORISO-E2E'"
+    " AND test.framework = 'playwright' AND test.project = 'dev'"
+    " AND test.file = 'tests/smoke-crash.spec.ts'))"
+)
 FORBIDDEN_TERMS = {
     "access_token",
     "client.address",
@@ -89,6 +120,9 @@ FORBIDDEN_TERMS = {
 
 
 def _scope_filter(definition: dict[str, Any]) -> str:
+    if definition.get("signal") == "logs":
+        selector = definition.get("filter")
+        return f"{CI_TEST_LOG_FILTER} AND ({selector})" if selector else CI_TEST_LOG_FILTER
     parts = [f"deployment.environment = '{ENVIRONMENT_TOKEN}'"]
     if definition.get("clusterScoped"):
         parts.append(f"k8s.cluster.name = '{CLUSTER_TOKEN}'")
@@ -97,14 +131,38 @@ def _scope_filter(definition: dict[str, Any]) -> str:
     return " AND ".join(parts)
 
 
-def _group_by(names: Iterable[str]) -> list[dict[str, str]]:
+def _group_by(names: Iterable[str], context: str = "attribute") -> list[dict[str, str]]:
     return [
-        {"name": name, "fieldContext": "attribute", "fieldDataType": "string"}
+        {"name": name, "fieldContext": context, "fieldDataType": "string"}
         for name in names
     ]
 
 
+def _event_query(definition: dict[str, Any]) -> dict[str, Any]:
+    """Builder query over test spans or CI result logs."""
+    query: dict[str, Any] = {
+        "name": "A",
+        "signal": definition["signal"],
+        "source": "",
+        "stepInterval": definition.get("stepInterval", 60),
+        "aggregations": [
+            {key: value for key, value in aggregation.items() if value}
+            for aggregation in definition["aggregations"]
+        ],
+        "disabled": False,
+        "filter": {"expression": _scope_filter(definition)},
+        "groupBy": _group_by(definition.get("groupBy", []), "attribute"),
+        "having": {"expression": definition.get("having", "")},
+        "legend": "",
+    }
+    if definition.get("limit"):
+        query["limit"] = definition["limit"]
+    return query
+
+
 def _builder_query(definition: dict[str, Any]) -> dict[str, Any]:
+    if definition.get("signal") in {"traces", "logs"}:
+        return _event_query(definition)
     return {
         "name": "A",
         "signal": "metrics",
@@ -131,15 +189,28 @@ def _dashboard(definition: dict[str, Any]) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     for index, panel in enumerate(definition["panels"]):
         panel_id = panel["id"]
+        plugin_spec = {}
+        if "columnUnits" in panel:
+            plugin_spec["formatting"] = {"columnUnits": panel["columnUnits"]}
         panels[panel_id] = {
             "kind": "Panel",
             "spec": {
-                "display": {"name": panel["title"], "description": ""},
-                "plugin": {"kind": "signoz/TimeSeriesPanel", "spec": {}},
+                "display": {
+                    "name": panel["title"],
+                    "description": panel.get("description", ""),
+                },
+                "plugin": {
+                    "kind": "signoz/TablePanel"
+                    if panel.get("panelType") == "table"
+                    else "signoz/TimeSeriesPanel",
+                    "spec": plugin_spec,
+                },
                 "links": [],
                 "queries": [
                     {
-                        "kind": "time_series",
+                        "kind": "scalar"
+                        if panel.get("panelType") == "table"
+                        else "time_series",
                         "spec": {
                             "plugin": {
                                 "kind": "signoz/BuilderQuery",
@@ -173,7 +244,7 @@ def _dashboard(definition: dict[str, Any]) -> dict[str, Any]:
                 "name": f"{definition['title']} [{ENVIRONMENT_TOKEN}]",
                 "description": definition["description"],
             },
-            "duration": "1h",
+            "duration": definition.get("duration", "1h"),
             "refreshInterval": "1m",
             "variables": [],
             "panels": panels,
@@ -254,7 +325,7 @@ def _alert(definition: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_assets(
-    asset_dir: str | Path, *, deployment_identity: bool | None = None,
+    asset_dir: str | Path, *, deployment_identity: bool | None = None, include_e2e: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     catalog_path = Path(asset_dir) / "observability-catalog.json"
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
@@ -262,6 +333,12 @@ def load_assets(
         raise RuntimeError("SigNoz dashboard catalog is incomplete")
     if {item["slug"] for item in catalog["alerts"]} != REQUIRED_ALERT_SLUGS:
         raise RuntimeError("SigNoz alert catalog is incomplete")
+    definitions = list(catalog["dashboards"])
+    if include_e2e:
+        e2e = catalog.get("e2eDashboards", [])
+        if {item["slug"] for item in e2e} != E2E_DASHBOARD_SLUGS:
+            raise RuntimeError("SigNoz E2E dashboard catalog is incomplete")
+        definitions += e2e
     alerts = [_alert(item) for item in catalog["alerts"]]
     if deployment_identity is not None:
         definition = catalog.get("deploymentIdentityAlert")
@@ -271,7 +348,7 @@ def load_assets(
             alerts.append(identity_alert)
         elif deployment_identity:
             raise RuntimeError("SigNoz deployment identity alert is missing from the catalog")
-    return [_dashboard(item) for item in catalog["dashboards"]], alerts
+    return [_dashboard(item) for item in definitions], alerts
 
 
 def _replace_tokens(value: Any, replacements: dict[str, str]) -> Any:
@@ -356,6 +433,23 @@ def _panel_title(panel: Any) -> str:
     return str(panel.get("spec", {}).get("display", {}).get("name", ""))
 
 
+def _e2e_dashboard_names(environment: str) -> set[str]:
+    env_slug = environment.lower().replace("_", "-")
+    return {f"{slug}-{env_slug}" for slug in E2E_DASHBOARD_SLUGS}
+
+
+def _dashboard_filter_is_scoped(
+    dashboard: dict[str, Any], query: dict[str, Any], environment: str
+) -> bool:
+    expression = query.get("filter", {}).get("expression", "")
+    if query.get("signal") == "logs":
+        return dashboard.get("name") in _e2e_dashboard_names(environment) and (
+            expression == CI_TEST_LOG_FILTER
+            or (expression.startswith(f"{CI_TEST_LOG_FILTER} AND (") and expression.endswith(")"))
+        )
+    return f"deployment.environment = '{environment}'" in expression
+
+
 def validate_asset_contract(
     dashboards: list[dict[str, Any]],
     alerts: list[dict[str, Any]],
@@ -366,7 +460,18 @@ def validate_asset_contract(
 ) -> None:
     slugs = {alert.get("_orisoSlug") for alert in alerts}
     required = REQUIRED_ALERT_SLUGS | (slugs & {DEPLOYMENT_IDENTITY_SLUG})
-    if len(dashboards) != 3 or len(alerts) != len(required) or slugs != required:
+    e2e_count = sum(
+        1
+        for item in dashboards
+        if any(item.get("name", "").startswith(f"{slug}-") for slug in E2E_DASHBOARD_SLUGS)
+    )
+    if e2e_count not in (0, len(E2E_DASHBOARD_SLUGS)):
+        raise RuntimeError("SigNoz E2E dashboards must be provisioned together")
+    if (
+        len(dashboards) != 3 + e2e_count
+        or len(alerts) != len(required)
+        or slugs != required
+    ):
         raise RuntimeError("SigNoz asset count does not match the ORISO contract")
     encoded = json.dumps(
         {"dashboards": dashboards, "alerts": alerts}, sort_keys=True
@@ -399,7 +504,9 @@ def validate_asset_contract(
                 f"dashboard {dashboard.get('name')} has no executable query"
             )
         for query in queries:
-            if environment_filter not in query.get("filter", {}).get("expression", ""):
+            if not _dashboard_filter_is_scoped(dashboard, query, environment):
+                if query.get("signal") == "logs":
+                    raise RuntimeError("CI log query is outside the allowed dashboard scope")
                 raise RuntimeError(f"dashboard query is not scoped to {environment}")
             groups = {item.get("name") for item in query.get("groupBy", [])}
             if not groups.issubset(ALLOWED_GROUPS):
@@ -437,17 +544,115 @@ def validate_asset_contract(
 
 
 def build_query_range_payload(
-    query: dict[str, Any], *, start_ms: int, end_ms: int
+    query: dict[str, Any], *, start_ms: int, end_ms: int,
+    request_type: str = "time_series", query_type: str = "builder_query",
 ) -> dict[str, Any]:
     return {
         "schemaVersion": "v1",
         "start": start_ms,
         "end": end_ms,
-        "requestType": "time_series",
-        "compositeQuery": {"queries": [{"type": "builder_query", "spec": query}]},
+        "requestType": request_type,
+        "compositeQuery": {"queries": [{"type": query_type, "spec": query}]},
         "formatOptions": {"formatTableResultForUI": False, "fillGaps": False},
         "noCache": True,
     }
+
+
+def _finite_number(value: Any) -> bool:
+    return type(value) is int or (type(value) is float and math.isfinite(value))
+
+
+def _current_panel_point(point: Any, start_ms: int, end_ms: int) -> bool:
+    if not isinstance(point, dict):
+        return False
+    timestamp = point.get("timestamp")
+    return (
+        type(timestamp) is int
+        and start_ms <= timestamp < end_ms
+        and point.get("partial", False) is False
+        and _finite_number(point.get("value"))
+    )
+
+
+def _dimension_has_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    return type(value) is bool or _finite_number(value)
+
+
+def _response_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError
+    return value
+
+
+def _validate_optional_series(series: dict[str, Any]) -> None:
+    for label in _response_list(series.get("labels")):
+        if not isinstance(label["key"]["name"], str) or "value" not in label:
+            raise ValueError
+    for point in _response_list(series["values"]):
+        value = point["value"]
+        if (
+            type(point["timestamp"]) is not int
+            or type(point.get("partial", False)) is not bool
+            or not (_finite_number(value) or value in ("NaN", "Inf", "-Inf"))
+        ):
+            raise ValueError
+
+
+def _validate_dashboard_result(
+    response: dict[str, Any], query: dict[str, Any], panel: str, start_ms: int, end_ms: int,
+    *, require_samples: bool,
+) -> None:
+    dimensions = {field["name"] for field in query.get("groupBy", [])}
+    try:
+        envelope = response["data"]
+        results = envelope["data"]["results"]
+        if envelope["type"] != "time_series" or not isinstance(results, list):
+            raise ValueError
+        result, = results
+        if result["queryName"] != query["name"]:
+            raise ValueError
+        buckets = _response_list(result["aggregations"])
+        if require_samples and not buckets:
+            raise RuntimeError(f"{panel}: no fresh numeric samples")
+
+        indexes = [bucket["index"] for bucket in buckets]
+        aggregation_count = len(query["aggregations"])
+        if (
+            any(type(index) is not int or not 0 <= index < aggregation_count for index in indexes)
+            or len(set(indexes)) != len(indexes)
+            or (require_samples and len(indexes) != aggregation_count)
+        ):
+            raise ValueError
+        for bucket in buckets:
+            series_list = _response_list(bucket["series"])
+            if not require_samples:
+                for series in series_list:
+                    _validate_optional_series(series)
+                continue
+            found = False
+            for series in series_list:
+                if not any(
+                    _current_panel_point(point, start_ms, end_ms)
+                    for point in _response_list(series["values"])
+                ):
+                    continue
+                found = True
+                present = {
+                    label["key"]["name"]
+                    for label in _response_list(series.get("labels"))
+                    if _dimension_has_value(label["value"])
+                }
+                missing = sorted(dimensions - present)
+                if missing:
+                    raise RuntimeError(f"{panel}: missing series dimensions {', '.join(missing)}")
+            if not found:
+                raise RuntimeError(f"{panel}: no fresh numeric samples")
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
+        raise RuntimeError(f"{panel}: unexpected SigNoz time-series result") from error
 
 
 def response_has_signal_data(response: Any) -> bool:
@@ -545,13 +750,26 @@ class _RejectRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class SignozClient:
+    READ_LIMIT = 2 * 1024 * 1024
+
     def __init__(
-        self, api_url: str, api_key: str, timeout: int = 20, *, reject_redirects: bool = False
+        self,
+        api_url: str,
+        api_key: str,
+        timeout: int = 20,
+        *,
+        read_only: bool = False,
+        reject_redirects: bool = False,
     ) -> None:
         self.api_url = api_url.rstrip("/") + "/"
         self.api_key = api_key
         self.timeout = timeout
-        self._opener = urllib.request.build_opener(_RejectRedirect()) if reject_redirects else None
+        self.reader = read_only
+        self._opener = (
+            urllib.request.build_opener(_RejectRedirect())
+            if read_only or reject_redirects
+            else None
+        )
 
     def request(
         self,
@@ -560,6 +778,11 @@ class SignozClient:
         payload: dict[str, Any] | None = None,
         expected: tuple[int, ...] = (200,),
     ) -> Any:
+        if self.reader and not (
+            (method == "POST" and path == "/api/v5/query_range")
+            or (method == "GET" and re.fullmatch(r"/api/v2/dashboards(?:/[0-9a-f-]{36})?", path))
+        ):
+            raise RuntimeError("Only the query and dashboard reads are allowed")
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             urllib.parse.urljoin(self.api_url, path.lstrip("/")),
@@ -575,14 +798,19 @@ class SignozClient:
         try:
             with open_url(request, timeout=self.timeout) as response:
                 status = response.status
-                raw = response.read()
+                raw = response.read(self.READ_LIMIT + 1) if self.reader else response.read()
+                if self.reader and len(raw) > self.READ_LIMIT:
+                    raise RuntimeError("SigNoz read response exceeds the size limit")
         except urllib.error.HTTPError as error:
+            if self.reader:
+                error.close()
+                raise SignozHttpError(method, path, error.code, "response body omitted") from None
             status = error.code
             raw = error.read()
         except urllib.error.URLError as error:
             raise RuntimeError(f"SigNoz API {method} {path} is unreachable") from error
         if status not in expected:
-            detail = raw.decode("utf-8", errors="replace")[:1000]
+            detail = "response body omitted" if self.reader else raw.decode("utf-8", errors="replace")[:1000]
             raise SignozHttpError(method, path, status, detail)
         if not raw:
             return None
@@ -687,18 +915,22 @@ def upsert_alerts(client: SignozClient, alerts: list[dict[str, Any]]) -> None:
 
 
 def _execute_query(
-    client: SignozClient, query: dict[str, Any], *, minutes: int = 15
+    client: SignozClient, query: dict[str, Any], *, minutes: int = 15,
+    dashboard_panel: str | None = None, require_samples: bool = True,
 ) -> dict[str, Any]:
     end_ms = int(time.time() * 1000)
+    start_ms = end_ms - minutes * 60_000
     response = client.request(
         "POST",
         "/api/v5/query_range",
-        build_query_range_payload(
-            query, start_ms=end_ms - minutes * 60_000, end_ms=end_ms
-        ),
+        build_query_range_payload(query, start_ms=start_ms, end_ms=end_ms),
     )
     if not isinstance(response, dict) or response.get("status") != "success":
         raise RuntimeError("SigNoz query range did not return success")
+    if dashboard_panel is not None:
+        _validate_dashboard_result(
+            response, query, dashboard_panel, start_ms, end_ms, require_samples=require_samples,
+        )
     return response
 
 
@@ -832,6 +1064,28 @@ def _wait_for_signal_data(
 
 def _query_contract(query: dict[str, Any]) -> dict[str, Any]:
     aggregations = query.get("aggregations", [])
+    if query.get("signal") in {"traces", "logs"}:
+        if not aggregations:
+            raise RuntimeError("managed SigNoz query must contain an aggregation")
+        return {
+            "signal": query["signal"],
+            "disabled": query.get("disabled"),
+            "aggregations": [
+                (str(item.get("expression")), str(item.get("alias", "")))
+                for item in aggregations
+            ],
+            "filter": query.get("filter", {}).get("expression", ""),
+            "having": query.get("having", {}).get("expression", ""),
+            "limit": query.get("limit"),
+            "groupBy": sorted(
+                (
+                    str(item.get("name")),
+                    str(item.get("fieldContext", "")),
+                    str(item.get("fieldDataType", "")),
+                )
+                for item in query.get("groupBy", [])
+            ),
+        }
     if len(aggregations) != 1:
         raise RuntimeError("managed SigNoz query must contain exactly one aggregation")
     aggregation = aggregations[0]
@@ -863,6 +1117,11 @@ def _assert_no_protected_fields(value: Any, label: str) -> None:
     leaked = sorted(term for term in FORBIDDEN_TERMS if term in encoded)
     if leaked:
         raise RuntimeError(f"{label} contains protected fields: {leaked}")
+
+
+def _panel_column_units(panel: dict[str, Any]) -> dict[str, str]:
+    plugin = panel.get("spec", {}).get("plugin", {})
+    return plugin.get("spec", {}).get("formatting", {}).get("columnUnits") or {}
 
 
 def validate_live_dashboard(
@@ -905,6 +1164,12 @@ def validate_live_dashboard(
             raise RuntimeError(
                 f"stored dashboard panel title drift: {expected['name']} / {panel_id}"
             )
+        if _panel_column_units(current_panel_specs[panel_id]) != _panel_column_units(
+            expected_panel_specs[panel_id]
+        ):
+            raise RuntimeError(
+                f"stored dashboard formatting drift: {expected['name']} / {panel_id}"
+            )
         current_panel_queries = current_panels[panel_id]
         if len(current_panel_queries) != len(expected_panel_queries):
             raise RuntimeError(
@@ -917,10 +1182,9 @@ def validate_live_dashboard(
                 raise RuntimeError(
                     f"stored dashboard query drift: {expected['name']} / {panel_id}"
                 )
-    environment_filter = f"deployment.environment = '{environment}'"
     for query in current_queries:
         contract = _query_contract(query)
-        if environment_filter not in contract["filter"]:
+        if not _dashboard_filter_is_scoped(current, query, environment):
             raise RuntimeError(f"stored dashboard query drift: {expected['name']}")
         if not {name for name, _, _ in contract["groupBy"]}.issubset(ALLOWED_GROUPS):
             raise RuntimeError(
@@ -994,10 +1258,9 @@ def prove_conformance(
 ) -> None:
     """Read every managed object back and compare it with the catalog.
 
-    With ``telemetry`` the proof also executes every stored query, requires
-    fresh collector data, and rejects data from the other environment. Without
-    it the proof is structural only, so a provisioning run does not depend on
-    telemetry that may not flow yet.
+    With ``telemetry`` the proof requires fresh grouped data on the core dashboards,
+    validates E2E query results, executes the alert queries, and verifies collector
+    freshness and environment separation. Without it the proof is structural only.
     """
     validate_asset_contract(
         dashboards,
@@ -1010,6 +1273,7 @@ def prove_conformance(
         item.get("name"): item
         for item in _list(client, "/api/v2/dashboards", "dashboards")
     }
+    optional_dashboards = _e2e_dashboard_names(environment)
     for expected in dashboards:
         listed = listed_dashboards.get(expected["name"])
         if not listed:
@@ -1019,11 +1283,14 @@ def prove_conformance(
             raise RuntimeError(
                 f"managed dashboard is not readable as v6: {expected['name']}"
             )
-        for query in validate_live_dashboard(
-            current, expected, environment=environment
-        ):
-            if telemetry:
-                _execute_query(client, query)
+        validate_live_dashboard(current, expected, environment=environment)
+        if telemetry:
+            for panel_id, queries in dashboard_panel_queries(current).items():
+                for query in queries:
+                    _execute_query(
+                        client, query, dashboard_panel=f"{expected['name']} / {panel_id}",
+                        require_samples=expected["name"] not in optional_dashboards,
+                    )
 
     listed_alerts = {item.get("alert"): item for item in _list(client, "/api/v2/rules")}
     freshness_query: dict[str, Any] | None = None
@@ -1140,6 +1407,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Include the deployment identity rule for an enabled Dev or Pre-Dev observer",
     )
     parser.add_argument(
+        "--e2e-dashboards",
+        action="store_true",
+        default=os.environ.get("ORISO_E2E_DASHBOARDS", "false").lower() == "true",
+        help="Also manage the E2E test health and flaky dashboards (oriso-e2e spans)",
+    )
+    parser.add_argument(
         "--skip-telemetry",
         action="store_true",
         help="In check mode only compare stored objects; run no queries",
@@ -1173,7 +1446,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.deployment_identity and args.environment not in ("dev", "pre-dev"):
         raise RuntimeError("deployment identity alerts require Dev or Pre-Dev")
 
-    dashboards, alerts = load_assets(args.assets_dir, deployment_identity=args.deployment_identity)
+    dashboards, alerts = load_assets(
+        args.assets_dir,
+        deployment_identity=args.deployment_identity,
+        include_e2e=args.e2e_dashboards,
+    )
     dashboards, alerts = materialize_assets(
         dashboards,
         alerts,
