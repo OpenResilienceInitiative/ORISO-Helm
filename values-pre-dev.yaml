@@ -7,7 +7,7 @@
 #   helm upgrade --install caritas ./ -n caritas --create-namespace \
 #     -f values.yaml -f values-dev.yaml -f values-pre-dev.yaml -f secrets.yaml
 #
-# Deliberate deltas from Dev: host and public URLs, Matrix identity, SigNoz labels,
+# Deliberate deltas from Dev: host and public URLs, Matrix identity, SigNoz labels and private UI,
 # no chart-managed Storybook, no dummy data, no release-toggle override, the closed mail-locale gate required by
 # tests/render_pending_mail_locale_optin_test.py, and the Spring profile (see below).
 #
@@ -52,9 +52,16 @@ signoz:
   orisoObservability:
     enabled: false
   signoz:
+    ingress:
+      enabled: false
+    service:
+      type: ClusterIP
     env:
-      # observability-validation.yaml requires it in sync with global.domainName.
+      # Keep the /signoz base path for the internal UI.
       signoz_global_external__url: "https://predev.oriso.org/signoz"
+  # Operators use the internal Service over a loopback port-forward (ORISO-Helm#304).
+  orisoIngress:
+    enabled: false
   otelCollector:
     additionalEnvs:
       ORISO_DEPLOYMENT_ENVIRONMENT: "pre-dev"
