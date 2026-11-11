@@ -422,6 +422,11 @@ spec:
                 configMapKeyRef:
                   key: CONSULTING_TYPE_SERVICE_API_URL
                   name: userservice-configmap-env
+            - name: CONSULTING_TYPE_SERVICE_SCOPED_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  key: CONSULTING_TYPE_SERVICE_SCOPED_API_URL
+                  name: userservice-configmap-env
             - name: TENANT_SERVICE_API_URL
               valueFrom:
                 configMapKeyRef:

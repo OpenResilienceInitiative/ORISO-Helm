@@ -205,6 +205,19 @@ def main() -> None:
     assert " where " not in log_statements[body_suppression[0]]
     statements = "\n".join(log_statements)
     assert "ParseJSON(log.body)" in statements
+    java_services = {
+        "userservice": "user-service",
+        "agencyservice": "agency-service",
+        "tenantservice": "tenant-service",
+        "consultingtypeservice": "consulting-type-service",
+    }
+    for workload, service in java_services.items():
+        assert any(
+            statement.startswith(f'set(resource.attributes["service.name"], "{service}")')
+            and f'resource.attributes["k8s.deployment.name"] == "{workload}"' in statement
+            and f'resource.attributes["k8s.container.name"] == "{workload}"' in statement
+            for statement in log_statements
+        ), workload
     assert "set(log.cache," in statements
     assert 'cache["request"]["correlationId"]' not in statements
     assert 'cache["log"]["message"]' not in statements

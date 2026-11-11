@@ -1,3 +1,10 @@
+{{- $private := .Values.otelCollector.privateOtlp.enabled -}}
+{{- if not (kindIs "bool" $private) -}}
+{{- fail "otelCollector.privateOtlp.enabled must be a boolean" -}}
+{{- end -}}
+{{- if $private -}}
+{{- include "otelCollector.validatePrivateOtlp" . -}}
+{{- end -}}
 {{- $orisoPolicy := fromYaml (.Files.Get "files/oriso-otel-collector-policy.yaml") -}}
 {{- $collectorConfig := mergeOverwrite (deepCopy .Values.otelCollector.config) $orisoPolicy -}}
 {{- if .Values.otelCollector.ciLogIngest.enabled -}}
@@ -15,6 +22,18 @@ metadata:
     {{- include "otelCollector.labels" . | nindent 4 }}
 data:
   otel-collector-config.yaml: |-
+    {{- if $private }}
+    {{- include "otelCollector.privateConfig" . | nindent 4 }}
+    {{- else }}
     {{- toYaml $collectorConfig | nindent 4 }}
+    {{- end }}
+  {{- if $private }}
+  private-otlp.conf: |-
+    {{- include "otelCollector.privateProxyConfig" . | nindent 4 }}
+binaryData:
+  # google.rpc.Status with the fixed message "OTLP request failed".
+  private-otlp-error.pb: EhNPVExQIHJlcXVlc3QgZmFpbGVk
+  {{- else }}
   otel-collector-opamp-config.yaml: |-
     server_endpoint: "ws://{{ include "signoz.fullname" . }}:4320/v1/opamp"
+  {{- end }}

@@ -57,6 +57,27 @@ def find_livekit(documents: list[dict]) -> dict:
     )
 
 
+def legacy_webhook_urls(documents: list[dict]) -> list[str]:
+    config = next(
+        document
+        for document in documents
+        if document.get("kind") == "Secret"
+        and document.get("metadata", {}).get("name") == "livekit-config-runtime"
+    )
+    return yaml.safe_load(config["stringData"]["config.yaml"])["webhook"]["urls"]
+
+
+def receiver_ingress(documents: list[dict]) -> list[dict]:
+    policy = next(
+        document
+        for document in documents
+        if document.get("kind") == "NetworkPolicy"
+        and document.get("metadata", {}).get("name")
+        == "matrixrtc-authorization-service"
+    )
+    return policy["spec"]["ingress"]
+
+
 def main() -> None:
     documents = render()
     livekit = find_livekit(documents)
@@ -73,6 +94,62 @@ def main() -> None:
     # bootstrap (matrixrtcAuth.bootstrap.enabled defaults to true), so that
     # Secret is expected here. The contract is asserted on pre-dev, which
     # carries the cutover.
+
+    pod = livekit["spec"]["template"]["spec"]
+    assert pod["hostNetwork"] is True
+    assert pod["dnsPolicy"] == "ClusterFirstWithHostNet"
+    default_webhook = ["http://matrixrtc-authorization-service:8080/sfu_webhook"]
+    assert legacy_webhook_urls(documents) == default_webhook
+    assert (
+        legacy_webhook_urls(render("--set", "livekit.legacyWebhookUrl=null"))
+        == default_webhook
+    )
+    private_receiver = "http://alternate-signed-receiver:8080/sfu_webhook"
+    assert legacy_webhook_urls(
+        render("--set-string", f"livekit.legacyWebhookUrl={private_receiver}")
+    ) == [private_receiver], "the configured private receiver must be rendered"
+
+    # LiveKit is host-network: across nodes some CNIs see its webhook as node
+    # traffic. The receiver admits only the pods by default and the exact
+    # LiveKit node addresses an operator lists, on the receiver port only.
+    pod_only = receiver_ingress(documents)
+    assert len(pod_only) == 1
+    assert all("ipBlock" not in peer for peer in pod_only[0]["from"])
+    node_rule = receiver_ingress(
+        render(
+            "--set-json",
+            'matrixrtcAuth.livekitNodeCidrs=["10.0.0.5/32","10.0.1.0/24","10.0.2.8/29"]',
+        )
+    )
+    assert len(node_rule) == 1
+    assert node_rule[0]["ports"] == [{"protocol": "TCP", "port": 8080}]
+    assert [peer["ipBlock"] for peer in node_rule[0]["from"] if "ipBlock" in peer] == [
+        {"cidr": "10.0.0.5/32"},
+        {"cidr": "10.0.1.0/24"},
+        {"cidr": "10.0.2.8/29"},
+    ]
+    # Too wide, malformed, non-canonical (host bits or leading zeroes) or IPv6:
+    # each must fail the render instead of being widened or passed to the API.
+    for too_wide in (
+        "0.0.0.0/0",
+        "10.0.0.0/8",
+        "10.0.0.5",
+        "999.999.999.999/32",
+        "256.0.0.1/32",
+        "10.0.0.5/24",
+        "10.0.2.9/29",
+        "010.0.0.5/32",
+        "abcd/64",
+        ":::/64",
+        "::/0",
+        "fd00::/32",
+        "fd00::5/128",
+    ):
+        rejected = run_helm(
+            "--set-json", f'matrixrtcAuth.livekitNodeCidrs=["{too_wide}"]'
+        )
+        assert rejected.returncode != 0, too_wide
+        assert "matrixrtcAuth.livekitNodeCidrs entry" in rejected.stderr, too_wide
 
     rolling = find_livekit(
         render(

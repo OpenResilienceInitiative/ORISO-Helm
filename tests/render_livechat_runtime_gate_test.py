@@ -82,8 +82,10 @@ def main() -> None:
         assert data["SPRING_DATA_REDIS_HOST"] == "redis"
         assert data["SPRING_DATA_REDIS_PORT"] == "6379"
         assert data["CONSULTANT_AVAILABILITY_REDIS_TTL_SECONDS"] == "120"
+        assert data["CONSULTING_TYPE_SERVICE_SCOPED_API_URL"] == "http://consultingtypeservice:8080"
 
         for name in (
+            "CONSULTING_TYPE_SERVICE_SCOPED_API_URL",
             "MATRIX_ENCRYPTION_ENABLED",
             "SPRING_DATA_REDIS_HOST",
             "SPRING_DATA_REDIS_PORT",
