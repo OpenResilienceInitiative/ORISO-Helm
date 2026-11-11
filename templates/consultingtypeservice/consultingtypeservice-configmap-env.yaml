@@ -15,6 +15,9 @@ data:
   SPRING_LIQUIBASE_CHANGE_LOG: {{ $liquibaseChangeLog | quote }}
   SPRING_LIQUIBASE_CHANGELOG: {{ $liquibaseChangeLog | quote }}
   SPRING_LIQUIBASE_CONTEXTS: {{ default "seed" .Values.consultingTypeService.liquibaseContexts | quote }}
+  # Frontend#1979: per-environment release toggles layered over the stored ones
+  # (`key=true,key2=false`). Empty keeps whatever MongoDB holds.
+  RELEASE_TOGGLE_OVERRIDES: {{ default "" .Values.consultingTypeService.releaseToggleOverrides | quote }}
   TENANT_SERVICE_API_URL: "http://tenantservice.{{ .Release.Namespace }}:8081"
   JAVA_OPTS: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
   SPRING_DATASOURCE_URL: "jdbc:mariadb://mariadb.{{ .Release.Namespace }}:3306/consultingtypeservice"
