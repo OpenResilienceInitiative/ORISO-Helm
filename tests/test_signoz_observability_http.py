@@ -42,6 +42,7 @@ class State:
         self.queries = 0
         self.browser_vitals_queries: list[dict[str, Any]] = []
         self.browser_vitals_response: dict[str, Any] = {}
+        self.browser_vitals_status = 200
         self.redirect_browser_vitals = False
         self.redirect_requests = 0
 
@@ -134,7 +135,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_header("Location", "/redirect-target")
                     self.end_headers()
                 else:
-                    self._send(200, self.state.browser_vitals_response)
+                    self._send(self.state.browser_vitals_status, self.state.browser_vitals_response)
                 return
             expression = body["compositeQuery"]["queries"][0]["spec"]["filter"][
                 "expression"
@@ -355,6 +356,16 @@ class HttpFlowTest(unittest.TestCase):
             self._browser_vitals()
 
         self.assertEqual(self.state.redirect_requests, 0)
+
+    def test_browser_vitals_reports_http_status_without_logging_response_detail(self) -> None:
+        self.state.browser_vitals_status = 403
+        self.state.browser_vitals_response = {"error": "DO-NOT-PRINT test-api-key"}
+
+        with self.assertRaisesRegex(RuntimeError, "returned 403") as failure:
+            self._browser_vitals()
+
+        self.assertNotIn("DO-NOT-PRINT", str(failure.exception))
+        self.assertNotIn("test-api-key", str(failure.exception))
 
     def test_browser_vitals_refuses_a_future_window_before_querying(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "timestamp before now"):

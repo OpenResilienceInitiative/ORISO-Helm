@@ -766,6 +766,8 @@ def _check_browser_vitals(
             ):
                 raise ValueError
             readings[metric] = {"samples": samples, "latestUnixMs": latest}
+    except SignozHttpError as error:
+        raise RuntimeError(f"SigNoz browser vitals query returned {error.status}") from None
     except (AttributeError, KeyError, TypeError, ValueError) as error:
         raise RuntimeError("SigNoz returned incomplete browser vitals evidence") from error
 

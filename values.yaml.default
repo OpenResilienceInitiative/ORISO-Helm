@@ -638,6 +638,10 @@ signoz:
     apiKeySecret:
       name: ""
       key: apiKey
+    # Optional recurring RUM readback with a separate query-only API key.
+    browserVitalsCheck:
+      enabled: false
+      apiKeySecretName: ""
     # Existing SigNoz notification channel; the chart does not create it.
     channelName: "oriso-alerts-slack"
     resources:

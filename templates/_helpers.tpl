@@ -192,6 +192,16 @@ the bundled SigNoz chart is enabled, use its in-cluster collector service.
 {{- default (include "oriso.signozFullname" .) (get $signoz "orisoServiceNameOverride" | default "") -}}
 {{- end -}}
 
+{{- define "oriso.signozInternalApiUrl" -}}
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $app := get $signoz "signoz" | default dict -}}
+{{- $service := get $app "service" | default dict -}}
+{{- $env := get $app "env" | default dict -}}
+{{- /* SigNoz v0.135.1 strips the external URL path from API routes. */ -}}
+{{- $path := (urlParse (get $env "signoz_global_external__url" | default "")).path | trimSuffix "/" -}}
+{{- printf "http://%s:%v%s" (include "oriso.signozServiceName" .) (get $service "port" | default 8080) $path -}}
+{{- end -}}
+
 {{- /* The vendored chart's otelCollector.fullname. */ -}}
 {{- define "oriso.signozOtelCollectorServiceName" -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
