@@ -52,6 +52,15 @@ def env(workload: dict[str, Any]) -> dict[str, Any]:
 
 
 def assert_dev(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
+    job = docs[("Job", "caritas-signoz-observability")]
+    job_env = job["spec"]["template"]["spec"]["containers"][0]["env"]
+    api_key = next(item for item in job_env if item["name"] == "SIGNOZ_API_KEY")
+    assert api_key["valueFrom"]["secretKeyRef"] == {
+        "name": "signoz-observability-api-key",
+        "key": "apiKey",
+    }
+    assert "value" not in api_key
+
     # Data protection. The retain hook needs the bound volumes, which only a
     # cluster lookup sees; offline it must render nothing, never a ClusterRole
     # that could patch every volume in the cluster.
