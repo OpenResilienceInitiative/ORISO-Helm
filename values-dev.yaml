@@ -57,6 +57,35 @@ signoz:
       limits:
         memory: 4Gi
     files:
+      # Apply per installation so the operator reconciles the changed files.
+      # Layered Pre-Dev inherits the policy. Later files may disable a writer.
+      config.d/98-oriso-system-log-retention.xml: |
+        <clickhouse>
+          <query_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </query_log>
+          <part_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </part_log>
+          <trace_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </trace_log>
+          <asynchronous_metric_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </asynchronous_metric_log>
+          <metric_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </metric_log>
+          <zookeeper_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </zookeeper_log>
+          <processors_profile_log>
+            <engine replace="1">Engine = MergeTree PARTITION BY event_date ORDER BY event_time TTL event_date + interval 3 day</engine>
+          </processors_profile_log>
+          <aggregated_zookeeper_log>
+            <ttl replace="1">event_date + INTERVAL 3 DAY</ttl>
+          </aggregated_zookeeper_log>
+        </clickhouse>
       # Dev's wide metric_log schema caused repeated failed merges. Keep this
       # environment-specific until other SigNoz installations are measured.
       config.d/99-oriso-disable-metric-log.xml: |
@@ -105,6 +134,11 @@ agencyService:
 tenantService:
   springProfilesActive: "dev"
   liquibaseContexts: "seed"
+  # The verified legacy Dev UTC writer signed the retained QA fixture on this day.
+  legacyDpaSigning:
+    zone: "UTC"
+    from: "2026-11-07T00:00:00"
+    to: "2026-11-07T23:59:59"
 consultingTypeService:
   liquibaseContexts: "seed"
   # Frontend#1979 (OBP 2.1 #101): e-mail notification settings are QA'd on Dev.

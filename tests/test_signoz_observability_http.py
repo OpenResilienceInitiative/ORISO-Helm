@@ -42,6 +42,7 @@ class State:
         self.rules: dict[str, dict[str, Any]] = {}
         self.queries = 0
         self.query_results: dict[str, list[dict[str, Any]]] = {}
+        self.trace_responses: dict[str, dict[str, Any]] = {}
         self.browser_vitals_queries: list[dict[str, Any]] = []
         self.browser_vitals_response: dict[str, Any] = {}
         self.browser_vitals_status = 200
@@ -140,6 +141,14 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(self.state.browser_vitals_status, self.state.browser_vitals_response)
                 return
             query = body["compositeQuery"]["queries"][0]["spec"]
+            if query["signal"] in {"traces", "logs"}:
+                alias = query["aggregations"][0].get("alias", "")
+                response = self.state.trace_responses.get(alias) if query["signal"] == "traces" else None
+                self._send(200, response or {
+                    "type": "time_series",
+                    "data": {"results": [{"queryName": query["name"], "aggregations": None}]},
+                })
+                return
             expression = query["filter"]["expression"]
             metric = query["aggregations"][0]["metricName"]
             aggregations: list[dict[str, Any]] = []
@@ -500,6 +509,93 @@ class HttpFlowTest(unittest.TestCase):
                 channel_name="oriso-alerts-slack",
                 telemetry=False,
             )
+
+    def test_e2e_dashboards_are_provisioned_and_read_back_when_enabled(self) -> None:
+        dashboards, alerts = MODULE.load_assets(
+            ROOT / "files" / "signoz", include_e2e=True
+        )
+        dashboards, alerts = MODULE.materialize_assets(
+            dashboards,
+            alerts,
+            environment="dev",
+            cluster_name="oriso-dev",
+            channel_name="oriso-alerts-slack",
+        )
+        self.assertEqual(len(dashboards), 5)
+        client = MODULE.SignozClient(
+            f"http://127.0.0.1:{self.server.server_port}", "test-api-key"
+        )
+        MODULE.upsert_dashboards(client, dashboards)
+        MODULE.upsert_alerts(client, alerts)
+        self.assertEqual(len(self.state.dashboards), 5)
+        MODULE.prove_conformance(
+            client,
+            dashboards,
+            alerts,
+            environment="dev",
+            cluster_name="oriso-dev",
+            channel_name="oriso-alerts-slack",
+            telemetry=False,
+        )
+
+    def test_full_check_accepts_quiet_e2e_queries_and_legacy_groups(self) -> None:
+        self.assertEqual(self._main("--mode", "provision", "--e2e-dashboards")[0], 0)
+        self.state.trace_responses["pass_rate_pct"] = {
+            "type": "time_series",
+            "data": {"results": [{"queryName": "A", "aggregations": [{
+                "index": 1,
+                "series": [{
+                    "labels": [{"key": {"name": "test.id"}, "value": None}],
+                    "values": [{"timestamp": 1_750_000_000_000, "value": 0, "partial": True}],
+                }],
+            }]}]},
+        }
+        code, printed = self._main("--mode", "check", "--e2e-dashboards")
+        self.assertEqual(code, 0)
+        self.assertIn("environment separation for pre-dev", printed)
+        self.assertEqual(self._counts(), (5, 6, 0, 0))
+
+        self.state.query_results["oriso.live_chat.queue.visibility"] = [{"queryName": "A", "aggregations": None}]
+        with self.assertRaisesRegex(RuntimeError, "oriso-live-chat-pre-dev / queue.*no fresh numeric"):
+            self._main("--mode", "check", "--e2e-dashboards")
+
+    def test_full_check_rejects_malformed_optional_e2e_results(self) -> None:
+        self.assertEqual(self._main("--mode", "provision", "--e2e-dashboards")[0], 0)
+        bad_results = (
+            {},
+            {"queryName": "wrong", "aggregations": None},
+            {"queryName": "A", "aggregations": {}},
+            {"queryName": "A", "aggregations": [{"index": 0, "series": []}, {"index": 0, "series": []}]},
+            {"queryName": "A", "aggregations": [{"index": 2, "series": []}]},
+            {"queryName": "A", "aggregations": [{"index": 0, "series": {}}]},
+            {"queryName": "A", "aggregations": [{"index": 0, "series": [{"values": "invalid"}]}]},
+            {"queryName": "A", "aggregations": [{"index": 0, "series": [
+                {"values": [{"timestamp": "invalid", "value": 0}]},
+            ]}]},
+        )
+        for result in bad_results:
+            with self.subTest(result=result):
+                self.state.trace_responses["pass_rate_pct"] = {
+                    "type": "time_series",
+                    "data": {"results": [result]},
+                }
+                with self.assertRaisesRegex(RuntimeError, "oriso-e2e-test-health-pre-dev / pass-rate: unexpected"):
+                    self._main("--mode", "check", "--e2e-dashboards")
+
+    def test_e2e_dashboards_flag_reads_a_strict_true_from_the_environment(self) -> None:
+        for value, expected in (
+            ("true", True),
+            ("TRUE", True),
+            ("false", False),
+            (None, False),
+            ("1", False),
+            ("yes", False),
+        ):
+            with self.subTest(value=value), mock.patch.dict(os.environ):
+                os.environ.pop("ORISO_E2E_DASHBOARDS", None)
+                if value is not None:
+                    os.environ["ORISO_E2E_DASHBOARDS"] = value
+                self.assertIs(MODULE._parse_args([]).e2e_dashboards, expected)
 
 
 if __name__ == "__main__":

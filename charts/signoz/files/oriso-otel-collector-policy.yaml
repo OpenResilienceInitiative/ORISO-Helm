@@ -11,6 +11,15 @@ processors:
     check_interval: 1s
     limit_percentage: 80
     spike_limit_percentage: 20
+  filter/reserved-ci-logs:
+    error_mode: silent
+    logs:
+      log_record:
+      - 'resource.attributes["service.name"] == "oriso-ci-tests"'
+      - 'instrumentation_scope.name == "oriso.ci.test-results"'
+      - 'resource.attributes["oriso.signal.source"] == "ci"'
+      - 'instrumentation_scope.attributes["oriso.signal.source"] == "ci"'
+      - 'attributes["oriso.signal.source"] == "ci"'
   filter/rum:
     error_mode: ignore
     metrics:
@@ -55,4 +64,4 @@ service:
       processors: [memory_limiter, batch]
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter, filter/reserved-ci-logs, batch]

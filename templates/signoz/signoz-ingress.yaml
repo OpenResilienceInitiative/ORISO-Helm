@@ -2,7 +2,7 @@
 {{- $orisoIngress := get $signoz "orisoIngress" | default dict -}}
 {{- $signozApp := get $signoz "signoz" | default dict -}}
 {{- $signozService := get $signozApp "service" | default dict -}}
-{{- if and (get $signoz "enabled" | default false) (get $orisoIngress "enabled" | default true) -}}
+{{- if and (get $signoz "enabled" | default false) (dig "enabled" true $orisoIngress) -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

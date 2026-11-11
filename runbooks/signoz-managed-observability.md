@@ -23,6 +23,44 @@ creates or updates:
   ClickHouse capacity, and stale collector telemetry. SigNoz generates one
   route policy per rule when the rule is saved.
 
+### Optional: E2E test dashboards (off by default)
+
+With `signoz.orisoObservability.e2eDashboards=true` (default `false`) the same
+Job also manages the two test dashboards for ORISO-E2E#97. The Playwright
+panels read `oriso-e2e` spans from `tests/support/otelReporter.ts`. The CI
+panels read `oriso-ci-tests` logs from the separate native report exporter.
+
+- `ORISO E2E Test Health [<environment>]` counts each identified first-attempt
+  run once per Playwright test and project. The pass rate uses Playwright's
+  expected outcome, so an expected failure counts as a pass. A run with any
+  unexpected first attempt counts as unexpected. A blank test ID identifies
+  the separate legacy grouping by project, file and title. The rate requires
+  a recorded run ID. The other panels show stored attempt rows, durations and
+  recent runs.
+- `ORISO E2E Flaky Tests [<environment>]` groups passes and unexpected failures
+  by the same Playwright test ID, project and full commit SHA. A timeout with a
+  failed span counts as a failure. The reporter's `test.flaky` flag also has its
+  own panel for passing retries. Test Health remains available for older spans.
+  The same-commit table requires the stable `test.id` from ORISO-E2E#110.
+- The CI pass rate counts terminal outcomes per distinct GitHub job. A job
+  with a failed record counts once as failed. The CI same-commit table
+  requires a passing job and a separate failing job for the same repository,
+  project, test and checkout. A job with conflicting results does not count as
+  a passing or failing observation in that table.
+- The five seed panels match the exact source project, file and cases from
+  ORISO-Frontend#1613, #1707, #1443, ORISO-UserService#251 and ORISO-Admin#1016.
+  They show the earliest dated CI observation in the selected time range.
+  The numeric field is the report window end in epoch milliseconds and the
+  table formats it as a date using the display time zone. An empty table
+  means there is no matching dated observation in the ingested results.
+
+The Playwright reporter sets `deployment.environment` to the project name.
+The runtime panels scope to that environment. The CI panels scope to the
+approved repository, framework and project combinations and to hosted,
+dated terminal results marked by the dedicated collector. CI report
+collection and operator replay are separate from dashboard provisioning. The Dev nightly runtime gate
+remains in ORISO-E2E#97 D.4.
+
 It does **not** own the notification channel. The Slack channel
 `oriso-alerts-slack` (Slack `#oriso-alerts-and-webhooks`) is made by hand in
 SigNoz from a webhook that stays secret. The rules reference it by name
@@ -34,6 +72,31 @@ Every query has a fixed `deployment.environment` filter; infrastructure queries
 also have a fixed `k8s.cluster.name` filter. Dashboard variables are absent,
 alert grouping is limited to the static `environment` label, and the program
 rejects assets that mention user, room, IP, token, or message-content fields.
+
+### Verify a Dev CI replay
+
+After the approved operator replay and Collector batch flush, pass the same
+sanitized exporter payload files to the read-only verifier. Use the existing
+Dev API key through the private `SIGNOZ_API_KEY` environment.
+
+```bash
+python3 files/signoz/verify_ci_replay.py storybook.otlp.json unit.otlp.json admin.otlp.json userservice.otlp.json
+```
+
+The verifier reads up to sixteen payload files and queries each job inside its
+recorded UTC evidence window. The bounded raw query selects only the CI
+fields and preserves the stored Float64 duration and nanosecond timestamps.
+The verifier checks the collector marker, scope, identity, outcome, retry
+and optional duration. It reports aggregate counts for exact,
+missing, duplicate, conflicting and unexpected rows. Warnings, cursors and
+invalid responses make the read inconclusive. A clean result needs exactly
+one stored row per expected test and both stored CI dashboard specifications
+to match the catalog.
+
+For a partial delivery or ambiguous request result, run the readback before
+considering a retry. Compare the saved dashboard panels in the replay window
+separately from the row and query-definition check.
+
 
 ## Switch and what it costs
 
@@ -52,7 +115,7 @@ own switch:
 | Value | Default | Effect |
 |---|---|---|
 | `signoz.orisoObservability.enabled` | `false` | Render the ConfigMap and the hook Job. |
-| `signoz.orisoObservability.conformanceCheck` | `false` | Require fresh data and the declared grouping dimensions on every dashboard panel. Execute the alert queries and verify collector freshness and separation. |
+| `signoz.orisoObservability.conformanceCheck` | `false` | Require fresh grouped data on the three core dashboards. Validate the optional E2E query responses. Execute the alert queries and verify collector freshness and separation. |
 | `signoz.orisoObservability.channelName` | `oriso-alerts-slack` | Existing channel the rules route to. |
 | `signoz.orisoObservability.apiKeySecret.name` / `.key` | `""` / `apiKey` | Existing Secret with the SigNoz API key; the name is required when on. |
 
@@ -61,9 +124,11 @@ every dashboard, rule, the channel, and the routes back against the catalog. It
 does not need telemetry to flow yet. Turn `conformanceCheck` on only after the
 UserService diagnostic metrics and the collectors are live in that environment.
 Exercise the approved scenarios for event-driven panels before running the full
-check. Each dashboard query needs a complete interval with a finite sample in the
-last 15 minutes. Every contributing series must have the panel's declared group
-keys. A numeric zero is valid.
+check. Each core dashboard query needs a complete interval with a finite sample
+in the last 15 minutes. Every contributing series must have the panel's declared
+group keys. A numeric zero is valid. The optional E2E dashboards accept valid
+empty or sparse query results and legacy rows with a blank test ID. Verify their
+contents after a known test run as part of ORISO-E2E#97.
 
 ## API key Secret (created out of band, never in values)
 
@@ -223,6 +288,47 @@ entry in the scheduled rule history and a corresponding Slack receipt.
 The one-off endpoint validates the rule shape and configured channel. Record
 receiver confirmation for the test notification and one scheduled dispatch
 per environment in the release evidence.
+
+## Java deployment identity alert
+
+The optional observer and rule are disabled by default. Enable
+`signoz.orisoObservability.deploymentIdentity.enabled` in a reviewed Dev or
+Pre-Dev release with managed observability enabled. Keep the flag off until
+the approved release record has image pins for `agencyservice`,
+`consultingtypeservice`, `tenantservice`, and `userservice`. Configure
+`signoz.orisoObservability.deploymentIdentity.expectedImages` with one entry
+per workload. Each entry has an `image` reference pinned to `@sha256:…`
+and a nonempty `runtimeDigests` list of canonical `sha256:…` digests.
+
+Record the expected image from the approved rollout and its CI provenance
+before inspecting the target. Include the canonical runtime digests verified
+for the target platform. An OCI index may resolve to a different platform
+manifest digest. Keep the expectation current when an approved image-only
+rollout happens outside Helm. The installed Helm manifest can lag an
+image-only rollout.
+
+The CronJob runs every two minutes. Its Role can read the four Deployments
+and list Pods and ReplicaSets in the release namespace. The list requests
+select the four workload labels. The job checks the observed generation,
+replica counts, controller UIDs, active revision, and primary container image.
+It emits `oriso.deployment.identity.mismatch` with value 0 for a verified match
+or 1 for a verified mismatch. An incomplete rollout, missing primary container,
+or incomparable runtime ID produces `oriso.deployment.identity.unverified=1`
+and a failed observation Job. The metrics carry service, environment, and
+cluster only. Image digests and Pod identifiers stay out of SigNoz and Slack.
+
+After the authorized rollout, verify fresh samples for all four services in
+the target environment. Check the rule with `--mode check --deployment-identity`
+and inspect the current mismatch and unverified values. The managed rule
+uses the latest samples and a maximum across services in that environment and
+cluster. A separate authorized route test and a confirmed Slack receipt
+complete alert acceptance.
+
+To stop the observer, turn off `deploymentIdentity.enabled` while leaving
+the managed observability hook enabled for the upgrade. The hook disables
+the previously owned rule and preserves the six baseline rules. If the entire
+hook is disabled in the same upgrade, disable the rule in SigNoz during the
+approved rollback.
 
 ## Promotion
 

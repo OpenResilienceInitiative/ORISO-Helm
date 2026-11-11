@@ -3,12 +3,16 @@
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import pathlib
 import subprocess
 import sys
 import tempfile
 from typing import Any
+from unittest.mock import Mock
+from urllib.parse import parse_qs, urlsplit
 
 import yaml
 
@@ -88,6 +92,79 @@ def find(items: list[dict[str, Any]], kind: str, name: str) -> dict[str, Any]:
         for item in items
         if item.get("kind") == kind and item.get("metadata", {}).get("name") == name
     )
+
+
+def check_observer_selector(documents: list[dict[str, Any]]) -> None:
+    """The observer's real list selector must match every rendered Java workload."""
+    path = os.path.join(CHART_DIR, "files", "signoz", "signoz_deployment_identity.py")
+    spec = importlib.util.spec_from_file_location("signoz_deployment_identity", path)
+    assert spec and spec.loader
+    observer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(observer)
+    connection = Mock()
+    connection.getresponse.return_value = Mock(status=200, read=Mock(return_value=b'{"items": []}'))
+    observer._list_workloads(connection, "/api/v1/namespaces/caritas/pods", {})
+    selector = parse_qs(urlsplit(connection.request.call_args.args[1]).query)["labelSelector"][0]
+    key, _, values = selector.partition(" in ")
+    selected = set(values.strip("()").split(","))
+    for workload in observer.SERVICES:
+        deployment = find(documents, "Deployment", workload)["spec"]
+        assert deployment["selector"]["matchLabels"].get(key) in selected, workload
+        assert deployment["template"]["metadata"]["labels"].get(key) in selected, workload
+        names = [container["name"] for container in deployment["template"]["spec"]["containers"]]
+        assert workload in names, (workload, names)
+
+
+def check_deployment_identity(default_documents: list[dict[str, Any]]) -> None:
+    name = "caritas-signoz-deployment-identity"
+    assert all(item.get("metadata", {}).get("name") != name for item in default_documents)
+    workloads = ("agencyservice", "consultingtypeservice", "tenantservice", "userservice")
+    digest = "sha256:" + "1" * 64
+    images = {
+        workload: {"image": f"ghcr.io/example/{workload}@{digest}", "runtimeDigests": [digest]}
+        for workload in workloads
+    }
+    flag = "signoz.orisoObservability.deploymentIdentity"
+    args = ("--set", f"{flag}.enabled=true", "--set-json", f"{flag}.expectedImages={json.dumps(images)}")
+    enabled = render(enabled=True, environment="dev", cluster_name="oriso-dev", extra_args=args)
+    role = find(enabled, "Role", name)
+    assert role["metadata"]["namespace"] == "caritas"
+    assert role["rules"] == [
+        {"apiGroups": ["apps"], "resources": ["deployments"],
+         "resourceNames": list(workloads), "verbs": ["get"]},
+        {"apiGroups": ["apps"], "resources": ["replicasets"], "verbs": ["list"]},
+        {"apiGroups": [""], "resources": ["pods"], "verbs": ["list"]},
+    ]
+    assert find(enabled, "RoleBinding", name)["roleRef"]["kind"] == "Role"
+    assert find(enabled, "ServiceAccount", name)["automountServiceAccountToken"] is False
+    cron = find(enabled, "CronJob", name)
+    assert cron["spec"]["concurrencyPolicy"] == "Forbid"
+    job = cron["spec"]["jobTemplate"]["spec"]
+    assert job["activeDeadlineSeconds"] == 55 and job["backoffLimit"] == 0
+    pod = job["template"]["spec"]
+    assert pod["serviceAccountName"] == name
+    assert pod["automountServiceAccountToken"] is True
+    container = pod["containers"][0]
+    assert container["securityContext"]["readOnlyRootFilesystem"] is True
+    assert container["securityContext"]["allowPrivilegeEscalation"] is False
+    env = {item["name"]: item["value"] for item in container["env"]}
+    assert env["ORISO_OTLP_HOST"] == "caritas-signoz-otel-collector:4318"
+    assert env["ORISO_ENVIRONMENT"] == "dev"
+    assert env["ORISO_CLUSTER_NAME"] == "oriso-dev"
+    assert json.loads(env["ORISO_EXPECTED_IMAGES"]) == images
+    assert "signoz_deployment_identity.py" in find(enabled, "ConfigMap", name)["data"]
+    check_observer_selector(enabled)
+    provision = find(enabled, "Job", "caritas-signoz-observability")
+    assert {"name": "ORISO_DEPLOYMENT_IDENTITY_ENABLED", "value": "true"} in (
+        provision["spec"]["template"]["spec"]["containers"][0]["env"]
+    )
+
+    assert render_result(enabled=False, extra_args=args).returncode != 0
+    assert render_result(enabled=True, environment="prod", extra_args=args).returncode != 0
+    assert render_result(enabled=True, extra_args=args[:2]).returncode != 0
+    string_flag = ("--set-string", f"{flag}.enabled=false", *args[2:])
+    result = render_result(enabled=True, environment="dev", cluster_name="oriso-dev", extra_args=string_flag)
+    assert result.returncode != 0 and "enabled must be a boolean" in result.stderr, result.stderr
 
 
 def browser_schedule_args(environment: str, secret: str = BROWSER_READER_SECRET) -> tuple[str, ...]:
@@ -178,6 +255,7 @@ def check_browser_schedule() -> None:
 
 def main() -> None:
     predev = render(enabled=True)
+    check_deployment_identity(predev)
     config = find(predev, "ConfigMap", "caritas-signoz-observability")
     job = find(predev, "Job", "caritas-signoz-observability")
 

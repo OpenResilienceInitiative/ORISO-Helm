@@ -1069,6 +1069,17 @@ telemetryStoreMigrator:
 # @section -- Otel Collector
 # @default -- "Please checkout the default values in values.yml"
 otelCollector:
+  # Operator replay over a Pod port-forward on Dev. See runbooks/signoz-dev.md.
+  ciLogIngest:
+    enabled: false
+  # ORISO private OTLP intake. Enable only with an approved producer and OTTL policy.
+  privateOtlp:
+    enabled: false
+    producerMatchLabels: []
+    maxRequestBytes: 0
+    policy:
+      filter: {}
+      transform: {}
   # otelCollector.name -- The name of the Otel Collector component.
   # @default -- "otel-collector"
   # @section -- Otel Collector
