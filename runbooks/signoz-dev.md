@@ -55,25 +55,40 @@ values file to `values_files` in its intended order. The drift check and both
 Helm commands use that same list.
 
 Before the upgrade, check for omitted user-supplied paths and for changes
-outside the observability projection. The check prints only the path count and
-the affected paths.
+outside the observability projection. The check merges the values files in
+order with Helm's rules (a later `null` removes the key) before comparing, and
+prints only the path count and the affected paths. The preflight below runs it
+again against the current files and the live release on every call.
 
 ```bash
-helm get values caritas -n caritas -o json | python3 -c '
+values_drift() {
+  helm get values caritas -n caritas -o json | python3 -c '
 import json, sys, yaml
+def merge(base, override):
+    for k, v in (override or {}).items():
+        if v is None:
+            base.pop(k, None)
+        elif isinstance(v, dict) and isinstance(base.get(k), dict):
+            merge(base[k], v)
+        else:
+            base[k] = v
+    return base
 def leaves(d, p=""):
     out = {}
     for k, v in (d or {}).items():
         out.update(leaves(v, f"{p}.{k}") if isinstance(v, dict) and v else {f"{p}.{k}": v})
     return out
 overlay_file, *files = sys.argv[1:]
-planned = {}
+merged = {}
 for name in files:
-    planned.update(leaves(yaml.safe_load(open(name))))
+    merge(merged, yaml.safe_load(open(name)))
+planned = leaves(merged)
 overlay = leaves(yaml.safe_load(open(overlay_file)))
 live = leaves(json.load(sys.stdin))
 drift = sorted(p for p in live if p not in planned or (p not in overlay and live[p] != planned[p]))
-print(len(drift), *drift, sep="\n")' "$observability_file" "${values_files[@]}" | tee /root/observability-drift.out
+print(len(drift), *drift, sep="\n")' "$observability_file" "${values_files[@]}"
+}
+values_drift
 ```
 
 Resolve the listed paths before continuing. Use the approved ordered values
@@ -116,7 +131,8 @@ expected_observability=values-dev.yaml
 preflight_signoz() (
   set +x
   set -uo pipefail
-  test "$(head -n 1 /root/observability-drift.out)" = 0 || exit 1
+  drift=$(values_drift) || exit 1
+  test "$(head -n 1 <<<"$drift")" = 0 || { printf '%s\n' "$drift"; exit 1; }
   preview=$(helm upgrade "${helm_args[@]}" --dry-run=server --hide-secret -o json) || exit 1
   printf '%s' "$preview" | jq -e '.config' |
     python3 scripts/observability_overlay.py "$expected_observability" --check-effective || exit 1
