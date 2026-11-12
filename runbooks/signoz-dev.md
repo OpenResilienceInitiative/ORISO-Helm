@@ -649,8 +649,8 @@ generate the token yourself and do not paste it into a ticket or chat):
 1. Generate a long random token in your password manager.
 2. On the Dev master (`KUBECONFIG=/etc/rancher/k3s/k3s.yaml`), create the Secret
    `signoz-e2e-ingest-auth` in namespace `caritas` with one key `auth` holding an
-   htpasswd line for user `e2e` (`htpasswd -nbB e2e '<token>'`, entered without
-   leaving it in shell history).
+   htpasswd line for user `e2e`. Run `htpasswd -nB e2e` and enter the token at
+   its prompt, so the token never appears on a command line or in shell history.
 3. In GitHub, repository ORISO-E2E, environment `dev-e2e`, add the secrets
    `DEV_OTLP_TOKEN` (the token) and `DEV_OTLP_ENDPOINT`
    (`https://dev.oriso.org/signoz-e2e/v1/traces`). The same environment also needs
