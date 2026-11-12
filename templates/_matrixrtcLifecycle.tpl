@@ -86,10 +86,19 @@ configuration is disabled; an explicit non-boolean fails.
 
 {{/* In-cluster address of the call policy gateway, for UserService's lifecycle and eviction calls. */}}
 {{- define "oriso.matrixrtcAuth.gatewayUrl" -}}
-{{- (.Values.matrixrtcAuth | default dict).gatewayInternalUrl | default "http://matrixrtc-auth-policy-gateway:3010" -}}
+{{- required "matrixrtcAuth.gatewayInternalUrl is required" (.Values.matrixrtcAuth | default dict).gatewayInternalUrl -}}
 {{- end -}}
 
-{{/* LiveKit RoomService address the gateway uses to remove a banned participant. */}}
+{{/*
+LiveKit RoomService address the gateway uses to remove a banned participant.
+The gateway NetworkPolicy admits only the chart's own LiveKit (app=livekit,
+plus matrixrtcAuth.livekitNodeCidrs) on port 7880, so only an address that
+reaches exactly that is accepted; anything else would render but be dropped.
+*/}}
 {{- define "oriso.matrixrtcEviction.livekitUrl" -}}
-{{- (.Values.matrixrtcEviction | default dict).livekitRoomServiceUrl | default "http://livekit:7880" -}}
+{{- $url := required "matrixrtcEviction.livekitRoomServiceUrl is required" (.Values.matrixrtcEviction | default dict).livekitRoomServiceUrl -}}
+{{- if not (regexMatch (printf "^http://livekit(\\.%s(\\.svc(\\.cluster\\.local)?)?)?:7880/?$" (regexQuoteMeta .Release.Namespace)) $url) -}}
+{{- fail (printf "matrixrtcEviction.livekitRoomServiceUrl %q must address the chart's LiveKit Service on port 7880 (for example http://livekit:7880); the gateway NetworkPolicy admits nothing else" $url) -}}
+{{- end -}}
+{{- $url -}}
 {{- end -}}

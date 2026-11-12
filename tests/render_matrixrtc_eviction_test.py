@@ -75,12 +75,18 @@ class MatrixRtcEvictionRenderTest(unittest.TestCase):
         self.assertEqual(env(docs, GATEWAY)["MATRIXRTC_LIFECYCLE_ENABLED"]["value"], "true")
 
     def test_addresses_come_from_values(self):
-        docs = render({**ON, "matrixrtcEviction.livekitRoomServiceUrl": "http://sfu.internal:7880",
+        docs = render({**ON, "matrixrtcEviction.livekitRoomServiceUrl": "http://livekit.media-test.svc:7880",
                        "matrixrtcAuth.gatewayInternalUrl": "http://gw.internal:3010"})
-        self.assertEqual(env(docs, GATEWAY)["MATRIXRTC_EVICTION_LIVEKIT_URL"]["value"], "http://sfu.internal:7880")
+        self.assertEqual(env(docs, GATEWAY)["MATRIXRTC_EVICTION_LIVEKIT_URL"]["value"], "http://livekit.media-test.svc:7880")
         data = find(docs, "ConfigMap", "userservice-configmap-env")["data"]
         self.assertEqual(data["MATRIXRTC_EVICTION_BASE_URL"], "http://gw.internal:3010")
         self.assertEqual(data["MATRIXRTC_LIFECYCLE_BASE_URL"], "http://gw.internal:3010")
+
+    def test_livekit_address_the_policy_would_drop_fails_at_render(self):
+        for url in ("http://sfu.internal:7880", "http://livekit:7881", "https://livekit:7880",
+                    "http://livekit.other-namespace:7880"):
+            with self.assertRaises(AssertionError, msg=url):
+                render({**ON, "matrixrtcEviction.livekitRoomServiceUrl": url})
 
     def test_non_boolean_fails(self):
         with self.assertRaises(AssertionError):
