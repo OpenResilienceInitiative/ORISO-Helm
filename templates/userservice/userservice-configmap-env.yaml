@@ -51,9 +51,9 @@ metadata:
     app: userservice-configmap-env
   name: userservice-configmap-env
 data:
-  MATRIXRTC_LIFECYCLE_BASE_URL: "http://matrixrtc-auth-policy-gateway:3010"
+  MATRIXRTC_LIFECYCLE_BASE_URL: {{ include "oriso.matrixrtcAuth.gatewayUrl" . | quote }}
   MATRIXRTC_LIFECYCLE_ENABLED: {{ (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") | quote }}
-  MATRIXRTC_EVICTION_BASE_URL: {{ ternary "http://matrixrtc-auth-policy-gateway:3010" "" (eq (include "oriso.matrixrtcEviction.enabled" .) "true") | quote }}
+  MATRIXRTC_EVICTION_BASE_URL: {{ ternary (include "oriso.matrixrtcAuth.gatewayUrl" .) "" (eq (include "oriso.matrixrtcEviction.enabled" .) "true") | quote }}
   ACCOUNT_INACTIVITY_ENABLED: {{ dig "accountInactivity" "enabled" false .Values.userService | quote }}
   ACCOUNT_INACTIVITY_DRY_RUN: {{ dig "accountInactivity" "dryRun" true .Values.userService | quote }}
   # General

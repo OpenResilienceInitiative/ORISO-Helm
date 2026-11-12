@@ -82,7 +82,7 @@ spec:
             {{- end }}
             {{- if (eq (include "oriso.matrixrtcEviction.enabled" .) "true") }}
             - name: MATRIXRTC_EVICTION_LIVEKIT_URL
-              value: http://livekit:7880
+              value: {{ include "oriso.matrixrtcEviction.livekitUrl" . | quote }}
             - name: MATRIXRTC_EVICTION_TOKEN_FILE
               value: /run/secrets/call-policy-token
             - name: MATRIXRTC_EVICTION_LIVEKIT_KEY_FILE

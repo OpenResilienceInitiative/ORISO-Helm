@@ -66,3 +66,30 @@ the release namespace always stays.
       app.kubernetes.io/name: ingress-nginx
       app.kubernetes.io/component: controller
 {{- end -}}
+
+{{/*
+Moderator removal from a running group call (ORISO-Admin#1518): UserService asks
+the policy gateway to remove a banned person's LiveKit participants. Missing
+configuration is disabled; an explicit non-boolean fails.
+*/}}
+{{- define "oriso.matrixrtcEviction.enabled" -}}
+{{- $cfg := .Values.matrixrtcEviction | default dict -}}
+{{- $enabled := false -}}
+{{- if hasKey $cfg "enabled" -}}
+{{- $enabled = $cfg.enabled -}}
+{{- end -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "matrixrtcEviction.enabled must be a boolean" -}}
+{{- end -}}
+{{- $enabled | toString -}}
+{{- end -}}
+
+{{/* In-cluster address of the call policy gateway, for UserService's lifecycle and eviction calls. */}}
+{{- define "oriso.matrixrtcAuth.gatewayUrl" -}}
+{{- (.Values.matrixrtcAuth | default dict).gatewayInternalUrl | default "http://matrixrtc-auth-policy-gateway:3010" -}}
+{{- end -}}
+
+{{/* LiveKit RoomService address the gateway uses to remove a banned participant. */}}
+{{- define "oriso.matrixrtcEviction.livekitUrl" -}}
+{{- (.Values.matrixrtcEviction | default dict).livekitRoomServiceUrl | default "http://livekit:7880" -}}
+{{- end -}}

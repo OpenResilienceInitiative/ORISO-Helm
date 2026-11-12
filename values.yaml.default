@@ -343,6 +343,8 @@ online-counseling-mariadb:
 # if your CNI does not match host-network pods by podSelector.
 matrixrtcEviction:
   enabled: false
+  # LiveKit RoomService (HTTP API) as the gateway reaches it in-cluster.
+  livekitRoomServiceUrl: "http://livekit:7880"
 
 matrixrtcLifecycle:
   enabled: false
@@ -360,6 +362,9 @@ matrixrtcLifecycle:
     nodeHostname: ""
 matrixrtcAuth:
   replicas: 1
+  # In-cluster address of the call policy gateway, used by UserService
+  # (media lifecycle and moderator removal from a running call).
+  gatewayInternalUrl: "http://matrixrtc-auth-policy-gateway:3010"
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
   # Optional: namespace of the ingress controller for the call NetworkPolicies.
   # Empty means "ingress-nginx". The release namespace is always admitted as well.

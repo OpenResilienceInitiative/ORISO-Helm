@@ -74,6 +74,14 @@ class MatrixRtcEvictionRenderTest(unittest.TestCase):
         self.assertEqual(len(livekit_egress(docs)), 1)
         self.assertEqual(env(docs, GATEWAY)["MATRIXRTC_LIFECYCLE_ENABLED"]["value"], "true")
 
+    def test_addresses_come_from_values(self):
+        docs = render({**ON, "matrixrtcEviction.livekitRoomServiceUrl": "http://sfu.internal:7880",
+                       "matrixrtcAuth.gatewayInternalUrl": "http://gw.internal:3010"})
+        self.assertEqual(env(docs, GATEWAY)["MATRIXRTC_EVICTION_LIVEKIT_URL"]["value"], "http://sfu.internal:7880")
+        data = find(docs, "ConfigMap", "userservice-configmap-env")["data"]
+        self.assertEqual(data["MATRIXRTC_EVICTION_BASE_URL"], "http://gw.internal:3010")
+        self.assertEqual(data["MATRIXRTC_LIFECYCLE_BASE_URL"], "http://gw.internal:3010")
+
     def test_non_boolean_fails(self):
         with self.assertRaises(AssertionError):
             render({"matrixrtcEviction.enabled": '"yes"'})
