@@ -335,6 +335,15 @@ online-counseling-mariadb:
   imageVersion: "11.0.6"
   maxconnections: "1000"
 # Off until the gateway image, dedicated secrets and RTC network acceptance pass.
+# Remove a person a moderator bans from a group conversation from that group's
+# running LiveKit call (ORISO-Admin#1518). The policy gateway calls the LiveKit
+# RoomService with the existing matrixrtcAuth LiveKit key; UserService calls the
+# gateway with the call-policy token. Independent of matrixrtcLifecycle.
+# Under hostNetwork LiveKit, list the LiveKit nodes in matrixrtcAuth.livekitNodeCidrs
+# if your CNI does not match host-network pods by podSelector.
+matrixrtcEviction:
+  enabled: false
+
 matrixrtcLifecycle:
   enabled: false
   # Change with every externally managed token rotation to restart both consumers.

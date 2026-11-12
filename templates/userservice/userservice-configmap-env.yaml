@@ -53,6 +53,7 @@ metadata:
 data:
   MATRIXRTC_LIFECYCLE_BASE_URL: "http://matrixrtc-auth-policy-gateway:3010"
   MATRIXRTC_LIFECYCLE_ENABLED: {{ (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") | quote }}
+  MATRIXRTC_EVICTION_BASE_URL: {{ ternary "http://matrixrtc-auth-policy-gateway:3010" "" (eq (include "oriso.matrixrtcEviction.enabled" .) "true") | quote }}
   ACCOUNT_INACTIVITY_ENABLED: {{ dig "accountInactivity" "enabled" false .Values.userService | quote }}
   ACCOUNT_INACTIVITY_DRY_RUN: {{ dig "accountInactivity" "dryRun" true .Values.userService | quote }}
   # General

@@ -18,10 +18,12 @@ spec:
         - podSelector:
             matchLabels:
               app: element-call
-        {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
+        {{- if (or (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") (eq (include "oriso.matrixrtcEviction.enabled" .) "true")) }}
         - podSelector:
             matchLabels:
               app: userservice
+        {{- end }}
+        {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
         - podSelector:
             matchLabels:
               app: livekit
@@ -30,14 +32,28 @@ spec:
         - protocol: TCP
           port: 3010
   egress:
-    {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
+    {{- if (or (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") (eq (include "oriso.matrixrtcEviction.enabled" .) "true")) }}
     - to:
         - podSelector:
             matchLabels:
               app: livekit
+        {{- if not (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
+        {{- /*
+          Eviction against the legacy host-network LiveKit: the Service resolves
+          to a node address, which some CNIs do not match by podSelector. The
+          operator-listed LiveKit nodes (validated in the receiver policy below)
+          are admitted on the RoomService port only.
+        */}}
+        {{- range $cidr := (.Values.matrixrtcAuth.livekitNodeCidrs | default list) }}
+        - ipBlock:
+            cidr: {{ toString $cidr | trim | quote }}
+        {{- end }}
+        {{- end }}
       ports:
         - protocol: TCP
           port: 7880
+    {{- end }}
+    {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
     - to:
         - podSelector:
             matchLabels:
