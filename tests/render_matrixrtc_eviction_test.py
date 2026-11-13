@@ -82,6 +82,15 @@ class MatrixRtcEvictionRenderTest(unittest.TestCase):
         self.assertEqual(data["MATRIXRTC_EVICTION_BASE_URL"], "http://gw.internal:3010")
         self.assertEqual(data["MATRIXRTC_LIFECYCLE_BASE_URL"], "http://gw.internal:3010")
 
+    def test_full_service_address_uses_the_configured_cluster_domain(self):
+        url = "http://livekit.media-test.svc.corp.internal:7880"
+        docs = render({**ON, "global.clusterDomain": "corp.internal",
+                       "matrixrtcEviction.livekitRoomServiceUrl": url})
+        self.assertEqual(env(docs, GATEWAY)["MATRIXRTC_EVICTION_LIVEKIT_URL"]["value"], url)
+        with self.assertRaises(AssertionError):
+            render({**ON, "global.clusterDomain": "corp.internal",
+                    "matrixrtcEviction.livekitRoomServiceUrl": "http://livekit.media-test.svc.cluster.local:7880"})
+
     def test_livekit_address_the_policy_would_drop_fails_at_render(self):
         for url in ("http://sfu.internal:7880", "http://livekit:7881", "https://livekit:7880",
                     "http://livekit.other-namespace:7880"):

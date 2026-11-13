@@ -98,7 +98,8 @@ reaches exactly that is accepted; anything else would render but be dropped.
 */}}
 {{- define "oriso.matrixrtcEviction.livekitUrl" -}}
 {{- $url := required "matrixrtcEviction.livekitRoomServiceUrl is required" (.Values.matrixrtcEviction | default dict).livekitRoomServiceUrl -}}
-{{- if not (regexMatch (printf "^http://livekit(\\.%s(\\.svc(\\.cluster\\.local)?)?)?:7880/?$" (regexQuoteMeta .Release.Namespace)) $url) -}}
+{{- $clusterDomain := (.Values.global | default dict).clusterDomain | default "cluster.local" -}}
+{{- if not (regexMatch (printf "^http://livekit(\\.%s(\\.svc(\\.%s)?)?)?:7880/?$" (regexQuoteMeta .Release.Namespace) (regexQuoteMeta $clusterDomain)) $url) -}}
 {{- fail (printf "matrixrtcEviction.livekitRoomServiceUrl %q must address the chart's LiveKit Service on port 7880 (for example http://livekit:7880); the gateway NetworkPolicy admits nothing else" $url) -}}
 {{- end -}}
 {{- $url -}}
