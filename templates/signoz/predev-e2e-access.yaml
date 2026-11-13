@@ -1,0 +1,69 @@
+{{- $signoz := .Values.signoz | default dict -}}
+{{- $access := get $signoz "orisoPreDevE2EAccess" | default dict -}}
+{{- $enabled := get $access "enabled" | default false -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "signoz.orisoPreDevE2EAccess.enabled must be a boolean" -}}
+{{- end -}}
+{{- if $enabled -}}
+{{- $environment := get (get .Values.global "observability" | default dict) "deploymentEnvironment" | default "" -}}
+{{- if not (and (eq $environment "pre-dev") (eq .Values.global.domainName "predev.oriso.org") (eq .Release.Name "caritas") (eq .Release.Namespace "caritas")) -}}
+{{- fail "signoz.orisoPreDevE2EAccess.enabled requires the canonical caritas Pre-Dev release" -}}
+{{- end -}}
+{{- if not (and (kindIs "bool" $signoz.enabled) $signoz.enabled) -}}
+{{- fail "signoz.orisoPreDevE2EAccess.enabled requires signoz.enabled=true" -}}
+{{- end -}}
+{{- $deployments := list "frontend" "userservice" "matrix-synapse" -}}
+{{- $matrixRtc := list "element-call" "matrixrtc-auth-policy-gateway" "matrixrtc-authorization-service" "livekit" -}}
+{{- range $identity := list
+      (dict "name" "oriso-predev-j08" "deployments" $deployments "sigNozProxy" true)
+      (dict "name" "oriso-predev-e2e-report" "deployments" (concat $deployments $matrixRtc) "sigNozProxy" false) }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $identity.name }}
+  namespace: caritas
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $identity.name }}
+  namespace: caritas
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: {{ $identity.deployments | toJson }}
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    resourceNames: ["caritas-signoz"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+  {{- if $identity.sigNozProxy }}
+  - apiGroups: [""]
+    resources: ["services/proxy"]
+    resourceNames: ["http:caritas-signoz:8080"]
+    verbs: ["create"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $identity.name }}
+  namespace: caritas
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $identity.name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $identity.name }}
+    namespace: caritas
+{{- end }}
+{{- end }}

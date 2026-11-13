@@ -248,7 +248,7 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call:2.0.15"
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.16"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Storybook is a development surface and stays absent unless an environment
@@ -320,7 +320,7 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.15"
+  imageVersion: "2.0.16"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -381,6 +381,9 @@ livekit:
   deploymentStrategy: Recreate
   terminationGracePeriodSeconds: 60
   image: "docker.io/livekit/livekit-server:v1.13.5"
+  # Optional private signed-webhook receiver. Empty uses the chart's upstream
+  # MatrixRTC authorization Service in the same namespace.
+  legacyWebhookUrl: ""
   existingConfigSecret:
     # Pre-provision this Secret outside Helm for the same release-history boundary.
     name: "livekit-config-runtime"
@@ -422,7 +425,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.15"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.16"
   # Deletion-log outbox (OBP 2.1 #130). With task identities on, an AgencyService image older
   # than ORISO-AgencyService#356 refuses to start once DELETION_AUDIT_READ is required. Switch this
   # on in the same release that deploys that image; until then the outbox stays unreadable.
@@ -443,7 +446,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "2.0.15"
+  imageVersion: "2.0.16"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -474,7 +477,7 @@ tenantService:
   systemEmailDeliveryServiceClient: ""
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.15"
+  imageVersion: "2.0.16"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -510,7 +513,7 @@ userService:
     requestsPerSecond: 5
     burstMultiplier: 2
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.15"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.16"
   serviceURL: "http://userservice:8080"
 
   keycloakResource: "user-service"
@@ -599,7 +602,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.15"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.16"
 
 nginxController:
   enabled: true

@@ -4,9 +4,16 @@ trace identity and sampling, browser Web Vitals (ORISO SigNoz plan, session 1)."
 
 from __future__ import annotations
 
+from contextlib import closing
+import fcntl
+import hashlib
+import json
 import os
+from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
+import sys
 import tempfile
 from typing import Any
 
@@ -14,10 +21,16 @@ import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JAVA_SERVICES = ("userservice", "agencyservice", "tenantservice", "consultingtypeservice")
+DEV_ALIAS = ("Ingress", "signoz-oriso-org-redirect")
 
 
-def render(*overlays: str, release: str = "caritas", chart: str = CHART_DIR) -> list[dict[str, Any]]:
-    command = ["helm", "template", release, chart, "--namespace", "caritas"]
+def render(
+    *overlays: str,
+    release: str = "caritas",
+    chart: str = CHART_DIR,
+    helm_args: tuple[str, ...] = (),
+) -> list[dict[str, Any]]:
+    command = ["helm", "template", release, chart, "--namespace", "caritas", *helm_args]
     for values in (
         "values.yaml.default",
         "tests/fixtures/values-render-domain.yaml",
@@ -47,6 +60,15 @@ def env(workload: dict[str, Any]) -> dict[str, Any]:
 
 
 def assert_dev(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
+    job = docs[("Job", "caritas-signoz-observability")]
+    job_env = job["spec"]["template"]["spec"]["containers"][0]["env"]
+    api_key = next(item for item in job_env if item["name"] == "SIGNOZ_API_KEY")
+    assert api_key["valueFrom"]["secretKeyRef"] == {
+        "name": "signoz-observability-api-key",
+        "key": "apiKey",
+    }
+    assert "value" not in api_key
+
     # Data protection. The retain hook needs the bound volumes, which only a
     # cluster lookup sees; offline it must render nothing, never a ClusterRole
     # that could patch every volume in the cluster.
@@ -78,12 +100,25 @@ def assert_dev(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     assert rum["processors"].index("filter/rum") < rum["processors"].index("transform/rum")
     rum_filter = "\n".join(config["processors"]["filter/rum"]["metrics"]["metric"])
     assert "lcp|cls|inp|ttfb|fcp" in rum_filter and '"frontend"' in rum_filter
-    resource = config["processors"]["transform/rum"]["metric_statements"][0]
+    rum_statements = config["processors"]["transform/rum"]["metric_statements"]
+    resource = rum_statements[0]
     assert resource["context"] == "resource"
     assert resource["statements"][0] == 'keep_keys(attributes, ["service.name"])'
-    datapoint = config["processors"]["transform/rum"]["metric_statements"][1]
+    datapoint = rum_statements[1]
     assert datapoint["context"] == "datapoint"
     assert datapoint["statements"][0].startswith('keep_keys(attributes, ["url.path_template"')
+    assert datapoint.get("conditions") == ['metric.name != "login_failure"']
+    login = rum_statements[2]
+    assert login["context"] == "datapoint"
+    assert login["conditions"] == ['metric.name == "login_failure"']
+    assert login["statements"][0] == 'keep_keys(attributes, ["outcome", "transport", "stage"])'
+    login_values = {
+        "outcome": "credentials|otp_required|access_denied|account_disabled|setup_incomplete|rate_limited|unavailable",
+        "transport": "bad_request|unauthorized|network|too_many_requests|unexpected",
+        "stage": "password|otp",
+    }
+    for key, values in login_values.items():
+        assert any(f'IsMatch(attributes["{key}"], "^({values})$")' in line for line in login["statements"]), key
     collector_env = env(docs[("Deployment", "caritas-signoz-otel-collector")])
     assert collector_env["ORISO_DEPLOYMENT_ENVIRONMENT"] == "dev"
     collector = docs[("Deployment", "caritas-signoz-otel-collector")]
@@ -137,13 +172,73 @@ def assert_default_off(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     assert frontend["REACT_APP_OTEL_METRICS_URL"] == "" and frontend["REACT_APP_OBSERVABILITY_ENABLED"] == "false"
 
 
-def render_dev_with(overlay: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+def render_dev_with(
+    overlay: dict[str, Any], *helm_args: str, chart: str = CHART_DIR,
+) -> dict[tuple[str, str], dict[str, Any]]:
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
         yaml.safe_dump(overlay, handle)
     try:
-        return by_key(render("values-dev.yaml", handle.name))
+        return by_key(render("values-dev.yaml", handle.name, chart=chart, helm_args=helm_args))
     finally:
         os.unlink(handle.name)
+
+
+def assert_dev_alias(
+    dev: dict[tuple[str, str], dict[str, Any]], defaults: dict[tuple[str, str], dict[str, Any]]
+) -> None:
+    alias = dev[DEV_ALIAS]
+    assert alias["metadata"]["namespace"] == "caritas"
+    assert alias["metadata"]["annotations"] == {
+        "cert-manager.io/cluster-issuer": "letsencrypt-prod",
+        "nginx.ingress.kubernetes.io/temporal-redirect": "https://dev.oriso.org/signoz/",
+        "helm.sh/resource-policy": "keep",
+    }
+    assert alias["spec"] == {
+        "ingressClassName": "nginx",
+        "rules": [{
+            "host": "signoz.oriso.org",
+            "http": {"paths": [{
+                "path": "/",
+                "pathType": "Prefix",
+                "backend": {"service": {"name": "caritas-signoz", "port": {"number": 8080}}},
+            }]},
+        }],
+        "tls": [{"hosts": ["signoz.oriso.org"], "secretName": "signoz-oriso-org-tls"}],
+    }
+    assert DEV_ALIAS not in defaults
+    assert DEV_ALIAS not in by_key(render("values-prod.yaml"))
+    # Pre-Dev inherits the alias flag from the first overlay.
+    assert DEV_ALIAS not in by_key(render("values-dev.yaml", "values-pre-dev.yaml"))
+    for override in (
+        {"signoz": {"orisoIngress": {"devAliasRedirect": False}}},
+        {"signoz": {"orisoIngress": {"enabled": False}}},
+        {"global": {"enableTls": False}},
+        {
+            "signoz": {"enabled": False, "orisoObservability": {"enabled": False}},
+            "signozCollector": {"enabled": False},
+            "global": {"observability": {
+                "otlpEnabled": False,
+                "appMetrics": False,
+                "dbMetrics": False,
+                "webVitals": {"enabled": False},
+            }},
+        },
+        {
+            "global": {"observability": {"deploymentEnvironment": "production", "e2eTraceIngest": {"enabled": False}}},
+            "signoz": {"otelCollector": {
+                "additionalEnvs": {"ORISO_DEPLOYMENT_ENVIRONMENT": "production"},
+                "ports": {"otlp-e2e": {"enabled": False}},
+            }},
+        },
+        {
+            "global": {"domainName": "predev.oriso.org", "observability": {"e2eTraceIngest": {"enabled": False}}},
+            "signoz": {
+                "signoz": {"env": {"signoz_global_external__url": "https://predev.oriso.org/signoz"}},
+                "otelCollector": {"ports": {"otlp-e2e": {"enabled": False}}},
+            },
+        },
+    ):
+        assert DEV_ALIAS not in render_dev_with(override), override
 
 
 def backup_source(docs: dict[tuple[str, str], dict[str, Any]]) -> str | None:
@@ -185,11 +280,11 @@ def assert_review_findings() -> None:
     assert config.index("k8s.cronjob.name\"])") < config.index("k8s.job.name\"])"), "CronJob name before the generated Job name"
 
 
-def render_dev_fails(overlay: dict[str, Any]) -> str:
+def render_dev_fails(overlay: dict[str, Any], *helm_args: str, chart: str = CHART_DIR) -> str:
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
         yaml.safe_dump(overlay, handle)
     try:
-        render("values-dev.yaml", handle.name)
+        render("values-dev.yaml", handle.name, chart=chart, helm_args=helm_args)
     except AssertionError as error:
         return str(error)
     finally:
@@ -281,32 +376,106 @@ def assert_second_review_findings() -> None:
 
 
 def assert_backup_is_atomic() -> None:
-    # Run the rendered backup script on a real SQLite file in a scratch dir.
-    import gzip
-    import sqlite3
-    config = by_key(render("values-dev.yaml"))[("ConfigMap", "caritas-signoz-data-protection")]
+    docs = by_key(render("values-dev.yaml"))
+    config = docs[("ConfigMap", "caritas-signoz-data-protection")]
+    cron = docs[("CronJob", "caritas-signoz-data-protection-backup")]
+    container = cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]
+    fields = {item["name"]: item["valueFrom"]["fieldRef"]["fieldPath"]
+              for item in container["env"] if "valueFrom" in item}
+    assert fields == {"JOB_UID": "metadata.labels['batch.kubernetes.io/controller-uid']",
+                      "POD_UID": "metadata.uid"}, fields
+    assert container["terminationMessagePolicy"] == "File"
+    job_uid = "75a198df-bb28-4e9e-9b0b-9e038b5d713f"
+    pod_uid = "cf829cd6-8339-4b58-a912-81a3ef109a57"
     with tempfile.TemporaryDirectory() as root:
-        signoz, backup = os.path.join(root, "signoz"), os.path.join(root, "backup")
-        os.makedirs(signoz)
-        os.makedirs(backup)
-        db = sqlite3.connect(os.path.join(signoz, "signoz.db"))
-        db.execute("create table users (name text)")
-        db.execute("insert into users values ('admin')")
-        db.commit()
-        db.close()
-        stale = os.path.join(backup, ".signoz-20261017T000000Z.db.gz.part")
-        with open(stale, "wb") as handle:
-            handle.write(b"truncated")
-        script = config["data"]["backup.py"].replace("/signoz/", signoz + "/").replace("/backup", backup)
-        result = subprocess.run(["python3", "-c", script], env={**os.environ, "KEEP": "14"},
-                                capture_output=True, text=True, check=False)
+        signoz, backup, recovery, scripts = (
+            Path(root) / name for name in ("signoz", "backup", "recovery", "scripts")
+        )
+        for directory in (signoz, backup, recovery, scripts):
+            directory.mkdir()
+        receipt_path = Path(root) / "termination-log"
+        database = signoz / "signoz.db"
+        (scripts / "backup.py").write_text(
+            config["data"]["backup.py"]
+            .replace('"/signoz/signoz.db"', f'"{database}"')
+            .replace('"/backup"', f'"{backup}"')
+            .replace('"/dev/termination-log"', f'"{receipt_path}"'),
+            encoding="utf-8",
+        )
+        (scripts / "restore.py").write_text(config["data"]["restore.py"], encoding="utf-8")
+
+        def run_backup(uid: str, keep: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [sys.executable, str(scripts / "backup.py")],
+                env={**os.environ, "KEEP": keep, "JOB_UID": job_uid, "POD_UID": uid},
+                capture_output=True, text=True, check=False, timeout=15,
+            )
+
+        with closing(sqlite3.connect(database)) as writer:
+            assert writer.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+            writer.execute("PRAGMA wal_autocheckpoint=0")
+            writer.executescript("""
+                CREATE TABLE organizations (id TEXT PRIMARY KEY);
+                CREATE TABLE users (id TEXT PRIMARY KEY);
+                CREATE TABLE dashboard (id TEXT PRIMARY KEY);
+                CREATE TABLE rule (id TEXT PRIMARY KEY);
+                INSERT INTO users VALUES ('synthetic-admin');
+                INSERT INTO rule VALUES ('synthetic-rule');
+            """)
+            writer.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            writer.execute("INSERT INTO dashboard VALUES ('wal-only-dashboard')")
+            writer.commit()
+            # The current row is only in the active WAL, so copying signoz.db alone would lose it.
+            with closing(sqlite3.connect(f"{database.as_uri()}?mode=ro&immutable=1", uri=True)) as raw:
+                assert raw.execute("SELECT id FROM dashboard").fetchall() == []
+            legacy_partial = backup / ".signoz-20261017T000000Z.db.gz.part"
+            legacy_partial.write_bytes(b"truncated")
+            result = run_backup(pod_uid, "14")
+            assert result.returncode == 0, result.stderr
+            assert writer.execute("SELECT id FROM dashboard").fetchall() == [("wal-only-dashboard",)]
+
+        (archive,) = backup.glob("signoz-*.db.gz")
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
+        assert receipt == {"version": 1, "archive": archive.name, "jobUid": job_uid,
+                           "podUid": pod_uid, "sha256": checksum, "bytes": archive.stat().st_size}, receipt
+        assert archive.name.endswith(f"-{job_uid}-{pod_uid}-{checksum}.db.gz")
+        assert archive.stat().st_mode & 0o777 == 0o600
+        assert legacy_partial.read_bytes() == b"truncated"
+        assert not (backup / ".signoz_metadata_stage").exists()
+        result = subprocess.run(
+            [sys.executable, str(scripts / "restore.py"), str(archive), str(recovery),
+             "--sha256", receipt["sha256"], "--compressed-bytes", str(receipt["bytes"])],
+            capture_output=True, text=True, check=False, timeout=15,
+        )
         assert result.returncode == 0, result.stderr
-        files = sorted(os.listdir(backup))
-        assert len(files) == 1 and files[0].startswith("signoz-") and files[0].endswith(".db.gz"), files
-        restored = os.path.join(root, "restored.db")
-        with gzip.open(os.path.join(backup, files[0]), "rb") as source, open(restored, "wb") as target:
-            target.write(source.read())
-        assert sqlite3.connect(restored).execute("select name from users").fetchall() == [("admin",)]
+        restored = recovery / "signoz.db"
+        with closing(sqlite3.connect(f"{restored.as_uri()}?mode=ro&immutable=1", uri=True)) as readback:
+            assert readback.execute("SELECT id FROM dashboard").fetchall() == [("wal-only-dashboard",)]
+            assert readback.execute("SELECT id FROM users").fetchall() == [("synthetic-admin",)]
+            assert readback.execute("SELECT id FROM rule").fetchall() == [("synthetic-rule",)]
+        assert sorted(path.name for path in recovery.iterdir()) == ["signoz.db"]
+
+        receipt_path.unlink()
+        receipt_path.mkdir()
+        result = run_backup("cf829cd6-8339-4b58-a912-81a3ef109a58", "1")
+        assert result.returncode == 1, result.stdout
+        assert hashlib.sha256(archive.read_bytes()).hexdigest() == checksum
+        assert len(list(backup.glob("signoz-*.db.gz"))) == 2
+
+        receipt_path.rmdir()
+        next_pod = "cf829cd6-8339-4b58-a912-81a3ef109a59"
+        with (backup / ".signoz_backup.lock").open("r+b") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = run_backup(next_pod, "1")
+            assert result.returncode == 1 and "Another metadata backup" in result.stderr, result.stderr
+            assert not receipt_path.exists()
+
+        result = run_backup(next_pod, "1")
+        assert result.returncode == 0, result.stderr
+        (latest,) = backup.glob("signoz-*.db.gz")
+        assert json.loads(receipt_path.read_text(encoding="utf-8"))["archive"] == latest.name
+        assert latest != archive and legacy_partial.is_file()
 
 
 def assert_long_release_name() -> None:
@@ -391,7 +560,7 @@ def assert_backup_storage_class() -> None:
     assert backup_claim_class(docs) == ""
     assert docs[("StatefulSet", "caritas-signoz")]["spec"]["volumeClaimTemplates"][0]["spec"]["storageClassName"] == ""
     # An existing claim keeps its class: storageClassName cannot change on a bound claim.
-    marker = '{{- $existingBackup := lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "%s-backup" $name) -}}'
+    marker = '{{- $existingBackup := lookup "v1" "PersistentVolumeClaim" .Release.Namespace $backupPVC -}}'
     with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as handle:
         yaml.safe_dump({"global": {"storageClass": "fast"}}, handle)
     try:
@@ -551,8 +720,11 @@ def assert_clickhouse_memory_on_dev() -> None:
 
 
 def main() -> None:
-    assert_dev(by_key(render("values-dev.yaml")))
-    assert_default_off(by_key(render()))
+    dev = by_key(render("values-dev.yaml"))
+    defaults = by_key(render())
+    assert_dev(dev)
+    assert_default_off(defaults)
+    assert_dev_alias(dev, defaults)
     assert_review_findings()
     assert_second_review_findings()
     assert_backup_is_atomic()

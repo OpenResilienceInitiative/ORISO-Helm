@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import secrets
 import shlex
 import subprocess
 import sys
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -24,6 +26,21 @@ import yaml
 SERVICE_NAME = "oriso-signoz-acceptance"
 METRIC_NAME = "oriso.signoz.acceptance"
 SUPPRESSED_LOG_BODY = "[ORISO log body suppressed by privacy policy]"
+# Match the managed ClickHouse capacity alert's 2 GiB floor.
+MIN_CLICKHOUSE_UNRESERVED_BYTES = 2 * 1024**3
+CLICKHOUSE_UNKNOWN_SPACE = 2**64 - 1
+CLICKHOUSE_LOG_TABLES = (
+    "query_log", "text_log", "trace_log", "metric_log", "asynchronous_metric_log",
+    "part_log", "zookeeper_log", "aggregated_zookeeper_log", "processors_profile_log",
+)
+CLICKHOUSE_REMOVABLE_WRITERS = ("metric_log", "trace_log")
+CLICKHOUSE_LOG_RETENTION_DAYS = 3
+MAX_CLICKHOUSE_DISK_USED_PERCENT = 75
+MAX_CLICKHOUSE_LOG_BYTES = 10 * 1024**3
+JAVA_SERVICES = ("user-service", "agency-service", "tenant-service", "consulting-type-service")
+JAVA_SIGNALS = ("logs", "metrics", "traces", "logToTrace")
+JAVA_FRESHNESS_MINUTES = 15
+JAVA_CORRELATION_MINUTES = 60
 CLICKHOUSE_EXPORTERS = {
     "traces": "clickhousetraces",
     "metrics": "signozclickhousemetrics",
@@ -184,6 +201,69 @@ def _metric_samples_query(*series_predicates: str) -> str:
             WHERE {predicate_sql}
           )
     """.strip()
+
+
+def build_java_signal_query(environment: str, end_ms: int) -> str:
+    """Count real stored signals and log-to-span matches without exporting identities."""
+    env = _sql_literal(environment)
+    services = ", ".join(_sql_literal(service) for service in JAVA_SERVICES)
+    fresh_ms = end_ms - JAVA_FRESHNESS_MINUTES * 60_000
+    correlation_ms = end_ms - JAVA_CORRELATION_MINUTES * 60_000
+    return f"""WITH recent_logs AS (
+    SELECT resources_string['service.name'] AS service_name, timestamp, trace_id, span_id
+    FROM signoz_logs.distributed_logs_v2
+    WHERE timestamp >= {correlation_ms * 1_000_000} AND timestamp < {end_ms * 1_000_000}
+      AND resources_string['deployment.environment'] = {env} AND service_name IN ({services})
+), recent_traces AS (
+    SELECT t.serviceName AS service_name, toString(t.trace_id) AS trace_id, t.span_id,
+        t.timestamp >= fromUnixTimestamp64Milli({fresh_ms}) AS is_fresh,
+        t.resources_string['deployment.environment'] AS deployment_environment,
+        lower(trimBoth(t.resources_string['service.version'], ' \\t\\n\\v\\f\\r')) AS normalized_version
+    FROM signoz_traces.distributed_signoz_index_v3 AS t
+    WHERE t.timestamp >= fromUnixTimestamp64Milli({correlation_ms})
+      AND t.timestamp < fromUnixTimestamp64Milli({end_ms})
+      AND t.ts_bucket_start BETWEEN {correlation_ms // 1000 - 1800} AND {end_ms // 1000}
+      AND t.serviceName IN ({services})
+), metric_identities AS (
+    SELECT DISTINCT env, temporality, metric_name, fingerprint,
+        resource_attrs['service.name'] AS service_name
+    FROM signoz_metrics.distributed_time_series_v4
+    WHERE unix_milli >= {fresh_ms - 3_600_000} AND unix_milli < {end_ms}
+      AND resource_attrs['deployment.environment'] = {env} AND service_name IN ({services})
+)
+SELECT signal, service_name, samples, wrong_environment, invalid_version FROM (
+    SELECT 'logs' AS signal, service_name, countIf(timestamp >= {fresh_ms * 1_000_000}) AS samples,
+        0 AS wrong_environment, 0 AS invalid_version
+    FROM recent_logs GROUP BY service_name
+    UNION ALL
+    SELECT 'traces' AS signal, service_name,
+        countIf(is_fresh) AS samples,
+        countIf(is_fresh AND deployment_environment != {env}) AS wrong_environment,
+        countIf(is_fresh AND normalized_version IN ('', 'unknown')) AS invalid_version
+    FROM recent_traces GROUP BY service_name
+    UNION ALL
+    SELECT 'metrics' AS signal, i.service_name AS service_name, count() AS samples,
+        0 AS wrong_environment, 0 AS invalid_version
+    FROM signoz_metrics.distributed_samples_v4 AS s
+    GLOBAL INNER JOIN metric_identities AS i USING (env, temporality, metric_name, fingerprint)
+    WHERE s.unix_milli >= {fresh_ms} AND s.unix_milli < {end_ms}
+      AND bitAnd(s.flags, 1) = 0 AND isFinite(s.value)
+    GROUP BY i.service_name
+    UNION ALL
+    SELECT 'logToTrace' AS signal, service_name, count() AS samples,
+        0 AS wrong_environment, 0 AS invalid_version
+    FROM recent_logs
+    WHERE length(trace_id) = 32 AND trace_id != '00000000000000000000000000000000'
+      AND length(span_id) = 16 AND span_id != '0000000000000000'
+      AND (service_name, trace_id, span_id) GLOBAL IN (
+        SELECT DISTINCT service_name, trace_id, span_id FROM recent_traces
+        WHERE deployment_environment = {env}
+      )
+    GROUP BY service_name
+)
+ORDER BY signal, service_name
+SETTINGS max_execution_time = 8, max_rows_to_read = 2000000, max_bytes_to_read = 134217728,
+  timeout_overflow_mode = 'throw', read_overflow_mode = 'throw', log_queries = 0"""
 
 
 def build_readback_queries(
@@ -365,14 +445,14 @@ def _check_runtime_readiness(
     timeout: str,
     require_k8s_infra: bool = False,
 ) -> None:
-    chi_name = f"{release}-clickhouse"
-    chi = json.loads(_kubectl(runner, namespace, "get", "chi", chi_name, "-o", "json"))
-    if chi.get("metadata", {}).get("deletionTimestamp"):
-        raise RuntimeError(f"ClickHouseInstallation {chi_name} is deleting")
+    statefulsets = _current_clickhouse_statefulsets(runner, namespace, release)
 
+    _kubectl(
+        runner, namespace, "rollout", "status", f"deployment/{release}-clickhouse-operator",
+        f"--timeout={timeout}",
+    )
     rollout_targets = (
-        f"deployment/{release}-clickhouse-operator",
-        f"statefulset/{release}-clickhouse-cluster-0-0",
+        *(f"statefulset/{statefulset['metadata']['name']}" for statefulset in statefulsets),
         f"deployment/{release}-signoz-otel-collector",
         f"statefulset/{release}-signoz",
     )
@@ -398,6 +478,46 @@ def _check_runtime_readiness(
         "job/signoz-telemetrystore-migrator",
         f"--timeout={timeout}",
     )
+
+
+def _current_clickhouse_statefulsets(
+    runner: Runner, namespace: str, release: str,
+) -> list[dict[str, Any]]:
+    chi_name = f"{release}-clickhouse"
+    chi = json.loads(_kubectl(runner, namespace, "get", "chi", chi_name, "-o", "json"))
+    installation = chi.get("metadata", {})
+    if installation.get("deletionTimestamp"):
+        raise RuntimeError(f"ClickHouseInstallation {chi_name} is deleting")
+    installation_uid = installation.get("uid")
+    if not installation_uid:
+        raise RuntimeError(f"ClickHouseInstallation {chi_name} has no UID")
+
+    statefulsets = json.loads(_kubectl(
+        runner, namespace, "get", "statefulset", "-l", f"clickhouse.altinity.com/chi={chi_name}",
+        "-o", "json",
+    ))["items"]
+    owned_statefulsets = []
+    for statefulset in statefulsets:
+        metadata = statefulset["metadata"]
+        if not any(
+            owner.get("controller") is True
+            and owner.get("kind") == "ClickHouseInstallation"
+            and owner.get("name") == chi_name
+            and owner.get("uid") == installation_uid
+            for owner in metadata.get("ownerReferences", [])
+        ):
+            continue
+        name = metadata["name"]
+        if metadata.get("deletionTimestamp"):
+            raise RuntimeError(f"ClickHouse StatefulSet {name} is deleting")
+        if statefulset["spec"].get("replicas", 1) < 1:
+            raise RuntimeError(f"ClickHouse StatefulSet {name} is scaled to zero")
+        if not metadata.get("uid"):
+            raise RuntimeError(f"ClickHouse StatefulSet {name} has no UID")
+        owned_statefulsets.append(statefulset)
+    if not owned_statefulsets:
+        raise RuntimeError(f"ClickHouseInstallation {chi_name} has no owned StatefulSets")
+    return sorted(owned_statefulsets, key=lambda statefulset: statefulset["metadata"]["name"])
 
 
 def _check_collector_config(runner: Runner, namespace: str, release: str) -> None:
@@ -533,53 +653,285 @@ def _delete_probe_pod(runner: Runner, namespace: str, pod_name: str) -> None:
     )
 
 
-def _clickhouse_pod(runner: Runner, namespace: str, release: str) -> str:
-    pod = _kubectl(
+def _clickhouse_pods(runner: Runner, namespace: str, release: str) -> list[str]:
+    statefulset_uids = {
+        statefulset["metadata"]["uid"]
+        for statefulset in _current_clickhouse_statefulsets(runner, namespace, release)
+    }
+    output = _kubectl(
         runner,
         namespace,
         "get",
-        "pod",
+        "pods",
         "-l",
-        f"app.kubernetes.io/instance={release},app.kubernetes.io/component=clickhouse",
+        f"clickhouse.altinity.com/chi={release}-clickhouse,"
+        "app.kubernetes.io/component=clickhouse",
         "-o",
-        "jsonpath={.items[0].metadata.name}",
+        "json",
     )
-    if not pod:
-        raise RuntimeError("ClickHouse pod was not found")
-    return pod
+    pods = []
+    for item in json.loads(output)["items"]:
+        metadata = item["metadata"]
+        if metadata.get("deletionTimestamp"):
+            continue
+        if not any(
+            owner.get("controller") is True
+            and owner.get("kind") == "StatefulSet"
+            and owner.get("uid") in statefulset_uids
+            for owner in metadata.get("ownerReferences", [])
+        ):
+            continue
+        name = metadata["name"]
+        if not any(
+            condition.get("type") == "Ready" and condition.get("status") == "True"
+            for condition in item.get("status", {}).get("conditions", [])
+        ):
+            raise RuntimeError(f"ClickHouse pod {name} is not ready")
+        pods.append(name)
+    if not pods:
+        raise RuntimeError("ClickHouse data pods were not found")
+    return sorted(pods)
 
 
-def _query_count(runner: Runner, namespace: str, pod: str, query: str) -> int:
-    output = _kubectl(
+def _clickhouse_query(
+    runner: Runner, namespace: str, pod: str, query: str, output_format: str, *, read_only: bool = False,
+) -> str:
+    options = (
+        ("--host", "127.0.0.1", "--readonly=1", "--log_queries=0", "--max_execution_time=5")
+        if read_only else ()
+    )
+    return _kubectl(
         runner,
         namespace,
         "exec",
         pod,
+        "-c",
+        "clickhouse",
         "--",
         "clickhouse-client",
+        *options,
         "--format",
-        "TabSeparatedRaw",
+        output_format,
         "--query",
         query,
     )
-    return int(output.splitlines()[-1])
+
+
+def _query_integer(runner: Runner, namespace: str, pod: str, query: str) -> int:
+    return int(_clickhouse_query(runner, namespace, pod, query, "TabSeparatedRaw"))
+
+
+def _parse_sample_count(value: Any) -> int:
+    if isinstance(value, str) and value.isdecimal():
+        value = int(value)
+    if type(value) is not int or value < 0:
+        raise ValueError
+    return value
+
+
+def _read_java_signals(runner: Runner, namespace: str, pod: str, environment: str) -> dict[str, Any]:
+    end_ms = time.time_ns() // 1_000_000
+    output = _clickhouse_query(
+        runner, namespace, pod, build_java_signal_query(environment, end_ms), "JSONEachRow"
+    )
+    counts = {service: dict.fromkeys(JAVA_SIGNALS, 0) for service in JAVA_SERVICES}
+    trace_identity = {}
+    seen = set()
+    try:
+        for line in output.splitlines():
+            row = json.loads(line)
+            service, signal = row["service_name"], row["signal"]
+            samples = _parse_sample_count(row["samples"])
+            pair = (service, signal)
+            if signal not in JAVA_SIGNALS or pair in seen:
+                raise ValueError
+            if signal == "traces":
+                wrong_environment = _parse_sample_count(row["wrong_environment"])
+                invalid_version = _parse_sample_count(row["invalid_version"])
+                if wrong_environment > samples or invalid_version > samples:
+                    raise ValueError
+                trace_identity[service] = {
+                    "wrongEnvironment": wrong_environment,
+                    "invalidVersion": invalid_version,
+                }
+            counts[service][signal] = samples
+            seen.add(pair)
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("ClickHouse returned invalid Java signal readback") from error
+    return {
+        "environment": environment,
+        "endUnixMs": end_ms,
+        "freshnessMinutes": JAVA_FRESHNESS_MINUTES,
+        "correlationMinutes": JAVA_CORRELATION_MINUTES,
+        "services": counts,
+        "traceIdentity": trace_identity,
+        "missing": [
+            f"{service}/{signal}" for service, signals in counts.items()
+            for signal, samples in signals.items() if samples == 0
+        ],
+    }
+
+
+def _require_java_signals(report: dict[str, Any]) -> None:
+    failures = []
+    if report["missing"]:
+        failures.append("Java signal readback missing " + ", ".join(report["missing"]))
+    identity_mismatches = [
+        f"{service} ({counts['wrongEnvironment']} wrong environment, {counts['invalidVersion']} invalid version)"
+        for service, counts in report["traceIdentity"].items()
+        if counts["wrongEnvironment"] or counts["invalidVersion"]
+    ]
+    if identity_mismatches:
+        failures.append("Java trace identity mismatch for " + ", ".join(identity_mismatches))
+    if failures:
+        raise RuntimeError(". ".join(failures))
+
+
+def _check_clickhouse_capacity(runner: Runner, namespace: str, pod: str) -> None:
+    try:
+        available = _query_integer(
+            runner, namespace, pod,
+            "SELECT unreserved_space FROM system.disks WHERE name = 'default'",
+        )
+    except ValueError as error:
+        raise RuntimeError(f"ClickHouse capacity unreadable on pod {pod}") from error
+    # ClickHouse uses the maximum UInt64 when it cannot report available space.
+    if not 0 <= available < CLICKHOUSE_UNKNOWN_SPACE:
+        raise RuntimeError(f"ClickHouse capacity unreadable on pod {pod}")
+    if available < MIN_CLICKHOUSE_UNRESERVED_BYTES:
+        raise RuntimeError(
+            f"ClickHouse pod {pod} has {available} unreserved bytes. "
+            f"At least {MIN_CLICKHOUSE_UNRESERVED_BYTES} bytes are required."
+        )
+
+
+def _clickhouse_byte_count(value: Any) -> int:
+    if isinstance(value, str) and value.isascii() and value.isdecimal():
+        value = int(value)
+    if type(value) is not int or not 0 <= value < CLICKHOUSE_UNKNOWN_SPACE:
+        raise ValueError("invalid ClickHouse byte count")
+    return value
+
+
+def _clickhouse_log_ttl_days(engine: str) -> int | None:
+    # Ignore keywords inside quotes. ClickHouse formats INTERVAL DAY as toIntervalDay.
+    unquoted = re.sub(
+        r"'(?:\\.|''|[^'\\])*'|`(?:\\.|``|[^`\\])*`" r'|"(?:\\.|""|[^"\\])*"',
+        "''",
+        engine,
+    )
+    definition = re.split(r"\s+SETTINGS\s+", unquoted, maxsplit=1)[0]
+    ttl = re.search(
+        r"\sTTL\s+event_date\s*\+\s*toIntervalDay\(([0-9]+)\)(?:\s+DELETE)?\s*$",
+        definition,
+    )
+    return int(ttl[1]) if ttl else None
+
+
+def _clickhouse_writer_snapshot(runner: Runner, namespace: str, pod: str) -> str:
+    command = ["kubectl", "-n", namespace, "exec", pod, "-c", "clickhouse", "-i", "--", "sh", "-s"]
+    script = Path(__file__).with_name("signoz_clickhouse_writer_snapshot.sh").read_text(encoding="utf-8")
+    return runner.run(command, input_text=script).stdout.strip()
+
+
+def _read_clickhouse_retention(runner: Runner, namespace: str, pod: str) -> dict[str, Any]:
+    def rows(query: str) -> list[dict[str, Any]]:
+        output = _clickhouse_query(runner, namespace, pod, query, "JSONEachRow", read_only=True)
+        return [json.loads(line) for line in output.splitlines()]
+
+    before = _clickhouse_writer_snapshot(runner, namespace, pod)
+
+    names = ", ".join(map(_sql_literal, CLICKHOUSE_LOG_TABLES))
+    family = f"^({'|'.join(CLICKHOUSE_LOG_TABLES)})(_[0-9]+)?$"
+    try:
+        [disk] = rows("SELECT type, total_space, free_space FROM system.disks WHERE name = 'default'")
+        total, free = map(_clickhouse_byte_count, (disk["total_space"], disk["free_space"]))
+        if disk["type"] != "Local" or total == 0 or free > total:
+            raise ValueError("invalid default local disk")
+        ttl_days = {}
+        for row in rows(
+            "SELECT name, engine_full FROM system.tables "
+            f"WHERE database = 'system' AND name IN ({names})"
+        ):
+            table = row["name"]
+            if table not in CLICKHOUSE_LOG_TABLES or table in ttl_days:
+                raise ValueError("unexpected system table")
+            ttl_days[table] = _clickhouse_log_ttl_days(row["engine_full"])
+        part_bytes = {}
+        for row in rows(
+            "SELECT table, sum(bytes_on_disk) AS active_bytes FROM system.parts "
+            f"WHERE active AND database = 'system' AND match(table, {_sql_literal(family)}) GROUP BY table"
+        ):
+            table = row["table"]
+            if not re.fullmatch(family, table) or table in part_bytes:
+                raise ValueError("unexpected system parts table")
+            part_bytes[table] = _clickhouse_byte_count(row["active_bytes"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError(f"ClickHouse retention metadata unreadable on pod {pod}") from error
+
+    after = _clickhouse_writer_snapshot(runner, namespace, pod)
+    evidence = re.fullmatch(r"[0-9a-f]{64}\t(active|disabled|unverified)\t(active|disabled|unverified)", before)
+    states = evidence.groups() if evidence and before == after else ("unverified", "unverified")
+    writers = dict(zip(CLICKHOUSE_REMOVABLE_WRITERS, states, strict=True))
+
+    failures = []
+    for table in CLICKHOUSE_LOG_TABLES:
+        if writers.get(table) == "disabled":
+            continue
+        days = ttl_days.get(table)
+        if table not in ttl_days:
+            failures.append(f"{table} is missing")
+        elif days is None:
+            failures.append(f"{table} has no supported unconditional deletion TTL")
+        elif days != CLICKHOUSE_LOG_RETENTION_DAYS:
+            failures.append(
+                f"{table} has a {days}-day deletion TTL. Expected {CLICKHOUSE_LOG_RETENTION_DAYS} days."
+            )
+    used = total - free
+    tracked_bytes = sum(part_bytes.values())
+    if used * 100 > total * MAX_CLICKHOUSE_DISK_USED_PERCENT:
+        failures.append(f"Disk use of {used}/{total} bytes exceeds {MAX_CLICKHOUSE_DISK_USED_PERCENT}%")
+    if tracked_bytes > MAX_CLICKHOUSE_LOG_BYTES:
+        failures.append(f"Active system log parts use {tracked_bytes} bytes. Limit is {MAX_CLICKHOUSE_LOG_BYTES}.")
+    return {
+        "diskTotalBytes": total,
+        "diskFreeBytes": free,
+        "diskUsedPercent": round(used * 100 / total, 2),
+        "deletionTtlDays": ttl_days,
+        "logWriters": writers,
+        "retainedDisabledLogBytes": sum(
+            size for table, size in part_bytes.items()
+            if writers.get(re.sub(r"_[0-9]+$", "", table)) == "disabled"
+        ),
+        "activeLogBytesByTable": part_bytes,
+        "trackedLogBytes": tracked_bytes,
+        "rotatedLogBytes": sum(size for table, size in part_bytes.items() if table not in CLICKHOUSE_LOG_TABLES),
+        "failures": failures,
+    }
+
+
+def _read_clickhouse_retention_pods(
+    runner: Runner, namespace: str, pods: list[str],
+) -> tuple[dict[str, dict[str, Any]], str]:
+    snapshots = {pod: _read_clickhouse_retention(runner, namespace, pod) for pod in pods}
+    failed = ", ".join(pod for pod, snapshot in snapshots.items() if snapshot["failures"])
+    return snapshots, failed
 
 
 def _wait_for_readback(
     runner: Runner,
     namespace: str,
-    release: str,
+    pod: str,
     environment: str,
     acceptance_id: str,
     attempts: int,
     interval_seconds: float,
 ) -> dict[str, int]:
-    pod = _clickhouse_pod(runner, namespace, release)
     queries = build_readback_queries(environment, acceptance_id)
     counts: dict[str, int] = {}
     for attempt in range(1, attempts + 1):
         counts = {
-            signal: _query_count(runner, namespace, pod, query)
+            signal: _query_integer(runner, namespace, pod, query)
             for signal, query in queries.items()
         }
         missing = [signal for signal, count in counts.items() if count < 1]
@@ -596,7 +948,7 @@ def _wait_for_readback(
 def _wait_for_infra_readback(
     runner: Runner,
     namespace: str,
-    release: str,
+    pod: str,
     environment: str,
     cluster_name: str,
     acceptance_id: str,
@@ -605,7 +957,6 @@ def _wait_for_infra_readback(
     attempts: int,
     interval_seconds: float,
 ) -> dict[str, int]:
-    pod = _clickhouse_pod(runner, namespace, release)
     queries = build_infra_readback_queries(
         environment,
         cluster_name,
@@ -616,7 +967,7 @@ def _wait_for_infra_readback(
     counts: dict[str, int] = {}
     for attempt in range(1, attempts + 1):
         counts = {
-            signal: _query_count(runner, namespace, pod, query)
+            signal: _query_integer(runner, namespace, pod, query)
             for signal, query in queries.items()
         }
         failures = infra_readback_failures(counts)
@@ -641,22 +992,48 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-k8s-infra",
         action="store_true",
-        help="Skip k8s-infra readiness and signal-quality acceptance",
+        help="Check the backend before infrastructure and Java signal acceptance",
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--skip-synthetic",
         action="store_true",
         help="Check readiness and pipeline wiring without proving persistence",
+    )
+    mode.add_argument(
+        "--check-java-signals",
+        action="store_true",
+        help="Read stored Java signals and correlation without creating acceptance probes",
+    )
+    mode.add_argument(
+        "--check-clickhouse-retention",
+        action="store_true",
+        help="Read ClickHouse deletion TTLs and disk and system log usage without creating acceptance probes",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    runner = Runner(args.ssh_host)
+    if args.check_java_signals:
+        pod = _clickhouse_pods(runner, args.namespace, args.release)[0]
+        signals = _read_java_signals(runner, args.namespace, pod, args.environment)
+        print(json.dumps(signals, indent=2, sort_keys=True))
+        _require_java_signals(signals)
+        return
+
+    if args.check_clickhouse_retention:
+        pods = _clickhouse_pods(runner, args.namespace, args.release)
+        snapshots, failed = _read_clickhouse_retention_pods(runner, args.namespace, pods)
+        print(json.dumps({"environment": args.environment, "pods": snapshots}, indent=2, sort_keys=True))
+        if failed:
+            raise RuntimeError(f"ClickHouse retention conformance failed on {failed}")
+        return
+
     require_k8s_infra = not args.skip_k8s_infra
     if require_k8s_infra and not args.cluster_name:
         raise RuntimeError("--cluster-name is required unless --skip-k8s-infra is set")
-    runner = Runner(args.ssh_host)
     _check_runtime_readiness(
         runner,
         args.namespace,
@@ -673,11 +1050,28 @@ def main() -> None:
         "readiness": "passed",
         "collectorPipeline": "passed",
         "k8sInfraReadiness": "passed" if require_k8s_infra else "skipped",
+        "clickhouseRetention": "skipped",
     }
     if args.skip_synthetic:
+        report["clickhouseCapacity"] = "skipped"
         report["syntheticReadback"] = "skipped"
         report["k8sInfraReadback"] = "skipped"
     else:
+        clickhouse_pods = _clickhouse_pods(runner, args.namespace, args.release)
+        if require_k8s_infra:
+            snapshots, failed = _read_clickhouse_retention_pods(runner, args.namespace, clickhouse_pods)
+            report["clickhouseRetention"] = {
+                "status": "failed" if failed else "passed",
+                "pods": snapshots,
+            }
+            if failed:
+                report["clickhouseCapacity"] = "not_reached"
+                print(json.dumps(report, indent=2, sort_keys=True))
+                raise RuntimeError(f"ClickHouse retention conformance failed on {failed}")
+        for pod in clickhouse_pods:
+            _check_clickhouse_capacity(runner, args.namespace, pod)
+        readback_pod = clickhouse_pods[0]
+        report["clickhouseCapacity"] = "passed"
         acceptance_id = f"acceptance-{uuid.uuid4().hex}"
         timestamp_ns = time.time_ns()
         trace_id = secrets.token_hex(16)
@@ -701,7 +1095,7 @@ def main() -> None:
         report["syntheticReadback"] = _wait_for_readback(
             runner,
             args.namespace,
-            args.release,
+            readback_pod,
             args.environment,
             acceptance_id,
             args.readback_attempts,
@@ -722,7 +1116,7 @@ def main() -> None:
                 report["k8sInfraReadback"] = _wait_for_infra_readback(
                     runner,
                     args.namespace,
-                    args.release,
+                    readback_pod,
                     args.environment,
                     args.cluster_name,
                     acceptance_id,
@@ -734,6 +1128,9 @@ def main() -> None:
             finally:
                 if probe_pod:
                     _delete_probe_pod(runner, args.namespace, probe_pod)
+            signals = _read_java_signals(runner, args.namespace, readback_pod, args.environment)
+            _require_java_signals(signals)
+            report["javaSignals"] = signals
         else:
             report["k8sInfraReadback"] = "skipped"
         report["acceptanceId"] = acceptance_id

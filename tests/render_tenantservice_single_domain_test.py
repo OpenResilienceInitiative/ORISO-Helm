@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression guard for TenantService access on a shared application host."""
+"""Regression guard for TenantService environment wiring."""
 
 from __future__ import annotations
 
@@ -19,6 +19,11 @@ TEMPLATES = (
     "templates/tenantservice/tenantservice-deployment.yaml",
 )
 FEATURE_FLAG = "FEATURE_MULTITENANCY_WITH_SINGLE_DOMAIN_ENABLED"
+DPA_SIGNING_ENV = {
+    "ORISO_DPA_LEGACY_SIGNING_ZONE": "UTC",
+    "ORISO_DPA_LEGACY_SIGNING_FROM": "2026-11-07T00:00:00",
+    "ORISO_DPA_LEGACY_SIGNING_TO": "2026-11-07T23:59:59",
+}
 
 
 def build_minimal_chart(destination: str) -> None:
@@ -34,7 +39,18 @@ def build_minimal_chart(destination: str) -> None:
         shutil.copyfile(os.path.join(CHART_DIR, relative_path), output)
 
 
-def render(chart: str, enabled: bool) -> list[dict]:
+def render(
+    chart: str,
+    enabled: bool,
+    overlays: tuple[str, ...] = (),
+    extra_args: tuple[str, ...] = (),
+) -> list[dict]:
+    """Render TenantService with the supplied layers and final Helm overrides."""
+    overlay_args = [
+        argument
+        for overlay in overlays
+        for argument in ("-f", os.path.join(CHART_DIR, overlay))
+    ]
     result = subprocess.run(
         [
             "helm",
@@ -48,6 +64,8 @@ def render(chart: str, enabled: bool) -> list[dict]:
             "global.domainName=render.oriso.internal",
             "--set-string",
             f"global.multitenancyWithSingleDomainEnabled={str(enabled).lower()}",
+            *overlay_args,
+            *extra_args,
         ],
         capture_output=True,
         text=True,
@@ -82,6 +100,58 @@ def verify(documents: list[dict], expected: str) -> None:
     }
 
 
+def verify_legacy_signing_environment(chart: str) -> None:
+    """Check the environment defaults and the complete-window opt-in contract."""
+    def assert_environment(documents: list[dict], expected: dict[str, str]) -> None:
+        deployment = named(documents, "Deployment", "tenantservice")
+        entries = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+        selected = [entry for entry in entries if entry["name"] in DPA_SIGNING_ENV]
+        assert selected == [
+            {"name": name, "value": value} for name, value in expected.items()
+        ], f"expected {expected!r}, found {selected!r}"
+
+    assert_environment(render(chart, True, ("values-dev.yaml",)), DPA_SIGNING_ENV)
+    for overlays in (
+        (),
+        ("values-dev.yaml", "values-pre-dev.yaml"),
+        ("values-prod.yaml",),
+    ):
+        assert_environment(render(chart, True, overlays), {})
+
+    assert_environment(
+        render(
+            chart,
+            True,
+            ("values-prod.yaml",),
+            extra_args=(
+                "--set-string", "tenantService.legacyDpaSigning.zone=Europe/Berlin",
+                "--set-string", "tenantService.legacyDpaSigning.from=2026-09-16T04:30:00",
+                "--set-string", "tenantService.legacyDpaSigning.to=2026-09-16T06:30:00",
+            ),
+        ),
+        {
+            "ORISO_DPA_LEGACY_SIGNING_ZONE": "Europe/Berlin",
+            "ORISO_DPA_LEGACY_SIGNING_FROM": "2026-09-16T04:30:00",
+            "ORISO_DPA_LEGACY_SIGNING_TO": "2026-09-16T06:30:00",
+        },
+    )
+
+    assignments = ("zone=UTC", "from=2026-11-07T00:00:00", "to=2026-11-07T23:59:59")
+    for missing in assignments:
+        args = tuple(
+            arg for assignment in assignments if assignment != missing
+            for arg in ("--set-string", f"tenantService.legacyDpaSigning.{assignment}")
+        )
+        assert_environment(
+            render(
+                chart,
+                True,
+                extra_args=args,
+            ),
+            {},
+        )
+
+
 def main() -> None:
     temporary_directory = tempfile.mkdtemp(prefix="tenant-single-domain-test-")
     try:
@@ -90,7 +160,8 @@ def main() -> None:
         build_minimal_chart(chart)
         verify(render(chart, True), "true")
         verify(render(chart, False), "false")
-        print("PASS: TenantService consumes the chart single-domain feature flag")
+        verify_legacy_signing_environment(chart)
+        print("PASS: TenantService uses the single-domain flag and requires a complete DPA signing window")
     finally:
         shutil.rmtree(temporary_directory)
 

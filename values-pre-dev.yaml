@@ -7,7 +7,7 @@
 #   helm upgrade --install caritas ./ -n caritas --create-namespace \
 #     -f values.yaml -f values-dev.yaml -f values-pre-dev.yaml -f secrets.yaml
 #
-# Deliberate deltas from Dev: host and public URLs, Matrix identity, SigNoz labels,
+# Deliberate deltas from Dev: host and public URLs, Matrix identity, SigNoz labels and private UI,
 # no chart-managed Storybook, no dummy data, no release-toggle override, the closed mail-locale gate required by
 # tests/render_pending_mail_locale_optin_test.py, and the Spring profile (see below).
 #
@@ -34,16 +34,34 @@ global:
   domainName: "predev.oriso.org"
   observability:
     deploymentEnvironment: "pre-dev"
+    # The external ingress-nginx controller exists only on Dev.
+    externalIngressNginxNamespace: ""
   # Pre-Dev keeps its existing database; do not seed dummy data.
   initializeDummyData: false
   matrix:
     matrixServerName: "predev.oriso.org"
 
 signoz:
+  clickhouse:
+    files:
+      # Pre-Dev layers on Dev. Neutralize the two Dev-only writer removals
+      # with valid XML because the ClickHouse file map renders null verbatim.
+      config.d/99-oriso-disable-metric-log.xml: "<clickhouse/>"
+      config.d/99-oriso-disable-trace-log.xml: "<clickhouse/>"
+  # Dev enables managed provisioning; Pre-Dev has no provisioning key configured.
+  orisoObservability:
+    enabled: false
   signoz:
+    ingress:
+      enabled: false
+    service:
+      type: ClusterIP
     env:
-      # observability-validation.yaml requires it in sync with global.domainName.
+      # Keep the /signoz base path for the internal UI.
       signoz_global_external__url: "https://predev.oriso.org/signoz"
+  # Operators use the internal Service over a loopback port-forward (ORISO-Helm#304).
+  orisoIngress:
+    enabled: false
   otelCollector:
     additionalEnvs:
       ORISO_DEPLOYMENT_ENVIRONMENT: "pre-dev"
@@ -62,6 +80,8 @@ agencyService:
   springProfilesActive: "prod"
 tenantService:
   springProfilesActive: "prod"
+  # Pre-Dev layers over Dev and has no verified legacy signing window.
+  legacyDpaSigning: null
 consultingTypeService:
   # tests/render_release_toggle_overrides_test.py: the e-mail notification
   # switch (Frontend#1979) is QA'd on Dev only; Pre-Dev keeps what MongoDB stores.

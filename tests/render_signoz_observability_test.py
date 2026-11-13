@@ -3,12 +3,16 @@
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import pathlib
 import subprocess
 import sys
 import tempfile
 from typing import Any
+from unittest.mock import Mock
+from urllib.parse import parse_qs, urlsplit
 
 import yaml
 
@@ -17,11 +21,14 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 FIXTURE_DOMAIN = "render.oriso.internal"
 API_KEY_SECRET = "signoz-observability-api-key"
+BROWSER_READER_SECRET = "signoz-browser-vitals-reader"
+BROWSER_CRON = "caritas-signoz-browser-vitals"
 
 
 def render_result(
     *,
-    enabled: bool,
+    enabled: bool | None,
+    release: str = "caritas",
     environment: str = "pre-dev",
     cluster_name: str = "oriso-predev",
     signoz_enabled: bool = True,
@@ -32,7 +39,7 @@ def render_result(
     command = [
         "helm",
         "template",
-        "caritas",
+        release,
         CHART_DIR,
         "--namespace",
         "caritas",
@@ -53,8 +60,6 @@ def render_result(
         "--set-string",
         f"signoz.signoz.env.signoz_global_external__url=https://{FIXTURE_DOMAIN}/signoz",
         "--set",
-        f"signoz.orisoObservability.enabled={'true' if enabled else 'false'}",
-        "--set",
         f"signoz.enabled={'true' if signoz_enabled else 'false'}",
         "--set",
         f"signozCollector.enabled={'true' if collector_enabled else 'false'}",
@@ -63,6 +68,8 @@ def render_result(
         "--set-string",
         f"global.observability.deploymentEnvironment={environment}",
     ]
+    if enabled is not None:
+        command += ["--set", f"signoz.orisoObservability.enabled={str(enabled).lower()}"]
     if secret_names:
         command += [
             "--set-string",
@@ -87,8 +94,168 @@ def find(items: list[dict[str, Any]], kind: str, name: str) -> dict[str, Any]:
     )
 
 
+def check_observer_selector(documents: list[dict[str, Any]]) -> None:
+    """The observer's real list selector must match every rendered Java workload."""
+    path = os.path.join(CHART_DIR, "files", "signoz", "signoz_deployment_identity.py")
+    spec = importlib.util.spec_from_file_location("signoz_deployment_identity", path)
+    assert spec and spec.loader
+    observer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(observer)
+    connection = Mock()
+    connection.getresponse.return_value = Mock(status=200, read=Mock(return_value=b'{"items": []}'))
+    observer._list_workloads(connection, "/api/v1/namespaces/caritas/pods", {})
+    selector = parse_qs(urlsplit(connection.request.call_args.args[1]).query)["labelSelector"][0]
+    key, _, values = selector.partition(" in ")
+    selected = set(values.strip("()").split(","))
+    for workload in observer.SERVICES:
+        deployment = find(documents, "Deployment", workload)["spec"]
+        assert deployment["selector"]["matchLabels"].get(key) in selected, workload
+        assert deployment["template"]["metadata"]["labels"].get(key) in selected, workload
+        names = [container["name"] for container in deployment["template"]["spec"]["containers"]]
+        assert workload in names, (workload, names)
+
+
+def check_deployment_identity(default_documents: list[dict[str, Any]]) -> None:
+    name = "caritas-signoz-deployment-identity"
+    assert all(item.get("metadata", {}).get("name") != name for item in default_documents)
+    workloads = ("agencyservice", "consultingtypeservice", "tenantservice", "userservice")
+    digest = "sha256:" + "1" * 64
+    images = {
+        workload: {"image": f"ghcr.io/example/{workload}@{digest}", "runtimeDigests": [digest]}
+        for workload in workloads
+    }
+    flag = "signoz.orisoObservability.deploymentIdentity"
+    args = ("--set", f"{flag}.enabled=true", "--set-json", f"{flag}.expectedImages={json.dumps(images)}")
+    enabled = render(enabled=True, environment="dev", cluster_name="oriso-dev", extra_args=args)
+    role = find(enabled, "Role", name)
+    assert role["metadata"]["namespace"] == "caritas"
+    assert role["rules"] == [
+        {"apiGroups": ["apps"], "resources": ["deployments"],
+         "resourceNames": list(workloads), "verbs": ["get"]},
+        {"apiGroups": ["apps"], "resources": ["replicasets"], "verbs": ["list"]},
+        {"apiGroups": [""], "resources": ["pods"], "verbs": ["list"]},
+    ]
+    assert find(enabled, "RoleBinding", name)["roleRef"]["kind"] == "Role"
+    assert find(enabled, "ServiceAccount", name)["automountServiceAccountToken"] is False
+    cron = find(enabled, "CronJob", name)
+    assert cron["spec"]["concurrencyPolicy"] == "Forbid"
+    job = cron["spec"]["jobTemplate"]["spec"]
+    assert job["activeDeadlineSeconds"] == 55 and job["backoffLimit"] == 0
+    pod = job["template"]["spec"]
+    assert pod["serviceAccountName"] == name
+    assert pod["automountServiceAccountToken"] is True
+    container = pod["containers"][0]
+    assert container["securityContext"]["readOnlyRootFilesystem"] is True
+    assert container["securityContext"]["allowPrivilegeEscalation"] is False
+    env = {item["name"]: item["value"] for item in container["env"]}
+    assert env["ORISO_OTLP_HOST"] == "caritas-signoz-otel-collector:4318"
+    assert env["ORISO_ENVIRONMENT"] == "dev"
+    assert env["ORISO_CLUSTER_NAME"] == "oriso-dev"
+    assert json.loads(env["ORISO_EXPECTED_IMAGES"]) == images
+    assert "signoz_deployment_identity.py" in find(enabled, "ConfigMap", name)["data"]
+    check_observer_selector(enabled)
+    provision = find(enabled, "Job", "caritas-signoz-observability")
+    assert {"name": "ORISO_DEPLOYMENT_IDENTITY_ENABLED", "value": "true"} in (
+        provision["spec"]["template"]["spec"]["containers"][0]["env"]
+    )
+
+    assert render_result(enabled=False, extra_args=args).returncode != 0
+    assert render_result(enabled=True, environment="prod", extra_args=args).returncode != 0
+    assert render_result(enabled=True, extra_args=args[:2]).returncode != 0
+    string_flag = ("--set-string", f"{flag}.enabled=false", *args[2:])
+    result = render_result(enabled=True, environment="dev", cluster_name="oriso-dev", extra_args=string_flag)
+    assert result.returncode != 0 and "enabled must be a boolean" in result.stderr, result.stderr
+
+
+def browser_schedule_args(environment: str, secret: str = BROWSER_READER_SECRET) -> tuple[str, ...]:
+    return (
+        "--set", "global.observability.webVitals.enabled=true",
+        "--set-string", f"signoz.otelCollector.additionalEnvs.ORISO_DEPLOYMENT_ENVIRONMENT={environment}",
+        "--set", "signoz.orisoObservability.browserVitalsCheck.enabled=true",
+        "--set-string", f"signoz.orisoObservability.browserVitalsCheck.apiKeySecretName={secret}",
+    )
+
+
+def check_browser_schedule() -> None:
+    for environment in ("dev", "pre-dev"):
+        docs = render(
+            enabled=False, collector_enabled=False, environment=environment,
+            extra_args=browser_schedule_args(environment) + (
+                "--set", "signoz.signoz.service.port=18080",
+            ),
+        )
+        schedule = find(docs, "CronJob", BROWSER_CRON)
+        spec = schedule["spec"]
+        assert spec["schedule"] == "*/5 * * * *"
+        assert spec["concurrencyPolicy"] == "Forbid"
+        assert 10 < spec["startingDeadlineSeconds"] < 300
+        assert spec["successfulJobsHistoryLimit"] >= 2
+        assert spec["failedJobsHistoryLimit"] >= 2
+        assert spec["jobTemplate"]["metadata"]["labels"]["app.kubernetes.io/name"] == "signoz-browser-vitals"
+        job = spec["jobTemplate"]["spec"]
+        assert 0 < job["activeDeadlineSeconds"] < 300
+        assert job["backoffLimit"] == 0
+        pod = job["template"]["spec"]
+        assert pod["automountServiceAccountToken"] is False
+        assert pod["restartPolicy"] == "Never"
+        container, = pod["containers"]
+        assert container["command"] == ["python3"]
+        assert container["args"] == [
+            "/opt/oriso/signoz/signoz_observability.py", "--mode", "check-browser-vitals",
+        ]
+        assert container["securityContext"]["readOnlyRootFilesystem"] is True
+        assert container["securityContext"]["runAsNonRoot"] is True
+        assert container["volumeMounts"] == [
+            {"name": "assets", "mountPath": "/opt/oriso/signoz", "readOnly": True},
+        ]
+        assert pod["volumes"][0]["configMap"]["name"] == "caritas-signoz-observability"
+        assert pod["volumes"][0]["configMap"]["items"] == [
+            {"key": "signoz_observability.py", "path": "signoz_observability.py"},
+        ]
+        env = {item["name"]: item for item in container["env"]}
+        assert set(env) == {"ORISO_ENVIRONMENT", "SIGNOZ_API_URL", "SIGNOZ_API_KEY"}
+        assert env["ORISO_ENVIRONMENT"]["value"] == environment
+        assert env["SIGNOZ_API_URL"]["value"] == "http://caritas-signoz:18080/signoz"
+        assert env["SIGNOZ_API_KEY"]["valueFrom"]["secretKeyRef"] == {
+            "name": BROWSER_READER_SECRET, "key": "apiKey",
+        }
+        assets = find(docs, "ConfigMap", "caritas-signoz-observability")
+        assert set(assets["data"]) == {"signoz_observability.py"}
+        assert not any(
+            item["kind"] in ("Job", "Secret")
+            and item["metadata"]["name"] in {"caritas-signoz-observability", BROWSER_READER_SECRET}
+            for item in docs
+        )
+
+    both = render(enabled=True, extra_args=browser_schedule_args("pre-dev"))
+    assert "observability-catalog.json" in find(both, "ConfigMap", "caritas-signoz-observability")["data"]
+    find(both, "Job", "caritas-signoz-observability")
+    find(both, "CronJob", BROWSER_CRON)
+
+    long_name = render(
+        enabled=False, release="reader-" + "a" * 44, extra_args=browser_schedule_args("pre-dev"),
+    )
+    scheduled, = [
+        item for item in long_name if item["kind"] == "CronJob"
+        and item["metadata"].get("labels", {}).get("app.kubernetes.io/name") == "signoz-browser-vitals"
+    ]
+    assert len(scheduled["metadata"]["name"]) <= 52
+
+    enable = ("--set", "signoz.orisoObservability.browserVitalsCheck.enabled=true")
+    for flags, error in (
+        (enable, "requires global.observability.webVitals.enabled=true"),
+        (("--set-string", "signoz.orisoObservability.browserVitalsCheck.enabled=false"), "enabled must be a boolean"),
+        (browser_schedule_args("pre-dev", ""), "browserVitalsCheck.apiKeySecretName"),
+        (browser_schedule_args("pre-dev", API_KEY_SECRET), "separate from the provisioning key"),
+    ):
+        result = render_result(enabled=False, extra_args=flags)
+        assert result.returncode != 0, flags
+        assert error in result.stderr, result.stderr
+
+
 def main() -> None:
     predev = render(enabled=True)
+    check_deployment_identity(predev)
     config = find(predev, "ConfigMap", "caritas-signoz-observability")
     job = find(predev, "Job", "caritas-signoz-observability")
 
@@ -217,6 +384,7 @@ def main() -> None:
     }
     assert ("ConfigMap", "caritas-signoz-observability") not in disabled_names
     assert ("Job", "caritas-signoz-observability") not in disabled_names
+    assert ("CronJob", BROWSER_CRON) not in disabled_names
 
     without_backend = render_result(enabled=True, signoz_enabled=False)
     assert without_backend.returncode != 0
@@ -234,11 +402,15 @@ def main() -> None:
     assert without_secrets.returncode != 0
     assert "apiKeySecret.name must name an existing Secret" in without_secrets.stderr
 
-    # The shipped defaults keep the feature off; no environment overlay turns
-    # it on until the API key Secret exists.
+    # Dev alone enables provisioning and must name the expected Secret.
+    dev = yaml.safe_load(pathlib.Path(CHART_DIR, "values-dev.yaml").read_text(encoding="utf-8"))
+    dev_managed = (dev.get("signoz") or {}).get("orisoObservability") or {}
+    assert dev_managed.get("enabled") is True, "values-dev.yaml"
+    assert (dev_managed.get("apiKeySecret") or {}).get("name") == API_KEY_SECRET, (
+        "values-dev.yaml"
+    )
     for overlay in (
         "values.yaml.default",
-        "values-dev.yaml",
         "values-pre-dev.yaml",
         "values-prod.yaml",
     ):
@@ -248,7 +420,26 @@ def main() -> None:
         )
         managed = ((values.get("signoz") or {}).get("orisoObservability")) or {}
         assert managed.get("enabled", False) is False, overlay
+        assert (managed.get("browserVitalsCheck") or {}).get("enabled", False) is False, overlay
 
+    layered_predev = render(
+        enabled=None,
+        extra_args=(
+            "-f",
+            os.path.join(CHART_DIR, "values-dev.yaml"),
+            "-f",
+            os.path.join(CHART_DIR, "values-pre-dev.yaml"),
+            "--set-string",
+            "signoz.signoz.env.signoz_global_external__url=https://predev.oriso.org/signoz",
+        ),
+    )
+    assert not any(
+        item.get("kind") == "Job"
+        and item.get("metadata", {}).get("name") == "caritas-signoz-observability"
+        for item in layered_predev
+    ), "Pre-Dev layering must not enable managed observability"
+
+    check_browser_schedule()
     print("PASS: managed SigNoz assets and fail-closed provisioning render correctly")
 
 

@@ -1,0 +1,139 @@
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $managed := get $signoz "orisoObservability" | default dict -}}
+{{- $identity := get $managed "deploymentIdentity" | default dict -}}
+{{- $enabled := get $identity "enabled" | default false -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "signoz.orisoObservability.deploymentIdentity.enabled must be a boolean" -}}
+{{- end -}}
+{{- if $enabled }}
+{{- if not (get $managed "enabled") }}
+{{- fail "signoz.orisoObservability.deploymentIdentity.enabled requires managed observability" }}
+{{- end }}
+{{- $environment := dig "observability" "deploymentEnvironment" "" .Values.global -}}
+{{- if not (has $environment (list "dev" "pre-dev")) }}
+{{- fail "deployment identity monitoring requires the Dev or Pre-Dev environment" }}
+{{- end }}
+{{- $expected := get $identity "expectedImages" | default dict -}}
+{{- $workloads := list "agencyservice" "consultingtypeservice" "tenantservice" "userservice" -}}
+{{- if ne (keys $expected | sortAlpha | join ",") (join "," $workloads) }}
+{{- fail "deploymentIdentity.expectedImages must name the four Java workloads" }}
+{{- end }}
+{{- range $workload := $workloads }}
+{{- $entry := get $expected $workload }}
+{{- if not (and (regexMatch "^[^@[:space:]]+@sha256:[0-9a-f]{64}$" (get $entry "image" | default "")) (get $entry "runtimeDigests")) }}
+{{- fail (printf "deploymentIdentity.expectedImages.%s requires a pinned image and approved runtime digests" $workload) }}
+{{- end }}
+{{- range $digest := get $entry "runtimeDigests" }}
+{{- if not (regexMatch "^sha256:[0-9a-f]{64}$" $digest) }}
+{{- fail (printf "deploymentIdentity.expectedImages.%s contains an invalid runtime digest" $workload) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $name := printf "%s-signoz-deployment-identity" (.Release.Name | trunc 25 | trimSuffix "-") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+data:
+  signoz_deployment_identity.py: |-
+{{ required "files/signoz/signoz_deployment_identity.py must exist" (.Files.Get "files/signoz/signoz_deployment_identity.py") | nindent 4 }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: {{ $workloads | toJson }}
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  schedule: "*/2 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 90
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 55
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: {{ $name }}
+          automountServiceAccountToken: true
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: observe
+              image: {{ required "signoz.orisoObservability.image must be set" (get $managed "image") | quote }}
+              command: ["python3", "/opt/oriso/signoz/signoz_deployment_identity.py"]
+              env:
+                - name: ORISO_ENVIRONMENT
+                  value: {{ $environment | quote }}
+                - name: ORISO_CLUSTER_NAME
+                  value: {{ .Values.signozCollector.clusterName | quote }}
+                - name: ORISO_OTLP_HOST
+                  value: {{ printf "%s:%v" (include "oriso.signozOtelCollectorServiceName" .) (get $signoz "orisoOtelCollectorHttpPort" | default 4318) | quote }}
+                - name: ORISO_EXPECTED_IMAGES
+                  value: {{ $expected | toJson | quote }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                runAsUser: 65532
+                runAsGroup: 65532
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 15m
+                  memory: 24Mi
+                limits:
+                  cpu: 150m
+                  memory: 96Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /opt/oriso/signoz
+                  readOnly: true
+          volumes:
+            - name: script
+              configMap:
+                name: {{ $name }}
+{{- end }}

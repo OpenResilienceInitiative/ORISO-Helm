@@ -1,6 +1,7 @@
 {{- $signoz := get .Values "signoz" | default dict -}}
 {{- $managed := get $signoz "orisoObservability" | default dict -}}
-{{- if and (get $signoz "enabled" | default false) (get $managed "enabled" | default false) }}
+{{- $browserCheck := get $managed "browserVitalsCheck" | default dict -}}
+{{- if and (get $signoz "enabled") (or (get $managed "enabled") (get $browserCheck "enabled")) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -13,6 +14,8 @@ metadata:
 data:
   signoz_observability.py: |-
 {{ required "files/signoz/signoz_observability.py must exist for signoz.orisoObservability" (.Files.Get "files/signoz/signoz_observability.py") | nindent 4 }}
+  {{- if get $managed "enabled" }}
   observability-catalog.json: |-
 {{ required "files/signoz/observability-catalog.json must exist for signoz.orisoObservability" (.Files.Get "files/signoz/observability-catalog.json") | nindent 4 }}
+  {{- end }}
 {{- end }}

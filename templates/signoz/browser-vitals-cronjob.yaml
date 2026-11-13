@@ -1,0 +1,96 @@
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $managed := get $signoz "orisoObservability" | default dict -}}
+{{- $check := get $managed "browserVitalsCheck" | default dict -}}
+{{- $enabled := get $check "enabled" | default false -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "signoz.orisoObservability.browserVitalsCheck.enabled must be a boolean" -}}
+{{- end -}}
+{{- if $enabled -}}
+{{- $observability := get .Values.global "observability" | default dict -}}
+{{- $rum := get $observability "webVitals" | default dict -}}
+{{- if not (get $signoz "enabled") -}}
+{{- fail "signoz.orisoObservability.browserVitalsCheck.enabled=true requires signoz.enabled=true" -}}
+{{- end -}}
+{{- if not (get $rum "enabled") -}}
+{{- fail "signoz.orisoObservability.browserVitalsCheck.enabled=true requires global.observability.webVitals.enabled=true" -}}
+{{- end -}}
+{{- $environment := required "global.observability.deploymentEnvironment is required for the browser vitals check" (get $observability "deploymentEnvironment") -}}
+{{- $secretName := required "signoz.orisoObservability.browserVitalsCheck.apiKeySecretName must name an existing query-only Secret" (get $check "apiKeySecretName" | default "" | trim) -}}
+{{- $provisionSecret := get $managed "apiKeySecret" | default dict -}}
+{{- if eq $secretName (get $provisionSecret "name" | default "") -}}
+{{- fail "the browser vitals check Secret must be separate from the provisioning key Secret" -}}
+{{- end -}}
+{{- $name := printf "%s-signoz-browser-vitals" .Release.Name -}}
+{{- if gt (len $name) 52 -}}
+{{- $name = printf "%s-%s" ($name | trunc 43 | trimAll "-.") ($name | sha256sum | trunc 8) -}}
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: signoz-browser-vitals
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 6
+  jobTemplate:
+    metadata:
+      labels:
+        app.kubernetes.io/name: signoz-browser-vitals
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: check-browser-vitals
+              image: {{ required "signoz.orisoObservability.image must be set" (get $managed "image") | quote }}
+              imagePullPolicy: IfNotPresent
+              command: ["python3"]
+              args: ["/opt/oriso/signoz/signoz_observability.py", "--mode", "check-browser-vitals"]
+              env:
+                - name: ORISO_ENVIRONMENT
+                  value: {{ $environment | quote }}
+                - name: SIGNOZ_API_URL
+                  value: {{ include "oriso.signozInternalApiUrl" . | quote }}
+                - name: SIGNOZ_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $secretName | quote }}
+                      key: apiKey
+              resources:
+{{ get $managed "resources" | default dict | toYaml | nindent 16 }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                runAsNonRoot: true
+                runAsUser: 65532
+                runAsGroup: 65532
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: assets
+                  mountPath: /opt/oriso/signoz
+                  readOnly: true
+          volumes:
+            - name: assets
+              configMap:
+                name: {{ printf "%s-signoz-observability" .Release.Name }}
+                defaultMode: 0444
+                items:
+                  - key: signoz_observability.py
+                    path: signoz_observability.py
+{{- end }}

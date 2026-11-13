@@ -130,32 +130,9 @@ metadata:
     oriso.org/retain-claims: {{ join "," $claims | quote }}
 data:
   backup.py: |
-    import glob, gzip, os, shutil, sqlite3, time
-    # Leftovers of an interrupted run never look like a finished backup.
-    for stale in glob.glob("/backup/.signoz-*"):
-        os.remove(stale)
-    src = sqlite3.connect("file:/signoz/signoz.db?mode=ro", uri=True)
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    tmp = f"/backup/.signoz-{stamp}.db"
-    dst = sqlite3.connect(tmp)
-    src.backup(dst)
-    ok = dst.execute("PRAGMA integrity_check").fetchone()[0]
-    dst.close()
-    src.close()
-    if ok != "ok":
-        os.remove(tmp)
-        raise SystemExit(f"integrity_check failed: {ok}")
-    part = f"/backup/.signoz-{stamp}.db.gz.part"
-    with open(tmp, "rb") as f, gzip.open(part, "wb") as g:
-        shutil.copyfileobj(f, g)
-    with open(part, "rb") as f:
-        os.fsync(f.fileno())
-    os.replace(part, f"/backup/signoz-{stamp}.db.gz")
-    os.remove(tmp)
-    keep = int(os.environ["KEEP"])
-    for old in sorted(glob.glob("/backup/signoz-*.db.gz"))[:-keep]:
-        os.remove(old)
-    print("backups:", *sorted(os.listdir("/backup")), sep="\n  ")
+    {{- .Files.Get "files/signoz/metadata_backup.py" | nindent 4 }}
+  restore.py: |
+    {{- .Files.Get "files/signoz/metadata_restore.py" | nindent 4 }}
 {{- if $pending }}
 ---
 apiVersion: v1
@@ -276,17 +253,64 @@ any configured); a bound backup claim keeps its class, which Kubernetes does not
 {{- $sourceClaim := lookup "v1" "PersistentVolumeClaim" .Release.Namespace $sqliteClaim -}}
 {{- $backupClass = dig "spec" "storageClassName" "" $sourceClaim -}}
 {{- end -}}
-{{- $existingBackup := lookup "v1" "PersistentVolumeClaim" .Release.Namespace (printf "%s-backup" $name) -}}
+{{- $backupPVC := printf "%s-backup" $name -}}
+{{- $existingBackup := lookup "v1" "PersistentVolumeClaim" .Release.Namespace $backupPVC -}}
 {{- if $existingBackup -}}
 {{- /* Keep the field exactly: an explicit "" must stay "", an absent field stays absent. */ -}}
 {{- $backupSpec := get $existingBackup "spec" | default dict -}}
 {{- $backupClass = hasKey $backupSpec "storageClassName" | ternary (get $backupSpec "storageClassName" | default "-") "" -}}
+{{- end -}}
+{{- $destination := $backupPVC -}}
+{{- $replacement := get $backup "replacementClaim" -}}
+{{- if not (kindIs "string" $replacement) -}}
+{{- fail "signoz.orisoDataProtection.backup.replacementClaim must be a string" -}}
+{{- end -}}
+{{- if $replacement -}}
+{{- if not .Release.IsUpgrade -}}
+{{- fail "signoz.orisoDataProtection.backup.replacementClaim requires an existing Helm release upgrade" -}}
+{{- end -}}
+{{- if or (gt (len $replacement) 253) (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" $replacement)) -}}
+{{- fail "signoz.orisoDataProtection.backup.replacementClaim must be a valid PVC name in the same namespace" -}}
+{{- end -}}
+{{- if or (eq $replacement $backupPVC) (has (printf "%s/%s" .Release.Namespace $replacement) $defaultClaims) -}}
+{{- fail "signoz.orisoDataProtection.backup.replacementClaim must differ from the original backup and SigNoz data claims" -}}
+{{- end -}}
+{{- /* Keep the original claim under Helm ownership for recovery and rollback. A client-only render cannot verify it. */ -}}
+{{- $annotations := dig "metadata" "annotations" dict $existingBackup -}}
+{{- if or (dig "metadata" "deletionTimestamp" "" $existingBackup)
+          (ne (get $annotations "helm.sh/resource-policy") "keep")
+          (ne (get $annotations "meta.helm.sh/release-name") .Release.Name)
+          (ne (get $annotations "meta.helm.sh/release-namespace") .Release.Namespace) -}}
+{{- fail (printf "signoz.orisoDataProtection.backup.replacementClaim requires a cluster-connected Helm render and the existing Helm-owned backup PVC %s/%s with the keep policy" .Release.Namespace $backupPVC) -}}
+{{- end -}}
+{{- $target := lookup "v1" "PersistentVolumeClaim" .Release.Namespace $replacement -}}
+{{- $uid := dig "metadata" "uid" "" $target -}}
+{{- $volumeName := dig "spec" "volumeName" "" $target -}}
+{{- $modes := dig "spec" "accessModes" list $target -}}
+{{- $writable := or (has "ReadWriteOnce" $modes) (has "ReadWriteOncePod" $modes) (has "ReadWriteMany" $modes) -}}
+{{- if or (not $uid) (not $volumeName) (not $writable)
+          (dig "metadata" "deletionTimestamp" "" $target)
+          (ne (dig "status" "phase" "" $target) "Bound")
+          (ne (dig "spec" "volumeMode" "Filesystem" $target) "Filesystem") -}}
+{{- fail (printf "signoz.orisoDataProtection.backup.replacementClaim requires a Bound, writable Filesystem PVC at %s/%s" .Release.Namespace $replacement) -}}
+{{- end -}}
+{{- $volume := lookup "v1" "PersistentVolume" "" $volumeName -}}
+{{- $ref := dig "spec" "claimRef" dict $volume -}}
+{{- if or (dig "metadata" "deletionTimestamp" "" $volume)
+          (ne (dig "status" "phase" "" $volume) "Bound")
+          (ne (dig "spec" "persistentVolumeReclaimPolicy" "" $volume) "Retain")
+          (ne (get $ref "namespace") .Release.Namespace)
+          (ne (get $ref "name") $replacement)
+          (ne (get $ref "uid") $uid) -}}
+{{- fail (printf "signoz.orisoDataProtection.backup.replacementClaim requires a Bound Retain PV matching the replacement PVC %s/%s, including its UID" .Release.Namespace $replacement) -}}
+{{- end -}}
+{{- $destination = $replacement -}}
 {{- end }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ $name }}-backup
+  name: {{ $backupPVC }}
   namespace: {{ .Release.Namespace }}
   annotations:
     # Uninstalling the release must not take the backups with it.
@@ -349,9 +373,18 @@ spec:
             - name: backup
               image: {{ $image | quote }}
               command: ["python3", "/scripts/backup.py"]
+              terminationMessagePolicy: File
               env:
                 - name: KEEP
                   value: {{ get $backup "keep" | default 14 | toString | quote }}
+                - name: JOB_UID
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.labels['batch.kubernetes.io/controller-uid']
+                - name: POD_UID
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.uid
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
@@ -379,6 +412,6 @@ spec:
                 claimName: {{ $sqliteClaim }}
             - name: backup
               persistentVolumeClaim:
-                claimName: {{ $name }}-backup
+                claimName: {{ $destination | quote }}
 {{- end }}
 {{- end }}
