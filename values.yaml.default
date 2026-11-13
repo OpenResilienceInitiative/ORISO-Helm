@@ -334,7 +334,6 @@ online-counseling-mariadb:
   imageName: "mariadb"
   imageVersion: "11.0.6"
   maxconnections: "1000"
-# Off until the gateway image, dedicated secrets and RTC network acceptance pass.
 # Remove a person a moderator bans from a group conversation from that group's
 # running LiveKit call (ORISO-Admin#1518). The policy gateway calls the LiveKit
 # RoomService with the existing matrixrtcAuth LiveKit key; UserService calls the
@@ -346,6 +345,7 @@ matrixrtcEviction:
   # LiveKit RoomService (HTTP API) as the gateway reaches it in-cluster.
   livekitRoomServiceUrl: "http://livekit:7880"
 
+# Off until the gateway image, dedicated secrets and RTC network acceptance pass.
 matrixrtcLifecycle:
   enabled: false
   # Change with every externally managed token rotation to restart both consumers.

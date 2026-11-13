@@ -84,9 +84,10 @@ configuration is disabled; an explicit non-boolean fails.
 {{- $enabled | toString -}}
 {{- end -}}
 
-{{/* In-cluster address of the call policy gateway, for UserService's lifecycle and eviction calls. */}}
+{{/* In-cluster address of the call policy gateway, for UserService's lifecycle and eviction calls.
+     Falls back to the chart's own gateway Service: environment values files may omit it. */}}
 {{- define "oriso.matrixrtcAuth.gatewayUrl" -}}
-{{- required "matrixrtcAuth.gatewayInternalUrl is required" (.Values.matrixrtcAuth | default dict).gatewayInternalUrl -}}
+{{- (.Values.matrixrtcAuth | default dict).gatewayInternalUrl | default "http://matrixrtc-auth-policy-gateway:3010" -}}
 {{- end -}}
 
 {{/*

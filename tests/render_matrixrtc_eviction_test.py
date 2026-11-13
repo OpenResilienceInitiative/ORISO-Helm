@@ -88,6 +88,13 @@ class MatrixRtcEvictionRenderTest(unittest.TestCase):
             with self.assertRaises(AssertionError, msg=url):
                 render({**ON, "matrixrtcEviction.livekitRoomServiceUrl": url})
 
+    def test_values_without_eviction_or_gateway_address_still_render(self):
+        # Dev deploys from its own values.yaml, which has neither key.
+        docs = render({"matrixrtcEviction": "null", "matrixrtcAuth.gatewayInternalUrl": "null"})
+        data = find(docs, "ConfigMap", "userservice-configmap-env")["data"]
+        self.assertEqual(data["MATRIXRTC_EVICTION_BASE_URL"], "")
+        self.assertEqual(data["MATRIXRTC_LIFECYCLE_BASE_URL"], "http://matrixrtc-auth-policy-gateway:3010")
+
     def test_non_boolean_fails(self):
         with self.assertRaises(AssertionError):
             render({"matrixrtcEviction.enabled": '"yes"'})
