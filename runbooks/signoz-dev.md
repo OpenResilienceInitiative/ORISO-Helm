@@ -18,6 +18,18 @@ SigNoz database back. Collector internals: `signoz-k8s-infra.md`.
 | `signoz.orisoDataProtection` | default on | volumes on `Retain`, daily `signoz.db` backup |
 | `signoz.clickhouse.resources` | request 2 GiB, limit 4 GiB | ClickHouse cannot fill the worker |
 
+A deployed Helm revision can be healthy while running without the Dev
+observability overlay. Verify the overlay after every Dev install or upgrade:
+
+```bash
+helm get values caritas -n caritas --all -o yaml |
+  python3 scripts/observability_overlay.py values-dev.yaml --check-effective
+```
+
+The check compares the keys declared by the Dev observability overlay and
+prints only the paths of missing or different settings. A failure requires
+the rollout procedure below and a fresh runtime check.
+
 ## Rollout
 
 Before the first upgrade that renders the existing public alias, follow
@@ -32,43 +44,62 @@ takes only the observability keys, defaults included:
 ssh dev-server
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 cd /root/ORISO-Helm && git fetch origin && git checkout <merged dev commit>
-python3 scripts/observability_overlay.py values-dev.yaml > /root/observability-dev.yaml
+observability_file=/root/observability-dev.yaml
+python3 scripts/observability_overlay.py values-dev.yaml > "$observability_file"
+values_files=(values.yaml secrets.yaml "$observability_file")
 ```
 
-The upgrade below does not use `--reuse-values` on purpose: the chart directory's
-own `values.yaml` carries the live settings, and the release's user-supplied
-values are exactly `secrets.yaml` (checked on revision 41, 2026-10-17), plus
-the observability overlay once this rollout has run. If a later revision was
-upgraded with extra `-f` files, pass them too. Without them, their settings
-fall back to `values.yaml`.
+Pass the hand-kept `values.yaml` explicitly so Helm preserves base settings
+recorded as user-supplied in the installed revision. Add every other approved
+values file to `values_files` in its intended order. The drift check and both
+Helm commands use that same list.
 
-So, right before the upgrade, list every user-supplied value path that the
-planned `-f` files (`secrets.yaml`, then the overlay) would drop or change.
-Paths the new overlay sets are the intended change and only count when it
-drops them. It compares values without printing them:
+Before the upgrade, check for omitted user-supplied paths and for changes
+outside the observability projection. The check merges the values files in
+order with Helm's rules (a later `null` removes the key) before comparing, and
+prints only the path count and the affected paths. The preflight below runs it
+again against the current files and the live release on every call.
 
 ```bash
-helm get values caritas -n caritas -o json | python3 -c '
+values_drift() {
+  helm get values caritas -n caritas -o json | python3 -c '
 import json, sys, yaml
+def merge(base, override):
+    for k, v in (override or {}).items():
+        if v is None:
+            base.pop(k, None)
+        elif isinstance(v, dict) and isinstance(base.get(k), dict):
+            merge(base[k], v)
+        else:
+            base[k] = v
+    return base
 def leaves(d, p=""):
     out = {}
     for k, v in (d or {}).items():
         out.update(leaves(v, f"{p}.{k}") if isinstance(v, dict) and v else {f"{p}.{k}": v})
     return out
-files = ["secrets.yaml", "/root/observability-dev.yaml"]
-planned = {}
+overlay_file, *files = sys.argv[1:]
+merged = {}
 for name in files:
-    planned.update(leaves(yaml.safe_load(open(name))))
-overlay = leaves(yaml.safe_load(open(files[-1])))
+    merge(merged, yaml.safe_load(open(name)))
+planned = leaves(merged)
+overlay = leaves(yaml.safe_load(open(overlay_file)))
 live = leaves(json.load(sys.stdin))
 drift = sorted(p for p in live if p not in planned or (p not in overlay and live[p] != planned[p]))
-print(len(drift), *drift, sep="\n")' | tee /root/observability-drift.out
+print(len(drift), *drift, sep="\n")' "$observability_file" "${values_files[@]}"
+}
+values_drift
 ```
 
-Stop unless the first line is `0`; otherwise add the listed paths' files with
-`-f` first. The first rollout restarts Keycloak, Synapse (`Recreate`, a short
-Matrix gap), Redis, the four Java services, Frontend and Admin. Announce it
-before starting the upgrade.
+Resolve the listed paths before continuing. Use the approved ordered values
+files, image pin overrides and post-renderer for both the preview and upgrade.
+Dev's application images can be updated independently of Helm. The image check
+compares the current direct Helm-managed Deployments, StatefulSets, DaemonSets
+and CronJobs with the proposed manifest, including their init containers.
+
+The first rollout restarts Keycloak, Synapse (`Recreate`, a short Matrix gap),
+Redis, the four Java services, Frontend and Admin. Announce it before starting
+the upgrade.
 
 Before an upgrade that disables or restores a ClickHouse system log, record
 the operator task ID and each ClickHouse pod's name, UID and container start
@@ -84,19 +115,50 @@ kubectl -n caritas get pods -o json | jq -er '
   | [$pod.name, $pod.uid, .state.running.startedAt, .ready] | @tsv'
 ```
 
-Require a ready row with a start time for each ClickHouse pod. The live upgrade
-also needs a successful server-side dry run, whose output you read first:
+Require a ready row with a start time for each ClickHouse pod.
+
+Run this preflight on the Dev master. For a staged rollout, set
+`expected_observability` to the values file that declares its approved
+observability settings.
 
 ```bash
-rm -f /root/observability-dry.ok
-test "$(head -n 1 /root/observability-drift.out)" = 0 && \
-helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
-  --dry-run=server > /root/observability-dry.out && touch /root/observability-dry.ok
-# read /root/observability-dry.out, then:
-test "$(head -n 1 /root/observability-drift.out)" = 0 && test -f /root/observability-dry.ok && \
-UPGRADE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) && \
-helm upgrade caritas . -n caritas -f secrets.yaml -f /root/observability-dev.yaml \
-  --wait --wait-for-jobs --timeout 15m
+# Put the approved image overrides and --post-renderer arguments here.
+extra_helm_args=()
+# Rebuild the Helm arguments from the current `values_files`, so the drift
+# check, the preview and the upgrade always use the same list.
+signoz_helm_args() {
+  helm_args=(caritas . -n caritas)
+  for file in "${values_files[@]}"; do
+    helm_args+=(-f "$file")
+  done
+  helm_args+=("${extra_helm_args[@]}")
+}
+expected_observability=values-dev.yaml
+preflight_signoz() (
+  set +x
+  set -uo pipefail
+  signoz_helm_args
+  drift=$(values_drift) || exit 1
+  test "$(head -n 1 <<<"$drift")" = 0 || { printf '%s\n' "$drift"; exit 1; }
+  preview=$(helm upgrade "${helm_args[@]}" --dry-run=server --hide-secret -o json) || exit 1
+  printf '%s' "$preview" | jq -e '.config' |
+    python3 scripts/observability_overlay.py "$expected_observability" --check-effective || exit 1
+  printf '%s' "$preview" | jq -er '.manifest' |
+    python3 scripts/check_helm_workload_images.py --namespace caritas --release caritas "$@"
+)
+preflight_signoz
+```
+
+Review the object changes, ClickHouse installation, retained claims and hook
+Jobs separately. Keep image-only promotions outside the rollout window and
+repeat the preflight immediately before the approved upgrade in the same shell.
+If you change `values_files` or `extra_helm_args`, the next preflight and the
+upgrade both pick up the change.
+
+```bash
+signoz_helm_args && preflight_signoz && \
+  UPGRADE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) && \
+  helm upgrade "${helm_args[@]}" --wait --wait-for-jobs --timeout 15m
 ```
 
 The retain hook only sees volumes that exist when Helm renders. After an
@@ -619,7 +681,22 @@ kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse extract-from-config -
 
 ## Rollback
 
-Turn single parts off in the generated overlay (`signozCollector.enabled`,
-`global.observability.webVitals.enabled`, `appMetrics`, `dbMetrics`) and
-upgrade again, or `helm rollback caritas <REVISION> -n caritas`. Rollback never
-deletes the retained volumes or the backup claim.
+For a targeted reversal, use the reviewed previous chart and overlay with the
+current image pins. Use the [rollout preflight](#rollout) for that forward
+upgrade. For an infrastructure collector reversal, follow the
+[collector rollback instructions](signoz-k8s-infra.md#release-gate-and-rollback).
+
+A Helm rollback reapplies the saved manifest. Check the approved target
+revision on the Dev master before using it.
+
+```bash
+set -o pipefail
+helm history caritas -n caritas
+helm get manifest caritas -n caritas --revision "${revision:?Set the approved target revision}" |
+  python3 scripts/check_helm_workload_images.py --namespace caritas --release caritas
+```
+
+An image mismatch requires the forward upgrade with the current pins. Apply
+the same check to the target of any automatic rollback before enabling it.
+Review the rollback's resource removals and hook Jobs separately, and require
+it to retain the SigNoz, ClickHouse, ZooKeeper and backup claims.
