@@ -19,7 +19,7 @@ AUTH_ERROR = (
 
 
 def render(*overlays: str, health_dashboard: dict | None = None,
-           expect_error: bool = False) -> list[dict] | str:
+           expect_error: bool = False, domain: str = "health.oriso.internal") -> list[dict] | str:
     command = [
         "helm", "template", "health-auth-test", str(CHART_DIR),
         "--namespace", "render-test",
@@ -27,9 +27,9 @@ def render(*overlays: str, health_dashboard: dict | None = None,
         "-f", str(CHART_DIR / "tests" / "fixtures" / "values-render-domain.yaml"),
         "-f", str(CHART_DIR / "secrets.yaml.default"),
         "-f", str(CHART_DIR / "tests" / "fixtures" / "render-required-secrets.yaml"),
-        "--set-string", "global.domainName=health.oriso.internal",
+        "--set-string", f"global.domainName={domain}",
         # Pre-Dev enables SigNoz, whose validation ties this URL to domainName.
-        "--set-string", "signoz.signoz.env.signoz_global_external__url=https://health.oriso.internal/signoz",
+        "--set-string", f"signoz.signoz.env.signoz_global_external__url=https://{domain}/signoz",
         "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
         "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
         "--set-string", "userService.smtpUser=smtp-canary-user",
@@ -212,11 +212,11 @@ class HealthDashboardIngressAuthTest(unittest.TestCase):
         self.assertEqual(resources["Service"]["spec"]["ports"][0]["targetPort"], 9300)
 
     def test_dev_enables_auth_and_can_be_disabled(self) -> None:
-        resources = health_resources(render("values-dev.yaml"))
+        resources = health_resources(render("values-dev.yaml", domain="dev.oriso.org"))
         annotations = resources["Ingress"]["metadata"]["annotations"]
         self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-type"], "basic")
         self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-secret"], "health-dashboard-basic-auth")
-        disabled = health_resources(render("values-dev.yaml", health_dashboard={"ingress": {
+        disabled = health_resources(render("values-dev.yaml", domain="dev.oriso.org", health_dashboard={"ingress": {
             "enabled": False, "authSecret": None,
         }}))
         self.assertEqual(set(disabled), {"Deployment", "Service"})

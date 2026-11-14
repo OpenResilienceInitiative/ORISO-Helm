@@ -39,6 +39,8 @@ class ObservabilityOverlayTest(unittest.TestCase):
         policy_path = CHART_DIR / "charts/signoz/files/oriso-otel-collector-policy.yaml"
         policy = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
         self.assertIn("otlp/rum", policy["receivers"])
+        self.assertIn("otlp/e2e", policy["receivers"])
+        self.assertEqual(policy["service"]["pipelines"]["traces/e2e"]["receivers"], ["otlp/e2e"])
 
     def check_effective(self, contents: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(

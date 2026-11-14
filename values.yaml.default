@@ -47,6 +47,13 @@ global:
     webVitals:
       enabled: false
       exportIntervalMillis: 60000
+    # Authenticated public OTLP/HTTP trace ingest at /signoz-e2e/v1/traces for
+    # the scheduled E2E run (needs signoz.enabled). authSecret is the NAME of an
+    # existing Secret in the release namespace with an htpasswd `auth` key; the
+    # chart never creates or renders the credential.
+    e2eTraceIngest:
+      enabled: false
+      authSecret: ""
 
   acmedomainName: "acme.your-domain.example.com"
  #adminDomainName: "admin.your-domain.example.com"
@@ -720,6 +727,14 @@ signoz:
         enabled: true
         containerPort: 4319
         servicePort: 4319
+        nodePort: ""
+        protocol: TCP
+      # Dedicated receiver for global.observability.e2eTraceIngest (own pipeline
+      # that keeps only service.name=oriso-e2e). Off unless the route is on.
+      otlp-e2e:
+        enabled: false
+        containerPort: 4321
+        servicePort: 4321
         nodePort: ""
         protocol: TCP
 

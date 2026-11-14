@@ -25,6 +25,11 @@ global:
     dbMetrics: true
     webVitals:
       enabled: true
+    # Spans of the scheduled Dev E2E run (ORISO-E2E#97). Create the Secret
+    # first (runbooks/signoz-dev.md); the chart only references it.
+    e2eTraceIngest:
+      enabled: true
+      authSecret: "signoz-e2e-ingest-auth"
   # Existing ORISO Dev product identity. The operator must separately supply
   # global.emailLegalOrganisationName before this chart can be deployed.
   emailBrandingName: "ORISO"
@@ -101,6 +106,9 @@ signoz:
           <trace_log remove="1"/>
         </clickhouse>
   otelCollector:
+    ports:
+      otlp-e2e:
+        enabled: true
     additionalEnvs:
       ORISO_DEPLOYMENT_ENVIRONMENT: "dev"
   orisoIngress:
