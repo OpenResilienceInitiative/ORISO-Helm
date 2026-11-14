@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -40,6 +41,43 @@ class ObservabilityOverlayTest(unittest.TestCase):
         self.assertIn("otlp/rum", policy["receivers"])
         self.assertIn("otlp/e2e", policy["receivers"])
         self.assertEqual(policy["service"]["pipelines"]["traces/e2e"]["receivers"], ["otlp/e2e"])
+
+    def check_effective(self, contents: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(CHART_DIR / "scripts" / "observability_overlay.py"),
+                "values-dev.yaml",
+                "--check-effective",
+            ],
+            input=contents,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+    def test_check_accepts_dev_overlay_and_unrelated_values(self) -> None:
+        self.values["global"]["domainName"] = "dev.oriso.org"
+        self.values["frontend"] = {"image": "example/dev:fixture"}
+        result = self.check_effective(yaml.safe_dump(self.values))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_check_detects_lost_dev_overlay_without_printing_values(self) -> None:
+        self.values["signozCollector"]["enabled"] = False
+        self.values["global"]["observability"].pop("webVitals")
+        self.values["signoz"]["clickhouse"]["resources"]["limits"]["memory"] = "DO-NOT-PRINT"
+        result = self.check_effective(yaml.safe_dump(self.values))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("signozCollector.enabled", result.stderr)
+        self.assertIn("global.observability.webVitals", result.stderr)
+        self.assertIn("signoz.clickhouse.resources.limits.memory", result.stderr)
+        self.assertNotIn("DO-NOT-PRINT", result.stderr + result.stdout)
+
+    def test_check_rejects_invalid_input_without_echoing_it(self) -> None:
+        result = self.check_effective("secret-value: [DO-NOT-PRINT")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Cannot read effective Helm values", result.stderr)
+        self.assertNotIn("DO-NOT-PRINT", result.stderr + result.stdout)
 
 
 if __name__ == "__main__":
