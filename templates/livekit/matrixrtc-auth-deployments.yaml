@@ -19,6 +19,7 @@ spec:
     metadata:
       annotations:
         checksum/media-lifecycle: {{ .Values.matrixrtcLifecycle | toJson | sha256sum | quote }}
+        checksum/media-eviction: {{ .Values.matrixrtcEviction | toJson | sha256sum | quote }}
       labels:
         app: matrixrtc-auth-policy-gateway
     spec:
@@ -79,6 +80,16 @@ spec:
             - name: MATRIXRTC_LIFECYCLE_POLICY_URL
               value: http://userservice:8080/internal/matrixrtc/media-access
             {{- end }}
+            {{- if (eq (include "oriso.matrixrtcEviction.enabled" .) "true") }}
+            - name: MATRIXRTC_EVICTION_LIVEKIT_URL
+              value: {{ include "oriso.matrixrtcEviction.livekitUrl" . | quote }}
+            - name: MATRIXRTC_EVICTION_TOKEN_FILE
+              value: /run/secrets/call-policy-token
+            - name: MATRIXRTC_EVICTION_LIVEKIT_KEY_FILE
+              value: /run/secrets/livekit-api-key
+            - name: MATRIXRTC_EVICTION_LIVEKIT_SECRET_FILE
+              value: /run/secrets/livekit-api-secret
+            {{- end }}
             - name: MATRIXRTC_ALLOWED_ORIGINS
               value: "https://{{ .Values.global.domainName }}"
             - name: MATRIX_SERVER_NAME
@@ -127,6 +138,8 @@ spec:
               {{- if (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") }}
               - key: {{ .Values.matrixrtcAuth.existingSecret.redisUrlKey | quote }}
                 path: redis-url
+              {{- end }}
+              {{- if (or (eq (include "oriso.matrixrtcLifecycle.enabled" .) "true") (eq (include "oriso.matrixrtcEviction.enabled" .) "true")) }}
               - key: {{ .Values.matrixrtcAuth.existingSecret.livekitApiKeyKey | quote }}
                 path: livekit-api-key
               - key: {{ .Values.matrixrtcAuth.existingSecret.livekitApiSecretKey | quote }}
