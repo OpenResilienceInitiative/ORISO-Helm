@@ -100,6 +100,11 @@ spec:
                   name: {{ .Values.matrixrtcLifecycle.existingSecret.name | quote }}
                   key: {{ .Values.matrixrtcLifecycle.existingSecret.tokenKey | quote }}
             {{- end }}
+            - name: MATRIXRTC_EVICTION_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: MATRIXRTC_EVICTION_BASE_URL
             - name: MATRIXRTC_CALL_POLICY_TOKEN
               valueFrom:
                 secretKeyRef:

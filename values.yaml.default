@@ -334,6 +334,17 @@ online-counseling-mariadb:
   imageName: "mariadb"
   imageVersion: "11.0.6"
   maxconnections: "1000"
+# Remove a person a moderator bans from a group conversation from that group's
+# running LiveKit call (ORISO-Admin#1518). The policy gateway calls the LiveKit
+# RoomService with the existing matrixrtcAuth LiveKit key; UserService calls the
+# gateway with the call-policy token. Independent of matrixrtcLifecycle.
+# Under hostNetwork LiveKit, list the LiveKit nodes in matrixrtcAuth.livekitNodeCidrs
+# if your CNI does not match host-network pods by podSelector.
+matrixrtcEviction:
+  enabled: false
+  # LiveKit RoomService (HTTP API) as the gateway reaches it in-cluster.
+  livekitRoomServiceUrl: "http://livekit:7880"
+
 # Off until the gateway image, dedicated secrets and RTC network acceptance pass.
 matrixrtcLifecycle:
   enabled: false
@@ -351,6 +362,9 @@ matrixrtcLifecycle:
     nodeHostname: ""
 matrixrtcAuth:
   replicas: 1
+  # In-cluster address of the call policy gateway, used by UserService
+  # (media lifecycle and moderator removal from a running call).
+  gatewayInternalUrl: "http://matrixrtc-auth-policy-gateway:3010"
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
   # Optional: namespace of the ingress controller for the call NetworkPolicies.
   # Empty means "ingress-nginx". The release namespace is always admitted as well.
