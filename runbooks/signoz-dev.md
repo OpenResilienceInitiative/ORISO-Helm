@@ -122,15 +122,22 @@ Run this preflight on the Dev master. For a staged rollout, set
 observability settings.
 
 ```bash
-helm_args=(caritas . -n caritas)
-for file in "${values_files[@]}"; do
-  helm_args+=(-f "$file")
-done
-# Include the approved image overrides and --post-renderer arguments here.
+# Put the approved image overrides and --post-renderer arguments here.
+extra_helm_args=()
+# Rebuild the Helm arguments from the current `values_files`, so the drift
+# check, the preview and the upgrade always use the same list.
+signoz_helm_args() {
+  helm_args=(caritas . -n caritas)
+  for file in "${values_files[@]}"; do
+    helm_args+=(-f "$file")
+  done
+  helm_args+=("${extra_helm_args[@]}")
+}
 expected_observability=values-dev.yaml
 preflight_signoz() (
   set +x
   set -uo pipefail
+  signoz_helm_args
   drift=$(values_drift) || exit 1
   test "$(head -n 1 <<<"$drift")" = 0 || { printf '%s\n' "$drift"; exit 1; }
   preview=$(helm upgrade "${helm_args[@]}" --dry-run=server --hide-secret -o json) || exit 1
@@ -145,9 +152,12 @@ preflight_signoz
 Review the object changes, ClickHouse installation, retained claims and hook
 Jobs separately. Keep image-only promotions outside the rollout window and
 repeat the preflight immediately before the approved upgrade in the same shell.
+If you change `values_files` or `extra_helm_args`, the next preflight and the
+upgrade both pick up the change.
 
 ```bash
-preflight_signoz && UPGRADE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) && \
+signoz_helm_args && preflight_signoz && \
+  UPGRADE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) && \
   helm upgrade "${helm_args[@]}" --wait --wait-for-jobs --timeout 15m
 ```
 
