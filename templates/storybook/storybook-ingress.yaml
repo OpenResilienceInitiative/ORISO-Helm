@@ -5,18 +5,10 @@ metadata:
   name: storybook-dev-ingress
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/auth-realm: "ORISO Storybook"
     nginx.ingress.kubernetes.io/auth-secret: {{ required "storybook.ingress.authSecret must name an existing basic-auth Secret when Storybook is enabled" .Values.storybook.ingress.authSecret | quote }}
     nginx.ingress.kubernetes.io/auth-type: basic
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      if ($uri = "/storybook-admin") {
-        return 308 /storybook-admin/;
-      }
-      if ($uri = "/storybook-frontend") {
-        return 308 /storybook-frontend/;
-      }
-    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/use-regex: "true"
 spec:
@@ -25,14 +17,14 @@ spec:
     - host: {{ .Values.global.domainName | quote }}
       http:
         paths:
-          - path: /storybook-admin(/|$)(.*)
+          - path: /storybook-admin/(.*)
             pathType: ImplementationSpecific
             backend:
               service:
                 name: storybook-admin
                 port:
                   number: 80
-          - path: /storybook-frontend(/|$)(.*)
+          - path: /storybook-frontend/(.*)
             pathType: ImplementationSpecific
             backend:
               service:
@@ -43,4 +35,32 @@ spec:
     - hosts:
         - {{ .Values.global.domainName | quote }}
       secretName: {{ .Values.global.domainName | replace "." "-" }}-tls
+{{- range $app := list "storybook-admin" "storybook-frontend" }}
+---
+# Bare /{{ $app }} -> /{{ $app }}/ (Helm#536: replaces a configuration-snippet).
+# Regex locations are ordered by descending length, so the paths above require
+# the slash; otherwise they would also match the bare path before this one.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $app }}-slash-redirect
+  annotations:
+    nginx.ingress.kubernetes.io/permanent-redirect: {{ printf "https://%s/%s/" $.Values.global.domainName $app | quote }}
+    nginx.ingress.kubernetes.io/permanent-redirect-code: "308"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: {{ $.Values.global.domainName | quote }}
+      http:
+        paths:
+          - path: /{{ $app }}$
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: {{ $app }}
+                port:
+                  number: 80
+{{- end }}
 {{- end }}

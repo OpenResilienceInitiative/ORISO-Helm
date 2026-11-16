@@ -19,11 +19,11 @@ kind: Ingress
 metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      default_type application/json;
-      return 403 '{"errcode":"M_FORBIDDEN","error":"Media must be fetched through the content scanner."}';
+    # Deny every client address, so nginx answers 403 and never proxies.
+    # The body is nginx's HTML error page, not Matrix JSON: a custom body would
+    # need a snippet, and snippets are disabled (Helm#536).
+    nginx.ingress.kubernetes.io/denylist-source-range: "0.0.0.0/0,::/0"
   name: media-scanner-direct-media-block-ingress
 spec:
   ingressClassName: nginx

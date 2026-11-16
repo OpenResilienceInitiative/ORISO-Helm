@@ -42,27 +42,6 @@ def render() -> list[dict]:
     return [doc for doc in yaml.safe_load_all(result.stdout) if doc]
 
 
-def extract_location_block(snippet: str, path: str) -> str:
-    """Return the body of the active `location = <path>` block, or "".
-
-    Lines commented out with `#` are ignored, so a disabled handler cannot
-    satisfy the assertions below.
-    """
-    lines = [line for line in snippet.splitlines() if not line.strip().startswith("#")]
-    opener = f"location = {path}"
-    for index, line in enumerate(lines):
-        if opener not in line:
-            continue
-        depth = 0
-        body: list[str] = []
-        for current in lines[index:]:
-            depth += current.count("{") - current.count("}")
-            body.append(current)
-            if depth == 0 and body:
-                return "\n".join(body)
-    return ""
-
-
 def main() -> None:
     documents = render()
     ingress = next(
@@ -71,22 +50,27 @@ def main() -> None:
         if doc.get("kind") == "Ingress"
         and doc["metadata"]["name"] == "matrix-client-ingress"
     )
-    snippet = ingress["metadata"]["annotations"].get(
-        "nginx.ingress.kubernetes.io/server-snippet", ""
-    )
+    # Helm#536: no snippet answers it any more; the controller disables them.
+    assert not any("snippet" in key for key in ingress["metadata"]["annotations"])
 
-    # Assert on the active handler itself, not on substrings of the whole
-    # snippet: a commented-out or differently-scoped block must not satisfy
-    # this guard.
-    block = extract_location_block(snippet, "/.well-known/matrix/server")
-    assert block, "no active `location = /.well-known/matrix/server` block"
-    assert "return 200" in block
-    assert "default_type application/json" in block
-    assert "Access-Control-Allow-Origin *" in block
-    # The delegation must name port 443, never the unreachable federation
-    # default 8448 that caused the outage.
-    assert f'"m.server": "{DOMAIN}:443"' in block
-    assert "8448" not in block
+    # The exact path reaches Synapse's client listener ...
+    paths = ingress["spec"]["rules"][0]["http"]["paths"]
+    (route,) = [path for path in paths if path["path"] == "/.well-known/matrix/server"]
+    assert route["pathType"] == "Exact"
+    assert route["backend"]["service"] == {"name": "matrix-synapse", "port": {"number": 8008}}
+
+    # ... where Synapse serves {"m.server": "<server_name>:443"} itself.
+    homeserver = next(
+        yaml.safe_load(doc["data"]["homeserver.yaml"])
+        for doc in documents
+        if doc.get("kind") == "ConfigMap" and "homeserver.yaml" in (doc.get("data") or {})
+    )
+    assert homeserver["serve_server_wellknown"] is True
+    client_listener = next(listener for listener in homeserver["listeners"] if listener["port"] == 8008)
+    assert any("client" in resource["names"] for resource in client_listener["resources"])
+    # Synapse only advertises :443 when server_name carries no port of its own;
+    # with one, it would advertise that port (e.g. the unreachable 8448).
+    assert ":" not in str(homeserver["server_name"]), homeserver["server_name"]
     print("PASS: matrix server delegation is published on :443")
 
 

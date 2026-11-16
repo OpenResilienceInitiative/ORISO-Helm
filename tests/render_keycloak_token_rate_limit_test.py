@@ -79,7 +79,8 @@ def main():
     annotations = limited["metadata"]["annotations"]
     assert annotations[PREFIX + "limit-rps"] == "5"
     assert annotations[PREFIX + "limit-burst-multiplier"] == "5"
-    assert annotations[PREFIX + "configuration-snippet"].strip() == "limit_req_status 429;"
+    # 429 comes from the controller's limit-req-status-code; snippets are off (Helm#536).
+    assert not any("snippet" in key for key in annotations), annotations
     assert annotations[PREFIX + "limit-whitelist"] == PRIVATE_RANGES
     assert annotations[PREFIX + "use-regex"] == "true"
     assert annotations[PREFIX + "ssl-redirect"] == main_ingress["metadata"]["annotations"][PREFIX + "ssl-redirect"]

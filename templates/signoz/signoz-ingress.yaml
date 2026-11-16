@@ -14,10 +14,6 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    # The app only serves the UI under /signoz/ and does not redirect the
-    # bare path itself.
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      rewrite ^/signoz$ /signoz/ permanent;
 spec:
   ingressClassName: {{ get $orisoIngress "ingressClassName" | default "nginx" | quote }}
   # Served on the main domain under /signoz — reuses the main-ingress
@@ -40,6 +36,36 @@ spec:
                 name: {{ include "oriso.signozServiceName" . }}
                 port:
                   number: {{ get $signozService "port" | default 8080 }}
+---
+# The app only serves the UI under /signoz/ and does not redirect the bare path
+# itself (Helm#536: replaces a configuration-snippet). "/signoz$" is longer than
+# "/signoz", so it is matched first when the host uses regex locations.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "oriso.signozServiceName" . }}-slash-redirect
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: signoz
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    nginx.ingress.kubernetes.io/permanent-redirect: {{ printf "https://%s/signoz/" .Values.global.domainName | quote }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: {{ get $orisoIngress "ingressClassName" | default "nginx" | quote }}
+  rules:
+    - host: {{ .Values.global.domainName | quote }}
+      http:
+        paths:
+          - path: /signoz$
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: {{ include "oriso.signozServiceName" . }}
+                port:
+                  number: {{ get $signozService "port" | default 8080 }}
 {{- end -}}
 
 {{- $o := get .Values.global "observability" | default dict }}
@@ -47,8 +73,8 @@ spec:
 ---
 {{- /*
 Browser Web Vitals ingest (global.observability.webVitals). Same origin as
-Frontend and Admin, so no CORS. Unauthenticated, so the location only accepts
-small uncompressed OTLP metric POSTs at a bounded rate, and is its own Ingress
+Frontend and Admin, so no CORS. Unauthenticated, so only small OTLP metric POSTs
+(decompressed size capped by the collector) at a bounded rate are accepted, and is its own Ingress
 so these limits do not touch the SigNoz UI. It reaches only the collector's
 otlp/rum receiver, whose pipeline drops anything that is not a known browser
 metric and overwrites the resource attributes (values.yaml.default).
@@ -66,14 +92,8 @@ metadata:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-body-size: "32k"
     nginx.ingress.kubernetes.io/limit-rps: "10"
-    # Compressed bodies would slip past the size limit; the browser exporter
-    # does not compress. The rewrite stays in this location: the
-    # rewrite-target annotation would switch every path of the host to
-    # case-insensitive regex matching.
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      if ($request_method != POST) { return 405; }
-      if ($http_content_encoding != "") { return 415; }
-      rewrite ^/signoz-rum/v1/metrics$ /v1/metrics break;
+    # No rewrite: otlp/rum serves this public path itself (metrics_url_path),
+    # rejects non-POST, and caps the decompressed body (oriso-otel-collector-policy.yaml).
 spec:
   ingressClassName: {{ get $orisoIngress "ingressClassName" | default "nginx" | quote }}
   tls:
@@ -102,8 +122,8 @@ E2E run on a GitHub runner that cannot reach the cluster. Off by default.
 ingress-nginx itself checks HTTP Basic credentials against an existing Secret
 (auth-type/auth-secret, the same mechanism as Storybook and the health
 dashboard), so no snippet reads a token and none is rendered into this chart.
-Only POST of a small uncompressed OTLP/HTTP trace body at a bounded rate is
-forwarded, and only to the dedicated otlp/e2e collector receiver (own port,
+Only POST of a small OTLP/HTTP trace body (decompressed size capped by the
+collector) at a bounded rate is accepted, and only to the dedicated otlp/e2e collector receiver (own port,
 own pipeline: only service.name=oriso-e2e is kept, environment is overwritten,
 oriso.signal.source=e2e is set), never to the main OTLP receiver.
 */}}
@@ -124,12 +144,10 @@ metadata:
     nginx.ingress.kubernetes.io/auth-realm: "ORISO E2E trace ingest"
     nginx.ingress.kubernetes.io/proxy-body-size: "256k"
     nginx.ingress.kubernetes.io/limit-rps: "5"
-    # Other ingresses on the shared host can turn Exact into a regex location.
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      if ($request_uri != "/signoz-e2e/v1/traces") { return 404; }
-      if ($request_method != POST) { return 405; }
-      if ($http_content_encoding != "") { return 415; }
-      rewrite ^/signoz-e2e/v1/traces$ /v1/traces break;
+    # Other ingresses on the shared host can turn Exact into a prefix regex, so
+    # longer paths may reach the collector; otlp/e2e serves only
+    # /signoz-e2e/v1/traces (traces_url_path), rejects non-POST and caps the
+    # decompressed body (oriso-otel-collector-policy.yaml).
 spec:
   ingressClassName: {{ get $orisoIngress "ingressClassName" | default "nginx" | quote }}
   tls:

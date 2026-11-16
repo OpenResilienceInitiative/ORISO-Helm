@@ -17,3 +17,6 @@ matrix:
   synapseServerName: "matrix.render.oriso.internal"
 matrixrtcAuth:
   membershipReaderUserId: "@matrixrtc-auth:matrix.render.oriso.internal"
+# Synthetic ACME contact; the ClusterIssuer requires one (ORISO-Helm#536).
+cert-manager:
+  acmeEmail: "acme@render.oriso.internal"

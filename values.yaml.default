@@ -1,6 +1,9 @@
 
 cert-manager:
   enabled: true
+  # Let's Encrypt account contact for the letsencrypt-prod ClusterIssuer
+  # (expiry and revocation notices). Required when enabled; use a role address.
+  acmeEmail: ""
 
 global:
   # Kubernetes service DNS suffix, supplied by the cluster operator.

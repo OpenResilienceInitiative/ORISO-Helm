@@ -59,7 +59,8 @@ def main() -> None:
         (doc.get("kind"), doc.get("metadata", {}).get("name")): doc
         for doc in dev
         if doc.get("metadata", {}).get("name")
-        in {"storybook-frontend", "storybook-admin", "storybook-dev-ingress"}
+        in {"storybook-frontend", "storybook-admin", "storybook-dev-ingress",
+            "storybook-admin-slash-redirect", "storybook-frontend-slash-redirect"}
     }
     assert set(resources) == {
         ("Deployment", "storybook-frontend"),
@@ -67,6 +68,8 @@ def main() -> None:
         ("Service", "storybook-frontend"),
         ("Service", "storybook-admin"),
         ("Ingress", "storybook-dev-ingress"),
+        ("Ingress", "storybook-admin-slash-redirect"),
+        ("Ingress", "storybook-frontend-slash-redirect"),
     }
 
     container = resources[("Deployment", "storybook-frontend")]["spec"]["template"]["spec"]["containers"][0]
@@ -85,20 +88,24 @@ def main() -> None:
     assert annotations["nginx.ingress.kubernetes.io/auth-type"] == "basic"
     assert annotations["nginx.ingress.kubernetes.io/auth-secret"] == "storybook-basic-auth"
     assert annotations["nginx.ingress.kubernetes.io/use-regex"] == "true"
-    assert annotations["nginx.ingress.kubernetes.io/rewrite-target"] == "/$2"
-    assert annotations["nginx.ingress.kubernetes.io/configuration-snippet"] == (
-        'if ($uri = "/storybook-admin") {\n'
-        "  return 308 /storybook-admin/;\n"
-        "}\n"
-        'if ($uri = "/storybook-frontend") {\n'
-        "  return 308 /storybook-frontend/;\n"
-        "}\n"
-    )
+    assert annotations["nginx.ingress.kubernetes.io/rewrite-target"] == "/$1"
+    assert not any("snippet" in key for key in annotations), annotations
     paths = ingress["spec"]["rules"][0]["http"]["paths"]
+    # The slash is required so the bare path falls through to the redirect
+    # ingress (regex locations are ordered by descending length).
     assert {path["path"] for path in paths} == {
-        "/storybook-admin(/|$)(.*)",
-        "/storybook-frontend(/|$)(.*)",
+        "/storybook-admin/(.*)",
+        "/storybook-frontend/(.*)",
     }
+    for app in ("storybook-admin", "storybook-frontend"):
+        redirect = resources[("Ingress", f"{app}-slash-redirect")]
+        redirect_annotations = redirect["metadata"]["annotations"]
+        assert redirect_annotations["nginx.ingress.kubernetes.io/permanent-redirect"] == f"https://dev.oriso.org/{app}/"
+        assert redirect_annotations["nginx.ingress.kubernetes.io/permanent-redirect-code"] == "308"
+        assert redirect_annotations["nginx.ingress.kubernetes.io/use-regex"] == "true"
+        (redirect_path,) = redirect["spec"]["rules"][0]["http"]["paths"]
+        assert redirect_path["path"] == f"/{app}$"
+        assert redirect["spec"]["rules"][0]["host"] == "dev.oriso.org"
     assert ingress["spec"]["rules"][0]["host"] == "dev.oriso.org"
     print("PASS: Dev renders authenticated Frontend and Admin Storybook routes")
 

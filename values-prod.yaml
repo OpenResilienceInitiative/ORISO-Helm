@@ -6,6 +6,7 @@
 #     --set global.domainName=<public host> \
 #     --set-string global.emailBrandingName='<your product name>' \
 #     --set-string global.emailLegalOrganisationName='<your legal organisation>' \
+#     --set-string cert-manager.acmeEmail=<role mailbox for Let's Encrypt> \
 #     --set matrix.matrixServerName=<matrix host> ...
 #
 # This overlay names no host on purpose (ORISO-Helm#366). The operator

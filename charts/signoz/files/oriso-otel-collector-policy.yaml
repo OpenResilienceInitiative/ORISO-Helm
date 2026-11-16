@@ -1,11 +1,16 @@
 # Static ORISO policy for the upstream SigNoz OpenTelemetry Collector.
 # Deployment-specific settings stay in values.yaml.default and environment values.
+# The two public receivers below guard themselves, so their ingresses need no
+# snippet (Helm#536): each serves only its public path (no rewrite), the OTLP
+# receiver answers 405 to anything but POST, and max_request_body_size also
+# caps the decompressed size of a compressed body.
 receivers:
   otlp/rum:
     protocols:
       http:
         endpoint: 0.0.0.0:4319
         max_request_body_size: 65536
+        metrics_url_path: /signoz-rum/v1/metrics
   # Dedicated receiver for the authenticated E2E ingest route. Not the main
   # `otlp` receiver, so a holder of the E2E token never reaches the pipelines
   # that carry real Dev services. Body cap equals the ingress limit (256k).
@@ -14,6 +19,7 @@ receivers:
       http:
         endpoint: 0.0.0.0:4321
         max_request_body_size: 262144
+        traces_url_path: /signoz-e2e/v1/traces
 processors:
   memory_limiter:
     check_interval: 1s

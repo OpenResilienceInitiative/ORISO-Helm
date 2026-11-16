@@ -147,13 +147,15 @@ def assert_dev(docs: dict[tuple[str, str], dict[str, Any]]) -> None:
     annotations = ingress["metadata"]["annotations"]
     # rewrite-target would turn every path of the host into a regex location.
     assert "nginx.ingress.kubernetes.io/rewrite-target" not in annotations
-    assert "rewrite ^/signoz-rum/v1/metrics$ /v1/metrics break;" in annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
+    # Helm#536: no snippet; otlp/rum serves the public path itself, rejects
+    # non-POST and caps the decompressed body.
+    assert not any("snippet" in key for key in annotations), annotations
     assert annotations["nginx.ingress.kubernetes.io/proxy-body-size"] == "32k"
     assert "nginx.ingress.kubernetes.io/limit-rps" in annotations
-    assert (
-        'if ($http_content_encoding != "") { return 415; }'
-        in annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
-    )
+    collector_config = yaml.safe_load(next(iter(docs[("ConfigMap", "caritas-signoz-otel-collector")]["data"].values())))
+    rum_http = collector_config["receivers"]["otlp/rum"]["protocols"]["http"]
+    assert rum_http["metrics_url_path"] == path["path"], rum_http
+    assert rum_http["max_request_body_size"] == 65536, rum_http
     url = "https://dev.oriso.org/signoz-rum/v1/metrics"
     frontend = docs[("ConfigMap", "frontend-configmap")]["data"]
     admin = docs[("ConfigMap", "admin-configmap")]["data"]
@@ -185,12 +187,8 @@ def assert_e2e_trace_ingest() -> None:
     assert "password" not in rendered_ingress.lower()
     assert not any(prefix in rendered_ingress for prefix in ("$2a$", "$2b$", "$2y$"))
     assert ("Secret", auth_secret) not in docs, "chart must only reference the E2E authentication Secret"
-    snippet = annotations["nginx.ingress.kubernetes.io/configuration-snippet"]
-    assert "if ($request_method != POST) { return 405; }" in snippet
-    assert 'if ($http_content_encoding != "") { return 415; }' in snippet
-    rewrite = "rewrite ^/signoz-e2e/v1/traces$ /v1/traces break;"
-    exact_uri = 'if ($request_uri != "/signoz-e2e/v1/traces") { return 404; }'
-    assert exact_uri in snippet and snippet.index(exact_uri) < snippet.index(rewrite), snippet
+    # Helm#536: no snippet; otlp/e2e serves only this path (traces_url_path below).
+    assert not any("snippet" in key for key in annotations), annotations
     assert "nginx.ingress.kubernetes.io/rewrite-target" not in annotations
     assert annotations["nginx.ingress.kubernetes.io/proxy-body-size"] == "256k"
     assert "nginx.ingress.kubernetes.io/limit-rps" in annotations
@@ -199,6 +197,7 @@ def assert_e2e_trace_ingest() -> None:
     config = yaml.safe_load(next(iter(collector_cm["data"].values())))
     e2e_http = config["receivers"]["otlp/e2e"]["protocols"]["http"]
     assert e2e_http["endpoint"] == "0.0.0.0:4321" and e2e_http["max_request_body_size"] == 262144, e2e_http
+    assert e2e_http["traces_url_path"] == path["path"], e2e_http
     assert config["service"]["pipelines"]["traces"]["receivers"] == ["otlp"], "main pipeline must not take the E2E receiver"
     pipeline = config["service"]["pipelines"]["traces/e2e"]
     assert pipeline["receivers"] == ["otlp/e2e"], pipeline

@@ -1,4 +1,10 @@
 {{- if .Values.nginxController.enabled }}
+{{- /*
+Helm#536: the controller watches only this release namespace
+(--watch-namespace), so it reads Secrets, Services and Ingresses through a
+namespaced Role. Only IngressClasses and its own Namespace are cluster-scoped;
+the ClusterRole name carries the namespace so two releases do not collide.
+*/}}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -7,15 +13,15 @@ metadata:
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: ingress-nginx
+  namespace: {{ .Release.Namespace }}
 rules:
   - apiGroups: [""]
     resources:
       - configmaps
       - endpoints
-      - nodes
       - pods
       - secrets
       - services
@@ -24,7 +30,7 @@ rules:
     resources: ["endpointslices"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses", "ingressclasses"]
+    resources: ["ingresses"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["events"]
@@ -38,19 +44,45 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ingress-nginx
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ingress-nginx
+subjects:
+  - kind: ServiceAccount
+    name: ingress-nginx
+    namespace: {{ .Release.Namespace }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ingress-nginx-{{ .Release.Namespace }}
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["namespaces"]
-    verbs: ["get", "list", "watch"]
+    resourceNames: [{{ .Release.Namespace | quote }}]
+    verbs: ["get"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: ingress-nginx
+  name: ingress-nginx-{{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: ingress-nginx
+  name: ingress-nginx-{{ .Release.Namespace }}
 subjects:
   - kind: ServiceAccount
     name: ingress-nginx

@@ -8,8 +8,19 @@ metadata:
     app.kubernetes.io/component: controller
     app.kubernetes.io/instance: ingress-nginx
 data:
-  allow-snippet-annotations: "true"
-  annotations-risk-level: "Critical"
+  # Helm#536: snippets let anyone who can write an Ingress run nginx config in
+  # the controller (its TLS keys, its Secret access, every host's traffic).
+  # Every chart route uses annotations instead; all of them are rated High or lower.
+  allow-snippet-annotations: "false"
+  annotations-risk-level: "High"
+  # Rate-limited routes answer 429 instead of nginx's default 503.
+  limit-req-status-code: "429"
+  # custom-headers ConfigMaps (permissions-policy-headers.yaml) may only set these.
+  global-allowed-response-headers: "Permissions-Policy"
+  hsts: "true"
+  hsts-max-age: "31536000"
+  hsts-include-subdomains: "true"
+  hsts-preload: "false"
   # KDG epic #282 task 7: the ingress-nginx default upstream log format logs
   # $remote_addr (client IP) and $request, which embeds the full request URI
   # including the query string — magic-link / password-reset tokens travel as

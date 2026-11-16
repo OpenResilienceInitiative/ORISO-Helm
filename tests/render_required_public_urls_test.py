@@ -110,6 +110,7 @@ def helm_template(*args: str) -> subprocess.CompletedProcess:
             *MATRIX_IDENTITY,
             "--set-string", "global.emailBrandingName=Render Test Platform",
             "--set-string", "global.emailLegalOrganisationName=Render Test Foundation",
+            "--set-string", "cert-manager.acmeEmail=acme@render.oriso.internal",
             *args,
         ],
         capture_output=True,

@@ -45,7 +45,10 @@ Two further edges are closed on purpose:
 - **No unscanned route.** `blockDirectMediaAccess` (default `true`) answers 403
   on `/_matrix/media/{v3,r0,v1}/{download,thumbnail}` and
   `/_matrix/client/v1/media/{download,thumbnail}`. Uploads stay open — the
-  scanner has to be able to fetch the file it is judging.
+  scanner has to be able to fetch the file it is judging. The 403 comes from
+  `denylist-source-range`, so its body is nginx's HTML error page, not a Matrix
+  `M_FORBIDDEN` JSON error: a custom body would need a snippet, and the
+  controller disables snippets (Helm#536).
 
 One consequence deserves its own sentence: `allowedMimeTypes` is enforced on
 the download path, so it retroactively applies to media that was uploaded

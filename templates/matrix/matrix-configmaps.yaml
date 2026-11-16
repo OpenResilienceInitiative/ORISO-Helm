@@ -46,6 +46,9 @@ data:
     # via Keycloak/UserService. An empty whitelist federates with nobody.
     federation_domain_whitelist: []
     allow_public_rooms_over_federation: false
+    # Delegation for lk-jwt-service's OpenID check: without it, discovery falls
+    # back to port 8448, where nothing listens (matrix-client-ingress routes it).
+    serve_server_wellknown: true
 
     listeners:
       - port: 8008

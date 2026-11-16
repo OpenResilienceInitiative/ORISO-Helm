@@ -187,8 +187,10 @@ def assert_clamav_only(chart: str) -> None:
     assert not any("upload" in path for path in blocked), (
         "uploads must stay reachable, otherwise the scanner has nothing to fetch"
     )
-    snippet = blocker["metadata"]["annotations"]["nginx.ingress.kubernetes.io/configuration-snippet"]
-    assert "return 403" in snippet
+    # Every client address is denied, so nginx answers 403 and never proxies.
+    blocker_annotations = blocker["metadata"]["annotations"]
+    assert blocker_annotations["nginx.ingress.kubernetes.io/denylist-source-range"] == "0.0.0.0/0,::/0"
+    assert not any("snippet" in key for key in blocker_annotations), blocker_annotations
 
     frontend = get(documents, "ConfigMap", "frontend-configmap")
     assert (

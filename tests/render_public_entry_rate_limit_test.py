@@ -53,7 +53,8 @@ def main():
         annotations = public["metadata"]["annotations"]
         assert annotations[PREFIX + "limit-rps"] == "5"
         assert annotations[PREFIX + "limit-burst-multiplier"] == "2"
-        assert annotations[PREFIX + "configuration-snippet"].strip() == "limit_req_status 429;"
+        # 429 comes from the controller's limit-req-status-code; snippets are off (Helm#536).
+        assert not any("snippet" in key for key in annotations), annotations
         assert annotations[PREFIX + "rewrite-target"] == "/$1"
         for key in ("cors-allow-headers", "cors-allow-methods", "enable-cors", "ssl-redirect", "use-regex"):
             assert annotations[PREFIX + key] == legacy["metadata"]["annotations"][PREFIX + key]

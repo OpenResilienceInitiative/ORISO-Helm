@@ -36,6 +36,8 @@ spec:
             - --controller-class=k8s.io/ingress-nginx
             - --publish-service=$(POD_NAMESPACE)/ingress-nginx
             - --configmap=$(POD_NAMESPACE)/ingress-nginx-controller
+            # Helm#536: serve and read only this namespace (see clusterrole.yaml).
+            - --watch-namespace=$(POD_NAMESPACE)
             {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
             # Per-ingress request counts, status codes and latency; labels carry the
             # ingress path pattern, never the client IP or the request query string.

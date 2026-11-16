@@ -1,0 +1,25 @@
+{{- /*
+Helm#536: response headers for the custom-headers annotation, so no ingress
+needs a configuration-snippet. Header names must be listed in the controller's
+global-allowed-response-headers, otherwise ingress-nginx denies the location.
+*/ -}}
+{{- define "oriso.permissionsPolicy" -}}
+camera=(self "{{ . }}"), microphone=(self "{{ . }}"), display-capture=(self "{{ . }}")
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: permissions-policy-call-host
+  namespace: {{ .Release.Namespace }}
+data:
+  # Main host: let the Element Call host use camera, microphone and screen share.
+  Permissions-Policy: {{ include "oriso.permissionsPolicy" (printf "https://acme%s" .Values.global.domainName) | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: permissions-policy-main-host
+  namespace: {{ .Release.Namespace }}
+data:
+  # Element Call host: let the main host use camera, microphone and screen share.
+  Permissions-Policy: {{ include "oriso.permissionsPolicy" (printf "https://%s" .Values.global.domainName) | quote }}

@@ -4,7 +4,6 @@ metadata:
   annotations:
     {{- include "oriso.accountInactivity.authAnnotations" . | nindent 4 }}
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/rewrite-target: /tenant/public/$1
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
     nginx.ingress.kubernetes.io/use-regex: 'true'
