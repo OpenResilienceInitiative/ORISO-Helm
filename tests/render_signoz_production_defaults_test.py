@@ -24,6 +24,8 @@ COLLECTOR = f"{UI}-otel-collector"
 UI_INGRESS = f"{UI}-ingress"
 RUM_INGRESS = f"{UI}-rum-ingress"
 E2E_INGRESS = f"{UI}-e2e-ingress"
+# Bare /signoz -> /signoz/; rendered exactly when the UI ingress is (Helm#536).
+UI_REDIRECT = f"{UI}-slash-redirect"
 EXPORT_FLAGS = (
     "MANAGEMENT_TRACING_EXPORT_OTLP_ENABLED",
     "MANAGEMENT_OTLP_METRICS_EXPORT_ENABLED",
@@ -178,7 +180,7 @@ class SigNozExposureDefaults(unittest.TestCase):
         docs = render(PROD_OVERLAY, "--set", "signoz.orisoIngress.enabled=true")
         self.assert_export_flags(docs, "false")
         self.assertEqual(find(docs, "Deployment", COLLECTOR)["spec"]["replicas"], 0)
-        self.assertEqual(list(signoz_ingresses(docs)), [UI_INGRESS])
+        self.assertEqual(list(signoz_ingresses(docs)), [UI_INGRESS, UI_REDIRECT])
 
     def test_dev_retains_default_export_and_ui(self):
         docs = render("values-dev.yaml")
@@ -186,7 +188,7 @@ class SigNozExposureDefaults(unittest.TestCase):
         self.assertEqual(find(docs, "Deployment", COLLECTOR)["spec"]["replicas"], 1)
         # The dedicated ingest and the TLS alias have separate Dev contracts.
         optional = {E2E_INGRESS, "signoz-oriso-org-redirect"}
-        self.assertEqual(set(signoz_ingresses(docs)) - optional, {UI_INGRESS, RUM_INGRESS})
+        self.assertEqual(set(signoz_ingresses(docs)) - optional, {UI_INGRESS, UI_REDIRECT, RUM_INGRESS})
 
     def test_predev_keeps_ui_private_even_with_inherited_public_settings(self):
         with NamedTemporaryFile(mode="w", suffix=".yaml", encoding="utf-8") as inherited:
@@ -223,7 +225,7 @@ class SigNozExposureDefaults(unittest.TestCase):
     def test_explicit_predev_ui_opt_in_preserves_rum(self):
         docs = render("values-pre-dev.yaml", "--set", "signoz.orisoIngress.enabled=true")
         self.assert_export_flags(docs, "true")
-        self.assertCountEqual(signoz_ingresses(docs), [UI_INGRESS, RUM_INGRESS])
+        self.assertCountEqual(signoz_ingresses(docs), [UI_INGRESS, UI_REDIRECT, RUM_INGRESS])
 
     def test_explicitly_disabling_ui_preserves_the_separate_rum_ingress(self):
         docs = render("values-dev.yaml", "--set", "signoz.orisoIngress.enabled=false")
