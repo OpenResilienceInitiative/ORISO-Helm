@@ -2,7 +2,8 @@
 #
 # Apply ON TOP of your base values, e.g.:
 #   helm upgrade --install caritas ./ -n caritas --create-namespace \
-#     -f values.yaml -f values-dev.yaml -f secrets.yaml
+#     -f values.yaml -f values-dev.yaml -f secrets.yaml \
+#     --set-string cert-manager.acmeEmail=<role mailbox for Let's Encrypt>
 #
 # Only environment DELTAS belong here. This overlay lowers *test friction*
 # only. Matrix room encryption rollout is configured separately per environment;

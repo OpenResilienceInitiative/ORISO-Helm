@@ -82,8 +82,13 @@ helm upgrade --install caritas ./ --namespace caritas --create-namespace \
 
 ```bash
 helm upgrade --install caritas ./ --namespace caritas --create-namespace --wait-for-jobs --timeout 15m \
-  -f values.yaml -f values-<env>.yaml -f secrets.yaml
+  -f values.yaml -f values-<env>.yaml -f secrets.yaml \
+  --set-string cert-manager.acmeEmail=<role mailbox for Let's Encrypt>
 ```
+
+While `cert-manager.enabled` is true (the default), the install also fails without
+`cert-manager.acmeEmail`, the Let's Encrypt account contact. No overlay sets it:
+pass a role mailbox at deploy time, as above, or set it in your own `values.yaml`.
 
 `values.yaml` (or the environment overlay `values-<env>.yaml`) must set
 `global.domainName`; without it the install fails on purpose.
