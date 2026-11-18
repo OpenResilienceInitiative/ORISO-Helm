@@ -32,8 +32,14 @@ spec:
         app: keycloak-verify-2fa-contract
     spec:
       restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 1000) | nindent 8 }}
       containers:
         - name: verify-2fa-contract
+          # kcadm keeps its session in $HOME/.keycloak.
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict "readOnly" false) | nindent 12 }}
           image: "{{ $kc.imageName }}:{{ $kc.imageVersion }}"
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:

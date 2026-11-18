@@ -10,7 +10,8 @@ class BackendServiceClients(unittest.TestCase):
         expected = {
             'backend-technical': ('12316d09-a9da-41b9-a13e-ee2c515800b5', ['technical'], {}),
             'backend-admin': ('615a7bf8-3e12-40c7-a949-f88640acea8e', ['otp-config-admin'],
-                              {'realm-management': ['manage-users', 'view-users', 'query-users', 'view-realm']}),
+                              {'realm-management': ['manage-users', 'view-users', 'query-users', 'view-realm',
+                                                    'query-clients']}),
         }
         for name, (subject, roles, client_roles) in expected.items():
             with self.subTest(client=name):

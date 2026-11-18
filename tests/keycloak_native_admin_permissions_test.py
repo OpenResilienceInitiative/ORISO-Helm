@@ -160,10 +160,11 @@ class Keycloak:
                 "standardFlowEnabled": False, "directAccessGrantsEnabled": False, "enabled": True})
             self.admin("PUT", "/users/" + self.service_account(client_id) + "/groups/"
                        + self.group_id("/protected-admins/technical-identities"))
-        # backend-admin mirrors dev today: realm-management manage-users, view-users, query-users, view-realm.
+        # backend-admin mirrors dev today: realm-management manage-users, view-users, query-users, view-realm,
+        # query-clients (ORISO-UserService#1601).
         management = self.client_uuid("realm-management")
         legacy = [self.admin("GET", "/clients/" + management + "/roles/" + r)
-                  for r in ("manage-users", "view-users", "query-users", "view-realm")]
+                  for r in ("manage-users", "view-users", "query-users", "view-realm", "query-clients")]
         self.admin("POST", "/users/" + self.service_account("backend-admin") + "/role-mappings/clients/" + management, legacy)
         self.permissions()
 

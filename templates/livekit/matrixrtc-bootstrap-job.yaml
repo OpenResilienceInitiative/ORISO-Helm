@@ -78,8 +78,12 @@ spec:
     spec:
       serviceAccountName: matrixrtc-bootstrap
       restartPolicy: OnFailure
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 991) | nindent 8 }}
       containers:
         - name: bootstrap
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict) | nindent 12 }}
           image: {{ include "oriso.immutableImage" (list "matrix.image" .Values.matrix.image) | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:

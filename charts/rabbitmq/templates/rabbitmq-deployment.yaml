@@ -14,6 +14,9 @@ spec:
       labels:
         app: rabbitmq
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 999) | nindent 8 }}
       containers:
         - name: rabbitmq
           image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
@@ -34,3 +37,15 @@ spec:
                 secretKeyRef:
                   name: rabbitmq-secret
                   key: RABBITMQ_DEFAULT_PASS
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict) | nindent 12 }}
+          volumeMounts:
+            - mountPath: /var/lib/rabbitmq
+              name: data
+            - mountPath: /tmp
+              name: tmp
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

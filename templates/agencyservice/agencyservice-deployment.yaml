@@ -28,6 +28,9 @@ spec:
                 matchLabels:
                   app: agencyservice
               topologyKey: kubernetes.io/hostname
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 65532) | nindent 8 }}
       containers:
         - name: agencyservice
           image: {{ include "oriso.immutableImage" (list "agencyService.image" .Values.agencyService.image) | quote }}
@@ -285,3 +288,11 @@ spec:
                   name: agencyservice-configmap-env
           ports:
             - containerPort: 8080
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict) | nindent 12 }}
+          volumeMounts:
+            - mountPath: /tmp
+              name: tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

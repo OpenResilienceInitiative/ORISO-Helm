@@ -1,6 +1,23 @@
 {{- $ingress := .Values.healthDashboard.ingress | default dict }}
 {{- if $ingress.enabled }}
-{{- $authSecret := required "healthDashboard.ingress.authSecret must name an existing basic-auth Secret when HealthDashboard ingress is enabled" ($ingress.authSecret | default "" | trim) }}
+{{- /* basicAuth defaults to true. hasKey, not `default`: `default true false` would turn an explicit false back into true. */}}
+{{- $basicAuth := true }}
+{{- if hasKey $ingress "basicAuth" }}
+{{- $basicAuth = $ingress.basicAuth }}
+{{- end }}
+{{- if not (kindIs "bool" $basicAuth) }}
+{{- fail "healthDashboard.ingress.basicAuth must be a boolean (true or false)" }}
+{{- end }}
+{{- if not $basicAuth }}
+{{- /* Without Basic Auth the dashboard is public, so the app must withhold internal details (#57). */}}
+{{- $publicMode := (index (.Values.healthDashboard.env | default dict) "ORISO_PUBLIC_MODE") | default "true" | toString | lower | trim }}
+{{- if eq $publicMode "false" }}
+{{- fail "healthDashboard.ingress.basicAuth=false makes /health public and requires public mode: remove healthDashboard.env.ORISO_PUBLIC_MODE=false" }}
+{{- end }}
+{{- end }}
+{{- $authSecret := "" }}
+{{- if $basicAuth }}
+{{- $authSecret = required "healthDashboard.ingress.authSecret must name an existing basic-auth Secret when HealthDashboard ingress is enabled with basicAuth" ($ingress.authSecret | default "" | trim) }}
 {{- if contains "/" $authSecret }}
 {{- fail "healthDashboard.ingress.authSecret must be a local Secret name without '/' in the effective HealthDashboard namespace" }}
 {{- end }}
@@ -15,6 +32,7 @@
 {{- fail (printf "healthDashboard.ingress is enabled but Secret %s/%s does not exist: set healthDashboard.ingress.htpasswd in secrets.yaml, or create the Secret with an htpasswd entry under the key `auth`" $authNamespace $authSecret) }}
 {{- end }}
 {{- end }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -23,9 +41,11 @@ metadata:
   labels:
     {{- include "health-dashboard.labels" . | nindent 4 }}
   annotations:
+    {{- if $basicAuth }}
     nginx.ingress.kubernetes.io/auth-type: basic
     nginx.ingress.kubernetes.io/auth-secret: {{ $authSecret | quote }}
     nginx.ingress.kubernetes.io/auth-realm: "HealthDashboard Authentication"
+    {{- end }}
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/rewrite-target: /$2

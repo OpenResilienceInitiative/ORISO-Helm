@@ -28,6 +28,9 @@ spec:
                 matchLabels:
                   app: frontend
               topologyKey: kubernetes.io/hostname
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 1000) | nindent 8 }}
       containers:
         - image: {{ include "oriso.immutableImage" (list "frontend.image" .Values.frontend.image) | quote }}
           name: frontend          
@@ -37,7 +40,10 @@ spec:
                 name: frontend-configmap
           ports:
             - containerPort: 8080
-          resources: {}          
+          # The entrypoint writes build/config.js from the environment at start.
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict "readOnly" false) | nindent 12 }}
+          resources: {}
       imagePullSecrets:
         - name: registry-secret
       restartPolicy: Always

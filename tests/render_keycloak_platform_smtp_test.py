@@ -58,7 +58,6 @@ def main():
     assert env["CONSULTING_TYPE_SERVICE_URL"]["valueFrom"]["configMapKeyRef"] == {
         "name": "userservice-configmap-env", "key": "CONSULTING_TYPE_SERVICE_API_URL"}
     result, distinct_docs = render(
-        "--set-string", "userService.keycloakResource=resource-only-canary",
         "--set-string", "global.keycloak.backendTechnicalClientId=technical-login-client-canary",
     )
     assert result.returncode == 0, result.stderr
@@ -71,7 +70,8 @@ def main():
     assert client_ref["name"] == service_config["metadata"]["name"]
     resolved_client = service_config["data"][client_ref["key"]]
     assert resolved_client == "technical-login-client-canary", resolved_client
-    assert resolved_client != service_config["data"]["KEYCLOAK_RESOURCE"]
+    # Helm#535: the unused user-service resource name is no longer rendered.
+    assert "KEYCLOAK_RESOURCE" not in service_config["data"]
     config = next(doc for doc in docs if doc.get("kind") == "ConfigMap" and doc["metadata"]["name"] == "keycloak-reconcile-smtp-script")
     assert "keycloak-reconcile-smtp.py" in config["data"]
     result, _ = render(

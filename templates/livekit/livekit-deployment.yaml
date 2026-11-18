@@ -14,6 +14,8 @@
 {{- fail "livekit.terminationGracePeriodSeconds must be an integer" -}}
 {{- end -}}
 {{- $replicas := int $replicasRaw -}}
+{{- $turnCert := include "oriso.livekitTurnCertSecret" . -}}
+{{- $turnConfig := include "oriso.livekitTurnConfig" . -}}
 {{- $terminationGrace := int $terminationGraceRaw -}}
 {{- if not (has $strategy (list "Recreate" "RollingUpdate")) -}}
 {{- fail "livekit.deploymentStrategy must be Recreate or RollingUpdate" -}}
@@ -47,6 +49,11 @@ spec:
     metadata:
       labels:
         app: livekit
+      {{- if $turnConfig }}
+      annotations:
+        # LiveKit reads config and TURN certificate only at startup: roll on change (certRevision for renewals).
+        oriso.org/livekit-turn-config: {{ printf "%s|%s|%v" $turnConfig $turnCert (.Values.livekit.turn.certRevision | default "") | sha256sum | quote }}
+      {{- end }}
     spec:
       {{- if $enabled }}
       nodeSelector:
@@ -62,6 +69,10 @@ spec:
       hostNetwork: {{ not $enabled }}
       dnsPolicy: {{ ternary "ClusterFirst" "ClusterFirstWithHostNet" $enabled }}
       enableServiceLinks: false
+      automountServiceAccountToken: false
+      # hostNetwork (lifecycle off) stays outside Pod Security "baseline"; the container itself runs restricted.
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 65532) | nindent 8 }}
       restartPolicy: Always
       terminationGracePeriodSeconds: {{ $terminationGrace }}
       containers:
@@ -99,10 +110,22 @@ spec:
               name: rtc-udp
               protocol: UDP
             {{- end }}
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict) | nindent 12 }}
           volumeMounts:
             - name: livekit-config
               mountPath: /etc/livekit
+            {{- if $turnCert }}
+            - name: livekit-turn-tls
+              mountPath: /etc/livekit-turn
+              readOnly: true
+            {{- end }}
       volumes:
+        {{- if $turnCert }}
+        - name: livekit-turn-tls
+          secret:
+            secretName: {{ $turnCert | quote }}
+        {{- end }}
         - name: livekit-config
           secret:
             secretName: {{ (ternary (dig "livekit" "existingConfigSecret" "name" "" $lifecycle) .Values.livekit.existingConfigSecret.name $enabled) | quote }}

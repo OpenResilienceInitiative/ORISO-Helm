@@ -18,6 +18,9 @@ spec:
         {{- include "oriso.appMetrics.podAnnotations" (dict "job" "redis" "port" 9121 "path" "/metrics") | nindent 8 }}
       {{- end }}
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 999 "fsGroup" 999) | nindent 8 }}
       containers:
         - name: redis
           image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
@@ -57,6 +60,8 @@ spec:
             periodSeconds: 5
             successThreshold: 1
             timeoutSeconds: 3
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict) | nindent 12 }}
           volumeMounts:
             - mountPath: /data
               name: redis-data
@@ -67,6 +72,8 @@ spec:
           ports:
             - containerPort: 9121
               name: metrics
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict) | nindent 12 }}
           env:
             - name: REDIS_SERVICE_URL      
               valueFrom:

@@ -12,6 +12,11 @@ spec:
       app: userservice
   strategy:
     type: RollingUpdate
+    # One replica on Dev: never take the running pod away before its
+    # replacement answers (a call start during a rollout got HTTP 503).
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
@@ -40,6 +45,9 @@ spec:
                   app: userservice
               topologyKey: kubernetes.io/hostname
       restartPolicy: Always
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 65532) | nindent 8 }}
       containers:
         - name: userservice
           image: {{ include "oriso.immutableImage" (list "userService.image" .Values.userService.image) | quote }}
@@ -100,6 +108,11 @@ spec:
                   name: {{ .Values.matrixrtcLifecycle.existingSecret.name | quote }}
                   key: {{ .Values.matrixrtcLifecycle.existingSecret.tokenKey | quote }}
             {{- end }}
+            - name: MATRIXRTC_EVICTION_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: userservice-configmap-env
+                  key: MATRIXRTC_EVICTION_BASE_URL
             - name: MATRIXRTC_CALL_POLICY_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -341,11 +354,6 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   key: KEYCLOAK_REALM
-                  name: userservice-configmap-env
-            - name: KEYCLOAK_RESOURCE
-              valueFrom:
-                configMapKeyRef:
-                  key: KEYCLOAK_RESOURCE
                   name: userservice-configmap-env
             - name: MAIL_SERVICE_API_MAILS_SEND
               valueFrom:
@@ -712,10 +720,36 @@ spec:
 
           ports:
             - containerPort: 8080
+          # Without a probe the pod counted as ready seconds after the
+          # container started, long before Spring Boot served anything, and
+          # the rollout stopped the old pod. Every /service/* call and the
+          # MatrixRTC call-policy check failed until the new JVM was up
+          # (Dev, 17 Nov 2026). server.port is 8082 (the Service
+          # targets it); the health probes are public (SecurityConfig).
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8082
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8082
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources: {}
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict) | nindent 12 }}
           volumeMounts:
+            - mountPath: /tmp
+              name: tmp
             - mountPath: /import
               name: userservice-import
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: userservice-import
           emptyDir: {}

@@ -30,6 +30,8 @@ spec:
         {{- include "oriso.signozCollector.selectorLabels" (dict "root" $ "component" "otel-deployment") | nindent 8 }}
     spec:
       serviceAccountName: {{ $name }}
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict) | nindent 8 }}
       volumes:
         - name: otel-deployment-config-vol
           configMap:

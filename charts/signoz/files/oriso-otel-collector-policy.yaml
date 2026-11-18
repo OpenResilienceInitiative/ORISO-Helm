@@ -6,6 +6,14 @@ receivers:
       http:
         endpoint: 0.0.0.0:4319
         max_request_body_size: 65536
+  # Dedicated receiver for the authenticated E2E ingest route. Not the main
+  # `otlp` receiver, so a holder of the E2E token never reaches the pipelines
+  # that carry real Dev services. Body cap equals the ingress limit (256k).
+  otlp/e2e:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4321
+        max_request_body_size: 262144
 processors:
   memory_limiter:
     check_interval: 1s
@@ -26,6 +34,18 @@ processors:
       metric:
       - 'not IsMatch(name, "^(lcp|cls|inp|ttfb|fcp|login_failure|chunk_load_failure|decryption_failure)$")'
       - 'resource.attributes["service.name"] != "frontend" and resource.attributes["service.name"] != "admin"'
+  filter/e2e:
+    error_mode: ignore
+    traces:
+      span:
+      - 'resource.attributes["service.name"] != "oriso-e2e"'
+  transform/e2e:
+    error_mode: ignore
+    trace_statements:
+    - context: resource
+      statements:
+      - set(attributes["deployment.environment"], "${env:ORISO_DEPLOYMENT_ENVIRONMENT}")
+      - set(attributes["oriso.signal.source"], "e2e")
   transform/rum:
     error_mode: ignore
     metric_statements:
@@ -68,6 +88,10 @@ service:
       receivers: [otlp/rum]
       processors: [memory_limiter, filter/rum, transform/rum, batch]
       exporters: [metadataexporter, signozclickhousemetrics, signozmeter]
+    traces/e2e:
+      receivers: [otlp/e2e]
+      processors: [memory_limiter, filter/e2e, transform/e2e, batch]
+      exporters: [clickhousetraces, metadataexporter, signozmeter]
     traces:
       receivers: [otlp]
       processors: [memory_limiter, signozspanmetrics/delta, batch]

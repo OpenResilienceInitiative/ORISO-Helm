@@ -44,6 +44,13 @@ global:
     webVitals:
       enabled: false
       exportIntervalMillis: 60000
+    # Authenticated public OTLP/HTTP trace ingest at /signoz-e2e/v1/traces for
+    # the scheduled E2E run (needs signoz.enabled). authSecret is the NAME of an
+    # existing Secret in the release namespace with an htpasswd `auth` key; the
+    # chart never creates or renders the credential.
+    e2eTraceIngest:
+      enabled: false
+      authSecret: ""
 
   acmedomainName: "acme.your-domain.example.com"
  #adminDomainName: "admin.your-domain.example.com"
@@ -248,7 +255,7 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call:2.0.16"
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.17"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Storybook is a development surface and stays absent unless an environment
@@ -320,7 +327,7 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.16"
+  imageVersion: "2.0.17"
 # MongoDB
 online-counseling-mongodb:
   imageName: "mongo"
@@ -331,6 +338,17 @@ online-counseling-mariadb:
   imageName: "mariadb"
   imageVersion: "11.0.6"
   maxconnections: "1000"
+# Remove a person a moderator bans from a group conversation from that group's
+# running LiveKit call (ORISO-Admin#1518). The policy gateway calls the LiveKit
+# RoomService with the existing matrixrtcAuth LiveKit key; UserService calls the
+# gateway with the call-policy token. Independent of matrixrtcLifecycle.
+# Under hostNetwork LiveKit, list the LiveKit nodes in matrixrtcAuth.livekitNodeCidrs
+# if your CNI does not match host-network pods by podSelector.
+matrixrtcEviction:
+  enabled: false
+  # LiveKit RoomService (HTTP API) as the gateway reaches it in-cluster.
+  livekitRoomServiceUrl: "http://livekit:7880"
+
 # Off until the gateway image, dedicated secrets and RTC network acceptance pass.
 matrixrtcLifecycle:
   enabled: false
@@ -348,6 +366,9 @@ matrixrtcLifecycle:
     nodeHostname: ""
 matrixrtcAuth:
   replicas: 1
+  # In-cluster address of the call policy gateway, used by UserService
+  # (media lifecycle and moderator removal from a running call).
+  gatewayInternalUrl: "http://matrixrtc-auth-policy-gateway:3010"
   membershipReaderUserId: "@matrixrtc-auth:your-server.local"
   # Optional: namespace of the ingress controller for the call NetworkPolicies.
   # Empty means "ingress-nginx". The release namespace is always admitted as well.
@@ -365,10 +386,10 @@ matrixrtcAuth:
   # The dev branch tracks the dev tag; release branches pin these by digest
   # because they are the LiveKit authorization boundary.
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.14"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.17"
     pullPolicy: ""
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.14"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.17"
     pullPolicy: ""
   service:
     port: 3010
@@ -388,6 +409,37 @@ livekit:
     # Pre-provision this Secret outside Helm for the same release-history boundary.
     name: "livekit-config-runtime"
     key: "config.yaml"
+  # ICE fallback for restrictive client networks (ORISO-Frontend#1828).
+  # LiveKit offers UDP 50000-60000 and ICE/TCP 7881 on the node's public IP.
+  # A client network that blocks both cannot build a peer connection and the
+  # call ends after ~15-30 s with "ConnectionError: could not establish pc
+  # connection". The embedded TURN server adds relay candidates on ports that
+  # such networks usually allow (UDP 3478, TURN/TLS on 443).
+  turn:
+    enabled: false
+    # Public DNS name that resolves to the LiveKit node's public IP and matches
+    # the certificate in tlsSecretName.
+    domain: ""
+    # TURN over TLS (TCP). 0 disables. LiveKit v1.13.5 always advertises
+    # `turns:<domain>:443?transport=tcp` to clients, whatever tlsPort is
+    # (pkg/service/roommanager.go). So clients reach TURN/TLS only on public
+    # port 443: keep 443 when the node listens directly (hostNetwork, nothing
+    # else may bind 443 there). Any other port needs a forward from public 443
+    # (e.g. an L4 load balancer; with TLS terminated there set externalTls).
+    tlsPort: 443
+    # TURN over UDP. 0 disables.
+    udpPort: 3478
+    # true when a TCP load balancer terminates TLS and forwards to tlsPort.
+    externalTls: false
+    # kubernetes.io/tls Secret for `domain`; required when tlsPort > 0 and
+    # externalTls is false.
+    tlsSecretName: ""
+    # LiveKit loads the TURN certificate only at startup. After every renewal
+    # of tlsSecretName, either bump certRevision (any new string, e.g. the
+    # certificate's notAfter date) and upgrade the release, or run
+    # `kubectl -n <ns> rollout restart deployment/livekit`. Otherwise TURN/TLS
+    # keeps serving the old certificate until it expires.
+    certRevision: ""
 
 # RabbitMQ
 online-counseling-rabbitmq:
@@ -425,7 +477,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.16"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.17"
   # Deletion-log outbox (OBP 2.1 #130). With task identities on, an AgencyService image older
   # than ORISO-AgencyService#356 refuses to start once DELETION_AUDIT_READ is required. Switch this
   # on in the same release that deploys that image; until then the outbox stays unreadable.
@@ -446,7 +498,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "2.0.16"
+  imageVersion: "2.0.17"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -477,7 +529,7 @@ tenantService:
   systemEmailDeliveryServiceClient: ""
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.16"
+  imageVersion: "2.0.17"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -486,6 +538,42 @@ tenantService:
   springDatasourceURL: "jdbc:mariadb://mariadb:3306/tenantservice"
   springRabbitmqHost: "rabbitmq"
   springRabbitmqPort: "5672"
+
+
+# AddonService (ADR-034): discovers add-ons and connects them to ORISO under
+# /service/addons. Off by default; see README "Add-ons" before enabling.
+addonService:
+  enabled: false
+  replicas: 1
+  # Built from https://github.com/OpenResilienceInitiative/ORISO-AddonService
+  # (latest from main, dev from dev, versions from release/addonservice-*).
+  # A tag of the form sha256:<digest> pins by digest.
+  image:
+    repository: "ghcr.io/openresilienceinitiative/oriso-addonservice"
+    tag: "dev"
+    pullPolicy: ""
+  imagePullSecrets: []
+  discovery:
+    # Services labelled oriso.io/addon=true in the namespace below.
+    kubernetes: true
+    namespace: "addons"
+    # The namespace must exist before install unless the chart creates it.
+    createNamespace: false
+    # Add-on base URLs used in addition to Kubernetes discovery.
+    staticAddons: []
+  # Deletion events (user.deleted, session.deleted) from the exchange
+  # oriso.lifecycle, forwarded to the add-ons that subscribe to them. Uses the
+  # platform RabbitMQ (userService.springRabbitmq*, global.secrets.rabbitmq*).
+  lifecycle:
+    enabled: true
+  ingress:
+    proxyBodySize: "16m"
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "384Mi"
+    limits:
+      memory: "768Mi"
 
 
 # User service
@@ -513,10 +601,8 @@ userService:
     requestsPerSecond: 5
     burstMultiplier: 2
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.16"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.17"
   serviceURL: "http://userservice:8080"
-
-  keycloakResource: "user-service"
 
   springProfilesActive: "prod"
 
@@ -602,7 +688,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.16"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.17"
 
 nginxController:
   enabled: true
@@ -613,7 +699,7 @@ nginxController:
 ipAnonymizer:
   enabled: false
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:2.0.13"
+  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:2.0.17"
 
 
 # ---------- Observability ----------------------------------------------------------------
@@ -682,6 +768,14 @@ signoz:
         servicePort: 4319
         nodePort: ""
         protocol: TCP
+      # Dedicated receiver for global.observability.e2eTraceIngest (own pipeline
+      # that keeps only service.name=oriso-e2e). Off unless the route is on.
+      otlp-e2e:
+        enabled: false
+        containerPort: 4321
+        servicePort: 4321
+        nodePort: ""
+        protocol: TCP
 
 # SigNoz node and cluster collectors. Requires signoz.enabled=true.
 signozCollector:
@@ -708,13 +802,17 @@ dbMonitoring:
 # Health Dashboard
 healthDashboard:
   ingress:
-    # Public at /health by default; every enabled ingress requires Basic Auth.
+    # Served at /health. With basicAuth: true (default) the whole path needs Basic Auth.
+    # basicAuth: false makes it public without login; the image's public mode
+    # (ORISO_PUBLIC_MODE, on by default since 2.0.17) then withholds the Helm image
+    # inventory, service URLs and raw health bodies (#57). authSecret is ignored then.
     enabled: true
+    basicAuth: true
     # Secret with an nginx `auth` htpasswd entry; set ingress.htpasswd in secrets.yaml to render it.
     authSecret: "health-dashboard-basic-auth"
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: "2.0.14"
+    tag: "2.0.17"
     pullPolicy: ""
   replicas: 1
   namespace: ""

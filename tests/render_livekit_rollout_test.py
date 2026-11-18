@@ -57,14 +57,18 @@ def find_livekit(documents: list[dict]) -> dict:
     )
 
 
-def legacy_webhook_urls(documents: list[dict]) -> list[str]:
+def livekit_config(documents: list[dict]) -> dict:
     config = next(
         document
         for document in documents
         if document.get("kind") == "Secret"
         and document.get("metadata", {}).get("name") == "livekit-config-runtime"
     )
-    return yaml.safe_load(config["stringData"]["config.yaml"])["webhook"]["urls"]
+    return yaml.safe_load(config["stringData"]["config.yaml"])
+
+
+def legacy_webhook_urls(documents: list[dict]) -> list[str]:
+    return livekit_config(documents)["webhook"]["urls"]
 
 
 def receiver_ingress(documents: list[dict]) -> list[dict]:
@@ -192,6 +196,92 @@ def main() -> None:
         "livekit.terminationGracePeriodSeconds must be an integer"
         in decimal_grace.stderr
     )
+
+    # ORISO-Frontend#1828: TURN stays off unless an environment enables it.
+    assert "turn" not in livekit_config(documents)
+    assert all(
+        volume["name"] != "livekit-turn-tls" for volume in pod["volumes"]
+    )
+    turn_args = (
+        "--set", "livekit.turn.enabled=true",
+        "--set-string", "livekit.turn.domain=turn.example.org",
+    )
+    with_turn = render(
+        *turn_args, "--set-string", "livekit.turn.tlsSecretName=livekit-turn-tls"
+    )
+    assert livekit_config(with_turn)["turn"] == {
+        "enabled": True,
+        "domain": "turn.example.org",
+        "tls_port": 443,
+        "udp_port": 3478,
+        "external_tls": False,
+        "cert_file": "/etc/livekit-turn/tls.crt",
+        "key_file": "/etc/livekit-turn/tls.key",
+    }
+    turn_pod = find_livekit(with_turn)["spec"]["template"]["spec"]
+    assert {"name": "livekit-turn-tls", "secret": {"secretName": "livekit-turn-tls"}} in turn_pod["volumes"]
+    assert {
+        "name": "livekit-turn-tls", "mountPath": "/etc/livekit-turn", "readOnly": True
+    } in turn_pod["containers"][0]["volumeMounts"]
+
+    external_tls = livekit_config(
+        render(*turn_args, "--set", "livekit.turn.externalTls=true", "--set", "livekit.turn.tlsPort=443")
+    )["turn"]
+    assert external_tls["external_tls"] is True and external_tls["tls_port"] == 443
+    assert "cert_file" not in external_tls
+
+    udp_only = livekit_config(render(*turn_args, "--set", "livekit.turn.tlsPort=0"))["turn"]
+    assert "tls_port" not in udp_only and udp_only["udp_port"] == 3478
+
+    def turn_annotation(docs):
+        meta = find_livekit(docs)["spec"]["template"]["metadata"]
+        return (meta.get("annotations") or {}).get("oriso.org/livekit-turn-config")
+
+    assert turn_annotation(documents) is None
+    udp_only_docs = render(*turn_args, "--set", "livekit.turn.tlsPort=0")
+    udp_only_other_domain = render(
+        "--set", "livekit.turn.enabled=true",
+        "--set-string", "livekit.turn.domain=turn2.example.org",
+        "--set", "livekit.turn.tlsPort=0",
+    )
+    assert turn_annotation(udp_only_docs)
+    assert turn_annotation(udp_only_docs) != turn_annotation(udp_only_other_domain)
+    assert turn_annotation(with_turn) not in (None, turn_annotation(udp_only_docs))
+    renewed = render(
+        *turn_args, "--set-string", "livekit.turn.tlsSecretName=livekit-turn-tls",
+        "--set-string", "livekit.turn.certRevision=2027-02-17",
+    )
+    assert turn_annotation(renewed) not in (None, turn_annotation(with_turn))
+    assert livekit_config(renewed)["turn"] == livekit_config(with_turn)["turn"]
+    external_tls_docs = render(
+        *turn_args, "--set", "livekit.turn.externalTls=true", "--set", "livekit.turn.tlsPort=443"
+    )
+    assert turn_annotation(external_tls_docs) not in (
+        None, turn_annotation(with_turn), turn_annotation(udp_only_docs)
+    )
+
+    string_external_tls = run_helm(
+        *turn_args, "--set-string", "livekit.turn.externalTls=false",
+        "--set-string", "livekit.turn.tlsSecretName=livekit-turn-tls",
+    )
+    assert string_external_tls.returncode != 0
+    assert "livekit.turn.externalTls must be a boolean" in string_external_tls.stderr
+
+    missing_cert = run_helm(*turn_args)
+    assert missing_cert.returncode != 0
+    assert "livekit.turn.tlsSecretName is required" in missing_cert.stderr
+
+    missing_domain = run_helm(
+        "--set", "livekit.turn.enabled=true", "--set", "livekit.turn.tlsPort=0"
+    )
+    assert missing_domain.returncode != 0
+    assert "livekit.turn.domain is required" in missing_domain.stderr
+
+    no_ports = run_helm(
+        *turn_args, "--set", "livekit.turn.tlsPort=0", "--set", "livekit.turn.udpPort=0"
+    )
+    assert no_ports.returncode != 0
+    assert "needs tlsPort or udpPort above 0" in no_ports.stderr
 
     print("PASS: single-node LiveKit rollout is serialized and bounded")
 

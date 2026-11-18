@@ -1,0 +1,11 @@
+{{- if (.Values.addonService).enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: addonservice-pdb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: addonservice
+{{- end }}

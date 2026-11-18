@@ -127,8 +127,6 @@ def rendered_realm():
     for path in ("values.yaml.default", "tests/fixtures/values-render-domain.yaml",
                  "secrets.yaml.default", "tests/fixtures/render-required-secrets.yaml"):
         command.extend(["-f", str(ROOT / path)])
-    command.extend(["--set-string", "global.secrets.redisdefaultPass=x",
-                    "--set-string", "tenantService.smtpPasswordEncryptionSecret=x"])
     out = subprocess.run(command, check=True, capture_output=True, text=True).stdout
     config = next(doc for doc in yaml.safe_load_all(out)
                   if doc and doc["kind"] == "ConfigMap" and doc["metadata"]["name"] == "keycloak-configmap-data")

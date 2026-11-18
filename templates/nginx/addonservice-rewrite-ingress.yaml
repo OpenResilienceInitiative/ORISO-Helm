@@ -1,0 +1,27 @@
+{{- if (.Values.addonService).enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    {{- include "oriso.accountInactivity.authAnnotations" . | nindent 4 }}
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ dig "ingress" "proxyBodySize" "16m" .Values.addonService | quote }}
+    nginx.ingress.kubernetes.io/rewrite-target: /$1$2$3
+    nginx.ingress.kubernetes.io/ssl-redirect: 'true'
+    nginx.ingress.kubernetes.io/use-regex: 'true'
+  name: addonservice-rewrite-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: '{{ .Values.global.domainName }}'
+    http:
+      paths:
+      - backend:
+          service:
+            name: addonservice
+            port:
+              number: 8090
+        path: /service/(addons)(/|$)(.*)
+        pathType: ImplementationSpecific
+{{- end }}

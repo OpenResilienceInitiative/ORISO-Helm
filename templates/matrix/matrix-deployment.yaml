@@ -31,6 +31,9 @@ spec:
         {{- include "oriso.appMetrics.podAnnotations" (dict "job" "synapse" "port" 9000 "path" "/_synapse/metrics") | nindent 8 }}
       {{- end }}
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 991) | nindent 8 }}
       initContainers:
         - name: fix-permissions
           image: {{ include "oriso.immutableImage" (list "matrix.initImage" .Values.matrix.initImage) | quote }}
@@ -41,8 +44,11 @@ spec:
           - |
             chown -R 991:991 /data || true
             chmod -R u+w /data || true
+          # Root exception: hands existing data on node-local volumes (no fsGroup support) to Synapse's UID.
           securityContext:
             runAsUser: 0
+            runAsNonRoot: false
+            {{- include "oriso.containerSecurityContext" (dict "add" (list "CHOWN" "FOWNER" "DAC_OVERRIDE")) | nindent 12 }}
           volumeMounts:
           - name: synapse-data
             mountPath: /data
@@ -117,7 +123,11 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
+        securityContext:
+          {{- include "oriso.containerSecurityContext" (dict) | nindent 10 }}
         volumeMounts:
+          - mountPath: /tmp
+            name: tmp
           {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
           - name: group-policy-module
             mountPath: /opt/oriso-modules
@@ -135,6 +145,8 @@ spec:
             name: homeserver-database-secret
             readOnly: true
       volumes:
+        - name: tmp
+          emptyDir: {}
         {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
         - name: group-policy-module
           configMap:

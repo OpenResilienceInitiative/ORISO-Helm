@@ -66,3 +66,41 @@ the release namespace always stays.
       app.kubernetes.io/name: ingress-nginx
       app.kubernetes.io/component: controller
 {{- end -}}
+
+{{/*
+Moderator removal from a running group call (ORISO-Admin#1518): UserService asks
+the policy gateway to remove a banned person's LiveKit participants. Missing
+configuration is disabled; an explicit non-boolean fails.
+*/}}
+{{- define "oriso.matrixrtcEviction.enabled" -}}
+{{- $cfg := .Values.matrixrtcEviction | default dict -}}
+{{- $enabled := false -}}
+{{- if hasKey $cfg "enabled" -}}
+{{- $enabled = $cfg.enabled -}}
+{{- end -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "matrixrtcEviction.enabled must be a boolean" -}}
+{{- end -}}
+{{- $enabled | toString -}}
+{{- end -}}
+
+{{/* In-cluster address of the call policy gateway, for UserService's lifecycle and eviction calls.
+     Falls back to the chart's own gateway Service: environment values files may omit it. */}}
+{{- define "oriso.matrixrtcAuth.gatewayUrl" -}}
+{{- (.Values.matrixrtcAuth | default dict).gatewayInternalUrl | default "http://matrixrtc-auth-policy-gateway:3010" -}}
+{{- end -}}
+
+{{/*
+LiveKit RoomService address the gateway uses to remove a banned participant.
+The gateway NetworkPolicy admits only the chart's own LiveKit (app=livekit,
+plus matrixrtcAuth.livekitNodeCidrs) on port 7880, so only an address that
+reaches exactly that is accepted; anything else would render but be dropped.
+*/}}
+{{- define "oriso.matrixrtcEviction.livekitUrl" -}}
+{{- $url := required "matrixrtcEviction.livekitRoomServiceUrl is required" (.Values.matrixrtcEviction | default dict).livekitRoomServiceUrl -}}
+{{- $clusterDomain := (.Values.global | default dict).clusterDomain | default "cluster.local" -}}
+{{- if not (regexMatch (printf "^http://livekit(\\.%s(\\.svc(\\.%s)?)?)?:7880/?$" (regexQuoteMeta .Release.Namespace) (regexQuoteMeta $clusterDomain)) $url) -}}
+{{- fail (printf "matrixrtcEviction.livekitRoomServiceUrl %q must address the chart's LiveKit Service on port 7880 (for example http://livekit:7880); the gateway NetworkPolicy admits nothing else" $url) -}}
+{{- end -}}
+{{- $url -}}
+{{- end -}}

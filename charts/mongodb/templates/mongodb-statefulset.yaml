@@ -23,16 +23,22 @@ spec:
       labels:
         app: mongodb
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 999 "fsGroup" 999) | nindent 8 }}
       initContainers:
         - name: add-keyfile
           image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           command: ["bash", "-c"]
+          # rm first: the old key is read-only for its owner, and fsGroup adds group bits.
           args:
             - >
+              rm -f /data/key/replica.key &&
               cp /data/replica.key.tmp /data/key/replica.key &&
-              chmod 400 /data/key/replica.key &&
-              chown mongodb:mongodb /data/key/replica.key
+              chmod 400 /data/key/replica.key
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict) | nindent 12 }}
           volumeMounts:
             - mountPath: /data/replica.key.tmp
               subPath: replica.key.tmp
@@ -61,6 +67,9 @@ spec:
             timeoutSeconds: 30
             initialDelaySeconds: 20
           env:
+            # mongosh in the readiness probe writes its history under $HOME.
+            - name: HOME
+              value: /tmp
             - name: MONGO_INITDB_ROOT_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -83,12 +92,18 @@ spec:
                   name: mongodb-secret
           ports:
             - containerPort: 27017
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict) | nindent 12 }}
           volumeMounts:
             - mountPath: /data/db
               name: mongodb-data
             - mountPath: /data/key
               name: mongodb-data
+            - mountPath: /tmp
+              name: tmp
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: replica-key
           secret:
             secretName: mongodb-secret-replica

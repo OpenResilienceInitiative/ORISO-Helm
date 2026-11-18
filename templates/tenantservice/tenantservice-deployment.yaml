@@ -28,12 +28,23 @@ spec:
                 matchLabels:
                   app: tenantservice
               topologyKey: kubernetes.io/hostname
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 65532) | nindent 8 }}
       containers:
       - name: tenantservice
         image:  {{ .Values.tenantService.imageName }}:{{ .Values.tenantService.imageVersion }}
         imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
         ports:
         - containerPort: 8081
+        securityContext:
+          {{- include "oriso.containerSecurityContext" (dict) | nindent 10 }}
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp
+        # Ehcache disk tier: persistence directory "spring-boot-ehcache/cache" under the working directory /.
+        - mountPath: /spring-boot-ehcache
+          name: ehcache
         env:
           {{- include "oriso.springTelemetryEnv" (dict "root" $ "image" (printf "%s:%s" .Values.tenantService.imageName (toString .Values.tenantService.imageVersion))) | nindent 10 }}
           - name: SPRING_PROFILES_ACTIVE
@@ -246,3 +257,8 @@ spec:
             port: 8081
           initialDelaySeconds: 60
           periodSeconds: 10
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: ehcache
+        emptyDir: {}

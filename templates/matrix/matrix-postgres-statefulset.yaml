@@ -19,6 +19,10 @@ spec:
       labels:
         app: matrix-postgres
     spec:
+      automountServiceAccountToken: false
+      # postgres in the alpine image is UID 70; the entrypoint resets PGDATA to 0700 on every start.
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 70 "fsGroup" 70) | nindent 8 }}
       containers:
       - name: postgres
         image: postgres:15-alpine
@@ -72,7 +76,13 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
+        securityContext:
+          {{- include "oriso.containerSecurityContext" (dict) | nindent 10 }}
         volumeMounts:
+        - mountPath: /var/run/postgresql
+          name: run
+        - mountPath: /tmp
+          name: tmp
         - mountPath: /var/lib/postgresql/data
           name: postgres-storage
         - mountPath: /backup
@@ -81,6 +91,10 @@ spec:
           name: postgres-config
           subPath: postgresql.conf
       volumes:
+      - name: run
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
       - name: postgres-storage
         persistentVolumeClaim:
           claimName: matrix-postgres-pvc

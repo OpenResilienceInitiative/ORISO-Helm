@@ -1,0 +1,96 @@
+{{- if (.Values.addonService).enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: addonservice
+  labels:
+    app: addonservice
+spec:
+  replicas: {{ dig "replicas" 1 .Values.addonService }}
+  selector:
+    matchLabels:
+      app: addonservice
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        checksum/config-env: {{ include (print $.Template.BasePath "/addonservice/addonservice-configmap-env.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/addonservice/addonservice-secret.yaml") . | sha256sum }}
+      labels:
+        app: addonservice
+    spec:
+      serviceAccountName: addonservice
+      {{- with .Values.addonService.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: addonservice
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: addonservice
+          image: {{ include "oriso.addonService.image" . | quote }}
+          imagePullPolicy: {{ default (include "oriso.imagePullPolicy" .) (dig "image" "pullPolicy" "" .Values.addonService) | quote }}
+          env:
+            {{- range $key := list "SPRING_DATASOURCE_URL" "SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI" "SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI" "ADDONS_USERSERVICE_BASEURL" "ADDONS_DISCOVERY_KUBERNETES" "ADDONS_DISCOVERY_NAMESPACE" "ADDONS_DISCOVERY_STATICADDONS" "ADDONS_TECHNICALCLIENT_TOKENURL" "ADDONS_TENANTSERVICE_BASEURL" "ADDONS_LIFECYCLE_ENABLED" "SPRING_RABBITMQ_HOST" "SPRING_RABBITMQ_PORT" }}
+            - name: {{ $key }}
+              valueFrom:
+                configMapKeyRef:
+                  key: {{ $key }}
+                  name: addonservice-configmap-env
+            {{- end }}
+            {{- range $key := list "SPRING_DATASOURCE_USERNAME" "SPRING_DATASOURCE_PASSWORD" "ADDONS_TOKEN_PRIVATEKEYPEM" "SPRING_RABBITMQ_USERNAME" "SPRING_RABBITMQ_PASSWORD" }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  key: {{ $key }}
+                  name: addonservice-secret
+            {{- end }}
+            # Host API calls into the core (notifications, context) use the backend technical client.
+            - name: ADDONS_TECHNICALCLIENT_CLIENTSECRET
+              valueFrom:
+                secretKeyRef:
+                  key: KEYCLOAK_BACKEND_TECHNICAL_CLIENT_SECRET
+                  name: keycloak-backend-client-secrets
+          ports:
+            - name: http
+              containerPort: 8090
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          {{- with .Values.addonService.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

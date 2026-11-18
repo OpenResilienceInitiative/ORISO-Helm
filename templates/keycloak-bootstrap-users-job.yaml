@@ -41,8 +41,14 @@ spec:
         app: keycloak-bootstrap-users
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 1000) | nindent 8 }}
       containers:
         - name: bootstrap-users
+          # kcadm keeps its session in $HOME/.keycloak.
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict "readOnly" false) | nindent 12 }}
           image: "{{ $kc.imageName }}:{{ $kc.imageVersion }}"
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:

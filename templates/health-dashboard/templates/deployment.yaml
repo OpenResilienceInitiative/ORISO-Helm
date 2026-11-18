@@ -22,6 +22,8 @@ spec:
         app: health-dashboard
     spec:
       serviceAccountName: health-dashboard
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 1000) | nindent 8 }}
       containers:
       - name: health-dashboard
         image: "{{ .Values.healthDashboard.image.repository }}:{{ .Values.healthDashboard.image.tag }}"
@@ -48,6 +50,8 @@ spec:
           mountPath: /app/config.json
           subPath: config.json
           readOnly: true
+        securityContext:
+          {{- include "oriso.containerSecurityContext" (dict) | nindent 10 }}
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
       volumes:

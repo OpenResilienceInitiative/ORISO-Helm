@@ -19,7 +19,7 @@ AUTH_ERROR = (
 
 
 def render(*overlays: str, health_dashboard: dict | None = None,
-           expect_error: bool = False) -> list[dict] | str:
+           expect_error: bool = False, domain: str = "health.oriso.internal") -> list[dict] | str:
     command = [
         "helm", "template", "health-auth-test", str(CHART_DIR),
         "--namespace", "render-test",
@@ -27,9 +27,9 @@ def render(*overlays: str, health_dashboard: dict | None = None,
         "-f", str(CHART_DIR / "tests" / "fixtures" / "values-render-domain.yaml"),
         "-f", str(CHART_DIR / "secrets.yaml.default"),
         "-f", str(CHART_DIR / "tests" / "fixtures" / "render-required-secrets.yaml"),
-        "--set-string", "global.domainName=health.oriso.internal",
+        "--set-string", f"global.domainName={domain}",
         # Pre-Dev enables SigNoz, whose validation ties this URL to domainName.
-        "--set-string", "signoz.signoz.env.signoz_global_external__url=https://health.oriso.internal/signoz",
+        "--set-string", f"signoz.signoz.env.signoz_global_external__url=https://{domain}/signoz",
         "--set-string", "tenantService.smtpPasswordEncryptionSecret=render-test-secret",
         "--set-string", "consultingTypeService.smtpPasswordEncryptionSecret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
         "--set-string", "userService.smtpUser=smtp-canary-user",
@@ -212,11 +212,11 @@ class HealthDashboardIngressAuthTest(unittest.TestCase):
         self.assertEqual(resources["Service"]["spec"]["ports"][0]["targetPort"], 9300)
 
     def test_dev_enables_auth_and_can_be_disabled(self) -> None:
-        resources = health_resources(render("values-dev.yaml"))
+        resources = health_resources(render("values-dev.yaml", domain="dev.oriso.org"))
         annotations = resources["Ingress"]["metadata"]["annotations"]
         self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-type"], "basic")
         self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-secret"], "health-dashboard-basic-auth")
-        disabled = health_resources(render("values-dev.yaml", health_dashboard={"ingress": {
+        disabled = health_resources(render("values-dev.yaml", domain="dev.oriso.org", health_dashboard={"ingress": {
             "enabled": False, "authSecret": None,
         }}))
         self.assertEqual(set(disabled), {"Deployment", "Service"})
@@ -233,6 +233,50 @@ class HealthDashboardIngressAuthTest(unittest.TestCase):
                 self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-secret"], "health-dashboard-basic-auth")
                 disabled = health_resources(render(*layers, health_dashboard={"ingress": {"enabled": False}}))
                 self.assertEqual(set(disabled), {"Deployment", "Service"})
+
+    def test_basic_auth_true_matches_default(self) -> None:
+        default = health_resources(render())
+        explicit = health_resources(render(health_dashboard={"ingress": {"enabled": True, "basicAuth": True}}))
+        self.assertEqual(explicit, default)
+
+    def test_basic_auth_false_serves_public_route_without_auth(self) -> None:
+        # HealthDashboard#57: public view without login; the image's public mode withholds internals.
+        auth = health_resources(render())["Ingress"]
+        for secret in (DEFAULT_AUTH_SECRET, None, ""):
+            with self.subTest(secret=repr(secret)):
+                docs = render(health_dashboard={"ingress": {
+                    "enabled": True, "basicAuth": False, "authSecret": secret, "htpasswd": "admin:$apr1$x$y",
+                }})
+                public = health_resources(docs)["Ingress"]
+                annotations = public["metadata"]["annotations"]
+                self.assertFalse([k for k in annotations if k.startswith("nginx.ingress.kubernetes.io/auth-")])
+                kept = {k: v for k, v in auth["metadata"]["annotations"].items()
+                        if not k.startswith("nginx.ingress.kubernetes.io/auth-")}
+                self.assertEqual(annotations, kept)
+                self.assertEqual(public["spec"], auth["spec"])
+                self.assertFalse(
+                    [d for d in docs if d["kind"] == "Secret" and d["metadata"]["name"] == DEFAULT_AUTH_SECRET],
+                    "basicAuth=false must not render the Basic Auth Secret",
+                )
+
+    def test_basic_auth_false_requires_public_mode(self) -> None:
+        for value in ("false", "FALSE", " False "):
+            with self.subTest(value=value):
+                error = render(health_dashboard={
+                    "ingress": {"enabled": True, "basicAuth": False},
+                    "env": {"ORISO_PUBLIC_MODE": value},
+                }, expect_error=True)
+                self.assertIn("healthDashboard.ingress.basicAuth=false makes /health public and requires public mode", error)
+        resources = health_resources(render(health_dashboard={
+            "ingress": {"enabled": True, "basicAuth": False}, "env": {"ORISO_PUBLIC_MODE": "true"},
+        }))
+        self.assertNotIn("nginx.ingress.kubernetes.io/auth-type", resources["Ingress"]["metadata"]["annotations"])
+
+    def test_basic_auth_rejects_non_boolean(self) -> None:
+        for value in ("false", "no", 0, None):
+            with self.subTest(value=repr(value)):
+                error = render(health_dashboard={"ingress": {"enabled": True, "basicAuth": value}}, expect_error=True)
+                self.assertIn("healthDashboard.ingress.basicAuth must be a boolean", error)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,15 @@ spec.loader.exec_module(smtp)
 Error = smtp.ReconcileError
 decode_claims = smtp.decode_claims
 
+# Helm#535: client shipped in realm.json with a secret published in the repo.
+PUBLISHED_CLIENT = ('user-service', 'user-service-secret')
+# Helm#535: must match realm.json. Retention (30 days) pending DPO sign-off.
+EVENTS_CONFIG = {'eventsEnabled': True, 'eventsExpiration': 2592000,
+                 'enabledEventTypes': ['LOGIN', 'LOGIN_ERROR', 'LOGOUT', 'REFRESH_TOKEN_ERROR'],
+                 'adminEventsEnabled': True, 'adminEventsDetailsEnabled': False}
+# Admin events expire through a realm attribute, not events/config (seconds, same 30 days).
+ADMIN_EVENTS_EXPIRATION = '2592000'
+
 
 def required(env, name):
     return smtp.required(env, name)
@@ -176,7 +185,8 @@ def verify_client_token(http, config, client, subject, admin):
                  and isinstance(resources, dict))
         if admin:
             management = resources.get('realm-management', {}).get('roles')
-            required_roles = {'manage-users', 'view-users', 'query-users', 'view-realm'}
+            # query-clients: UserService's role check lists the realm's clients (ORISO-UserService#1601).
+            required_roles = {'manage-users', 'view-users', 'query-users', 'view-realm', 'query-clients'}
             # Existing view-users is a composite including query-groups.
             valid = (valid and set(resources) == {'realm-management'} and isinstance(management, list)
                      and required_roles <= set(management) <= required_roles | {'query-groups'})
@@ -226,6 +236,34 @@ def verify_smtp_sync_token(http, config, subject):
         raise Error('BACKEND_CLIENT_TOKEN_CONTRACT_MISMATCH')
 
 
+def retire_published_client(api):
+    name, published = PUBLISHED_CLIENT
+    client = api.find_client(name)
+    if not client:
+        return 'PUBLISHED_CLIENT_ABSENT'
+    cid = quote(client['id'], safe='')
+    secret = api.request('GET', 'clients/' + cid + '/client-secret')
+    # A rotated secret means an operator adopted the client; leave it to them.
+    if not isinstance(secret, dict) or secret.get('value') != published:
+        return 'PUBLISHED_CLIENT_KEPT_ROTATED_SECRET'
+    api.request('DELETE', 'clients/' + cid)
+    return 'PUBLISHED_CLIENT_DELETED'
+
+
+def reconcile_events(api):
+    current = api.request('GET', 'events/config')
+    if not isinstance(current, dict):
+        raise Error('BACKEND_CLIENT_INVALID: events config')
+    # PUT replaces the whole config; keep listeners and anything else as-is.
+    api.request('PUT', 'events/config', {**current, **EVENTS_CONFIG})
+    attributes = api.realm().get('attributes') or {}
+    if attributes.get('adminEventsExpiration') != ADMIN_EVENTS_EXPIRATION:
+        # A realm PUT replaces all attributes; send the current ones back.
+        body = json.dumps({'attributes': {**attributes, 'adminEventsExpiration': ADMIN_EVENTS_EXPIRATION}}).encode()
+        api.http.request('PUT', api.base.rstrip('/'), body, api.headers, 'ADMIN_UNAVAILABLE', admin_api=True)
+    print('REALM_EVENTS_RECONCILED')
+
+
 def reconcile(config):
     api = Admin(config)
     names = (config['TECHNICAL_CLIENT_ID'], config['ADMIN_CLIENT_ID'])
@@ -250,7 +288,7 @@ def reconcile(config):
         raise Error('BACKEND_CLIENT_INVALID: realm-management missing')
     roles = [api.request('GET', 'roles/' + role) for role in ('technical', 'otp-config-admin')]
     management_roles = [api.request('GET', 'clients/' + quote(management['id'], safe='') + '/roles/' + role)
-                        for role in ('manage-users', 'view-users', 'query-users', 'view-realm')]
+                        for role in ('manage-users', 'view-users', 'query-users', 'view-realm', 'query-clients')]
     actual_subjects = []
     for i, name in enumerate(names):
         if not clients[i]:
@@ -271,6 +309,8 @@ def reconcile(config):
     print('ADMIN_SERVICE_SUBJECT=' + actual_subjects[1])
     if not config['prepare']:
         reconcile_smtp_sync(api, config, sync_client, management)
+        print(retire_published_client(api))
+        reconcile_events(api)
     if config['retire']:
         api.retire(config['LEGACY_TECHNICAL_USERNAME'])
         api.retire(config['LEGACY_ADMIN_USERNAME'])

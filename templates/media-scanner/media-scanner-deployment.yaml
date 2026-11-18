@@ -27,6 +27,8 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: content-scanner
           image: {{ .Values.mediaScanner.image | quote }}

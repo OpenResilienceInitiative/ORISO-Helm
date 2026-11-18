@@ -29,6 +29,11 @@ spec:
                 matchLabels:
                   app: admin
               topologyKey: kubernetes.io/hostname
+      automountServiceAccountToken: false
+      # Root: the image writes admin/env.js into its root-owned web root at start
+      # and runs nginx and the auth BFF as root. Non-root needs an image change.
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict) | nindent 8 }}
       containers:
       - name: admin
         image: {{ .Values.admin.imageName }}:{{ .Values.admin.imageVersion }}     
@@ -39,6 +44,8 @@ spec:
         ports:
         - containerPort: 80
           name: http
+        securityContext:
+          {{- include "oriso.containerSecurityContext" (dict "readOnly" false "add" (list "CHOWN" "SETUID" "SETGID" "NET_BIND_SERVICE")) | nindent 10 }}
         resources:
           requests:
             memory: "128Mi"

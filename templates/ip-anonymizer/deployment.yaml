@@ -16,6 +16,9 @@ spec:
       labels:
         app: ip-anonymizer
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict) | nindent 8 }}
       containers:
         - name: ip-anonymizer
           image: {{ .Values.ipAnonymizer.image | quote }}

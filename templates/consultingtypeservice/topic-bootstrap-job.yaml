@@ -22,8 +22,13 @@ spec:
         app: topic-bootstrap
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 999) | nindent 8 }}
       containers:
         - name: topic-bootstrap
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict) | nindent 12 }}
           image: "{{ $mariadb.imageName }}:{{ $mariadb.imageVersion }}"
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:

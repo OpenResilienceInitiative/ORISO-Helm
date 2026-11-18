@@ -31,7 +31,10 @@ Copy the secrets template and fill in all credentials:
 cp secrets.yaml.default secrets.yaml
 ```
 
-Open `secrets.yaml` and replace every `changeme` with a real value. Fields to fill in:
+Open `secrets.yaml` and replace every `changeme` with a real value. The install
+fails while any value still contains `changeme`, and the error names it; the
+database, RabbitMQ, Redis, Matrix and Keycloak admin passwords must also be at
+least 12 characters (ORISO-Helm#540). Fields to fill in:
 
 - `global.secrets.*Password` / `*Pass` — database and service passwords
 - `global.secrets.matrixRegistrationSharedSecret` — Matrix shared secret
@@ -187,3 +190,70 @@ Production activation requires a verified privacy pipeline on the current
 collector, retention, backup and restore, and authenticated UI access. The
 historical pseudonymization pipeline targeted an earlier collector.
 [Historical collector PR](https://github.com/OpenResilienceInitiative/ORISO-Helm/pull/65) · [Production acceptance](https://github.com/OpenResilienceInitiative/ORISO-E2E/issues/99)
+
+### Add-ons (optional)
+
+Add-ons are optional services with their own backend and UI (ADR-034). The
+[AddonService](https://github.com/OpenResilienceInitiative/ORISO-AddonService) discovers them,
+lets a SuperAdmin enable each one per Träger and serves them under
+`/service/addons`. It is off by default (`addonService.enabled: false`); with
+it off, nothing below is rendered.
+
+To enable it, set in `values.yaml`:
+
+- `addonService.enabled: true`
+- `addonService.image.repository` / `addonService.image.tag`: required, no
+  default (a tag of the form `sha256:<digest>` pins by digest);
+  `addonService.imagePullSecrets` for a private registry
+- `addonService.discovery.namespace`: where add-ons run (default `addons`). The
+  chart grants the AddonService `get`/`list` on Services there only. The
+  namespace must exist before the install, or set
+  `addonService.discovery.createNamespace: true`
+- `addonService.discovery.staticAddons`: add-on base URLs used in addition to
+  Kubernetes discovery (`discovery.kubernetes: false` turns discovery and its
+  RBAC off)
+
+and in `secrets.yaml`:
+
+- `global.secrets.addonServiceDbPassword` (and optionally
+  `addonServiceDbUsername`, default `addonservice`). The Job
+  `addonservice-db-init-*` creates the `addonservice` database and user as
+  MariaDB root on install and upgrade; Liquibase in the service creates the
+  tables. Use a password without quotes. After changing it, delete the
+  completed Job so the next upgrade runs it again.
+- `addonService.tokenPrivateKeyPem`: the RS256 key that signs the tokens
+  add-ons receive. It must stay the same across restarts and replicas:
+
+  ```bash
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out addonservice-token.pem
+  ```
+
+Add-ons are not part of this chart; each brings its own chart or manifests
+and installs into the add-on namespace. An add-on:
+
+- exposes a Service labelled `oriso.io/addon: "true"` (port from the
+  annotation `oriso.io/addon-port`, otherwise the first port)
+- serves its manifest at `/.well-known/oriso-addon.json`
+- should accept traffic only from the AddonService, for example:
+
+  ```yaml
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: only-addonservice
+    namespace: addons
+  spec:
+    podSelector: {}
+    policyTypes: [Ingress]
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: caritas
+            podSelector:
+              matchLabels:
+                app: addonservice
+  ```
+
+Add-on backends reach the AddonService at
+`http://addonservice.<release namespace>.svc:8090`.

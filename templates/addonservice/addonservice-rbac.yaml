@@ -1,0 +1,41 @@
+{{- if (.Values.addonService).enabled }}
+{{- $addonNamespace := include "oriso.addonService.discoveryNamespace" . }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: addonservice
+  namespace: {{ .Release.Namespace }}
+{{- if eq (include "oriso.addonService.kubernetesDiscovery" .) "true" }}
+{{- if dig "discovery" "createNamespace" false .Values.addonService }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $addonNamespace }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: addonservice-discovery-{{ .Release.Namespace }}
+  namespace: {{ $addonNamespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: addonservice-discovery-{{ .Release.Namespace }}
+  namespace: {{ $addonNamespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: addonservice-discovery-{{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: addonservice
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

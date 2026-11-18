@@ -1,0 +1,13 @@
+{{- if (.Values.addonService).enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: addonservice
+spec:
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+  selector:
+    app: addonservice
+{{- end }}

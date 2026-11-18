@@ -1,0 +1,19 @@
+{{- if (.Values.addonService).enabled }}
+{{- /*
+Not a Helm hook: as post-install/post-upgrade it would only run (and under
+Argo CD as PostSync) after the AddonService is healthy, which it cannot be
+without its database. A Job's pod template is immutable, so the name carries a
+hash of the rendered template and any change to it creates a new Job.
+*/ -}}
+{{- $podTemplate := include "oriso.addonService.dbJobPodTemplate" . -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: addonservice-db-init-{{ $podTemplate | sha256sum | trunc 8 }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  template:
+    {{- $podTemplate | nindent 4 }}
+{{- end }}

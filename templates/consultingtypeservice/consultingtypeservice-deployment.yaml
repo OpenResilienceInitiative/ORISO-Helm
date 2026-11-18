@@ -27,6 +27,9 @@ spec:
                 matchLabels:
                   app: consultingtypeservice
               topologyKey: kubernetes.io/hostname
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 65532) | nindent 8 }}
       containers:
         - name: consultingtypeservice
           image:  {{ .Values.consultingTypeService.imageName }}:{{ .Values.consultingTypeService.imageVersion }}          
@@ -245,10 +248,16 @@ spec:
                   name: consultingtypeservice-configmap-env
           ports:
             - containerPort: 8080
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict) | nindent 12 }}
           volumeMounts:
+            - mountPath: /tmp
+              name: tmp
             - mountPath: /{{ .Values.consultingTypeService.consultingTypesJsonPath }}
               name: consulting-type-settings
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: consulting-type-settings
           configMap:
             name: consultingtypeservice-settings-configmap

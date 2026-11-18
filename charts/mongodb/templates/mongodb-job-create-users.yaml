@@ -12,8 +12,14 @@ spec:
     spec:
       activeDeadlineSeconds: 600
       restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 999) | nindent 8 }}
       initContainers:
         - name: wait-for-mongo-ready
+          # mongosh writes its history under $HOME.
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict "readOnly" false) | nindent 12 }}
           image: mongo:6.0
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:
@@ -42,6 +48,9 @@ spec:
               exit 1
       containers:
         - name: create-mongo-users
+          # mongosh writes its history under $HOME.
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict "readOnly" false) | nindent 12 }}
           image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           env:

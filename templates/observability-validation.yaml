@@ -76,6 +76,57 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- fail (printf "signoz.otelCollector.additionalEnvs.ORISO_DEPLOYMENT_ENVIRONMENT must equal global.observability.deploymentEnvironment (%q) when global.observability.webVitals.enabled=true" $environment) -}}
 {{- end -}}
 {{- end -}}
+{{- $e2eObservability := get .Values.global "observability" | default dict -}}
+{{- $e2eIngest := dig "e2eTraceIngest" "enabled" false $e2eObservability -}}
+{{- $e2eCollector := get $signoz "otelCollector" | default dict -}}
+{{- $e2ePortEnabled := dig "ports" "otlp-e2e" "enabled" false $e2eCollector -}}
+{{- if and $signozEnabled $e2ePortEnabled (not $e2eIngest) -}}
+{{- fail "signoz.otelCollector.ports.otlp-e2e.enabled=true requires global.observability.e2eTraceIngest.enabled=true" -}}
+{{- end -}}
+{{- if and $signozEnabled $e2eIngest -}}
+{{- $e2eEnvironment := get $e2eObservability "deploymentEnvironment" | default "" -}}
+{{- if or (ne $e2eEnvironment "dev") (ne .Values.global.domainName "dev.oriso.org") -}}
+{{- fail "E2E trace ingest requires the Dev environment and dev.oriso.org" -}}
+{{- end -}}
+{{- if not (dig "configMap" "create" true $e2eCollector) -}}
+{{- fail "global.observability.e2eTraceIngest.enabled=true requires signoz.otelCollector.configMap.create=true: without the chart-managed ConfigMap the collector runs the image configuration and the E2E receiver on port 4321 does not exist" -}}
+{{- end -}}
+{{- range (dig "command" "extraArgs" (list) $e2eCollector) -}}
+{{- if hasPrefix "--config" (toString .) -}}
+{{- fail "global.observability.e2eTraceIngest.enabled=true forbids --config in signoz.otelCollector.command.extraArgs: the collector must load the chart-managed E2E policy" -}}
+{{- end -}}
+{{- end -}}
+{{- if not $e2ePortEnabled -}}
+{{- fail "global.observability.e2eTraceIngest.enabled=true requires signoz.otelCollector.ports.otlp-e2e.enabled=true: the E2E ingress sends spans to that dedicated collector port" -}}
+{{- end -}}
+{{- if or (ne (dig "service" "type" "ClusterIP" $e2eCollector) "ClusterIP") (dig "ingress" "enabled" false $e2eCollector) -}}
+{{- fail "E2E trace ingest requires a ClusterIP collector Service and the vendored collector ingress disabled" -}}
+{{- end -}}
+{{- if and (eq (toString (get $e2eCollector "replicaCount")) "0") (not (dig "autoscaling" "enabled" false $e2eCollector)) -}}
+{{- fail "E2E trace ingest requires a running bundled SigNoz collector" -}}
+{{- end -}}
+{{- if ne (dig "ports" "otlp-e2e" "protocol" "TCP" $e2eCollector) "TCP" -}}
+{{- fail "signoz.otelCollector.ports.otlp-e2e.protocol must be TCP" -}}
+{{- end -}}
+{{- $e2eContainerPort := dig "otelCollector" "ports" "otlp-e2e" "containerPort" 4321 $signoz -}}
+{{- if not (and (or (kindIs "float64" $e2eContainerPort) (kindIs "int" $e2eContainerPort) (kindIs "int64" $e2eContainerPort)) (eq (float64 $e2eContainerPort) 4321.0)) -}}
+{{- fail "signoz.otelCollector.ports.otlp-e2e.containerPort must be 4321: the dedicated E2E receiver listens on that port" -}}
+{{- end -}}
+{{- $e2ePort := dig "otelCollector" "ports" "otlp-e2e" "servicePort" 4321 $signoz -}}
+{{- if not (and (or (kindIs "float64" $e2ePort) (kindIs "int" $e2ePort) (kindIs "int64" $e2ePort)) (eq (float64 $e2ePort) (float64 (int $e2ePort))) (ge (int $e2ePort) 1) (le (int $e2ePort) 65535)) -}}
+{{- fail (printf "signoz.otelCollector.ports.otlp-e2e.servicePort must be a port number from 1 to 65535 (got %v)" $e2ePort) -}}
+{{- end -}}
+{{- $collectorPorts := dig "otelCollector" "ports" (dict) $signoz -}}
+{{- range $name, $port := $collectorPorts -}}
+{{- if and (ne $name "otlp-e2e") (get $port "enabled") (eq (toString (get $port "servicePort")) (toString $e2ePort)) (eq (get $port "protocol" | default "TCP") (get (get $collectorPorts "otlp-e2e") "protocol" | default "TCP")) -}}
+{{- fail (printf "signoz.otelCollector.ports.otlp-e2e.servicePort conflicts with enabled collector port %s" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- $e2eEnvs := get $e2eCollector "additionalEnvs" | default dict -}}
+{{- if ne (get $e2eEnvs "ORISO_DEPLOYMENT_ENVIRONMENT" | default "") $e2eEnvironment -}}
+{{- fail (printf "signoz.otelCollector.additionalEnvs.ORISO_DEPLOYMENT_ENVIRONMENT must equal global.observability.deploymentEnvironment (%q) when global.observability.e2eTraceIngest.enabled=true: the E2E pipeline stamps it on every span" $e2eEnvironment) -}}
+{{- end -}}
+{{- end -}}
 {{- if $collectorEnabled -}}
 {{- if eq (get $collector "clusterName" | default "") "" -}}
 {{- fail "signozCollector.clusterName is required when signozCollector is enabled" -}}
