@@ -1,0 +1,119 @@
+name: Encrypted MariaDB backup and isolated restore rehearsal
+
+on:
+  push:
+    branches: [evidence/533-encrypted-mariadb-rehearsal]
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install age for the proposed encrypted handoff
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends age
+      - name: Back up, encrypt and restore a synthetic MariaDB fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          export FIXTURE_CONTAINER="backup-source-${GITHUB_RUN_ID}"
+          target="backup-target-${GITHUB_RUN_ID}"
+          scratch=$(mktemp -d "$RUNNER_TEMP/mariadb-533.XXXXXXXX")
+          cleanup() {
+            docker rm -fv "$FIXTURE_CONTAINER" "$target" >/dev/null 2>&1 || true
+            rm -r "$scratch"
+          }
+          trap cleanup EXIT
+          image='mariadb@sha256:9f56b2ac10055b68d07e3dcf2a17109fef77f1f08d504b1f028eb874457963b6'
+          docker pull "$image"
+          export MYSQL_ROOT_PASSWORD="$(openssl rand -hex 24)"
+
+          start_db() {
+            docker run --detach --network none --cpus 1 --memory 384m --name "$1" \
+              --env MYSQL_ROOT_PASSWORD "$image" >/dev/null
+            for _ in {1..45}; do
+              if docker exec "$1" healthcheck.sh --connect --innodb_initialized >/dev/null 2>&1; then
+                return 0
+              fi
+              sleep 1
+            done
+            return 1
+          }
+
+          sql() {
+            local container="$1"
+            shift
+            docker exec -i "$container" sh -ec \
+              'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mariadb --user=root --batch --skip-column-names "$@"' \
+              mariadb "$@"
+          }
+
+          start_db "$FIXTURE_CONTAINER"
+          sql "$FIXTURE_CONTAINER" <<'SQL'
+          CREATE DATABASE audit_fixture;
+          CREATE TABLE audit_fixture.marker (id INT PRIMARY KEY, note VARCHAR(40)) ENGINE=InnoDB;
+          INSERT INTO audit_fixture.marker VALUES (1, 'synthetic-sample'), (2, 'second-row');
+          SQL
+          query='SELECT id, note FROM audit_fixture.marker ORDER BY id'
+          sql "$FIXTURE_CONTAINER" --execute "$query" > "$scratch/expected"
+          mkdir "$scratch/bin"
+          cat > "$scratch/bin/kubectl" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          [[ "$1" == --kubeconfig && "$3" == --context && "$4" == fixture ]]
+          [[ "$5" == --namespace && "$6" == fixture ]]
+          shift 6
+          case "$1" in
+              wait)
+                  [[ "$3" == pod/mariadb-0 ]]
+                  docker exec "$FIXTURE_CONTAINER" healthcheck.sh --connect --innodb_initialized >/dev/null
+                  ;;
+              exec)
+                  [[ "$2" == pod/mariadb-0 && "$3" == --container && "$4" == mariadb && "$5" == -- ]]
+                  shift 5
+                  exec docker exec "$FIXTURE_CONTAINER" "$@"
+                  ;;
+              *)
+                  exit 2
+                  ;;
+          esac
+          BASH
+          chmod 700 "$scratch/bin/kubectl"
+          touch "$scratch/kubeconfig"
+          PATH="$scratch/bin:$PATH" python3 scripts/backup_mariadb.py "$scratch/kubeconfig" fixture fixture "$scratch/output"
+          shopt -s nullglob
+          dumps=("$scratch"/output/mariadb-*/audit_fixture.sql.gz)
+          test "${#dumps[@]}" -eq 1
+          test "$(find "$scratch/output" -type f | wc -l)" -eq 1
+          gzip -t "${dumps[0]}"
+          mkdir "$scratch/handoff"
+          age-keygen -o "$scratch/restore-identity" 2>/dev/null
+          recipient="$(age-keygen -y "$scratch/restore-identity")"
+          age --recipient "$recipient" --output "$scratch/handoff/audit_fixture.sql.gz.age" "${dumps[0]}"
+          test -s "$scratch/handoff/audit_fixture.sql.gz.age"
+          age-keygen -o "$scratch/different-identity" 2>/dev/null
+          if age --decrypt --identity "$scratch/different-identity" "$scratch/handoff/audit_fixture.sql.gz.age" >/dev/null 2>&1; then
+            echo 'Encrypted handoff unexpectedly accepted a different key.'
+            exit 1
+          fi
+          printf 'Encrypted archive rejected the independent wrong identity.\n'
+          rm -r "$scratch/output"
+          docker rm -fv "$FIXTURE_CONTAINER" >/dev/null
+
+          start_db "$target"
+          test "$(sql "$target" --execute "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'audit_fixture'")" -eq 0
+          age --decrypt --identity "$scratch/restore-identity" "$scratch/handoff/audit_fixture.sql.gz.age" |
+            gzip -cd | sql "$target"
+          sql "$target" --execute "$query" > "$scratch/restored"
+          cmp "$scratch/expected" "$scratch/restored"
+          printf 'Native MariaDB: %s\n' "$(sql "$target" --execute 'SELECT VERSION()')"
+          printf 'Only the encrypted handoff was retained between synthetic backup and restore.\n'
+          printf 'Both fixture rows matched in an independent, network-isolated MariaDB restore.\n'
