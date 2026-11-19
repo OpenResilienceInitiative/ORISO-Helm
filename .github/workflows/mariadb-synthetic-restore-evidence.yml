@@ -1,0 +1,85 @@
+name: MariaDB synthetic restore rehearsal
+
+on:
+  push:
+    branches: [evidence/533-mariadb-synthetic-restore]
+    paths: [.github/workflows/mariadb-synthetic-restore-evidence.yml]
+
+permissions: {}
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Restore a dump into a separate MariaDB 11.0.6 instance
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_container="audit-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          restore_container="audit-target-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          scratch="$(mktemp -d "$RUNNER_TEMP/mariadb-restore.XXXXXXXX")"
+          cleanup() {
+            docker rm -fv "$source_container" "$restore_container" >/dev/null 2>&1 || true
+            rm -r "$scratch"
+          }
+          trap cleanup EXIT
+
+          docker pull mariadb:11.0.6
+          image="$(docker image inspect mariadb:11.0.6 --format '{{.Id}}')"
+          docker image inspect "$image" --format 'Image registry digests {{json .RepoDigests}}'
+          export MARIADB_ROOT_PASSWORD="$(openssl rand -hex 24)"
+
+          start_database() {
+            local container="$1"
+            docker run --detach --pull never --network none --cpus 1 --memory 384m \
+              --name "$container" --env MARIADB_ROOT_PASSWORD "$image" >/dev/null
+            for attempt in {1..40}; do
+              if docker exec "$container" healthcheck.sh --connect --innodb_initialized >/dev/null 2>&1; then
+                return 0
+              fi
+              sleep 2
+            done
+            echo "Synthetic database failed to become ready" >&2
+            return 1
+          }
+
+          sql() {
+            local container="$1"
+            shift
+            docker exec -i "$container" sh -c \
+              'export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"; exec mariadb --user=root --batch --skip-column-names "$@"' \
+              mariadb "$@"
+          }
+
+          start_database "$source_container"
+          sql "$source_container" <<'SQL'
+          CREATE DATABASE audit_fixture;
+          CREATE TABLE audit_fixture.recovery_marker (
+              fixture_id INT PRIMARY KEY,
+              marker VARCHAR(64) NOT NULL
+          ) ENGINE=InnoDB;
+          INSERT INTO audit_fixture.recovery_marker VALUES
+              (1, 'synthetic-restore-533'),
+              (2, 'independent-row');
+          SQL
+
+          query='SELECT fixture_id, marker FROM audit_fixture.recovery_marker ORDER BY fixture_id'
+          sql "$source_container" --execute "$query" >"$scratch/expected.tsv"
+          test "$(wc -l <"$scratch/expected.tsv")" -eq 2
+          docker exec "$source_container" sh -c \
+            'export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"; exec mariadb-dump --user=root --single-transaction --databases audit_fixture' \
+            >"$scratch/fixture.sql"
+          test -s "$scratch/fixture.sql"
+          digest="$(sha256sum "$scratch/fixture.sql" | cut -d ' ' -f1)"
+          docker rm -fv "$source_container" >/dev/null
+
+          start_database "$restore_container"
+          test "$(sql "$restore_container" --execute "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'audit_fixture'")" -eq 0
+          test "$(sha256sum "$scratch/fixture.sql" | cut -d ' ' -f1)" = "$digest"
+          sql "$restore_container" <"$scratch/fixture.sql"
+          sql "$restore_container" --execute "$query" >"$scratch/restored.tsv"
+          cmp "$scratch/expected.tsv" "$scratch/restored.tsv"
+          version="$(sql "$restore_container" --execute 'SELECT VERSION()')"
+          [[ "$version" == 11.0.6-MariaDB* ]]
+          printf 'MariaDB version %s\nSynthetic dump SHA-256 %s\nVerified clean target and two restored fixture rows.\n' "$version" "$digest"
