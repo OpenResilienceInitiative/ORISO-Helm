@@ -1,0 +1,115 @@
+name: Dev database image startup rehearsal
+
+on:
+  push:
+    branches: [evidence/583-native-datastore-startup]
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-startup:
+    name: ${{ matrix.database }} synthetic cold and warm start
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - database: mariadb
+            image: mariadb@sha256:9f56b2ac10055b68d07e3dcf2a17109fef77f1f08d504b1f028eb874457963b6
+            data_dir: /var/lib/mysql
+            daemon: mariadbd
+          - database: mongodb
+            image: mongo@sha256:41108d183e972dcbf98d09ed83f6cfc89a471a3f15d06f9d64a95e45d9db8dd2
+            data_dir: /data/db
+            daemon: mongod
+    env:
+      DATABASE: ${{ matrix.database }}
+      IMAGE: ${{ matrix.image }}
+      DATA_DIR: ${{ matrix.data_dir }}
+      DAEMON: ${{ matrix.daemon }}
+    steps:
+      - name: Measure application readiness on an isolated fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ARCH" = X64
+          docker pull --platform linux/amd64 "$IMAGE"
+          test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE")" = linux/amd64
+          test "$(docker info --format '{{.CgroupVersion}}')" = 2
+          export MARIADB_ROOT_PASSWORD="$(openssl rand -hex 18)"
+          export MONGO_INITDB_ROOT_USERNAME=synthetic-admin
+          export MONGO_INITDB_ROOT_PASSWORD="$(openssl rand -hex 18)"
+
+          container="oriso-583-${GITHUB_RUN_ID}-${DATABASE}"
+          volume="${container}-data"
+          cleanup() {
+            docker rm --force "$container" >/dev/null 2>&1 || true
+            docker volume rm "$volume" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          maria_query() {
+            docker exec "$container" sh -ec 'export MYSQL_PWD="$MARIADB_ROOT_PASSWORD";
+              exec mariadb --protocol=TCP --host=127.0.0.1 --user=root --batch --skip-column-names -e "$1"' query "$1"
+          }
+
+          mongo_query() {
+            docker exec "$container" sh -ec 'exec mongo --quiet --host 127.0.0.1 --authenticationDatabase admin \
+              --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --eval "$1"' query "$1"
+          }
+
+          ready() {
+            test "$(docker exec "$container" cat /proc/1/comm 2>/dev/null)" = "$DAEMON" || return 1
+            case "$DATABASE:$1" in
+              mariadb:cold) test "$(maria_query 'SELECT 1')" = 1 ;;
+              mariadb:warm) test "$(maria_query 'SELECT COUNT(*) FROM audit_startup.fixture')" = 1 ;;
+              mongodb:cold) mongo_query 'if (db.adminCommand({ping: 1}).ok !== 1) quit(2)' ;;
+              mongodb:warm) mongo_query 'if (db.getSiblingDB("audit_startup").fixture.countDocuments({_id: 1}) !== 1) quit(2)' ;;
+            esac
+          }
+
+          monotonic_ms() { python3 -c 'import time; print(time.monotonic_ns() // 1_000_000)'; }
+
+          measure() {
+            local profile="$1" phase="$2" start="$3" now cpu memory
+            while ! ready "$phase" >/dev/null 2>&1; do
+              now=$(monotonic_ms)
+              if ((now - start >= 120000)); then
+                docker inspect --format 'status={{.State.Status}} OOM={{.State.OOMKilled}} exit={{.State.ExitCode}}' "$container"
+                return 1
+              fi
+              sleep 0.25
+            done
+            now=$(monotonic_ms)
+            cpu=$(docker exec "$container" awk '$1 == "usage_usec" {print $2}' /sys/fs/cgroup/cpu.stat)
+            memory=$(docker exec "$container" cat /sys/fs/cgroup/memory.peak)
+            test -n "$cpu" && test -n "$memory"
+            printf '| %s | %s | %s | %s | %s | %s |\n' "$DATABASE" "$profile" "$phase" "$((now - start))" "$cpu" "$memory" | tee -a "$GITHUB_STEP_SUMMARY"
+          }
+
+          printf 'Native Linux/amd64 synthetic fixture. Image %s\n\n' "$IMAGE" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Database | Profile | Start | Ready in ms | Cgroup CPU usec | Cgroup peak bytes |\n| --- | --- | --- | ---: | ---: | ---: |\n' >> "$GITHUB_STEP_SUMMARY"
+          for profile in no-container-limits one-cpu-one-gib; do
+            limits=()
+            if [[ "$profile" = one-cpu-one-gib ]]; then
+              limits=(--cpus 1 --memory 1024m --memory-swap 1024m)
+            fi
+            docker volume create "$volume" >/dev/null
+            start=$(monotonic_ms)
+            docker run --detach --pull never --network none --platform linux/amd64 --name "$container" \
+              "${limits[@]}" --mount "type=volume,source=$volume,target=$DATA_DIR" \
+              --env MARIADB_ROOT_PASSWORD --env MONGO_INITDB_ROOT_USERNAME --env MONGO_INITDB_ROOT_PASSWORD "$IMAGE" >/dev/null
+            measure "$profile" cold "$start"
+            if [[ "$DATABASE" = mariadb ]]; then
+              maria_query 'CREATE DATABASE audit_startup; CREATE TABLE audit_startup.fixture (id INT PRIMARY KEY); INSERT INTO audit_startup.fixture VALUES (1)' >/dev/null
+            else
+              mongo_query 'if (!db.getSiblingDB("audit_startup").fixture.insertOne({_id: 1}).acknowledged) quit(2)' >/dev/null
+            fi
+            docker stop --time 10 "$container" >/dev/null
+            start=$(monotonic_ms)
+            docker start "$container" >/dev/null
+            measure "$profile" warm "$start"
+            cleanup
+          done
