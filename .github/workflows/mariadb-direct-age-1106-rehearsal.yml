@@ -1,0 +1,135 @@
+name: Directly encrypted MariaDB 11.0.6 backup and restore
+
+on:
+  push:
+    branches: [evidence/533-direct-age-1106]
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install age for the proposed encrypted handoff
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends age
+      - name: Run the direct age backup and restore on the current Dev image digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          export FIXTURE_CONTAINER="backup-source-${GITHUB_RUN_ID}"
+          target="backup-target-${GITHUB_RUN_ID}"
+          scratch=$(mktemp -d "$RUNNER_TEMP/mariadb-533.XXXXXXXX")
+          cleanup() {
+            docker rm -fv "$FIXTURE_CONTAINER" "$target" >/dev/null 2>&1 || true
+            rm -r "$scratch"
+          }
+          trap cleanup EXIT
+          image='mariadb@sha256:9f56b2ac10055b68d07e3dcf2a17109fef77f1f08d504b1f028eb874457963b6'
+          docker pull --platform linux/amd64 "$image"
+          test "$(docker image inspect "$image" --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+          export MYSQL_ROOT_PASSWORD="$(openssl rand -hex 24)"
+
+          start_db() {
+            docker run --detach --network none --cpus 1 --memory 384m --name "$1" \
+              --env MYSQL_ROOT_PASSWORD "$image" >/dev/null
+            for _ in {1..45}; do
+              if docker exec "$1" healthcheck.sh --connect --innodb_initialized >/dev/null 2>&1; then
+                return 0
+              fi
+              sleep 1
+            done
+            return 1
+          }
+
+          sql() {
+            local container="$1"
+            shift
+            docker exec -i "$container" sh -ec \
+              'export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"; exec mariadb --user=root --batch --skip-column-names "$@"' \
+              mariadb "$@"
+          }
+
+          start_db "$FIXTURE_CONTAINER"
+          sql "$FIXTURE_CONTAINER" <<'SQL'
+          CREATE DATABASE audit_fixture;
+          CREATE TABLE audit_fixture.marker (id INT PRIMARY KEY, note VARCHAR(40)) ENGINE=InnoDB;
+          INSERT INTO audit_fixture.marker VALUES (1, 'synthetic-sample'), (2, 'second-row');
+          CREATE DATABASE audit_secondary;
+          CREATE TABLE audit_secondary.marker (id INT PRIMARY KEY, note VARCHAR(40)) ENGINE=InnoDB;
+          INSERT INTO audit_secondary.marker VALUES (3, 'separate-synthetic-schema');
+          SQL
+          query='SELECT id, note FROM audit_fixture.marker ORDER BY id; SELECT id, note FROM audit_secondary.marker ORDER BY id'
+          sql "$FIXTURE_CONTAINER" --execute "$query" > "$scratch/expected"
+          mkdir "$scratch/bin"
+          cat > "$scratch/bin/kubectl" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          [[ "$1" == --kubeconfig && "$3" == --context && "$4" == fixture ]]
+          [[ "$5" == --namespace && "$6" == fixture ]]
+          shift 6
+          case "$1" in
+              wait)
+                  [[ "$3" == pod/mariadb-0 ]]
+                  docker exec "$FIXTURE_CONTAINER" healthcheck.sh --connect --innodb_initialized >/dev/null
+                  ;;
+              exec)
+                  [[ "$2" == pod/mariadb-0 && "$3" == --container && "$4" == mariadb && "$5" == -- ]]
+                  shift 5
+                  exec docker exec "$FIXTURE_CONTAINER" "$@"
+                  ;;
+              *)
+                  exit 2
+                  ;;
+          esac
+          BASH
+          chmod 700 "$scratch/bin/kubectl"
+          touch "$scratch/kubeconfig"
+          age-keygen -o "$scratch/restore-identity" 2>/dev/null
+          age-keygen -y "$scratch/restore-identity" >"$scratch/recipients.txt"
+          age-keygen -o "$scratch/different-identity" 2>/dev/null
+
+          backup_started=$SECONDS
+          PATH="$scratch/bin:$PATH" python3 scripts/backup_mariadb.py \
+            "$scratch/kubeconfig" fixture fixture "$scratch/output" \
+            --age-recipients-file "$scratch/recipients.txt" --dump-timeout-seconds 30
+          backup_elapsed=$((SECONDS-backup_started))
+          test "$(find "$scratch/output" -type f -name '*.sql.gz.age' | wc -l)" -eq 2
+          test "$(find "$scratch/output" -type f | wc -l)" -eq 2
+          test "$(find "$scratch/output" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1
+
+          for schema in audit_fixture audit_secondary; do
+            archive=$(find "$scratch/output" -type f -name "$schema.sql.gz.age")
+            test -s "$archive"
+            test "$(stat -c '%a' "$archive")" = 600
+            if age --decrypt --identity "$scratch/different-identity" "$archive" >/dev/null 2>&1; then
+              echo 'Synthetic archive unexpectedly accepted the wrong identity.' >&2
+              exit 1
+            fi
+            age --decrypt --identity "$scratch/restore-identity" "$archive" | gzip -t
+          done
+          printf 'Verified two direct ciphertext archives and wrong-key rejection.\n'
+          docker rm -fv "$FIXTURE_CONTAINER" >/dev/null
+
+          start_db "$target"
+          test "$(sql "$target" --execute "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN ('audit_fixture','audit_secondary')")" -eq 0
+          version=$(sql "$target" --execute 'SELECT VERSION()')
+          [[ "$version" == 11.0.6-MariaDB* ]]
+          restore_started=$SECONDS
+          for schema in audit_fixture audit_secondary; do
+            archive=$(find "$scratch/output" -type f -name "$schema.sql.gz.age")
+            age --decrypt --identity "$scratch/restore-identity" "$archive" | gzip -cd | sql "$target"
+          done
+          restore_elapsed=$((SECONDS-restore_started))
+          sql "$target" --execute "$query" >"$scratch/restored"
+          cmp "$scratch/expected" "$scratch/restored"
+          test "$(wc -l <"$scratch/restored")" -eq 3
+          printf 'Dev-matched image digest %s\nNative MariaDB %s\n' "$image" "$version"
+          printf 'Restored 3 synthetic rows across 2 schemas. Backup seconds %s. Restore seconds %s.\n' "$backup_elapsed" "$restore_elapsed"
