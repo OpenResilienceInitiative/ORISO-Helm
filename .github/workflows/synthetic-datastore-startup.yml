@@ -86,30 +86,34 @@ jobs:
             cpu=$(docker exec "$container" awk '$1 == "usage_usec" {print $2}' /sys/fs/cgroup/cpu.stat)
             memory=$(docker exec "$container" cat /sys/fs/cgroup/memory.peak)
             test -n "$cpu" && test -n "$memory"
-            printf '| %s | %s | %s | %s | %s | %s |\n' "$DATABASE" "$profile" "$phase" "$((now - start))" "$cpu" "$memory" | tee -a "$GITHUB_STEP_SUMMARY"
+            printf '| %s | %s | %s | %s | %s | %s | %s |\n' "$DATABASE" "$trial" "$profile" "$phase" "$((now - start))" "$cpu" "$memory" | tee -a "$GITHUB_STEP_SUMMARY"
           }
 
           printf 'Native Linux/amd64 synthetic fixture. Image %s\n\n' "$IMAGE" >> "$GITHUB_STEP_SUMMARY"
-          printf '| Database | Profile | Start | Ready in ms | Cgroup CPU usec | Cgroup peak bytes |\n| --- | --- | --- | ---: | ---: | ---: |\n' >> "$GITHUB_STEP_SUMMARY"
-          for profile in no-container-limits one-cpu-one-gib; do
-            limits=()
-            if [[ "$profile" = one-cpu-one-gib ]]; then
-              limits=(--cpus 1 --memory 1024m --memory-swap 1024m)
-            fi
-            docker volume create "$volume" >/dev/null
-            start=$(monotonic_ms)
-            docker run --detach --pull never --network none --platform linux/amd64 --name "$container" \
-              "${limits[@]}" --mount "type=volume,source=$volume,target=$DATA_DIR" \
-              --env MARIADB_ROOT_PASSWORD --env MONGO_INITDB_ROOT_USERNAME --env MONGO_INITDB_ROOT_PASSWORD "$IMAGE" >/dev/null
-            measure "$profile" cold "$start"
-            if [[ "$DATABASE" = mariadb ]]; then
-              maria_query 'CREATE DATABASE audit_startup; CREATE TABLE audit_startup.fixture (id INT PRIMARY KEY); INSERT INTO audit_startup.fixture VALUES (1)' >/dev/null
-            else
-              mongo_query 'if (!db.getSiblingDB("audit_startup").fixture.insertOne({_id: 1}).acknowledged) quit(2)' >/dev/null
-            fi
-            docker stop --time 10 "$container" >/dev/null
-            start=$(monotonic_ms)
-            docker start "$container" >/dev/null
-            measure "$profile" warm "$start"
-            cleanup
+          printf '| Database | Trial | Profile | Start | Ready in ms | Cgroup CPU usec | Cgroup peak bytes |\n| --- | ---: | --- | --- | ---: | ---: | ---: |\n' >> "$GITHUB_STEP_SUMMARY"
+          for trial in 1 2 3; do
+            profiles=(no-container-limits one-cpu-one-gib)
+            if ((trial % 2 == 0)); then profiles=(one-cpu-one-gib no-container-limits); fi
+            for profile in "${profiles[@]}"; do
+              limits=()
+              if [[ "$profile" = one-cpu-one-gib ]]; then
+                limits=(--cpus 1 --memory 1024m --memory-swap 1024m)
+              fi
+              docker volume create "$volume" >/dev/null
+              start=$(monotonic_ms)
+              docker run --detach --pull never --network none --platform linux/amd64 --name "$container" \
+                "${limits[@]}" --mount "type=volume,source=$volume,target=$DATA_DIR" \
+                --env MARIADB_ROOT_PASSWORD --env MONGO_INITDB_ROOT_USERNAME --env MONGO_INITDB_ROOT_PASSWORD "$IMAGE" >/dev/null
+              measure "$profile" cold "$start"
+              if [[ "$DATABASE" = mariadb ]]; then
+                maria_query 'CREATE DATABASE audit_startup; CREATE TABLE audit_startup.fixture (id INT PRIMARY KEY); INSERT INTO audit_startup.fixture VALUES (1)' >/dev/null
+              else
+                mongo_query 'if (!db.getSiblingDB("audit_startup").fixture.insertOne({_id: 1}).acknowledged) quit(2)' >/dev/null
+              fi
+              docker stop --time 10 "$container" >/dev/null
+              start=$(monotonic_ms)
+              docker start "$container" >/dev/null
+              measure "$profile" warm "$start"
+              cleanup
+            done
           done
