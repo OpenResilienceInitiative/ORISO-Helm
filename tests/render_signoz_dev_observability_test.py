@@ -869,10 +869,18 @@ def clickhouse_resources(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def assert_clickhouse_memory_on_dev() -> None:
     # A limit stops ClickHouse taking the whole worker; the request lets the
     # scheduler see what it really uses.
-    assert clickhouse_resources(render("values-dev.yaml")) == [{
-        "requests": {"cpu": "100m", "memory": "2Gi"},
-        "limits": {"memory": "4Gi"},
+    docs = render("values-dev.yaml")
+    assert clickhouse_resources(docs) == [{
+        "requests": {"cpu": "500m", "memory": "2Gi"},
+        "limits": {"cpu": "2", "memory": "4Gi"},
     }]
+    # The live data claim is 25Gi; a smaller template would ask to shrink it.
+    assert [
+        claim["spec"]["resources"]["requests"]["storage"]
+        for doc in docs
+        if doc.get("kind") == "ClickHouseInstallation"
+        for claim in doc["spec"]["templates"]["volumeClaimTemplates"]
+    ] == ["25Gi"]
 
 
 def assert_signal_backup(dev: dict[tuple[str, str], dict[str, Any]]) -> None:
