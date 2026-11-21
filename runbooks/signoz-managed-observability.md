@@ -543,3 +543,14 @@ kubectl -n caritas get jobs \
   --sort-by=.metadata.creationTimestamp
 kubectl -n caritas logs "job/${job_name:?Set the observed Job name}" -c check-browser-vitals
 ```
+
+## Production monitoring stance (proposed, ORISO-Helm#542)
+
+Status: proposed until the production owner decides (ADR-031 in ORISO-Docs is still Proposed). The chart keeps production passive: `signoz.enabled: false`, `observability.otlpEnabled: false`, `orisoObservability.enabled: false`.
+
+Until decided, production is covered only by the hoster's monitoring. Decide before enabling anything:
+
+1. Owner: who is paged for production, the project team or the hoster.
+2. Coverage: SigNoz in production with the platform alerts and external heartbeat, or the hoster's stack watching nodes, pods, PVCs, certificates, ingress 5xx and backups.
+3. Platform alerts and heartbeat are Dev-only opt-ins (`platformAlerts`, `heartbeat`); production needs a separate review of retention, authentication, privacy boundary (#497) and recovery.
+4. Backup alerts wait for the backups in #282 Task 9.
