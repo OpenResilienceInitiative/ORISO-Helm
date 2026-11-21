@@ -146,6 +146,10 @@ storybook:
     # Provision this Secret in the release namespace before enabling the route.
     # It must contain an nginx-compatible `auth` htpasswd entry.
     authSecret: "storybook-basic-auth"
+  mcp:
+    enabled: true
+    # Provision this Secret in the release namespace before enabling the route.
+    authSecret: "storybook-mcp-basic-auth"
 
 # Spring "dev" profile for the backend services (verbose errors, dev wiring).
 agencyService:

@@ -299,6 +299,21 @@ storybook:
   ingress:
     authSecret: ""
     authRealm: "ORISO Storybook"
+  # Storybook MCP for coding agents: `storybook dev` + @storybook/addon-mcp,
+  # served at /storybook-{frontend,admin}-mcp/mcp behind basic auth.
+  mcp:
+    enabled: false
+    image: "docker.io/library/node:22.23.3"
+    branch: "dev"
+    # Existing Secret with an nginx-compatible `auth` htpasswd entry.
+    authSecret: ""
+    resources:
+      requests:
+        cpu: 200m
+        memory: 1Gi
+      limits:
+        cpu: 1500m
+        memory: 3Gi
 
 # ---------- Media security (epic ORISO-Admin#366, ADR-019) -----------------------------------------------------------
 

@@ -53,3 +53,49 @@ After deployment, verify the boundary and the current story:
 4. Open the Frontend self-help group Owner and Participant stories and confirm their
    interaction tests pass.
 5. Record the deployed Storybook image digest separately from the Helm release.
+
+## Storybook MCP for coding agents
+
+Coding agents read the component documentation through the Storybook MCP
+(`@storybook/addon-mcp`, tools such as `docs-list` and `docs-show`). The static
+builds above cannot answer `/mcp`, so `storybook.mcp.enabled` adds one
+`storybook dev` server per app:
+
+| App | MCP endpoint |
+|---|---|
+| Frontend | `https://dev.oriso.org/storybook-frontend-mcp/mcp` |
+| Admin | `https://dev.oriso.org/storybook-admin-mcp/mcp` |
+
+Each pod clones the configured branch (`storybook.mcp.branch`, default `dev`)
+at start, installs dependencies and starts Storybook. Startup takes several
+minutes. To pick up new commits, restart the Deployments:
+
+```sh
+kubectl -n caritas rollout restart deployment/storybook-mcp-frontend deployment/storybook-mcp-admin
+kubectl -n caritas logs deployment/storybook-mcp-frontend | grep 'source revision'
+```
+
+The route uses its own basic-auth Secret, `storybook-mcp-basic-auth` (an
+nginx-compatible `auth` htpasswd entry for user `storybook`). Create it through
+the normal secret-management process before the Helm upgrade and keep the
+plain credential in the team secret store. Do not commit it.
+
+Verify after deployment:
+
+1. An unauthenticated `POST` to either endpoint returns `401`.
+2. An authenticated JSON-RPC `initialize` returns `200` with `serverInfo`.
+3. `tools/list` contains `docs-list` and `docs-show`.
+
+Register the servers in Claude Code (user scope) with the credential from the
+secret store, never typed into a shared file:
+
+```sh
+AUTH="Basic $(printf 'storybook:%s' "$STORYBOOK_MCP_PASSWORD" | base64)"
+claude mcp add --scope user --transport http storybook-frontend \
+  https://dev.oriso.org/storybook-frontend-mcp/mcp --header "Authorization: $AUTH"
+claude mcp add --scope user --transport http storybook-admin \
+  https://dev.oriso.org/storybook-admin-mcp/mcp --header "Authorization: $AUTH"
+```
+
+If a default-deny NetworkPolicy is enabled in the namespace, these pods need
+egress to `github.com` and `registry.npmjs.org`.

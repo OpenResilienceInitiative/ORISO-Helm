@@ -1,0 +1,142 @@
+{{- /*
+Storybook MCP (ORISO-Helm, Storybook MCP on Dev). Static Storybook builds cannot
+answer /mcp, so each app runs `storybook dev` with @storybook/addon-mcp, cloned
+from the configured branch at pod start. Restart the Deployment to pick up new
+commits. Requires the basic-auth Secret named in storybook.mcp.authSecret.
+*/ -}}
+{{- if and .Values.storybook.enabled .Values.storybook.mcp.enabled }}
+{{- $mcp := .Values.storybook.mcp }}
+{{- $apps := list
+  (dict "name" "frontend" "repo" "ORISO-Frontend" "install" "npm ci --ignore-scripts --legacy-peer-deps --no-audit --no-fund\nnpm run patch:matrix-sdk")
+  (dict "name" "admin" "repo" "ORISO-Admin" "install" "npm ci --ignore-scripts --no-audit --no-fund\nnpm run prepare:runtime") }}
+{{- range $apps }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storybook-mcp-{{ .name }}
+  labels:
+    app: storybook-mcp-{{ .name }}
+    app.kubernetes.io/part-of: storybook-mcp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: storybook-mcp-{{ .name }}
+  template:
+    metadata:
+      labels:
+        app: storybook-mcp-{{ .name }}
+        app.kubernetes.io/part-of: storybook-mcp
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 1000 "fsGroup" 1000) | nindent 8 }}
+      containers:
+        - name: storybook
+          image: {{ include "oriso.immutableImage" (list "storybook.mcp.image" $mcp.image) | quote }}
+          workingDir: /work
+          env:
+            - name: HOME
+              value: /work
+            - name: npm_config_cache
+              value: /work/.npm
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=2048"
+            - name: STORYBOOK_DISABLE_TELEMETRY
+              value: "1"
+            - name: CI
+              value: "true"
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              git clone --depth 1 -b {{ $mcp.branch }} https://github.com/OpenResilienceInitiative/{{ .repo }}.git app
+              cd app
+              git log -1 --format='source revision %H %cI'
+              {{- .install | nindent 14 }}
+              exec npx storybook dev -p 6006 --host 0.0.0.0 --ci --no-open
+          ports:
+            - name: http
+              containerPort: 6006
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 120
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 15
+          resources: {{- toYaml $mcp.resources | nindent 12 }}
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict "readOnly" false) | nindent 12 }}
+          volumeMounts:
+            - name: work
+              mountPath: /work
+      volumes:
+        - name: work
+          emptyDir:
+            sizeLimit: 6Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: storybook-mcp-{{ .name }}
+  labels:
+    app.kubernetes.io/part-of: storybook-mcp
+spec:
+  selector:
+    app: storybook-mcp-{{ .name }}
+  ports:
+    - name: http
+      port: 6006
+      targetPort: http
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: storybook-mcp-dev-ingress
+  labels:
+    app.kubernetes.io/part-of: storybook-mcp
+  annotations:
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: {{ required "storybook.mcp.authSecret must name an existing basic-auth Secret when the Storybook MCP is enabled" $mcp.authSecret | quote }}
+    nginx.ingress.kubernetes.io/auth-realm: "ORISO Storybook MCP"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Storybook's dev server rejects foreign Host headers ("Invalid host").
+    nginx.ingress.kubernetes.io/upstream-vhost: localhost
+    # MCP streamable HTTP may answer with server-sent events.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: 8m
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: {{ .Values.global.domainName | quote }}
+      http:
+        paths:
+          - path: /storybook-frontend-mcp(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: storybook-mcp-frontend
+                port:
+                  number: 6006
+          - path: /storybook-admin-mcp(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: storybook-mcp-admin
+                port:
+                  number: 6006
+  tls:
+    - hosts:
+        - {{ .Values.global.domainName | quote }}
+      secretName: {{ .Values.global.domainName | replace "." "-" }}-tls
+{{- end }}
