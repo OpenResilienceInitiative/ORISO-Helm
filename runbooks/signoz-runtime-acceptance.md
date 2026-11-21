@@ -172,3 +172,85 @@ before it checks the independent 2 GiB floor and creates probes.
 
 Record backup and restore evidence separately for the SQLite metadata and
 ClickHouse signal data. [Dev backup procedure](https://github.com/OpenResilienceInitiative/ORISO-Helm/blob/3302d946b1297043c27a9fa2ef521fb544d1d99f/runbooks/signoz-dev.md#replace-an-unavailable-sqlite-backup-destination) · [ClickHouse signal recovery](https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/499)
+
+## Dev operator steps for the full release gate (#494)
+
+The gate is a script run from any checkout of origin/dev. It needs no Helm
+rollout of its own, but its Java-signal and `service.version` checks measure
+the installed release, so run it after the approved Dev rollout (or label the
+result as covering the currently installed revision). It does not restart or
+change ClickHouse.
+
+Preconditions, all read-only:
+
+```bash
+kubectl -n caritas get chi caritas-clickhouse -o jsonpath='{.status.status}{"\n"}'   # Completed
+kubectl -n caritas get sts -l clickhouse.altinity.com/chi=caritas-clickhouse        # 1/1, owned by the CHI
+kubectl -n caritas get ds caritas-k8s-infra-otel-agent                              # desired = ready
+```
+
+1. Readiness only (no ingestion). `--ssh-host` runs plain `kubectl` over SSH, so
+   use an account whose `kubectl` already works (`davea@178.105.70.64` does;
+   `root@` is not needed). Expect a JSON report with the owned StatefulSet,
+   both infrastructure collectors and the pipeline checks passed, and
+   synthetic persistence, capacity and retention skipped.
+
+   ```bash
+   python3 scripts/signoz_runtime_acceptance.py --namespace caritas --release caritas \
+     --environment dev --cluster-name oriso-dev --ssh-host davea@178.105.70.64 --skip-synthetic
+   ```
+
+2. Full gate (separate authorization, writes synthetic data). It creates three
+   short-lived `curlimages/curl` pods (`--rm`), one BusyBox log pod and one
+   `Event`, all named `signoz-acceptance-<8 hex>`. It writes one trace, one
+   metric and one correlated log with service `oriso-signoz-acceptance` and the
+   random `oriso.acceptance.id`. It exits before writing if the retention
+   readback fails or a data pod has under 2 GiB free.
+
+   ```bash
+   python3 scripts/signoz_runtime_acceptance.py --namespace caritas --release caritas \
+     --environment dev --cluster-name oriso-dev --ssh-host davea@178.105.70.64 \
+     | tee /tmp/signoz-acceptance-dev.json
+   ```
+
+   Pass criteria: exit 0; `syntheticReadback` with positive trace, metric and
+   log counts; positive `k8sInfraReadback`; `forbiddenLogBody` exactly `0`;
+   `clickhouseRetention`, `clickhouseCapacity` and `javaSignals` populated for
+   `user-service`, `agency-service`, `tenant-service`, `consulting-type-service`.
+   Attach the JSON to #494.
+
+3. Independent readback (read-only, run in
+   `kubectl -n caritas exec chi-caritas-clickhouse-cluster-0-0-0 -c clickhouse -- clickhouse-client --readonly=1`;
+   each count must be at least 1):
+
+   ```sql
+   SELECT 'traces', count() FROM signoz_traces.signoz_index_v3
+    WHERE timestamp > now() - INTERVAL 1 HOUR AND resources_string['service.name'] = 'oriso-signoz-acceptance'
+   UNION ALL
+   SELECT 'logs', count() FROM signoz_logs.logs_v2
+    WHERE timestamp > toUnixTimestamp(now() - INTERVAL 1 HOUR) * 1000000000
+      AND resources_string['service.name'] = 'oriso-signoz-acceptance'
+   UNION ALL
+   SELECT 'metrics', count() FROM signoz_metrics.samples_v4
+    WHERE unix_milli > toUnixTimestamp64Milli(now64() - INTERVAL 1 HOUR)
+      AND fingerprint IN (SELECT fingerprint FROM signoz_metrics.time_series_v4
+        WHERE resource_attrs['service.name'] = 'oriso-signoz-acceptance')
+   FORMAT TSV
+   ```
+
+4. Cleanup. The probe pods and the log pod remove themselves. Confirm and
+   remove leftovers after a failed run:
+
+   ```bash
+   kubectl -n caritas get pod,event -o name | grep signoz-acceptance
+   ```
+
+   Delete a leftover pod by its exact name only. The three stored rows are not deleted:
+   `ALTER ... DELETE` would be an unapproved ClickHouse mutation and the rows
+   are tiny and carry no application data. They expire by table TTL (traces
+   seven days on Dev, checked 2026-11-21; logs and metrics by their retention
+   column or interval). The Event expires under the cluster Event retention.
+
+Rollback: nothing to roll back; the gate changes no configuration. If it fails,
+read `kubectl -n caritas logs` of the named collector pod, fix the cause and
+rerun only step 2. A failure at the retention readback means no probe was sent.
