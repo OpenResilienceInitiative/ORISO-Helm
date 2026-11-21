@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly SCRIPT_DIR=/root/deploy-script
+readonly BLOCKLIST=/etc/oriso/dev-image-deploy.blocklist
+readonly LOG_DIR=/var/log/oriso
+readonly LOCK_FILE=/var/lock/oriso-dev-image-deploy.lock
+readonly RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+readonly RUN_LOG="$LOG_DIR/dev-image-deploy-$RUN_ID.log"
+
+dry_run=false
+if [[ "${1:-}" == "--dry-run" ]]; then
+  dry_run=true
+elif [[ $# -gt 0 ]]; then
+  echo "Usage: $0 [--dry-run]" >&2
+  exit 64
+fi
+
+mkdir -p "$LOG_DIR"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "Another Dev image deployment is already running; leaving it untouched."
+  exit 0
+fi
+
+exec > >(tee -a "$RUN_LOG") 2>&1
+printf 'Dev image deployment started: %s\n' "$(date -Is)"
+printf 'Blocklist: %s\n' "$BLOCKLIST"
+printf 'Log: %s\n' "$RUN_LOG"
+
+is_blocked() {
+  [[ -f "$BLOCKLIST" ]] && awk -v id="$1" '
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+    { gsub(/^[[:space:]]+|[[:space:]]+$/, ""); if ($0 == id) found = 1 }
+    END { exit !found }
+  ' "$BLOCKLIST"
+}
+
+run_one() {
+  local service="$1"
+  if is_blocked "$service"; then
+    printf 'SKIPPED %-28s blocked by %s\n' "$service" "$BLOCKLIST"
+    return 0
+  fi
+  deploy_service "$service"
+}
+
+deploy_service() {
+  local service="$1"
+  local script="$SCRIPT_DIR/deploy-$service-dev.sh"
+
+  if [[ ! -x "$script" ]]; then
+    printf 'FAILED  %-28s missing executable %s\n' "$service" "$script" >&2
+    return 1
+  fi
+  if "$dry_run"; then
+    printf 'DRY RUN %-28s %s\n' "$service" "$script"
+    return 0
+  fi
+
+  printf 'START   %-28s\n' "$service"
+  if timeout 12m "$script"; then
+    printf 'SUCCESS %-28s\n' "$service"
+  else
+    local status=$?
+    printf 'FAILED  %-28s exit=%s\n' "$service" "$status" >&2
+    return "$status"
+  fi
+}
+
+deploy_userservice_then_tenantservice() {
+  if is_blocked userservice; then
+    printf 'SKIPPED %-28s blocked by %s\n' userservice "$BLOCKLIST"
+    printf 'SKIPPED %-28s UserService was blocked\n' tenantservice
+    return 0
+  fi
+
+  if ! deploy_service userservice; then
+    printf 'SKIPPED %-28s UserService rollout did not succeed\n' tenantservice >&2
+    return 1
+  fi
+  run_one tenantservice
+}
+
+run_wave_member() {
+  case "$1" in
+    userservice+tenantservice) deploy_userservice_then_tenantservice ;;
+    *) run_one "$1" ;;
+  esac
+}
+
+run_wave() {
+  local name="$1"
+  shift
+  local -a pids=()
+  local -a services=("$@")
+  local failed=0
+  local index service
+
+  printf 'Wave %s: %s\n' "$name" "${services[*]}"
+  if "$dry_run"; then
+    for service in "${services[@]}"; do
+      run_wave_member "$service"
+    done
+    return 0
+  fi
+
+  for service in "${services[@]}"; do
+    (run_wave_member "$service") &
+    pids+=("$!")
+  done
+  for index in "${!pids[@]}"; do
+    if ! wait "${pids[$index]}"; then
+      failed=1
+    fi
+  done
+  return "$failed"
+}
+
+failed=0
+# Backend services are updated first. The public surfaces follow after their dependencies.
+run_wave backend agencyservice consultingtypeservice userservice+tenantservice livekit-token-service element-call || failed=1
+run_wave surfaces admin frontend health-dashboard status-page storybook-admin storybook-frontend || failed=1
+
+if (( failed )); then
+  printf 'Dev image deployment finished with failures: %s\n' "$(date -Is)" >&2
+  exit 1
+fi
+printf 'Dev image deployment finished successfully: %s\n' "$(date -Is)"
