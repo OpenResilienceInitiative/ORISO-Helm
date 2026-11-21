@@ -5,6 +5,8 @@ import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import gzip
+import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -19,6 +21,10 @@ import zlib
 
 
 SYSTEM_SCHEMAS = {"information_schema", "mysql", "performance_schema", "sys"}
+SCHEMA_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_$-]*")
+SHA256 = re.compile(r"[0-9a-f]{64}")
+ENCRYPTED_EXTENSION = ".sql.gz.age"
+RECEIPT_NAME = "backup-receipt.json"
 POD = "pod/mariadb-0"
 CLIENT_TIMEOUT_SECONDS = 60
 DEFAULT_DUMP_TIMEOUT_SECONDS = 3600
@@ -156,6 +162,75 @@ def check_target(kubernetes):
     return fields[0]
 
 
+def archive_sha256(path):
+    with path.open("rb") as archive:
+        digest = hashlib.sha256()
+        for block in iter(lambda: archive.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def write_encrypted_receipt(stage, destination, archives):
+    receipt = {
+        "version": 1,
+        "run": destination.name,
+        "archives": {path.name: archive_sha256(path) for path in archives},
+    }
+    content = (json.dumps(receipt, sort_keys=True) + "\n").encode("utf-8")
+    with (stage / RECEIPT_NAME).open("xb") as output:
+        output.write(content)
+    return hashlib.sha256(content).hexdigest()
+
+
+def verify_encrypted_receipt(backup_dir, expected_sha256):
+    receipt_path = backup_dir / RECEIPT_NAME
+    if receipt_path.is_symlink() or not receipt_path.is_file():
+        raise RuntimeError("Encrypted backup receipt is missing or not a regular file")
+    content = receipt_path.read_bytes()
+    if hashlib.sha256(content).hexdigest() != expected_sha256:
+        raise RuntimeError("Encrypted backup receipt does not match the expected SHA-256")
+    try:
+        receipt = json.loads(content)
+    except ValueError as error:
+        raise RuntimeError("Encrypted backup receipt is not valid JSON") from error
+    if not isinstance(receipt, dict) or receipt.get("version") != 1:
+        raise RuntimeError("Unsupported encrypted backup receipt version")
+    archives = receipt.get("archives")
+    if not isinstance(archives, dict) or not archives or any(
+        not name.endswith(ENCRYPTED_EXTENSION)
+        or not SCHEMA_NAME.fullmatch(name.removesuffix(ENCRYPTED_EXTENSION))
+        or not isinstance(digest, str)
+        or not SHA256.fullmatch(digest)
+        for name, digest in archives.items()
+    ):
+        raise RuntimeError("Encrypted backup receipt contains an invalid archive inventory")
+    paths = {item.name: item for item in backup_dir.glob(f"*{ENCRYPTED_EXTENSION}")}
+    if paths.keys() != archives.keys():
+        raise RuntimeError("Encrypted backup archive set does not match its receipt")
+    for name, path in paths.items():
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError(f"Encrypted backup archive is not a regular file: {name}")
+        if archive_sha256(path) != archives[name]:
+            raise RuntimeError(f"Encrypted backup archive SHA-256 mismatch: {name}")
+    return len(archives)
+
+
+def verify_receipt_cli(argv):
+    parser = argparse.ArgumentParser(description="Verify a copied encrypted backup against its writer receipt.")
+    parser.add_argument("backup_dir", type=Path)
+    parser.add_argument("--receipt-sha256", required=True, type=str.lower)
+    args = parser.parse_args(argv)
+    if not SHA256.fullmatch(args.receipt_sha256):
+        parser.error("--receipt-sha256 must be a 64-digit hexadecimal SHA-256")
+    try:
+        count = verify_encrypted_receipt(args.backup_dir, args.receipt_sha256)
+    except (OSError, RuntimeError) as error:
+        print(f"Backup verification stopped: {error}", file=sys.stderr)
+        return 1
+    print(f"Verified {count} encrypted MariaDB archives against the backup receipt")
+    return 0
+
+
 def backup(kubernetes, output_root, dump_timeout, age_command=None):
     wait_for_target(kubernetes)
     remote = kubernetes + ["exec", POD, "--container", "mariadb", "--", "sh", "-ec"]
@@ -168,7 +243,7 @@ def backup(kubernetes, output_root, dump_timeout, age_command=None):
     ]
     if not schemas:
         raise RuntimeError("MariaDB returned no application schemas")
-    if any(not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_$-]*", name) for name in schemas):
+    if any(not SCHEMA_NAME.fullmatch(name) for name in schemas):
         raise RuntimeError("MariaDB returned a schema name unsuitable for a backup filename")
 
     output_root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -177,17 +252,18 @@ def backup(kubernetes, output_root, dump_timeout, age_command=None):
     started = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     with TemporaryDirectory(prefix=f".mariadb-{started}-", dir=output_root) as scratch:
         stage = Path(scratch)
-        extension = ".sql.gz.age" if age_command else ".sql.gz"
+        extension = ENCRYPTED_EXTENSION if age_command else ".sql.gz"
+        archives = []
         for schema in schemas:
-            save_dump(
-                remote + [DUMP, "mariadb-dump", schema], stage / f"{schema}{extension}",
-                dump_timeout, age_command,
-            )
+            path = stage / f"{schema}{extension}"
+            save_dump(remote + [DUMP, "mariadb-dump", schema], path, dump_timeout, age_command)
+            archives.append(path)
         destination = output_root / stage.name.removeprefix(".")
+        receipt_sha256 = write_encrypted_receipt(stage, destination, archives) if age_command else None
         if destination.exists() or destination.is_symlink():
             raise RuntimeError("Backup destination already exists")
         stage.rename(destination)
-    return destination
+    return destination, receipt_sha256
 
 
 def cancel_backup(_signum, _frame):
@@ -197,7 +273,10 @@ def cancel_backup(_signum, _frame):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="Verify an existing copy with --verify-encrypted-receipt DIR --receipt-sha256 SHA256.",
+    )
     parser.add_argument("kubeconfig", type=Path)
     parser.add_argument("context")
     parser.add_argument("namespace")
@@ -238,7 +317,7 @@ def main():
                   f"namespace={args.namespace} {POD} uid={uid}")
             return 0
         age_command = read_age_command(args.age_recipients_file) if args.age_recipients_file else None
-        destination = backup(kubernetes, args.output_root, args.dump_timeout_seconds, age_command)
+        destination, receipt_sha256 = backup(kubernetes, args.output_root, args.dump_timeout_seconds, age_command)
     except subprocess.CalledProcessError as error:
         print(f"{operation} stopped after kubectl exited with status {error.returncode}", file=sys.stderr)
         return 1
@@ -248,9 +327,13 @@ def main():
     except (OSError, RuntimeError) as error:
         print(f"{operation} stopped: {error}", file=sys.stderr)
         return 1
+    if receipt_sha256:
+        print(f"Encrypted backup receipt SHA-256: {receipt_sha256}")
     print(f"Completed local MariaDB backup: {destination}")
     return 0
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--verify-encrypted-receipt"]:
+        sys.exit(verify_receipt_cli(sys.argv[2:]))
     sys.exit(main())

@@ -1,6 +1,7 @@
 """Exercise the host backup command against a disposable kubectl fixture."""
 
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -285,8 +286,7 @@ class MariaDbBackupTest(unittest.TestCase):
             os.kill(pid, 0)
         pid_file.unlink()
 
-    @unittest.skipUnless(shutil.which("age") and shutil.which("age-keygen"), "requires age and age-keygen")
-    def test_encrypted_backup_contains_only_ciphertext_and_decrypts_for_both_recipients(self):
+    def publish_encrypted_fixture(self):
         identities = []
         recipients = []
         for index in range(2):
@@ -299,10 +299,39 @@ class MariaDbBackupTest(unittest.TestCase):
         result = self.encrypted_backup("success")
         self.assertEqual(result.returncode, 0, result.stderr)
         directory, = self.output.iterdir()
-        self.assertEqual({file.name for file in directory.iterdir()}, {
-            "tenantservice.sql.gz.age", "userservice.sql.gz.age",
-        })
+        return directory, identities, result.stdout
+
+    def verify_encrypted_receipt(self, directory, digest):
+        _, env = self.backup_invocation("success", with_output=False)
+        command = [
+            sys.executable, str(SCRIPT), "--verify-encrypted-receipt", str(directory),
+            "--receipt-sha256", digest,
+        ]
+        return subprocess.run(command, env=env, text=True, capture_output=True, timeout=5)
+
+    @unittest.skipUnless(shutil.which("age") and shutil.which("age-keygen"), "requires age and age-keygen")
+    def test_encrypted_backup_publishes_receipt_and_decrypts_for_both_recipients(self):
+        directory, identities, stdout = self.publish_encrypted_fixture()
+        archive_names = {"tenantservice.sql.gz.age", "userservice.sql.gz.age"}
+        receipt = directory / "backup-receipt.json"
+        self.assertTrue(directory.name.startswith("mariadb-"))
+        self.assertEqual({file.name for file in directory.iterdir()}, archive_names | {receipt.name})
         self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(receipt.stat().st_mode), 0o600)
+        receipt_bytes = receipt.read_bytes()
+        self.assertEqual(json.loads(receipt_bytes), {
+            "version": 1,
+            "run": directory.name,
+            "archives": {name: hashlib.sha256((directory / name).read_bytes()).hexdigest()
+                         for name in archive_names},
+        })
+        digest = hashlib.sha256(receipt_bytes).hexdigest()
+        self.assertIn(f"Encrypted backup receipt SHA-256: {digest}", stdout)
+        self.assertEqual(stdout.splitlines()[-1], f"Completed local MariaDB backup: {directory}")
+        calls = self.calls_recorded()
+        verification = self.verify_encrypted_receipt(directory, digest)
+        self.assertEqual(verification.returncode, 0, verification.stderr)
+        self.assertEqual(self.calls_recorded(), calls)
         for schema in ("tenantservice", "userservice"):
             artifact = directory / f"{schema}.sql.gz.age"
             self.assertEqual(stat.S_IMODE(artifact.stat().st_mode), 0o600)
@@ -313,6 +342,43 @@ class MariaDbBackupTest(unittest.TestCase):
                 )
                 with gzip.GzipFile(fileobj=io.BytesIO(compressed)) as restored:
                     self.assertEqual(restored.read(), f"-- synthetic dump of {schema}\n".encode())
+
+    @unittest.skipUnless(shutil.which("age") and shutil.which("age-keygen"), "requires age and age-keygen")
+    def test_encrypted_receipt_rejects_archive_and_receipt_changes(self):
+        directory, _, _ = self.publish_encrypted_fixture()
+        receipt_bytes = (directory / "backup-receipt.json").read_bytes()
+        digest = hashlib.sha256(receipt_bytes).hexdigest()
+        calls = self.calls_recorded()
+
+        for scenario in ("missing", "extra", "swapped", "symlink", "altered receipt"):
+            with self.subTest(scenario=scenario):
+                copy = self.output.parent / scenario / directory.name
+                shutil.copytree(directory, copy)
+                tenant = copy / "tenantservice.sql.gz.age"
+                user = copy / "userservice.sql.gz.age"
+                if scenario == "missing":
+                    user.unlink()
+                elif scenario == "extra":
+                    shutil.copyfile(user, copy / "reporting.sql.gz.age")
+                elif scenario == "swapped":
+                    tenant_ciphertext, user_ciphertext = tenant.read_bytes(), user.read_bytes()
+                    tenant.write_bytes(user_ciphertext)
+                    user.write_bytes(tenant_ciphertext)
+                elif scenario == "symlink":
+                    user.unlink()
+                    user.symlink_to(directory / user.name)
+                elif scenario == "altered receipt":
+                    (copy / "backup-receipt.json").write_bytes(receipt_bytes + b"\n")
+
+                result = self.verify_encrypted_receipt(copy, digest)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertEqual(self.calls_recorded(), calls)
+
+        for untrusted_digest in ("not-a-digest", "0" * 64):
+            with self.subTest(digest=untrusted_digest):
+                result = self.verify_encrypted_receipt(directory, untrusted_digest)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertEqual(self.calls_recorded(), calls)
 
     def test_invalid_recipient_input_is_rejected_before_kubectl(self):
         for invalid in ("# Empty list\n", "not-a-public-recipient\n", "age1plugin1sample\n"):
