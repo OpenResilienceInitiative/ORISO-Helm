@@ -158,6 +158,18 @@ native archive on Dev needs the `oriso_signal_backup` disk and its volume.
 
 ### Path A steps
 
+**Dev volume pre-provisioned on 21 November 2026.** The claim
+`signoz-clickhouse-signal-backup` exists and is Bound: 10 GiB on
+`hcloud-volumes`, volume `pvc-b9af13bd-8ff8-42d1-9199-62bc5e89dc36`, reclaim
+policy already `Retain`. A short test pod on the ClickHouse node
+`oriso-dev-workers-79a6f89ec12a5d07` attached, formatted and wrote to it, then
+was deleted, so the volume is detached. The claim carries Helm's ownership
+metadata (release `caritas`, `app.kubernetes.io/managed-by: Helm`), so the
+upgrade adopts it instead of failing on an existing object. On Dev the rollout
+therefore only re-attaches a known-good volume to the same node. In step 1 the
+claim shows as adopted rather than new. Step 3's second upgrade is not needed;
+run only its verification.
+
 Read-only preconditions:
 
 ```bash
