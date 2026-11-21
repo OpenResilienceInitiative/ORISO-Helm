@@ -464,6 +464,9 @@ def main() -> None:
     assert (dev_managed.get("apiKeySecret") or {}).get("name") == API_KEY_SECRET, (
         "values-dev.yaml"
     )
+    assert dev_managed.get("browserVitalsCheck") == {
+        "enabled": True, "apiKeySecretName": BROWSER_READER_SECRET,
+    }, "values-dev.yaml"
     for overlay in (
         "values.yaml.default",
         "values-pre-dev.yaml",
