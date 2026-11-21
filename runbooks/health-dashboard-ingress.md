@@ -8,19 +8,28 @@ renders do not establish that any environment has received this change.
 ## Configuration and upgrade impact
 
 The HealthDashboard Deployment and internal Service continue to render.
-Its external Ingress is disabled by default. A later upgrade using the new base
-values removes the chart-managed `/health` route unless the environment
-explicitly enables it. Existing customized values should be reviewed before
-upgrading. PreDev and production overlays do not opt in.
+The base chart enables the external Ingress with Basic Authentication. The Dev,
+PreDev, and production overlays keep it enabled. Review the effective values
+before an upgrade. To keep the dashboard internal, put the following in a values
+file and pass that file after the environment overlay.
 
-Every enabled ingress requires Basic Authentication; there is no separate switch
-to disable authentication. The Basic Auth realm is fixed as
-`HealthDashboard Authentication`. Configuration contains only an existing Secret name:
+```yaml
+healthDashboard:
+  ingress:
+    enabled: false
+```
+
+Alternatively, pass `--set healthDashboard.ingress.enabled=false` to Helm.
+
+Basic Authentication is enabled by default for the external route. Keep it
+enabled for a restricted dashboard. The realm is fixed as
+`HealthDashboard Authentication`. The values reference the Secret by name:
 
 ```yaml
 healthDashboard:
   ingress:
     enabled: true
+    basicAuth: true
     authSecret: health-dashboard-basic-auth
 ```
 
@@ -42,9 +51,28 @@ rotate Storybook/Redis credentials as part of this change.
 The Secret must be in the **effective ingress namespace**:
 `healthDashboard.namespace` when nonempty, otherwise the Helm release namespace.
 The Ingress, Service and Deployment use that same namespace. Supply a local
-Secret name, never a `namespace/name` reference. Helm rendering does not check
-Secret existence, contents or ingress-controller configuration. A missing,
-malformed or wrong-namespace Secret can make the route unavailable.
+Secret name, never a `namespace/name` reference. Offline rendering validates the
+name. When Helm can look up an existing namespace during an upgrade and the
+chart does not render an htpasswd Secret, the template also checks that the
+referenced Secret exists. Verify the `auth` entry and the ingress controller
+before rollout. A malformed or wrong-namespace Secret can make the route
+unavailable.
+
+## Public status view
+
+The public status view remains available without login as required by
+[HealthDashboard #57](https://github.com/OpenResilienceInitiative/ORISO-HealthDashboard/issues/57).
+Before selecting that mode, verify that the installed image includes the
+public-mode changes and that `ORISO_PUBLIC_MODE` is enabled. Set
+`healthDashboard.ingress.basicAuth` to `false` as a boolean in the environment
+overlay. To keep public mode enabled, omit
+`healthDashboard.env.ORISO_PUBLIC_MODE` to use the default or set it to
+`"true"`. With Basic Authentication disabled, the chart rejects both the YAML
+boolean `false` and the string `"false"` for that value.
+The public view omits the Helm image inventory, internal service URLs and
+raw health responses. Operator-only routes stay unavailable while role-based
+access is tracked in
+[HealthDashboard #58](https://github.com/OpenResilienceInitiative/ORISO-HealthDashboard/issues/58).
 
 ## Local verification
 
@@ -54,12 +82,13 @@ These checks use synthetic fixture values and do not contact a cluster:
 python3 tests/render_health_dashboard_ingress_auth_test.py
 python3 tests/render_storybook_dev_test.py
 python3 tests/render_environment_overlays_test.py
-helm lint . -f values.yaml.default -f secrets.yaml.default -f values-dev.yaml \
+helm lint . -f values.yaml.default -f tests/fixtures/values-render-domain.yaml \
+  -f secrets.yaml.default -f tests/fixtures/render-required-secrets.yaml -f values-dev.yaml \
   --set-string userService.smtpUser=smtp-validation-user \
   --set-string userService.smtpPassword=smtp-validation-password
 helm template health-auth-test . --namespace render-test \
-  -f values.yaml.default -f secrets.yaml.default -f values-dev.yaml \
-  --set-string global.domainName=health.oriso.internal \
+  -f values.yaml.default -f tests/fixtures/values-render-domain.yaml \
+  -f secrets.yaml.default -f tests/fixtures/render-required-secrets.yaml -f values-dev.yaml \
   --set-string userService.smtpUser=smtp-validation-user \
   --set-string userService.smtpPassword=smtp-validation-password \
   > /tmp/health-auth-rendered.yaml
@@ -67,15 +96,17 @@ helm template health-auth-test . --namespace render-test \
 
 Check the rendered HealthDashboard Ingress for `auth-type: basic`, the expected
 Secret/realm, host, TLS, `/health(/|$)(.*)`, `/$2` rewrite and Service backend.
-The automated render tests also cover disabled/default behavior, invalid names,
-namespace/port overrides, and Dev/PreDev/production overlays. Overlay names here
-identify local inputs, not tested running environments. This change adds no PR
-validation workflow; local results must be attached separately to the PR.
+The automated render tests cover the authenticated default, explicit disablement,
+invalid names, namespace and port overrides, and Dev, PreDev, and production
+overlays. They also verify that the public ingress requires public mode.
+Record local and deployed verification separately in the PR.
 
 ## Verification after authorized Dev rollout
 
-The operator must record the Helm revision/chart and deployed HealthDashboard
-image separately, then verify the real ingress boundary:
+Record the Helm chart revision and deployed HealthDashboard image separately.
+Use the authorized chart deployment path for ingress changes. Updating the Dev
+image alone leaves the installed Ingress unchanged. For a restricted dashboard,
+verify the real ingress boundary:
 
 - [ ] Unauthenticated requests to `/health`, `/health/`, and the dashboard's
   actual data endpoints are denied with a Basic Auth challenge (`401`, allowing
@@ -86,20 +117,22 @@ image separately, then verify the real ingress boundary:
 - [ ] The internal Service still reaches HealthDashboard successfully.
 - [ ] An authenticated browser loads and refreshes the dashboard successfully.
 
-These runtime checks require an authorized rollout and credentials. They are
-not completed by rendering, linting or packaging the chart.
+For the approved public status view, confirm that a signed-out browser loads
+status information and that the deployed image withholds operator information.
+Verify the public and restricted views through their respective acceptance
+checks after rollout. Chart rendering and lint cover configuration only.
 
 ## Safe rollback
 
 If the protected route is unavailable, keep authentication in place while the
 operator checks the Secret name, `auth` entry and effective namespace. If access
-must be withdrawn, set `healthDashboard.ingress.enabled: false` in the approved
-environment values and apply it through the normal deployment process. Put
-this override after `values-dev.yaml` so it wins. The internal Deployment and
+must be withdrawn, use the [ingress override](#configuration-and-upgrade-impact)
+through the normal deployment process. When applying a values file on Dev, pass
+it after `values-dev.yaml`. The internal Deployment and
 Service remain available, but the public dashboard route is removed.
 
 Do not blindly roll back to an older chart revision: it may recreate the
 unauthenticated public route. Any rollback to such a revision must first have a
 reviewed external access block, and the operator must verify the live boundary
-afterwards. Never recover availability by removing the auth annotations or
-creating an unauthenticated replacement ingress.
+afterwards. For a restricted dashboard, recover availability with the required
+authentication in place or withdraw the public route.
