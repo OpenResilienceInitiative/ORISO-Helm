@@ -549,6 +549,19 @@ Check the recorded UUIDs to distinguish retained data from new canonical
 tables. Keep old tables until their TTL expires or the operator separately
 approves removal of specific obsolete tables.
 
+Rotated `<name>_N` tables keep the TTL they had before the overlay (30 or 7
+days on Dev) and still count toward conformance. After approval, bring each
+one to three days, then confirm with the inventory query above. Rollback is
+the same statement with the previous interval, but rows already deleted by
+the shorter TTL do not return.
+
+```bash
+kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "ALTER TABLE system.<name>_N MODIFY TTL event_date + INTERVAL 3 DAY DELETE"
+```
+
+SigNoz application retention (`signoz_logs.logs_v2`, key tables) is a SigNoz
+setting, not part of this contract or the Helm values.
+
 ## Replace an unavailable SQLite backup destination
 
 Keep the original Helm-owned backup claim and its PV for storage recovery.
