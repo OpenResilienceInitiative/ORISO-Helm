@@ -188,6 +188,14 @@ data:
     # MSC4140 delayed events let Element Call schedule a crash-safe leave event.
     max_event_delay_duration: 24h
 
+    {{- with .Values.matrix.deleteStaleDevicesAfter }}
+    # Devices unused for this long are deleted with their access tokens. Every
+    # E2EE key is sent to every device of every member, so forgotten devices
+    # multiply to-device traffic (ORISO-Helm#628). Unset keeps Synapse's
+    # default: never delete.
+    delete_stale_devices_after: {{ . | quote }}
+    {{- end }}
+
     experimental_features:
       msc3575_enabled: true
       msc3575_for_workers: true

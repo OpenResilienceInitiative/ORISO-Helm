@@ -222,6 +222,11 @@ matrix:
     limits:
       cpu: 1500m
       memory: 1Gi
+  # Stale Matrix devices on Dev (ORISO-Helm#628). On 2026-11-21, 114 users held
+  # 2,706 devices (p90 74, max 310; 1,169 unseen for 7+ days), mostly fresh E2E
+  # browser profiles and the UserService admin login. Each E2EE key goes to every
+  # device, which pushed Synapse into CPU throttling during calls.
+  deleteStaleDevicesAfter: "30d"
   # Synapse rc_invites for Dev (ORISO-UserService#1736). A new enquiry in
   # Springfield QA Dev invites ~17 counsellors into its holding room at once;
   # with the shipped burst of 10 the rest waits, and the standing supervisor's

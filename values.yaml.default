@@ -218,6 +218,10 @@ matrix:
     limits:
       cpu: 500m
       memory: 1Gi
+  # Synapse delete_stale_devices_after (e.g. "90d"). Empty = never delete.
+  # A deleted browser device signs that browser out of Matrix and drops its
+  # encryption keys, so set it per environment after the product decision.
+  deleteStaleDevicesAfter: ""
   # Synapse rc_login. All browser logins reach Synapse through UserService, so
   # the address limit applies to the whole platform. failed_attempts is not set
   # on purpose: it keeps Synapse's default and limits wrong passwords.
