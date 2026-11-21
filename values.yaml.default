@@ -695,6 +695,11 @@ userService:
   teamDiscussion:
     archiveRetentionDays: 0
 
+  # Notification retention. Non-positive values disable the corresponding cutoff.
+  eventNotificationRetention:
+    readDays: 90
+    absoluteDays: 365
+
   # 2FA / OTP login posture — enabled by default.
   otpAllowedForUsers: "true"
   otpAllowedForConsultants: "true"

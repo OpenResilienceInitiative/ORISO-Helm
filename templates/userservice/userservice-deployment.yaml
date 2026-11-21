@@ -683,6 +683,16 @@ spec:
                 configMapKeyRef:
                   key: TEAM_DISCUSSION_ARCHIVE_RETENTION_DAYS
                   name: userservice-configmap-env
+            - name: EVENT_NOTIFICATION_RETENTION_READ_DAYS
+              valueFrom:
+                configMapKeyRef:
+                  key: EVENT_NOTIFICATION_RETENTION_READ_DAYS
+                  name: userservice-configmap-env
+            - name: EVENT_NOTIFICATION_RETENTION_ABSOLUTE_DAYS
+              valueFrom:
+                configMapKeyRef:
+                  key: EVENT_NOTIFICATION_RETENTION_ABSOLUTE_DAYS
+                  name: userservice-configmap-env
             - name: GROUP_APPOINTMENT_MAIL_ENABLED
               valueFrom:
                 configMapKeyRef:
