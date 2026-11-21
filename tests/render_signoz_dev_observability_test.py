@@ -309,7 +309,10 @@ def assert_e2e_trace_ingest_scope() -> None:
                 "dbMetrics": False, "webVitals": {"enabled": False},
             }},
             "signozCollector": {"enabled": False},
-            "signoz": {"orisoObservability": {"enabled": False}, "otelCollector": {"replicaCount": 0}},
+            "signoz": {
+                "orisoObservability": {"enabled": False, "browserVitalsCheck": {"enabled": False}},
+                "otelCollector": {"replicaCount": 0},
+            },
         }, "E2E trace ingest requires a running bundled SigNoz collector"),
     ]
     for overrides, message in invalid:
@@ -370,7 +373,9 @@ def assert_dev_alias(
         {"signoz": {"orisoIngress": {"enabled": False}}},
         {"global": {"enableTls": False}},
         {
-            "signoz": {"enabled": False, "orisoObservability": {"enabled": False}},
+            "signoz": {"enabled": False, "orisoObservability": {
+                "enabled": False, "browserVitalsCheck": {"enabled": False},
+            }},
             "signozCollector": {"enabled": False},
             "global": {"observability": {
                 "otlpEnabled": False,
