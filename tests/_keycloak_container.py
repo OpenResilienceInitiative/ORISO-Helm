@@ -84,12 +84,13 @@ def master_admin(base, ssl_context=None):
 class KeycloakContainer:
     """One throwaway Keycloak; `base` set to reuse an already running one instead."""
 
-    def __init__(self, prefix, base=None, tls_dir=None, ssl_context=None):
+    def __init__(self, prefix, base=None, tls_dir=None, ssl_context=None, image=IMAGE):
         self.name = None
         self.prefix = prefix
         self.base = base
         self.tls_dir = tls_dir
         self.ssl_context = ssl_context
+        self.image = image
 
     def start(self):
         if not self.base:
@@ -106,7 +107,7 @@ class KeycloakContainer:
                 docker_args += ["-v", f"{self.tls_dir}:/test-tls:ro"]
                 keycloak_args += ["--https-certificate-file=/test-tls/cert.pem",
                                   "--https-certificate-key-file=/test-tls/key.pem"]
-            subprocess.run(docker_args + [IMAGE] + keycloak_args, check=True, capture_output=True)
+            subprocess.run(docker_args + [self.image] + keycloak_args, check=True, capture_output=True)
         try:
             if self.name:
                 endpoint = subprocess.run(["docker", "port", self.name, f"{port}/tcp"], check=True,

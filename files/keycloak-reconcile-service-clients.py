@@ -29,6 +29,7 @@ EVENTS_CONFIG = {'eventsEnabled': True, 'eventsExpiration': 2592000,
 # Admin events expire through a realm attribute, not events/config (seconds, same 30 days).
 ADMIN_EVENTS_EXPIRATION = '2592000'
 APP_CLIENT_ID = 'app'
+ADMIN_API_SCOPE = 'kc-admin-api'
 POST_LOGOUT_REDIRECT_URIS = 'post.logout.redirect.uris'
 DNS_LABEL = r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
 
@@ -129,6 +130,20 @@ class Admin:
                 or any(c.get(k) is not False for k in ('directAccessGrantsEnabled', 'standardFlowEnabled', 'implicitFlowEnabled', 'fullScopeAllowed'))):
             raise Error('BACKEND_CLIENT_INVALID: existing client is not dedicated')
 
+    def admin_api_scope(self):
+        scopes = self.request('GET', 'client-scopes')
+        if not isinstance(scopes, list) or any(not isinstance(scope, dict) for scope in scopes):
+            raise Error('BACKEND_CLIENT_INVALID: realm client scopes')
+        matches = [scope for scope in scopes if scope.get('name') == ADMIN_API_SCOPE]
+        if not matches:
+            # Keycloak versions before the Admin REST audience check have no built-in scope.
+            return None
+        scope = matches[0]
+        if (len(matches) != 1 or scope.get('protocol') != 'openid-connect'
+                or not isinstance(scope.get('id'), str) or not scope['id']):
+            raise Error('BACKEND_CLIENT_INVALID: Admin REST client scope')
+        return scope['id']
+
     def subject(self, client):
         user = self.request('GET', 'clients/' + quote(client['id'], safe='') + '/service-account-user')
         if not isinstance(user, dict) or not isinstance(user.get('id'), str) or not user['id']:
@@ -156,7 +171,7 @@ class Admin:
         if management_roles and not any(m['id'] == management_id for m in mappings.values()):
             self.request('POST', path + '/clients/' + quote(management_id, safe=''), management_roles)
 
-    def reconcile(self, client, subject, secret, realm_roles, management_roles, management_id):
+    def reconcile(self, client, subject, secret, realm_roles, management_roles, management_id, admin_api_scope=None):
         cid = quote(client['id'], safe='')
         uid = quote(subject, safe='')
         # Inherited group roles would escape direct-role reconciliation.
@@ -164,11 +179,16 @@ class Admin:
             self.request('DELETE', 'users/' + uid + '/groups/' + quote(group['id'], safe=''))
         self.replace_mappings('users/' + uid + '/role-mappings', realm_roles, management_roles, management_id)
         self.replace_mappings('clients/' + cid + '/scope-mappings', realm_roles, management_roles, management_id)
-        # Only the standard role-claim mapper is needed. No optional scope grants.
-        for scope_kind in ('default-client-scopes', 'optional-client-scopes'):
-            for scope in self.request('GET', 'clients/' + cid + '/' + scope_kind):
-                if scope_kind == 'optional-client-scopes' or scope.get('name') != 'roles':
-                    self.request('DELETE', 'clients/' + cid + '/' + scope_kind + '/' + quote(scope['id'], safe=''))
+        default_scopes = 'clients/' + cid + '/default-client-scopes'
+        optional_scopes = 'clients/' + cid + '/optional-client-scopes'
+        defaults = self.request('GET', default_scopes)
+        for scope in defaults:
+            if scope.get('name') != 'roles' and scope['id'] != admin_api_scope:
+                self.request('DELETE', default_scopes + '/' + quote(scope['id'], safe=''))
+        for scope in self.request('GET', optional_scopes):
+            self.request('DELETE', optional_scopes + '/' + quote(scope['id'], safe=''))
+        if admin_api_scope and all(scope['id'] != admin_api_scope for scope in defaults):
+            self.request('PUT', default_scopes + '/' + quote(admin_api_scope, safe=''))
         self.request('PUT', 'clients/' + cid, {'secret': secret, 'enabled': True})
 
     def realm(self):
@@ -219,7 +239,7 @@ def verify_client_token(http, config, client, subject, admin):
         raise Error('BACKEND_CLIENT_TOKEN_CONTRACT_MISMATCH')
 
 
-def reconcile_smtp_sync(api, config, client, management):
+def reconcile_smtp_sync(api, config, client, management, admin_api_scope):
     # Native Keycloak needs manage-realm to update SMTP settings; nothing else.
     name = config['SMTP_SYNC_CLIENT_ID']
     if not client:
@@ -232,7 +252,8 @@ def reconcile_smtp_sync(api, config, client, management):
             raise Error('BACKEND_CLIENT_INVALID: client creation failed')
     manage_realm = api.request('GET', 'clients/' + quote(management['id'], safe='') + '/roles/manage-realm')
     subject = api.subject(client)
-    api.reconcile(client, subject, config['SMTP_SYNC_CLIENT_SECRET'], [], [manage_realm], management['id'])
+    api.reconcile(client, subject, config['SMTP_SYNC_CLIENT_SECRET'], [], [manage_realm], management['id'],
+                  admin_api_scope=admin_api_scope)
     verify_smtp_sync_token(api.http, config, subject)
     print('SMTP_SYNC_CLIENT_RECONCILED')
 
@@ -356,6 +377,7 @@ def reconcile(config):
     management = api.find_client('realm-management')
     if not management:
         raise Error('BACKEND_CLIENT_INVALID: realm-management missing')
+    admin_api_scope = api.admin_api_scope()
     roles = [api.request('GET', 'roles/' + role) for role in ('technical', 'otp-config-admin')]
     management_roles = [api.request('GET', 'clients/' + quote(management['id'], safe='') + '/roles/' + role)
                         for role in ('manage-users', 'view-users', 'query-users', 'view-realm', 'query-clients')]
@@ -371,7 +393,8 @@ def reconcile(config):
                 raise Error('BACKEND_CLIENT_INVALID: client creation failed')
         subject = api.subject(clients[i])
         api.reconcile(clients[i], subject, config['TECHNICAL_CLIENT_SECRET' if i == 0 else 'ADMIN_CLIENT_SECRET'],
-                      [roles[i]], [] if i == 0 else management_roles, management['id'])
+                      [roles[i]], [] if i == 0 else management_roles, management['id'],
+                      admin_api_scope=admin_api_scope if i == 1 else None)
         actual_subjects.append(subject)
     for i, name in enumerate(names):
         verify_client_token(api.http, config, name, actual_subjects[i], i == 1)
@@ -379,7 +402,7 @@ def reconcile(config):
     print('ADMIN_SERVICE_SUBJECT=' + actual_subjects[1])
     if not config['prepare']:
         reconcile_app_client_urls(api, browser_client, config['app_client_urls'])
-        reconcile_smtp_sync(api, config, sync_client, management)
+        reconcile_smtp_sync(api, config, sync_client, management, admin_api_scope)
         print(retire_published_client(api))
         reconcile_events(api)
     if config['retire']:

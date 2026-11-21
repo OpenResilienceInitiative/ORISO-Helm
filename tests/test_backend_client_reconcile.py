@@ -36,6 +36,7 @@ class ReconcileClientsTest(unittest.TestCase):
         self.scope_maps = {}
         self.groups = {}
         self.client_scopes = {}
+        self.realm_scopes = []
         self.fail_delete_path = None
         self.fail_mapping = False
         self.ignore_app_update = False
@@ -94,6 +95,8 @@ class ReconcileClientsTest(unittest.TestCase):
                     elif key == 'users':
                         username = parse_qs(urlsplit(self.path).query).get('username', [''])[0]
                         answer = [{'id':uid, **value} for uid,value in outer.users.items() if value['username']==username]
+                    elif key == 'client-scopes':
+                        answer = outer.realm_scopes
                     elif key == 'events/config':
                         if self.command == 'PUT': outer.events_config = payload; status = 204
                         else: answer = outer.events_config
@@ -162,6 +165,10 @@ class ReconcileClientsTest(unittest.TestCase):
                         if self.command == 'DELETE':
                             scopes[:] = [scope for scope in scopes if scope['id'] != parts[3]]
                             status = 204
+                        elif self.command == 'PUT':
+                            scope = next(s for s in outer.realm_scopes if s['id'] == parts[3])
+                            scopes.append(scope)
+                            status = 204
                         else:
                             answer = scopes
                     else: status=404
@@ -196,6 +203,41 @@ class ReconcileClientsTest(unittest.TestCase):
             for key in ('directAccessGrantsEnabled','standardFlowEnabled','implicitFlowEnabled','fullScopeAllowed'): self.assertFalse(c[key])
         self.assertIn('sa-backend-technical',result.stdout)
         self.assertTrue(self.users['legacy-tech']['enabled']);self.assertTrue(self.users['legacy-admin']['enabled'])
+
+    def test_admin_api_scope_is_reconciled_only_for_native_admin_callers(self):
+        scope = {'id': 'admin-api-uuid', 'name': 'kc-admin-api', 'protocol': 'openid-connect'}
+        self.realm_scopes = [scope]
+        self.prepare()
+        defaults = 'default-client-scopes'
+        optional = 'optional-client-scopes'
+        self.assertEqual(self.client_scopes['backend-admin'][defaults], [scope])
+        self.assertNotIn('smtp-sync', self.clients)
+        self.client_scopes['backend-technical'][defaults] = [scope]
+        self.client_scopes['backend-admin'][optional] = [scope]
+        self.events.clear()
+
+        result = self.run_helper()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.client_scopes['backend-admin'][defaults], [scope])
+        self.assertEqual(self.client_scopes['backend-admin'][optional], [])
+        self.assertEqual(self.client_scopes['backend-technical'][defaults], [])
+        self.assertEqual(self.client_scopes['smtp-sync'][defaults], [scope])
+        self.assertNotIn('app-uuid', self.client_scopes)
+        updates = [path for method, path, _ in self.events if method == 'PUT' and path.endswith('/admin-api-uuid')]
+        self.assertEqual(updates, ['/admin/realms/online-beratung/clients/smtp-sync/default-client-scopes/admin-api-uuid'])
+
+    def test_ambiguous_admin_api_scope_stops_before_mutating_clients(self):
+        self.realm_scopes = [
+            {'id': value, 'name': 'kc-admin-api', 'protocol': 'openid-connect'}
+            for value in ('first', 'second')
+        ]
+
+        result = self.run_helper(PREPARE_ONLY='true')
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('BACKEND_CLIENT_INVALID: Admin REST client scope', result.stderr)
+        self.assertEqual(self.mutations(), [])
     def test_app_redirect_policy_converges_and_preserves_explicit_logout(self):
         app = self.clients['app-uuid']
         explicit_logout = APP_ORIGIN + '/admin'

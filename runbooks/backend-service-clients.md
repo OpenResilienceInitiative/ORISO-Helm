@@ -29,6 +29,8 @@ Existing realms have their own UUIDs; never use fresh export IDs there.
 4. Deploy the Java companions and this chart with the same independent secrets and actual IDs. Exercise invitations, settings, user management and mail. Secret, client ID or subject changes replace the affected backend Pods automatically.
 5. Only after that verification, set retirement true for an explicitly reviewed upgrade. This disables the two old password users and revokes their sessions. Keep the master-realm recovery identity separate.
 
+Starting with Keycloak 26.8.2, stock Admin REST calls require the built-in `kc-admin-api` scope. After the upgraded realm is ready, run normal service-identity reconciliation and verify UserService user management and SMTP settings. For an image-only rollout, use the standalone procedure below. Keep the Admin REST audience check enabled.
+
 **For operators — bounded preparation using rendered review files:**
 ```bash
 # Render the candidate with the reviewed deployment values; keep this output private.
@@ -66,13 +68,49 @@ kubectl --namespace "$NAMESPACE" logs job/keycloak-prepare-backend-clients
 # Do not log Secret contents, bearer tokens, or private rendered deployment values.
 ```
 
+### Normal reconciliation after an image-only rollout
+
+Use the reviewed chart revision and the installed environment's values, including the real service-account subjects. Render only the script ConfigMap and normal Job into the private review directory. Review both resources before applying them.
+
+```bash
+helm template service-clients . --namespace "$NAMESPACE" \
+  -f values.yaml.default -f "$ENVIRONMENT_VALUES" -f "$PERSISTENT_SECRET_VALUES" \
+  --set global.keycloak.backendServiceClients.prepareOnly=false \
+  --set global.keycloak.backendServiceClients.retireLegacyUsers=false \
+  --set global.keycloak.bootstrapUsers.realmAdmin.disableExisting=false \
+  --show-only templates/keycloak-reconcile-service-identities-job.yaml \
+  > "$PRIVATE_REVIEW_DIR/backend-clients-reconcile.yaml"
+```
+
+Run the reviewed resources after the upgraded Keycloak realm is ready. Replace a prior Job only when Kubernetes marks it Complete or Failed.
+
+```bash
+(
+  set -eu
+  job=keycloak-reconcile-service-identities
+  existing=$(kubectl --namespace "$NAMESPACE" get job "$job" --ignore-not-found \
+    -o jsonpath='{.metadata.name}{"|"}{.status.conditions[?(@.type=="Complete")].status}{"|"}{.status.conditions[?(@.type=="Failed")].status}')
+  case "$existing" in
+    '') ;;
+    *'|True|'*|*'|True') kubectl --namespace "$NAMESPACE" delete job "$job" --wait=true ;;
+    *) echo "Reconciliation is still active. Wait for the Job to finish." >&2; exit 1 ;;
+  esac
+  kubectl --namespace "$NAMESPACE" apply -f "$PRIVATE_REVIEW_DIR/backend-clients-reconcile.yaml"
+  kubectl --namespace "$NAMESPACE" wait --for=condition=complete "job/$job" --timeout=600s
+)
+```
+
+Verify a UserService user lookup and the SMTP settings job's readback and acknowledgement. Check both on the new Keycloak runtime before completing the rollout.
+
 **For developers — permission and release contract:**
 ```text
 Technical: realm role technical; no realm-management roles.
-Admin: realm role otp-config-admin; manage-users, view-users, query-users, view-realm.
+Admin: realm role otp-config-admin; manage-users, view-users, query-users, view-realm, query-clients.
 Existing view-users composite also yields query-groups; no realm-admin/impersonation grant.
 Clients: confidential, serviceAccountsEnabled, fullScopeAllowed false,
-no direct password grant, no browser/implicit flows, only the standard roles scope.
+no direct password grant and no browser/implicit flows. Keep the standard roles scope.
+On runtimes with the built-in kc-admin-api scope, grant it by default only to the
+configured backend admin and SMTP sync clients. The technical client keeps roles only.
 Job prepareOnly default false; retireLegacyUsers default false.
 Normal mode rejects missing clients, wrong UUIDs, public/human-flow clients,
 and invalid final grants before legacy retirement.
