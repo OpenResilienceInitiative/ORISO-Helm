@@ -23,6 +23,10 @@ spec:
         {{- with .Values.clickhouseOperator.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- /* The cluster collector's oriso-apps job ignores signoz.io/*; this exposes the exporter's chi_* metrics to it. */}}
+        {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
+        {{- include "oriso.appMetrics.podAnnotations" (dict "job" "clickhouse-operator" "port" 8888 "path" "/metrics") | nindent 8 }}
+        {{- end }}
         checksum/files: {{ include (print $.Template.BasePath "/clickhouse-operator/configmaps/etc-files.yaml") . | sha256sum }}
         checksum/confd-files: {{ include (print $.Template.BasePath "/clickhouse-operator/configmaps/etc-confd-files.yaml") . | sha256sum }}
         checksum/configd-files: {{ include (print $.Template.BasePath "/clickhouse-operator/configmaps/etc-configd-files.yaml") . | sha256sum }}
