@@ -14,6 +14,7 @@ import time
 
 UPTIME = "oriso-signoz-uptime.service"
 HEARTBEAT = "oriso-signoz-heartbeat-check.service"
+DEV_NIGHTLY = "oriso-dev-nightly-monitor.service"
 BACKUP_PUSH = "oriso-offsite-backup.service"
 BACKUP_CHECK = "oriso-offsite-check.service"
 BACKUP_STORES = ("mariadb", "mongodb", "matrix-postgres")
@@ -35,12 +36,18 @@ UNIT_MATCHES = ("_PID=1", f"UNIT={UPTIME}", f"UNIT={HEARTBEAT}")
 SCOPE_MATCHES = {
     "signoz": UNIT_MATCHES,
     "offsite-backup": ("_PID=1", f"UNIT={BACKUP_PUSH}", f"UNIT={BACKUP_CHECK}"),
+    "dev-nightly": ("_PID=1", f"UNIT={DEV_NIGHTLY}"),
 }
-CADENCE_UNITS = {"uptime": UPTIME, "heartbeat": HEARTBEAT}
+CADENCE_CHECKS = {
+    "uptime": ("signoz", UPTIME),
+    "heartbeat": ("signoz", HEARTBEAT),
+    "dev-nightly": ("dev-nightly", DEV_NIGHTLY),
+}
 CADENCE_EXIT = {"OK": 0, "CRITICAL": 2, "UNKNOWN": 3}
 PLUGIN_STATES = {
     UPTIME: {1: "WARNING", 2: "CRITICAL", 3: "UNKNOWN"},
     HEARTBEAT: {2: "CRITICAL"},
+    DEV_NIGHTLY: {1: "PENDING", 2: "CRITICAL", 3: "UNKNOWN"},
     BACKUP_PUSH: {1: "CRITICAL"},
     BACKUP_CHECK: {1: "CRITICAL"},
 }
@@ -288,12 +295,13 @@ def local_boot_id():
 
 def check_cadence(unit):
     result = {"unit": unit}
+    unit_matches = ("_PID=1", f"UNIT={unit}")
     try:
         if timer_state(unit.removesuffix(".service") + ".timer") != "active":
             return dict(result, state="CRITICAL", reason="timer-not-active")
         boot_id = local_boot_id()
         rows, extra = read_journal((f"--boot={boot_id}", "--lines=1"), (
-            "_PID=1", f"UNIT={unit}", "JOB_TYPE=start", f"MESSAGE_ID={JOB_DONE}", f"MESSAGE_ID={JOB_FAILED}",
+            *unit_matches, "JOB_TYPE=start", f"MESSAGE_ID={JOB_DONE}", f"MESSAGE_ID={JOB_FAILED}",
         ), 1)
         if not rows and not extra:
             return dict(result, state="CRITICAL", reason="missing-completion")
@@ -308,7 +316,7 @@ def check_cadence(unit):
         if age >= MAX_COMPLETION_AGE_SECONDS * 1_000_000:
             return dict(result, state="CRITICAL", reason="stale-completion")
         ids = invocation_ids(rows)
-        details = completion_details(ids, options=(f"--boot={boot_id}",), limit=4)
+        details = completion_details(ids, options=(f"--boot={boot_id}",), limit=4, unit_matches=unit_matches)
         probe_state, service_result, _ = classify(completion, details) if ids else ("UNKNOWN", None, None)
         if service_result is None:
             return dict(result, state="UNKNOWN", reason="unattributed-completion")
@@ -319,24 +327,26 @@ def check_cadence(unit):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scope", choices=SCOPE_MATCHES, default="signoz", help="which manager units to read")
+    parser.add_argument("--scope", choices=SCOPE_MATCHES, help="which manager units to read (default signoz for pages)")
     start = parser.add_mutually_exclusive_group(required=True)
     start.add_argument("--since", help="Journal start time for the first page")
     start.add_argument("--cursor", help="Last completion cursor accepted by the consumer")
-    start.add_argument("--check-cadence", choices=CADENCE_UNITS, help="Check a running timer and its latest completion")
+    start.add_argument("--check-cadence", choices=CADENCE_CHECKS, help="Check a running timer and its latest completion")
     args = parser.parse_args()
     if args.check_cadence:
-        if args.scope != "signoz":
-            parser.error("--check-cadence is only supported for the signoz scope")
-        result = check_cadence(CADENCE_UNITS[args.check_cadence])
+        scope, unit = CADENCE_CHECKS[args.check_cadence]
+        if args.scope is not None and args.scope != scope:
+            parser.error(f"--check-cadence {args.check_cadence} requires --scope {scope} when a scope is specified")
+        result = check_cadence(unit)
         print(json.dumps(result, sort_keys=True))
         return CADENCE_EXIT[result["state"]]
+    scope = args.scope or "signoz"
     try:
-        page = read_page(since=args.since, cursor=args.cursor, scope=args.scope)
+        page = read_page(since=args.since, cursor=args.cursor, scope=scope)
     except (KeyError, OSError, TypeError, ValueError) as error:
         print(f"Cannot read SigNoz check completions: {error}", file=sys.stderr)
         return 3
-    if args.scope == "offsite-backup":
+    if scope == "offsite-backup":
         page["freshness"] = read_backup_freshness()
     print(json.dumps(page, sort_keys=True))
     return 0

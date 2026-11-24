@@ -1,6 +1,6 @@
 """Exercise completion, failure detail and cursor handling at the reader boundary."""
 
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 import json
@@ -17,6 +17,7 @@ INVOCATION = "b" * 32
 MACHINE = "d" * 32
 UPTIME = "oriso-signoz-uptime.service"
 HEARTBEAT = "oriso-signoz-heartbeat-check.service"
+DEV_NIGHTLY = "oriso-dev-nightly-monitor.service"
 PUSH = "oriso-offsite-backup.service"
 CHECK = "oriso-offsite-check.service"
 
@@ -145,6 +146,84 @@ class CheckCadenceTest(TestCase):
             ):
                 result = reader.check_cadence(UPTIME)
                 self.assertEqual((result["state"], result["reason"]), expected)
+
+
+class DevNightlyJournalTest(TestCase):
+    def test_nightly_scope_preserves_each_plugin_exit_and_reads_only_manager_metadata(self):
+        outcomes = [(0, "OK"), (1, "PENDING"), (2, "CRITICAL"), (3, "UNKNOWN")]
+        completions = []
+        details = []
+        for status, _ in outcomes:
+            fields = {"UNIT": DEV_NIGHTLY, "INVOCATION_ID": f"{status:032x}"}
+            message = reader.JOB_FAILED if status else reader.JOB_DONE
+            completions.append(event(
+                message, **fields, JOB_TYPE="start", JOB_RESULT="failed" if status else "done",
+                __CURSOR=f"nightly-{status}", __REALTIME_TIMESTAMP=str((status + 1) * 1000000),
+            ))
+            if status:
+                details.extend([
+                    event(reader.UNIT_FAILED, **fields, UNIT_RESULT="exit-code"),
+                    event(reader.PROCESS_EXIT, **fields, EXIT_CODE="exited", EXIT_STATUS=str(status)),
+                ])
+            else:
+                details.append(event(reader.UNIT_SUCCEEDED, **fields, MESSAGE="untrusted service output"))
+
+        with (
+            patch.object(reader.sys, "argv", ["monitor", "--scope", "dev-nightly", "--since", "10 minutes ago"]),
+            patch.object(reader, "read_journal", side_effect=[(completions, False), (details, False)]) as journal,
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(reader.main(), 0)
+
+        page = json.loads(output.getvalue())
+        self.assertEqual([(row["exit_status"], row["state"]) for row in page["completed"]], outcomes)
+        self.assertEqual(page["next_cursor"], "nightly-3")
+        self.assertNotIn("untrusted service output", output.getvalue())
+        for call in journal.call_args_list:
+            self.assertIn("_PID=1", call.args[1])
+            self.assertIn(f"UNIT={DEV_NIGHTLY}", call.args[1])
+            self.assertNotIn(f"UNIT={UPTIME}", call.args[1])
+            self.assertNotIn(f"UNIT={PUSH}", call.args[1])
+
+    def test_recent_pending_probe_has_healthy_cadence_without_recovering_the_probe(self):
+        completed = event(reader.JOB_FAILED, UNIT=DEV_NIGHTLY, JOB_RESULT="failed",
+                          __MONOTONIC_TIMESTAMP="100000000")
+        failed = event(reader.UNIT_FAILED, UNIT=DEV_NIGHTLY, UNIT_RESULT="exit-code")
+        exited = event(reader.PROCESS_EXIT, UNIT=DEV_NIGHTLY, EXIT_CODE="exited", EXIT_STATUS="1")
+        for arguments in ([], ["--scope", "dev-nightly"]):
+            with (
+                self.subTest(arguments=arguments),
+                patch.object(reader.sys, "argv", ["monitor", *arguments, "--check-cadence", "dev-nightly"]),
+                patch.object(reader, "timer_state", return_value="active") as timer,
+                patch.object(reader, "local_boot_id", return_value=BOOT),
+                patch.object(reader.time, "monotonic_ns", return_value=140_000_000_000),
+                patch.object(reader, "read_journal", side_effect=[
+                    ([completed], False), ([failed, exited], False),
+                ]) as journal,
+                redirect_stdout(StringIO()) as output,
+            ):
+                self.assertEqual(reader.main(), 0)
+            timer.assert_called_once_with("oriso-dev-nightly-monitor.timer")
+            for call in journal.call_args_list:
+                self.assertIn(f"--boot={BOOT}", call.args[0])
+                self.assertIn(f"UNIT={DEV_NIGHTLY}", call.args[1])
+                self.assertNotIn(f"UNIT={HEARTBEAT}", call.args[1])
+            self.assertEqual(json.loads(output.getvalue()), {
+                "unit": DEV_NIGHTLY, "state": "OK", "reason": "recent-completion",
+                "age_seconds": 40.0, "last_probe_state": "PENDING",
+            })
+
+    def test_explicit_cadence_scope_cannot_read_a_different_unit(self):
+        with (
+            patch.object(reader.sys, "argv", ["monitor", "--scope", "dev-nightly", "--check-cadence", "uptime"]),
+            patch.object(reader, "check_cadence") as check,
+            redirect_stderr(StringIO()) as output,
+            self.assertRaises(SystemExit) as raised,
+        ):
+            reader.main()
+        self.assertEqual(raised.exception.code, 2)
+        check.assert_not_called()
+        self.assertIn("--check-cadence uptime requires --scope signoz", output.getvalue())
 
 
 class BackupJournalTest(TestCase):
