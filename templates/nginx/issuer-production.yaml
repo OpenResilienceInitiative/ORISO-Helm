@@ -13,7 +13,7 @@
     {{- $email = trim (dig "spec" "acme" "email" "" $issuer) -}}
   {{- end -}}
 {{- end -}}
-{{- if and $email (not (regexMatch "^[^[:space:]@]+@[^[:space:]@]+$" $email)) -}}
+{{- if and $email (not (regexMatch "^[^[:space:]@/]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}$" $email)) -}}
   {{- fail "cert-manager.acmeEmail must be an email address" -}}
 {{- end }}
 apiVersion: cert-manager.io/v1

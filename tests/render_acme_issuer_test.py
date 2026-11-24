@@ -44,6 +44,8 @@ def main():
             assert issuer["spec"]["acme"]["privateKeySecretRef"] == {"name": "letsencrypt-prod"}
         assert "cert-manager.acmeEmail" in render(chart, "--set", "cert-manager.acmeEmail=true", fail=True)
         assert "cert-manager.acmeEmail" in render(chart, "--set-string", "cert-manager.acmeEmail=invalid", fail=True)
+        for bad in ("ops@example.org/path", "ops@localhost", "ops@exa mple.org"):
+            assert "cert-manager.acmeEmail" in render(chart, "--set-string", f"cert-manager.acmeEmail={bad}", fail=True)
         assert render(chart, "--set", "cert-manager.enabled=false") == []
 
         [issuer] = render(chart, "--set-string", f"cert-manager.acmeEmail={CONTACT}")
