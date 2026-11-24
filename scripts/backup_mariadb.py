@@ -21,6 +21,8 @@ import zlib
 
 
 SYSTEM_SCHEMAS = {"information_schema", "mysql", "performance_schema", "sys"}
+# An ext4 volume's lost+found folder in the datadir root, listed by SHOW DATABASES; not a schema.
+FILESYSTEM_ENTRIES = {"#mysql50#lost+found"}
 SCHEMA_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_$-]*")
 SHA256 = re.compile(r"[0-9a-f]{64}")
 ENCRYPTED_EXTENSION = ".sql.gz.age"
@@ -239,7 +241,7 @@ def backup(kubernetes, output_root, dump_timeout, age_command=None):
     )
     schemas = [
         name for name in listed_schemas.splitlines()
-        if name and name.casefold() not in SYSTEM_SCHEMAS
+        if name and name.casefold() not in SYSTEM_SCHEMAS and name not in FILESYSTEM_ENTRIES
     ]
     if not schemas:
         raise RuntimeError("MariaDB returned no application schemas")
