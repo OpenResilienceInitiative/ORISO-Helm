@@ -149,7 +149,53 @@ class CheckCadenceTest(TestCase):
 
 
 class DevNightlyJournalTest(TestCase):
-    def test_nightly_scope_preserves_each_plugin_exit_and_reads_only_manager_metadata(self):
+    run_url = "https://github.com/OpenResilienceInitiative/ORISO-E2E/actions/runs/123"
+
+    def report(self):
+        return {
+            "repository": "OpenResilienceInitiative/ORISO-E2E",
+            "target": "https://dev.oriso.org", "state": "red",
+            "scheduledAt": "2026-11-24T02:30:00.000Z", "defaultBranchSha": "c" * 40,
+            "run": {
+                "url": self.run_url, "launcherSha": "e" * 40, "attempt": 2,
+                "status": "completed", "conclusion": "failure",
+                "problem": {
+                    "job": "Dev nightly specs", "url": f"{self.run_url}/job/456",
+                    "status": "completed", "conclusion": "failure",
+                    "step": {"number": 3, "name": "Run the Dev spec set",
+                             "status": "completed", "conclusion": "failure"},
+                },
+            },
+        }
+
+    def stdout_record(self, message, **overrides):
+        return {
+            "_TRANSPORT": "stdout", "_SYSTEMD_UNIT": DEV_NIGHTLY,
+            "_MACHINE_ID": MACHINE, "_BOOT_ID": BOOT,
+            "_SYSTEMD_INVOCATION_ID": INVOCATION, "MESSAGE": message, **overrides,
+        }
+
+    def incident_page(self, observations):
+        completion = event(
+            reader.JOB_FAILED, UNIT=DEV_NIGHTLY, JOB_RESULT="failed",
+            __CURSOR="incident", __REALTIME_TIMESTAMP="1795496400000000",
+        )
+        details = [
+            event(reader.UNIT_FAILED, UNIT=DEV_NIGHTLY, UNIT_RESULT="exit-code"),
+            event(reader.PROCESS_EXIT, UNIT=DEV_NIGHTLY, EXIT_CODE="exited", EXIT_STATUS="2"),
+        ]
+        with patch.object(reader, "read_journal", side_effect=[
+            ([completion], False), (details, False), observations,
+        ]) as journal:
+            page = reader.read_page(since="10 minutes ago", scope="dev-nightly")
+        self.assertEqual(page["next_cursor"], "incident")
+        self.assertFalse(page["more"])
+        self.assertEqual(page["completed"][0]["state"], "CRITICAL")
+        self.assertEqual(page["completed"][0]["exit_status"], 2)
+        self.assertEqual(journal.call_count, 3)
+        return page["completed"][0], journal.call_args_list[2]
+
+    def test_nightly_scope_preserves_each_plugin_exit_when_stdout_is_missing(self):
         outcomes = [(0, "OK"), (1, "PENDING"), (2, "CRITICAL"), (3, "UNKNOWN")]
         completions = []
         details = []
@@ -170,20 +216,76 @@ class DevNightlyJournalTest(TestCase):
 
         with (
             patch.object(reader.sys, "argv", ["monitor", "--scope", "dev-nightly", "--since", "10 minutes ago"]),
-            patch.object(reader, "read_journal", side_effect=[(completions, False), (details, False)]) as journal,
+            patch.object(reader, "read_journal", side_effect=[
+                (completions, False), (details, False), ([], False),
+            ]) as journal,
             redirect_stdout(StringIO()) as output,
         ):
             self.assertEqual(reader.main(), 0)
 
         page = json.loads(output.getvalue())
         self.assertEqual([(row["exit_status"], row["state"]) for row in page["completed"]], outcomes)
+        self.assertTrue(all("probe" not in row for row in page["completed"]))
         self.assertEqual(page["next_cursor"], "nightly-3")
         self.assertNotIn("untrusted service output", output.getvalue())
-        for call in journal.call_args_list:
+        for call in journal.call_args_list[:2]:
             self.assertIn("_PID=1", call.args[1])
             self.assertIn(f"UNIT={DEV_NIGHTLY}", call.args[1])
             self.assertNotIn(f"UNIT={UPTIME}", call.args[1])
             self.assertNotIn(f"UNIT={PUSH}", call.args[1])
+        for status, _ in outcomes:
+            self.assertIn(f"_SYSTEMD_INVOCATION_ID={status:032x}", journal.call_args_list[2].args[1])
+
+    def test_nightly_scope_attaches_only_the_validated_probe(self):
+        expected = self.report()
+        raw = self.report()
+        raw["detail"] = "should not be relayed"
+        raw["run"]["problem"]["runner_name"] = "should not be relayed"
+        raw["repository_secret"] = "should not be relayed"
+        valid = self.stdout_record(json.dumps(raw))
+        foreign = self.stdout_record(json.dumps(raw), _MACHINE_ID="c" * 32)
+        wrong_boot = self.stdout_record(json.dumps(raw), _BOOT_ID="c" * 32)
+        wrong_unit = self.stdout_record(json.dumps(raw), _SYSTEMD_UNIT=UPTIME)
+        wrong_invocation = self.stdout_record(json.dumps(raw), _SYSTEMD_INVOCATION_ID="c" * 32)
+        result, read = self.incident_page(([foreign, wrong_boot, wrong_unit, wrong_invocation, valid], False))
+        self.assertEqual(result["probe"], dict(expected, detail="Dev nightly specs / Run the Dev spec set (failure)."))
+        self.assertEqual(read.args[1], (
+            "_TRANSPORT=stdout", f"_SYSTEMD_UNIT={DEV_NIGHTLY}",
+            f"_SYSTEMD_INVOCATION_ID={INVOCATION}",
+        ))
+        self.assertLessEqual(read.args[2], 2 * reader.PAGE_SIZE)
+        self.assertIn("MESSAGE", read.kwargs["fields"].split(","))
+        self.assertNotIn("should not be relayed", json.dumps(result))
+
+    def test_duplicate_invalid_or_unavailable_stdout_does_not_affect_the_incident(self):
+        valid = self.stdout_record(json.dumps(self.report()))
+        wrong_verdict = self.stdout_record(json.dumps(dict(self.report(), state="green")))
+        bad_url = self.report()
+        bad_url["run"]["problem"]["url"] = self.run_url + "/job/456?private=canary"
+        messages = (
+            "unparseable canary", "[123]", '{"state":"red","state":"green"}',
+            " " * 4096, json.dumps(bad_url),
+        )
+        for observations in (
+            *[([self.stdout_record(message)], False) for message in messages],
+            ([valid, valid], False), ([valid], True), ([wrong_verdict], False),
+            PermissionError("private journal error"),
+        ):
+            with self.subTest(observations=type(observations).__name__):
+                result, _ = self.incident_page(observations)
+                self.assertNotIn("probe", result)
+
+    def test_unreviewed_step_name_is_replaced_and_stalled_job_is_attributed(self):
+        report = self.report()
+        report["state"] = "stalled"
+        run = report["run"]
+        run.update(status="in_progress", conclusion=None)
+        run["problem"].update(status="in_progress", conclusion=None)
+        run["problem"]["step"].update(name="unreviewed name", status="in_progress", conclusion=None)
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["state"], "stalled")
+        self.assertEqual(result["probe"]["run"]["problem"]["step"]["name"], "Step 3")
+        self.assertEqual(result["probe"]["detail"], "Dev nightly specs / Step 3 (in_progress).")
 
     def test_recent_pending_probe_has_healthy_cadence_without_recovering_the_probe(self):
         completed = event(reader.JOB_FAILED, UNIT=DEV_NIGHTLY, JOB_RESULT="failed",

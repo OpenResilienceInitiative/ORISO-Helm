@@ -376,6 +376,14 @@ The [off-site backup monitoring scope](offsite-backup.md#monitor-the-backup-jobs
 uses its own cursor for the two backup units and includes a sanitized archive
 freshness snapshot on every poll.
 
+For the independent Dev nightly monitor, use a separate cursor with
+`--scope dev-nightly`. When the service wrote one valid JSON report, its
+completion includes a `probe` object scoped to the same boot and
+invocation. Operators can use its schedule slot, launcher revision, job
+link and step in the incident text. The systemd verdict still determines
+routing when details are unavailable. The optional lookup has a short
+deadline and needs only the existing restricted journal reader.
+
 #### Watch the check runner from another host
 
 Install the same journal reader on the check runner. From the independent
