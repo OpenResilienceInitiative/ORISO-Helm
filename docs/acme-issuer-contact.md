@@ -9,8 +9,10 @@ cert-manager:
   acmeEmail: "acme-operations@example.invalid"
 ```
 
-Replace the example address with the operator's approved contact. A new
-managed install requires this value. The existing ClusterIssuer name, ACME
+Replace the example address with the operator's approved contact. The value
+is optional: when it is unset, the issuer renders without an `email`, so
+Let's Encrypt registers the account without a contact. A value that is set
+must be an email address. The existing ClusterIssuer name, ACME
 server, private-key Secret reference and HTTP-01 solver stay the same.
 
 A live Helm upgrade can reuse the issuer's current contact when the issuer is

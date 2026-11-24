@@ -13,10 +13,7 @@
     {{- $email = trim (dig "spec" "acme" "email" "" $issuer) -}}
   {{- end -}}
 {{- end -}}
-{{- if not $email -}}
-  {{- fail "cert-manager.acmeEmail is required when this chart manages letsencrypt-prod" -}}
-{{- end -}}
-{{- if not (regexMatch "^[^[:space:]@]+@[^[:space:]@]+$" $email) -}}
+{{- if and $email (not (regexMatch "^[^[:space:]@]+@[^[:space:]@]+$" $email)) -}}
   {{- fail "cert-manager.acmeEmail must be an email address" -}}
 {{- end }}
 apiVersion: cert-manager.io/v1
@@ -26,7 +23,9 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: {{ $email | quote }}
+    {{- with $email }}
+    email: {{ . | quote }}
+    {{- end }}
     privateKeySecretRef:
       name: letsencrypt-prod
     solvers:

@@ -19,7 +19,7 @@ def render(chart, *arguments, fail=False):
         capture_output=True, text=True, check=False,
     )
     if fail:
-        assert result.returncode != 0, "managed issuer rendered without a valid configured contact"
+        assert result.returncode != 0, "managed issuer rendered with an invalid configured contact"
         return result.stderr
     assert result.returncode == 0, result.stderr
     return [doc for doc in yaml.safe_load_all(result.stdout) if doc]
@@ -36,8 +36,12 @@ def main():
         (chart / "values.yaml").write_text(yaml.safe_dump({"cert-manager": config}))
         shutil.copyfile(ISSUER_TEMPLATE, chart / "templates/issuer.yaml")
 
-        assert "cert-manager.acmeEmail is required" in render(chart, fail=True)
-        assert "cert-manager.acmeEmail is required" in render(chart, "--is-upgrade", fail=True)
+        # Unset contact (Frank, 23 Nov 2026): the issuer renders without an email instead of failing,
+        # so an offline/GitOps render without the value keeps working.
+        for arguments in ((), ("--is-upgrade",)):
+            [issuer] = render(chart, *arguments)
+            assert "email" not in issuer["spec"]["acme"]
+            assert issuer["spec"]["acme"]["privateKeySecretRef"] == {"name": "letsencrypt-prod"}
         assert "cert-manager.acmeEmail" in render(chart, "--set", "cert-manager.acmeEmail=true", fail=True)
         assert "cert-manager.acmeEmail" in render(chart, "--set-string", "cert-manager.acmeEmail=invalid", fail=True)
         assert render(chart, "--set", "cert-manager.enabled=false") == []
@@ -50,7 +54,7 @@ def main():
             "privateKeySecretRef": {"name": "letsencrypt-prod"},
             "solvers": [{"http01": {"ingress": {"class": "nginx"}}}],
         }
-    print("PASS: managed ACME issuer requires a configured contact and retains its account key reference")
+    print("PASS: managed ACME issuer uses a configured contact when set and retains its account key reference")
 
 
 if __name__ == "__main__":
