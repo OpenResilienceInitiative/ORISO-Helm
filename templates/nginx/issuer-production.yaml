@@ -13,7 +13,8 @@
     {{- $email = trim (dig "spec" "acme" "email" "" $issuer) -}}
   {{- end -}}
 {{- end -}}
-{{- if and $email (not (regexMatch "^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(\\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\\.)+[A-Za-z]{2,}$" $email)) -}}
+{{- /* Local part limited to URI-safe characters: cert-manager sends it unescaped as a mailto: URI to Let's Encrypt. */ -}}
+{{- if and $email (not (regexMatch "^[A-Za-z0-9_+-]+(\\.[A-Za-z0-9_+-]+)*@([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\\.)+[A-Za-z]{2,}$" $email)) -}}
   {{- fail "cert-manager.acmeEmail must be an email address" -}}
 {{- end }}
 apiVersion: cert-manager.io/v1

@@ -46,7 +46,8 @@ def main():
         assert "cert-manager.acmeEmail" in render(chart, "--set-string", "cert-manager.acmeEmail=invalid", fail=True)
         for bad in ("ops@example.org/path", "ops@localhost", "ops@exa mple.org", "ops@-example.org", "ops@example-.org",
                     "ops..alerts@example.org", ".ops@example.org", "ops.@example.org",
-                    "ops:alerts@example.org", "ops;alerts@example.org", "ops<x>@example.org", "ops(x)@example.org", "ops\"x@example.org"):
+                    "ops:alerts@example.org", "ops;alerts@example.org", "ops<x>@example.org", "ops(x)@example.org", "ops\"x@example.org",
+                    "ops#alerts@example.org", "ops?x@example.org", "ops%41@example.org", "ops&x@example.org"):
             assert "cert-manager.acmeEmail" in render(chart, "--set-string", f"cert-manager.acmeEmail={bad}", fail=True)
         assert render(chart, "--set", "cert-manager.enabled=false") == []
 
