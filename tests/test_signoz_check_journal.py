@@ -264,7 +264,7 @@ class DevNightlyJournalTest(TestCase):
         bad_url["run"]["problem"]["url"] = self.run_url + "/job/456?private=canary"
         messages = (
             "unparseable canary", "[123]", '{"state":"red","state":"green"}',
-            " " * 4096, json.dumps(bad_url),
+            " " * (reader.MAX_NIGHTLY_MESSAGE_BYTES + 1), json.dumps(bad_url),
         )
         for observations in (
             *[([self.stdout_record(message)], False) for message in messages],
@@ -353,6 +353,45 @@ class DevNightlyJournalTest(TestCase):
         self.assertEqual(result["probe"]["run"]["testSourceSha"], tested)
         self.assertIn("Verify the checked-out Dev call test source (failure)", result["probe"]["detail"])
         self.assertTrue(result["probe"]["detail"].endswith(f"E2E test source {tested}."))
+
+    def test_native_video_incident_keeps_independent_failures_and_the_verified_source(self):
+        report = self.report()
+        run = report["run"]
+        tested = "d" * 40
+        failures = [
+            ("Protected Dev video call", "Run the protected Dev video call"),
+            ("Public Dev call readiness", "Check public Dev video call prerequisites"),
+            ("Dev nightly specs", "Check Dev telemetry prerequisites"),
+            ("Dev Test Access readiness", "Check encrypted Dev chat history"),
+            ("Dev video acceptance", "Require a completed Dev video proof"),
+        ]
+        run["problems"] = [
+            {
+                "job": job, "url": f"{self.run_url}/job/{456 + index}", "status": "completed",
+                "conclusion": "failure",
+                "step": {"number": 4, "name": step, "status": "completed", "conclusion": "failure"},
+            }
+            for index, (job, step) in enumerate(failures)
+        ]
+        run["problem"] = run["problems"][0]
+        run["testSourceSha"] = tested
+        report["detail"] = " ".join(f"{job} / {step} (failure)." for job, step in failures)
+        message = json.dumps(report)
+        self.assertGreater(len(message.encode("utf-8")), 2048)
+        result, _ = self.incident_page(([self.stdout_record(message)], False))
+        self.assertEqual(result["state"], "CRITICAL")
+        self.assertEqual(result["probe"]["run"]["problems"], run["problems"])
+        self.assertEqual(result["probe"]["run"]["testSourceSha"], tested)
+        self.assertIn("Protected Dev video call / Run the protected Dev video call", result["probe"]["detail"])
+
+        runner = run["problems"][0]
+        runner.update(job="Dev video runner readiness")
+        runner["step"]["name"] = "Check Dev video runner label"
+        run["problems"][1].update(job="Protected Dev video call", conclusion="skipped")
+        run["problems"][1].pop("step")
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertIn("Dev video runner readiness / Check Dev video runner label (failure)", result["probe"]["detail"])
+        self.assertIn("Protected Dev video call (skipped)", result["probe"]["detail"])
 
     def test_rejects_invalid_or_unattributed_e2e_source_without_changing_the_verdict(self):
         for source in (None, {}, "0" * 40, "x" * 40, "d" * 40 + "\n"):

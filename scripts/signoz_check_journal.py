@@ -73,14 +73,18 @@ ACTION_CONCLUSIONS = {
 }
 NIGHTLY_JOBS = {
     "Workflow and reporter contract", "Dev nightly specs", "Public Dev call readiness", "Dev Test Access readiness",
+    "Dev video runner readiness", "Protected Dev video call", "Dev video acceptance",
 }
 # Known names stay legible. New or unreviewed names use the step number until reviewed here.
 NIGHTLY_STEPS = {
     "Set up job", "Resolve the reviewed Dev source", "Verify the checked-out workflow matches the launcher",
     "Prove the Dev nightly cannot reach another environment or the cluster",
+    "Check Dev workflow and runner contracts",
     "Prove the trace headers and the authenticated export are well formed",
     "Verify the checked-out Dev call test source",
     "Check public Dev video call prerequisites",
+    "Check Dev video runner label", "Verify the checked-out Dev video call source",
+    "Check the Dev video runner tools", "Run the protected Dev video call", "Require a completed Dev video proof",
     "Verify the tested Dev source before accessing credentials",
     "Fail fast when secrets are absent or the hub rejects the token",
     "Check Dev telemetry prerequisites", "Check scoped Dev Test Access",
@@ -105,7 +109,7 @@ NIGHTLY_DIAGNOSTIC_DETAILS = {
 }
 GITHUB_NUMBER = r"[1-9][0-9]{0,15}"
 GIT_SHA = re.compile(r"[0-9a-f]{40}")
-MAX_NIGHTLY_MESSAGE_BYTES = 2048
+MAX_NIGHTLY_MESSAGE_BYTES = 4096
 
 
 def read_journal(options, matches, limit, *, fields=JOURNAL_FIELDS, timeout="8s"):
