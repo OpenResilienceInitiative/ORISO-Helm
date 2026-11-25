@@ -287,6 +287,29 @@ class DevNightlyJournalTest(TestCase):
         self.assertEqual(result["probe"]["run"]["problem"]["step"]["name"], "Step 3")
         self.assertEqual(result["probe"]["detail"], "Dev nightly specs / Step 3 (in_progress).")
 
+    def test_two_failed_workflow_jobs_are_relayed_with_their_reviewed_steps(self):
+        report = self.report()
+        run = report["run"]
+        call_check = {
+            "job": "Public Dev call readiness", "url": f"{self.run_url}/job/457",
+            "status": "completed", "conclusion": "failure",
+            "step": {"number": 4, "name": "Check public Dev video call prerequisites",
+                     "status": "completed", "conclusion": "failure"},
+        }
+        run["problems"] = [run["problem"], call_check]
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["run"]["problems"], run["problems"])
+        self.assertEqual(
+            result["probe"]["detail"],
+            "Dev nightly specs / Run the Dev spec set (failure). "
+            "Public Dev call readiness / Check public Dev video call prerequisites (failure).",
+        )
+
+        run["problems"] = [run["problem"], call_check | {"url": run["problem"]["url"]}]
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["state"], "CRITICAL")
+        self.assertNotIn("probe", result)
+
     def test_recent_pending_probe_has_healthy_cadence_without_recovering_the_probe(self):
         completed = event(reader.JOB_FAILED, UNIT=DEV_NIGHTLY, JOB_RESULT="failed",
                           __MONOTONIC_TIMESTAMP="100000000")

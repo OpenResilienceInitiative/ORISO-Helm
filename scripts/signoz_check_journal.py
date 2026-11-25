@@ -71,12 +71,13 @@ RUNNING_ACTION_STATES = {"queued", "requested", "waiting", "pending", "in_progre
 ACTION_CONCLUSIONS = {
     "success", "failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale", "skipped", "neutral",
 }
-NIGHTLY_JOBS = {"Workflow and reporter contract", "Dev nightly specs"}
+NIGHTLY_JOBS = {"Workflow and reporter contract", "Dev nightly specs", "Public Dev call readiness"}
 # Known names stay legible. New or unreviewed names use the step number until reviewed here.
 NIGHTLY_STEPS = {
     "Set up job", "Resolve the reviewed Dev source", "Verify the checked-out workflow matches the launcher",
     "Prove the Dev nightly cannot reach another environment or the cluster",
     "Prove the trace headers and the authenticated export are well formed",
+    "Check public Dev video call prerequisites",
     "Verify the tested Dev source before accessing credentials",
     "Fail fast when secrets are absent or the hub rejects the token",
     "Typecheck the E2E suite", "Run the Dev spec set", "Verify stored Dev traces",
@@ -202,6 +203,29 @@ def nightly_problem(problem, run_url, state):
     return projected
 
 
+def nightly_problems(run, run_url, state):
+    primary = nightly_problem(run["problem"], run_url, state)
+    if "problems" not in run:
+        return [primary]
+    records = run["problems"]
+    if not isinstance(records, list) or not 2 <= len(records) <= len(NIGHTLY_JOBS):
+        raise ValueError("invalid number of nightly problems")
+    problems = [nightly_problem(record, run_url, state) for record in records]
+    if (
+        primary != problems[0] or len({item["job"] for item in problems}) != len(problems)
+        or len({item["url"] for item in problems}) != len(problems)
+    ):
+        raise ValueError("inconsistent nightly problem identities")
+    return problems
+
+
+def describe_nightly_problem(problem):
+    step = problem.get("step")
+    subject = f"{problem['job']} / {step['name']}" if step else problem["job"]
+    status = step if step else problem
+    return f"{subject} ({status['conclusion'] or status['status']})."
+
+
 def project_nightly_probe(message, completion):
     if not isinstance(message, str) or len(message.encode("utf-8")) > MAX_NIGHTLY_MESSAGE_BYTES:
         raise ValueError("invalid nightly report size")
@@ -235,15 +259,14 @@ def project_nightly_probe(message, completion):
             or (state == "green") != (projected["conclusion"] == "success")
         ):
             raise ValueError("run state disagrees with the nightly result")
-        if "problem" in run:
+        if "problem" in run or "problems" in run:
             if state not in {"red", "stalled"} or sha is None:
                 raise ValueError("unattributed nightly problem")
-            problem = nightly_problem(run["problem"], url, state)
-            projected["problem"] = problem
-            step = problem.get("step")
-            subject = f"{problem['job']} / {step['name']}" if step else problem["job"]
-            status = step if step else problem
-            probe["detail"] = f"{subject} ({status['conclusion'] or status['status']})."
+            problems = nightly_problems(run, url, state)
+            projected["problem"] = problems[0]
+            if len(problems) > 1:
+                projected["problems"] = problems
+            probe["detail"] = " ".join(map(describe_nightly_problem, problems))
         elif state in {"red", "stalled"} and isinstance(detail, str) and detail in NIGHTLY_DIAGNOSTIC_DETAILS:
             probe["detail"] = detail
         probe["run"] = projected

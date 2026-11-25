@@ -379,10 +379,12 @@ freshness snapshot on every poll.
 For the independent Dev nightly monitor, use a separate cursor with
 `--scope dev-nightly`. When the service wrote one valid JSON report, its
 completion includes a `probe` object scoped to the same boot and
-invocation. Operators can use its schedule slot, launcher revision, job
-link and step in the incident text. The systemd verdict still determines
-routing when details are unavailable. The optional lookup has a short
-deadline and needs only the existing restricted journal reader.
+invocation. The incident text includes the schedule slot and launcher
+revision. Each reported job has its own link and the step when available.
+This includes the public Dev call check and the app smoke when both fail.
+The systemd verdict determines routing when details are unavailable. The
+optional lookup has a short deadline and needs only the existing restricted
+journal reader.
 
 #### Watch the check runner from another host
 
