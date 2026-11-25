@@ -79,6 +79,7 @@ NIGHTLY_STEPS = {
     "Set up job", "Resolve the reviewed Dev source", "Verify the checked-out workflow matches the launcher",
     "Prove the Dev nightly cannot reach another environment or the cluster",
     "Prove the trace headers and the authenticated export are well formed",
+    "Verify the checked-out Dev call test source",
     "Check public Dev video call prerequisites",
     "Verify the tested Dev source before accessing credentials",
     "Fail fast when secrets are absent or the hub rejects the token",
@@ -272,6 +273,14 @@ def project_nightly_probe(message, completion):
             if len(problems) > 1:
                 projected["problems"] = problems
             probe["detail"] = " ".join(map(describe_nightly_problem, problems))
+            if "testSourceSha" in run:
+                tested = run["testSourceSha"]
+                if not isinstance(tested, str) or not GIT_SHA.fullmatch(tested) or tested == "0" * 40:
+                    raise ValueError("invalid nightly E2E test source SHA")
+                projected["testSourceSha"] = tested
+                probe["detail"] += f" E2E test source {tested}."
+        elif "testSourceSha" in run:
+            raise ValueError("unattributed nightly E2E test source")
         elif state in {"red", "stalled"} and isinstance(detail, str) and detail in NIGHTLY_DIAGNOSTIC_DETAILS:
             probe["detail"] = detail
         probe["run"] = projected

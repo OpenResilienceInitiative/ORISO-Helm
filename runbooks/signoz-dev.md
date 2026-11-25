@@ -382,6 +382,9 @@ completion includes a `probe` object scoped to the same boot and
 invocation. The incident text includes the schedule slot and launcher
 revision. Each reported job has its own link and the step when available.
 This includes the public Dev call check and the app smoke when both fail.
+When a checkout was verified in the same attempt, the incident adds the E2E
+test source SHA alongside the launcher revision. The run evidence records any
+deployed application builds observed by the browser.
 The systemd verdict determines routing when details are unavailable. The
 optional lookup has a short deadline and needs only the existing restricted
 journal reader.

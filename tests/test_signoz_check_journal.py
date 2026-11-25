@@ -341,6 +341,34 @@ class DevNightlyJournalTest(TestCase):
         self.assertEqual(result["probe"]["run"]["problems"], run["problems"])
         self.assertIn("Dev Test Access readiness / Check encrypted Dev chat history", result["probe"]["detail"])
 
+    def test_incident_keeps_verified_e2e_source_separate_from_launcher(self):
+        report = self.report()
+        tested = "d" * 40
+        run = report["run"]
+        run["testSourceSha"] = tested
+        run["problem"]["job"] = "Public Dev call readiness"
+        run["problem"]["step"]["name"] = "Verify the checked-out Dev call test source"
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["run"]["launcherSha"], "e" * 40)
+        self.assertEqual(result["probe"]["run"]["testSourceSha"], tested)
+        self.assertIn("Verify the checked-out Dev call test source (failure)", result["probe"]["detail"])
+        self.assertTrue(result["probe"]["detail"].endswith(f"E2E test source {tested}."))
+
+    def test_rejects_invalid_or_unattributed_e2e_source_without_changing_the_verdict(self):
+        for source in (None, {}, "0" * 40, "x" * 40, "d" * 40 + "\n"):
+            with self.subTest(source=source):
+                report = self.report()
+                report["run"]["testSourceSha"] = source
+                result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+                self.assertNotIn("probe", result)
+                self.assertEqual(result["state"], "CRITICAL")
+
+        report = self.report()
+        report["run"]["testSourceSha"] = "d" * 40
+        report["run"].pop("problem")
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertNotIn("probe", result)
+
     def test_recent_pending_probe_has_healthy_cadence_without_recovering_the_probe(self):
         completed = event(reader.JOB_FAILED, UNIT=DEV_NIGHTLY, JOB_RESULT="failed",
                           __MONOTONIC_TIMESTAMP="100000000")
