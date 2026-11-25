@@ -10,6 +10,8 @@ import sys
 import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STORYBOOK_APPS = ("storybook-admin", "storybook-frontend")
+STORYBOOK_NAMES = {*STORYBOOK_APPS, "storybook-dev-ingress", *(f"{app}-slash-redirect" for app in STORYBOOK_APPS)}
 
 
 def render(*values_files: str) -> list[dict]:
@@ -49,17 +51,15 @@ def render(*values_files: str) -> list[dict]:
 def main() -> None:
     """Assert Storybook is disabled by default and correctly enabled for Dev."""
     baseline = render()
-    assert not any(
-        doc.get("metadata", {}).get("name") == "storybook-frontend"
-        for doc in baseline
-    ), "Storybook must be disabled by default"
+    assert not any(doc.get("metadata", {}).get("name") in STORYBOOK_NAMES for doc in baseline), (
+        "Storybook routes and workloads must be disabled by default"
+    )
 
     dev = render("values-dev.yaml")
     resources = {
         (doc.get("kind"), doc.get("metadata", {}).get("name")): doc
         for doc in dev
-        if doc.get("metadata", {}).get("name")
-        in {"storybook-frontend", "storybook-admin", "storybook-dev-ingress"}
+        if doc.get("metadata", {}).get("name") in STORYBOOK_NAMES
     }
     assert set(resources) == {
         ("Deployment", "storybook-frontend"),
@@ -67,7 +67,9 @@ def main() -> None:
         ("Service", "storybook-frontend"),
         ("Service", "storybook-admin"),
         ("Ingress", "storybook-dev-ingress"),
-    }
+        ("Ingress", "storybook-admin-slash-redirect"),
+        ("Ingress", "storybook-frontend-slash-redirect"),
+    }, "Dev must render two snippet-free Storybook redirects and the content route"
 
     container = resources[("Deployment", "storybook-frontend")]["spec"]["template"]["spec"]["containers"][0]
     assert container["image"] == "ghcr.io/openresilienceinitiative/oriso-storybook:dev"
@@ -85,21 +87,30 @@ def main() -> None:
     assert annotations["nginx.ingress.kubernetes.io/auth-type"] == "basic"
     assert annotations["nginx.ingress.kubernetes.io/auth-secret"] == "storybook-basic-auth"
     assert annotations["nginx.ingress.kubernetes.io/use-regex"] == "true"
-    assert annotations["nginx.ingress.kubernetes.io/rewrite-target"] == "/$2"
-    assert annotations["nginx.ingress.kubernetes.io/configuration-snippet"] == (
-        'if ($uri = "/storybook-admin") {\n'
-        "  return 308 /storybook-admin/;\n"
-        "}\n"
-        'if ($uri = "/storybook-frontend") {\n'
-        "  return 308 /storybook-frontend/;\n"
-        "}\n"
-    )
+    assert annotations["nginx.ingress.kubernetes.io/rewrite-target"] == "/$1"
     paths = ingress["spec"]["rules"][0]["http"]["paths"]
-    assert {path["path"] for path in paths} == {
-        "/storybook-admin(/|$)(.*)",
-        "/storybook-frontend(/|$)(.*)",
-    }
+    assert {path["path"] for path in paths} == {f"/{app}/(.*)" for app in STORYBOOK_APPS}
     assert ingress["spec"]["rules"][0]["host"] == "dev.oriso.org"
+    assert ingress["spec"]["tls"] == [{"hosts": ["dev.oriso.org"], "secretName": "dev-oriso-org-tls"}]
+    for app in STORYBOOK_APPS:
+        redirect = resources[("Ingress", f"{app}-slash-redirect")]
+        redirection = redirect["metadata"]["annotations"]
+        assert redirection["nginx.ingress.kubernetes.io/permanent-redirect"] == f"https://dev.oriso.org/{app}/"
+        assert redirection["nginx.ingress.kubernetes.io/permanent-redirect-code"] == "308"
+        assert redirection["nginx.ingress.kubernetes.io/use-regex"] == "true"
+        assert redirection["nginx.ingress.kubernetes.io/ssl-redirect"] == "true"
+        rule = redirect["spec"]["rules"][0]
+        assert rule["host"] == "dev.oriso.org"
+        assert rule["http"]["paths"] == [{
+            "path": f"/{app}$",
+            "pathType": "ImplementationSpecific",
+            "backend": {"service": {"name": app, "port": {"number": 80}}},
+        }]
+
+    for (kind, _), resource in resources.items():
+        if kind == "Ingress":
+            assert resource["spec"]["ingressClassName"] == "nginx"
+            assert not any(key.endswith("-snippet") for key in resource["metadata"]["annotations"])
     print("PASS: Dev renders authenticated Frontend and Admin Storybook routes")
 
 

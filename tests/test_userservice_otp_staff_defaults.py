@@ -5,13 +5,15 @@ roles must default to true.
 UserService answers 2FA enrolment with 409 and never announces the requirement.
 The advice-seeker template fallback stays "false". Staff flags use `dig`, not
 `| default`, because `default` treats an explicit boolean false as empty and
-would turn an operator's `--set ...=false` into "true". Pure source checks,
-no helm.
+would turn an operator's `--set ...=false` into "true".
 """
 
 import re
+import subprocess
 import unittest
 from pathlib import Path
+
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "templates" / "userservice" / "userservice-configmap-env.yaml"
@@ -52,6 +54,42 @@ class UserServiceOtpStaffDefaults(unittest.TestCase):
 
     def test_advice_seeker_template_fallback_is_false(self):
         self.assertEqual("false", default_of("IDENTITY_OTP_ALLOWED_FOR_USERS"))
+
+    def test_dev_renders_tenant_super_admin_otp_and_wires_userservice(self):
+        args = ["helm", "template", "caritas", str(ROOT), "--namespace", "caritas"]
+        for values in (
+            "values.yaml.default",
+            "secrets.yaml.default",
+            "tests/fixtures/values-render-domain.yaml",
+            "tests/fixtures/render-required-secrets.yaml",
+            "values-dev.yaml",
+        ):
+            args.extend(["-f", str(ROOT / values)])
+        args.extend([
+            "--set-string", "global.emailLegalOrganisationName=Render Test Foundation",
+            "--show-only", "templates/userservice/userservice-configmap-env.yaml",
+            "--show-only", "templates/userservice/userservice-deployment.yaml",
+        ])
+        rendered = subprocess.run(args, capture_output=True, text=True, check=False)
+        self.assertEqual(rendered.returncode, 0, rendered.stderr)
+        resources = {
+            (doc["kind"], doc["metadata"]["name"]): doc
+            for doc in yaml.safe_load_all(rendered.stdout)
+            if doc
+        }
+
+        key = "IDENTITY_OTP_ALLOWED_FOR_TENANT_SUPER_ADMINS"
+        config_map = resources["ConfigMap", "userservice-configmap-env"]
+        self.assertEqual(config_map["data"].get(key), "true")
+        deployment = resources["Deployment", "userservice"]
+        containers = deployment["spec"]["template"]["spec"]["containers"]
+        userservice = next(container for container in containers if container["name"] == "userservice")
+        entries = [entry for entry in userservice["env"] if entry["name"] == key]
+        self.assertEqual(entries, [{
+            "name": key,
+            "valueFrom": {"configMapKeyRef": {"name": config_map["metadata"]["name"], "key": key}},
+        }])
+
 
 if __name__ == "__main__":
     unittest.main()

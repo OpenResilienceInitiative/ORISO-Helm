@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import secrets
 import shlex
@@ -18,14 +19,17 @@ import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
 SERVICE_NAME = "oriso-signoz-acceptance"
 METRIC_NAME = "oriso.signoz.acceptance"
 SUPPRESSED_LOG_BODY = "[ORISO log body suppressed by privacy policy]"
+ARGOCD_MIGRATION_JOB = "signoz-telemetrystore-migrator-sync"
 # Match the managed ClickHouse capacity alert's 2 GiB floor.
 MIN_CLICKHOUSE_UNRESERVED_BYTES = 2 * 1024**3
 CLICKHOUSE_UNKNOWN_SPACE = 2**64 - 1
@@ -203,12 +207,20 @@ def _metric_samples_query(*series_predicates: str) -> str:
     """.strip()
 
 
-def build_java_signal_query(environment: str, end_ms: int) -> str:
+def _java_signal_starts(end_ms: int, since_ms: int | None) -> tuple[int, int]:
+    if since_ms is not None and not 0 <= since_ms < end_ms:
+        raise RuntimeError("--since-unix-ms must be a nonnegative timestamp before now")
+    fresh_ms = max(end_ms - JAVA_FRESHNESS_MINUTES * 60_000, since_ms or 0)
+    correlation_ms = max(end_ms - JAVA_CORRELATION_MINUTES * 60_000, since_ms or 0)
+    return fresh_ms, correlation_ms
+
+
+def build_java_signal_query(environment: str, end_ms: int, since_ms: int | None = None) -> str:
     """Count real stored signals and log-to-span matches without exporting identities."""
     env = _sql_literal(environment)
     services = ", ".join(_sql_literal(service) for service in JAVA_SERVICES)
-    fresh_ms = end_ms - JAVA_FRESHNESS_MINUTES * 60_000
-    correlation_ms = end_ms - JAVA_CORRELATION_MINUTES * 60_000
+    fresh_ms, correlation_ms = _java_signal_starts(end_ms, since_ms)
+    # The tuple predicate prunes the sample sorting key before the join attributes rows to services.
     return f"""WITH recent_logs AS (
     SELECT resources_string['service.name'] AS service_name, timestamp, trace_id, span_id
     FROM signoz_logs.distributed_logs_v2
@@ -247,6 +259,9 @@ SELECT signal, service_name, samples, wrong_environment, invalid_version FROM (
     FROM signoz_metrics.distributed_samples_v4 AS s
     GLOBAL INNER JOIN metric_identities AS i USING (env, temporality, metric_name, fingerprint)
     WHERE s.unix_milli >= {fresh_ms} AND s.unix_milli < {end_ms}
+      AND (s.env, s.temporality, s.metric_name, s.fingerprint) GLOBAL IN (
+        SELECT env, temporality, metric_name, fingerprint FROM metric_identities
+      )
       AND bitAnd(s.flags, 1) = 0 AND isFinite(s.value)
     GROUP BY i.service_name
     UNION ALL
@@ -329,6 +344,12 @@ def build_infra_readback_queries(
         ),
         "nodeMetrics": _metric_samples_query(
             "startsWith(metric_name, 'k8s.node.')", *metric_identity
+        ),
+        "nodeFilesystemAvailable": _metric_samples_query(
+            "metric_name = 'k8s.node.filesystem.available'", *metric_identity
+        ),
+        "nodeFilesystemCapacity": _metric_samples_query(
+            "metric_name = 'k8s.node.filesystem.capacity'", *metric_identity
         ),
         "hostMetrics": _metric_samples_query(
             "startsWith(metric_name, 'system.')", *metric_identity
@@ -444,7 +465,10 @@ def _check_runtime_readiness(
     release: str,
     timeout: str,
     require_k8s_infra: bool = False,
-) -> None:
+    *,
+    argocd_application: str | None = None,
+    argocd_migration_job: str = ARGOCD_MIGRATION_JOB,
+) -> dict[str, Any] | None:
     statefulsets = _current_clickhouse_statefulsets(runner, namespace, release)
 
     _kubectl(
@@ -470,21 +494,115 @@ def _check_runtime_readiness(
                 f"--timeout={timeout}",
             )
 
+    if argocd_application is not None:
+        return _check_argocd_migration(runner, namespace, argocd_application, argocd_migration_job)
+
     _kubectl(
         runner,
         namespace,
         "wait",
         "--for=condition=complete",
-        "job/signoz-telemetrystore-migrator",
+        f"job/{_current_migration_job(runner, namespace, release)}",
         f"--timeout={timeout}",
     )
+    return None
+
+
+def _check_argocd_migration(
+    runner: Runner, namespace: str, application_ref: str, job_name: str,
+) -> dict[str, Any]:
+    app_namespace, app_name = application_ref.split("/")
+    application = json.loads(_kubectl(
+        runner, app_namespace, "get", "applications.argoproj.io", app_name, "-o", "json",
+    ))
+    status = application.get("status", {})
+    comparison = status.get("sync", {})
+    compared_to = comparison.get("comparedTo", {})
+    state = status.get("operationState", {})
+    operation = state.get("operation", {}).get("sync")
+    result = state.get("syncResult", {})
+    spec = application.get("spec", {})
+    destination = spec.get("destination", {})
+    if (
+        destination.get("namespace") != namespace
+        or destination.get("server") != "https://kubernetes.default.svc"
+        or compared_to.get("destination") != destination
+    ):
+        raise RuntimeError(
+            f"Argo CD Application {application_ref} must target the local cluster and namespace {namespace}"
+        )
+    if (
+        application.get("metadata", {}).get("deletionTimestamp")
+        or application.get("operation")
+        or comparison.get("status") != "Synced"
+        or state.get("phase") != "Succeeded"
+        or operation is None
+        or any(operation.get(key) for key in ("dryRun", "resources", "manifests"))
+    ):
+        raise RuntimeError(f"Argo CD Application {application_ref} has no current successful full sync")
+
+    # Check the applied source configuration as well as its resolved revision.
+    # An updated Helm source can change values at the same Git or chart revision.
+    if spec.get("sources"):
+        sources = spec["sources"]
+        revisions = comparison.get("revisions", [])
+        current = (
+            len(revisions) == len(sources) and all(revisions)
+            and result.get("revisions") == revisions
+            and compared_to.get("sources") == result.get("sources") == sources
+        )
+    else:
+        source = spec.get("source")
+        revision = comparison.get("revision")
+        revisions = [revision]
+        current = (
+            source and revision and result.get("revision") == revision
+            and compared_to.get("source") == result.get("source") == source
+        )
+    if not current:
+        raise RuntimeError(f"Argo CD Application {application_ref} has no successful sync for its current sources and revisions")
+
+    identity = {
+        "group": "batch",
+        "version": "v1",
+        "kind": "Job",
+        "namespace": namespace,
+        "name": job_name,
+        "hookType": "Sync",
+        "syncPhase": "Sync",
+    }
+    matching_hooks = [
+        resource for resource in result.get("resources", [])
+        if all(resource.get(key) == value for key, value in identity.items())
+    ]
+    if len(matching_hooks) != 1 or matching_hooks[0].get("hookPhase") != "Succeeded":
+        raise RuntimeError(f"Argo CD Application {application_ref} has no successful Sync hook for Job {namespace}/{job_name}")
+    return {"application": application_ref, "job": job_name, "revisions": revisions}
+
+
+def _current_migration_job(runner: Runner, namespace: str, release: str) -> str:
+    mode_label = "oriso.org/signoz-migrator"
+    selector = f"app.kubernetes.io/instance={release},{mode_label}"
+    jobs = json.loads(_kubectl(runner, namespace, "get", "job", "-l", selector, "-o", "json"))
+    by_mode: dict[str, list[str]] = {"managed": [], "hook": []}
+    for item in jobs["items"]:
+        metadata = item["metadata"]
+        mode = metadata["labels"][mode_label]
+        if not metadata.get("deletionTimestamp") and mode in by_mode:
+            by_mode[mode].append(metadata["name"])
+
+    names = by_mode["managed"] or by_mode["hook"]
+    if len(names) > 1:
+        raise RuntimeError(f"Multiple SigNoz migration Jobs for {release}: {', '.join(sorted(names))}")
+    return names[0] if names else "signoz-telemetrystore-migrator"
 
 
 def _current_clickhouse_statefulsets(
-    runner: Runner, namespace: str, release: str,
+    runner: Runner, namespace: str, release: str, *, chi: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     chi_name = f"{release}-clickhouse"
-    chi = json.loads(_kubectl(runner, namespace, "get", "chi", chi_name, "-o", "json"))
+    if chi is None:
+        chi = json.loads(_kubectl(runner, namespace, "get", "chi", chi_name, "-o", "json"))
     installation = chi.get("metadata", {})
     if installation.get("deletionTimestamp"):
         raise RuntimeError(f"ClickHouseInstallation {chi_name} is deleting")
@@ -574,6 +692,25 @@ def _emit_signal(
     )
 
 
+def build_acceptance_event(namespace: str, acceptance_id: str) -> dict[str, Any]:
+    """Core v1 Event whose message carries only the random acceptance ID."""
+    # k8s_events skips events older than its start time, so stamp the current time.
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return {
+        "apiVersion": "v1",
+        "kind": "Event",
+        "metadata": {"name": f"signoz-acceptance-{acceptance_id[-8:]}", "namespace": namespace},
+        "involvedObject": {"apiVersion": "v1", "kind": "Namespace", "name": namespace, "namespace": namespace},
+        "reason": "SigNozAcceptance",
+        "type": "Normal",
+        "message": acceptance_id,
+        "source": {"component": "oriso-signoz-acceptance"},
+        "firstTimestamp": now,
+        "lastTimestamp": now,
+        "count": 1,
+    }
+
+
 def _emit_infra_probes(
     runner: Runner,
     namespace: str,
@@ -584,17 +721,10 @@ def _emit_infra_probes(
 ) -> str:
     """Create one Kubernetes event and one representative application log."""
     suffix = acceptance_id[-8:]
-    event_name = f"signoz-acceptance-{suffix}"
-    _kubectl(
-        runner,
-        namespace,
-        "create",
-        "event",
-        event_name,
-        "--reason=SigNozAcceptance",
-        "--type=Normal",
-        f"--message={acceptance_id}",
-        f"--for=namespace/{namespace}",
+    # kubectl has no "create event" subcommand, so submit a core Event manifest.
+    runner.run(
+        ["kubectl", "-n", namespace, "create", "-f", "-"],
+        input_text=json.dumps(build_acceptance_event(namespace, acceptance_id)),
     )
 
     pod_name = f"signoz-log-acceptance-{suffix}"
@@ -729,40 +859,104 @@ def _parse_sample_count(value: Any) -> int:
     return value
 
 
-def _read_java_signals(runner: Runner, namespace: str, pod: str, environment: str) -> dict[str, Any]:
+def _read_java_signals(
+    runner: Runner, namespace: str, pod: str, environment: str, since_ms: int | None = None,
+) -> dict[str, Any]:
     end_ms = time.time_ns() // 1_000_000
     output = _clickhouse_query(
-        runner, namespace, pod, build_java_signal_query(environment, end_ms), "JSONEachRow"
+        runner, namespace, pod, build_java_signal_query(environment, end_ms, since_ms), "JSONEachRow"
     )
+    try:
+        return _java_signal_report(
+            (json.loads(line) for line in output.splitlines()), environment, end_ms, since_ms,
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("ClickHouse returned invalid Java signal readback") from error
+
+
+def _read_java_signals_api(
+    api_url: str, environment: str, since_ms: int | None,
+) -> dict[str, Any]:
+    try:
+        endpoint = urlsplit(api_url)
+        if (
+            endpoint.scheme != "https" or not endpoint.hostname or endpoint.username is not None
+            or endpoint.query or endpoint.fragment or any(char.isspace() for char in api_url)
+        ):
+            raise ValueError
+    except ValueError:
+        raise RuntimeError("--signoz-url requires a trusted HTTPS base URL") from None
+    api_key = os.environ.get("SIGNOZ_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("SIGNOZ_API_KEY is required with --signoz-url")
+
+    # This script also runs directly from scripts/, outside the repository import path.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from files.signoz.signoz_observability import SignozClient, build_query_range_payload
+
+    end_ms = time.time_ns() // 1_000_000
+    _, start_ms = _java_signal_starts(end_ms, since_ms)
+    name = "JavaSignals"
+    payload = build_query_range_payload(
+        {"name": name, "query": build_java_signal_query(environment, end_ms, since_ms)},
+        start_ms=start_ms, end_ms=end_ms, request_type="raw", query_type="clickhouse_sql",
+    )
+    client = SignozClient(api_url, api_key, read_only=True)
+    try:
+        response = client.request("POST", "/api/v5/query_range", payload)
+        envelope = response["data"]
+        inner = envelope["data"]
+        result, = inner["results"]
+        rows = result["rows"]
+        if rows is None:
+            rows = []
+        if (
+            response["status"] != "success" or envelope["type"] != "raw"
+            or result["queryName"] != name or result["nextCursor"] != ""
+            or any(part.get("warning") or part.get("warnings") for part in (response, envelope, inner, result))
+            or not isinstance(rows, list) or len(rows) > len(JAVA_SERVICES) * len(JAVA_SIGNALS)
+        ):
+            raise ValueError
+        fields = {"service_name", "signal", "samples", "wrong_environment", "invalid_version"}
+        counts = [row["data"] for row in rows]
+        if any(not isinstance(row, dict) or row.keys() != fields for row in counts):
+            raise ValueError
+        return _java_signal_report(counts, environment, end_ms, since_ms)
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("SigNoz returned invalid Java signal readback") from error
+
+
+def _java_signal_report(
+    rows: Iterable[dict[str, Any]], environment: str, end_ms: int, since_ms: int | None,
+) -> dict[str, Any]:
     counts = {service: dict.fromkeys(JAVA_SIGNALS, 0) for service in JAVA_SERVICES}
     trace_identity = {}
     seen = set()
-    try:
-        for line in output.splitlines():
-            row = json.loads(line)
-            service, signal = row["service_name"], row["signal"]
-            samples = _parse_sample_count(row["samples"])
-            pair = (service, signal)
-            if signal not in JAVA_SIGNALS or pair in seen:
+    for row in rows:
+        service, signal = row["service_name"], row["signal"]
+        samples = _parse_sample_count(row["samples"])
+        pair = (service, signal)
+        if signal not in JAVA_SIGNALS or pair in seen:
+            raise ValueError
+        if signal == "traces":
+            wrong_environment = _parse_sample_count(row["wrong_environment"])
+            invalid_version = _parse_sample_count(row["invalid_version"])
+            if wrong_environment > samples or invalid_version > samples:
                 raise ValueError
-            if signal == "traces":
-                wrong_environment = _parse_sample_count(row["wrong_environment"])
-                invalid_version = _parse_sample_count(row["invalid_version"])
-                if wrong_environment > samples or invalid_version > samples:
-                    raise ValueError
-                trace_identity[service] = {
-                    "wrongEnvironment": wrong_environment,
-                    "invalidVersion": invalid_version,
-                }
-            counts[service][signal] = samples
-            seen.add(pair)
-    except (KeyError, TypeError, ValueError) as error:
-        raise RuntimeError("ClickHouse returned invalid Java signal readback") from error
+            trace_identity[service] = {
+                "wrongEnvironment": wrong_environment,
+                "invalidVersion": invalid_version,
+            }
+        counts[service][signal] = samples
+        seen.add(pair)
+    fresh_ms, correlation_ms = _java_signal_starts(end_ms, since_ms)
     return {
         "environment": environment,
         "endUnixMs": end_ms,
         "freshnessMinutes": JAVA_FRESHNESS_MINUTES,
         "correlationMinutes": JAVA_CORRELATION_MINUTES,
+        "freshnessStartUnixMs": fresh_ms,
+        "correlationStartUnixMs": correlation_ms,
         "services": counts,
         "traceIdentity": trace_identity,
         "missing": [
@@ -985,6 +1179,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--environment", required=True)
     parser.add_argument("--cluster-name")
     parser.add_argument("--ssh-host")
+    parser.add_argument(
+        "--argocd-application", metavar="NAMESPACE/NAME",
+        help="Check the in-cluster Argo CD Application for a completed migration Sync hook",
+    )
+    parser.add_argument(
+        "--argocd-migration-job",
+        help=f"Rendered Argo CD migration Job name when it differs from {ARGOCD_MIGRATION_JOB}",
+    )
+    parser.add_argument("--signoz-url", help="Query the trusted HTTPS SigNoz API in Java signal mode")
+    parser.add_argument("--since-unix-ms", type=int, help="Earliest admitted sample in Java signal mode")
     parser.add_argument("--timeout", default="10m")
     parser.add_argument("--readback-attempts", type=int, default=20)
     parser.add_argument("--readback-interval-seconds", type=float, default=3)
@@ -1010,19 +1214,35 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Read ClickHouse deletion TTLs and disk and system log usage without creating acceptance probes",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if (args.signoz_url is not None or args.since_unix_ms is not None) and not args.check_java_signals:
+        parser.error("--signoz-url and --since-unix-ms require --check-java-signals")
+    if args.signoz_url is not None and args.ssh_host is not None:
+        parser.error("--signoz-url and --ssh-host select different query transports")
+    if args.argocd_application is not None:
+        if not re.fullmatch(r"[a-z0-9-]+/[a-z0-9.-]+", args.argocd_application):
+            parser.error("--argocd-application must be NAMESPACE/NAME")
+        if args.check_java_signals or args.check_clickhouse_retention:
+            parser.error("--argocd-application requires a readiness or full acceptance check")
+    if args.argocd_migration_job is not None and args.argocd_application is None:
+        parser.error("--argocd-migration-job requires --argocd-application")
+    return args
 
 
 def main() -> None:
     args = parse_args()
-    runner = Runner(args.ssh_host)
     if args.check_java_signals:
-        pod = _clickhouse_pods(runner, args.namespace, args.release)[0]
-        signals = _read_java_signals(runner, args.namespace, pod, args.environment)
+        if args.signoz_url is not None:
+            signals = _read_java_signals_api(args.signoz_url, args.environment, args.since_unix_ms)
+        else:
+            runner = Runner(args.ssh_host)
+            pod = _clickhouse_pods(runner, args.namespace, args.release)[0]
+            signals = _read_java_signals(runner, args.namespace, pod, args.environment, args.since_unix_ms)
         print(json.dumps(signals, indent=2, sort_keys=True))
         _require_java_signals(signals)
         return
 
+    runner = Runner(args.ssh_host)
     if args.check_clickhouse_retention:
         pods = _clickhouse_pods(runner, args.namespace, args.release)
         snapshots, failed = _read_clickhouse_retention_pods(runner, args.namespace, pods)
@@ -1034,12 +1254,14 @@ def main() -> None:
     require_k8s_infra = not args.skip_k8s_infra
     if require_k8s_infra and not args.cluster_name:
         raise RuntimeError("--cluster-name is required unless --skip-k8s-infra is set")
-    _check_runtime_readiness(
+    argocd_migration = _check_runtime_readiness(
         runner,
         args.namespace,
         args.release,
         args.timeout,
         require_k8s_infra=require_k8s_infra,
+        argocd_application=args.argocd_application,
+        argocd_migration_job=args.argocd_migration_job or ARGOCD_MIGRATION_JOB,
     )
     _check_collector_config(runner, args.namespace, args.release)
 
@@ -1052,6 +1274,8 @@ def main() -> None:
         "k8sInfraReadiness": "passed" if require_k8s_infra else "skipped",
         "clickhouseRetention": "skipped",
     }
+    if argocd_migration is not None and args.argocd_application is not None:
+        report["argocdMigration"] = argocd_migration
     if args.skip_synthetic:
         report["clickhouseCapacity"] = "skipped"
         report["syntheticReadback"] = "skipped"

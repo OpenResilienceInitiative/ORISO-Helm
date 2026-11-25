@@ -7,6 +7,56 @@ SQLite procedure. The current Dev ClickHouse catalog has one local
 destination, archive retention, recovery objectives and a restore environment.
 [SQLite recovery](https://github.com/OpenResilienceInitiative/ORISO-Helm/pull/496)
 
+## Activate the scheduled archives
+
+A routine Dev upgrade leaves the ClickHouse signal backup inactive. For a
+separately approved rollout, verify that the storage class can provision and
+attach a 10 GiB ReadWriteOnce volume at the ClickHouse Pod's topology. Plan for
+ClickHouse to restart when its pod template changes. Check the bound claim,
+the recovered Ready replica and SigNoz queries before accepting the rollout.
+
+In the [Dev rollout procedure](signoz-dev.md#rollout), use the same input list
+for generating and checking the intended observability projection:
+
+```sh
+observability_inputs=(values-dev.yaml values-dev-clickhouse-signal-backup.yaml)
+python3 scripts/observability_overlay.py "${observability_inputs[@]}" > "$observability_file"
+```
+
+Helm replaces volume and mount lists. Preserve unrelated existing entries in
+the reviewed values if the installation has any. For an already enabled
+installation, include the same approved overlay to keep its schedule and
+mount. For an intentional removal, use a reviewed values input that sets the
+job flag to false, removes only the signal backup volume and mount entries, and
+replaces its disk file with empty valid XML (`<clickhouse/>`). This makes each
+planned change visible to the drift check. Use explicit values rather than
+reusing the installed release values. The preflight flags inherited signal
+backup disk or mount settings on a routine upgrade. Plan the restart and verify
+the kept claim's PV reclaim policy before removing the mount.
+
+With the overlay active, `signoz.orisoDataProtection.signalBackup` runs a CronJob daily at
+03:15 UTC. It writes a native archive of the six databases to the
+`oriso_signal_backup` disk. That disk is the separate claim
+`signoz-clickhouse-signal-backup`, which ClickHouse mounts at
+`/var/lib/clickhouse-signal-backup/`. Helm keeps the claim on uninstall and
+the retain hook switches its volume to reclaim `Retain` on the next upgrade
+after it binds. Each archive `signal-<UTC stamp>.zip` passes a CRC read-back
+before its `.sha256` file is written. The newest seven verified archives are
+kept. Unverified leftovers of failed runs are removed. The Job's termination
+message records the backup ID, archive, digest and size.
+
+```sh
+kubectl -n caritas get jobs -l app.kubernetes.io/component=signoz-signal-backup
+kubectl -n caritas get pod -l app.kubernetes.io/component=signoz-signal-backup \
+  -o jsonpath='{.items[-1:].status.containerStatuses[0].state.terminated.message}'
+```
+
+The claim shares ClickHouse's node and storage class. It protects against a
+deleted or recreated data claim, not against the loss of the node's storage.
+Restore into a fresh target as described below. Use
+`Disk('oriso_signal_backup', '<archive>')` after mounting a copy of the claim
+read-only as that disk and checking the `.sha256` file.
+
 ## Isolated rehearsal
 
 Run the rehearsal on ARM64 macOS with Python 3.11 or later, PyYAML and the two

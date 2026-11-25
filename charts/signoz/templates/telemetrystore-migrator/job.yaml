@@ -1,95 +1,69 @@
 {{- if .Values.telemetryStoreMigrator.enabled }}
+{{- $baseName := include "telemetryStoreMigrator.fullname" . }}
+{{- $migrator := .Values.telemetryStoreMigrator }}
+{{- $argo := $migrator.argocdSyncHook }}
+{{- $hook := and (not $argo) $migrator.upgradeHelmHooks .Release.IsUpgrade }}
+{{- $annotations := deepCopy ($migrator.annotations | default dict) }}
+{{- $embeddedSecret := "" }}
+{{- $passwordRef := dict }}
+{{- if not $hook }}
+  {{- if .Values.clickhouse.enabled }}
+    {{- $embeddedSecret = printf "%s-migrator-auth" (include "signoz.fullname" . | trunc 49 | trimSuffix "-") }}
+    {{- $passwordRef = dict "name" $embeddedSecret "key" "password" }}
+  {{- else if include "clickhouse.createSecret" . }}
+    {{- $passwordRef = dict "name" (include "clickhouse.secretName" .) "key" (include "clickhouse.secretPasswordKey" .) }}
+  {{- end }}
+{{- end }}
+{{- $podTemplate := include "telemetryStoreMigrator.podTemplate" (dict "root" . "passwordRef" $passwordRef) }}
+{{- $mode := "managed" }}
+{{- $jobName := $baseName }}
+{{- if $argo }}
+  {{- /* Keep one Job identity across rendered revisions. An existing active Job
+        cannot be replaced by applying a changed immutable Pod template. */}}
+  {{- $mode = "argocd" }}
+  {{- $jobName = printf "%s-sync" ($baseName | trunc 58 | trimSuffix "-") }}
+  {{- $lifecycleAnnotations := list
+    "argocd.argoproj.io/hook" "argocd.argoproj.io/hook-delete-policy"
+    "argocd.argoproj.io/sync-options" "argocd.argoproj.io/sync-wave"
+    "helm.sh/hook" "helm.sh/hook-delete-policy" }}
+  {{- range $key := $lifecycleAnnotations }}
+    {{- if hasKey $annotations $key }}
+      {{- fail (printf "Argo CD migrator manages annotation %s. Remove it from telemetryStoreMigrator.annotations." $key) }}
+    {{- end }}
+  {{- end }}
+  {{- $_ := set $annotations "argocd.argoproj.io/hook" "Sync" }}
+  {{- $_ := set $annotations "argocd.argoproj.io/hook-delete-policy" "HookSucceeded" }}
+{{- else if $hook }}
+  {{- $mode = "hook" }}
+  {{- $jobName = printf "%s-pre-upgrade" ($baseName | trunc 51 | trimSuffix "-") }}
+  {{- $_ := set $annotations "helm.sh/hook" "pre-upgrade" }}
+  {{- $_ := set $annotations "helm.sh/hook-delete-policy" "before-hook-creation" }}
+{{- else }}
+  {{- /* A Job Pod template is immutable. Hash Secret references, never inline passwords. */}}
+  {{- $jobName = printf "%s-%s" ($baseName | trunc 46 | trimSuffix "-") (sha256sum $podTemplate | trunc 16) }}
+{{- end }}
+{{- include "telemetryStoreMigrator.checkReplacement" (dict "root" . "jobName" $jobName "hook" $hook) }}
+{{- if $embeddedSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $embeddedSecret }}
+type: Opaque
+data:
+  password: {{ .Values.clickhouse.password | toString | b64enc | quote }}
+---
+{{- end }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "telemetryStoreMigrator.fullname" . }}
+  name: {{ $jobName }}
   labels:
     {{- include "telemetryStoreMigrator.selectorLabels" . | nindent 4 }}
+    oriso.org/signoz-migrator: {{ $mode }}
   annotations:
-    {{- with .Values.telemetryStoreMigrator.annotations }}
+    {{- with $annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
-    {{- if .Values.telemetryStoreMigrator.upgradeHelmHooks }}
-    argocd.argoproj.io/sync-options: Force=true,Replace=true
-    {{- if .Release.IsUpgrade }}
-    helm.sh/hook: pre-upgrade
-    helm.sh/hook-delete-policy: before-hook-creation
-    {{- end }}
-    {{- end }}
 spec:
-  template:
-    metadata:
-      labels:
-        {{- include "telemetryStoreMigrator.selectorLabels" . | nindent 8 }}
-    spec:
-      {{- with .Values.telemetryStoreMigrator.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.telemetryStoreMigrator.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.telemetryStoreMigrator.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.telemetryStoreMigrator.topologySpreadConstraints }}
-      topologySpreadConstraints:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      serviceAccountName: {{ include "telemetryStoreMigrator.serviceAccountName" . }}
-      initContainers:
-        - name: ready
-          image: {{ include "otelCollector.image" . }}
-          imagePullPolicy: {{ .Values.otelCollector.image.pullPolicy }}
-          env:
-            {{- include "snippet.telemetryStoreMigrator-env" . | nindent 12 }}
-          args:
-            - "migrate"
-            - "ready"
-          {{- with .Values.telemetryStoreMigrator.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-        - name: bootstrap
-          image: {{ include "otelCollector.image" . }}
-          imagePullPolicy: {{ .Values.otelCollector.image.pullPolicy }}
-          env:
-            {{- include "snippet.telemetryStoreMigrator-env" . | nindent 12 }}
-          args:
-            - "migrate"
-            - "bootstrap"
-          {{- with .Values.telemetryStoreMigrator.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-        - name: sync
-          image: {{ include "otelCollector.image" . }}
-          imagePullPolicy: {{ .Values.otelCollector.image.pullPolicy }}
-          env:
-            {{- include "snippet.telemetryStoreMigrator-env" . | nindent 12 }}
-          args:
-            - "migrate"
-            - "sync"
-            - "up"
-          {{- with .Values.telemetryStoreMigrator.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-      containers:
-        - name: async
-          image: {{ include "otelCollector.image" . }}
-          imagePullPolicy: {{ .Values.otelCollector.image.pullPolicy }}
-          env:
-            {{- include "snippet.telemetryStoreMigrator-env" . | nindent 12 }}
-          args:
-            - "migrate"
-            - "async"
-            - "up"
-          {{- with .Values.telemetryStoreMigrator.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-      restartPolicy: OnFailure
+  template: {{- $podTemplate | nindent 4 }}
 {{- end }}

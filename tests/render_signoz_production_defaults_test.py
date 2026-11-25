@@ -133,6 +133,16 @@ class SigNozExposureDefaults(unittest.TestCase):
             yaml.safe_dump(lower, inherited)
             inherited.flush()
             self.assert_private_preparation(render(inherited_values=inherited.name))
+            docs = render(
+                PROD_OVERLAY,
+                "--set", "signoz.otelCollector.replicaCount=1",
+                "--set", "signozCollector.enabled=true",
+                "--set-string", "signozCollector.clusterName=production-render",
+                inherited_values=inherited.name,
+            )
+            config = configmap_data(docs, f"{RELEASE}-k8s-infra-otel-deployment")
+            collector = yaml.safe_load(config["otel-deployment-config.yaml"])
+            self.assertNotIn("prometheus/oriso-ingress-nginx", collector["receivers"])
 
     def test_local_java_export_fails_when_the_bundled_collector_is_dormant(self):
         for host in ("", f"{COLLECTOR}:4318", f"{COLLECTOR}.default.svc.cluster.local.:4318"):

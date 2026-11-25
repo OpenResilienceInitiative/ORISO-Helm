@@ -190,6 +190,23 @@ def main():
             "name": "userservice-configmap-env", "key": "DELETION_AUDIT_AGENCYOUTBOX_ENABLED"
         }
 
+    finish, finish_docs = render("--set", "tenantService.tenantDeletionFinishEnabled=true")
+    assert finish.returncode == 0, finish.stderr
+    assert (
+        finish_docs[("ConfigMap", "tenantservice-configmap-env")]["data"][
+            "TASK_IDENTITY_REQUIRED_TASKS"
+        ]
+        == RECEIVERS["tenantservice"]["tasks"] + ",TENANT_DELETION"
+    ), "the Träger deletion switch must add exactly TENANT_DELETION"
+    # UserService finishes Träger deletions only when TenantService accepts them (ORISO-Admin#1525).
+    for rendered, expected in ((docs, "false"), (finish_docs, "true")):
+        user_config = rendered[("ConfigMap", "userservice-configmap-env")]["data"]
+        assert user_config["DELETION_TENANTFINISH_ENABLED"] == expected
+        user_env = env_by_name(rendered[("Deployment", "userservice")])
+        assert user_env["DELETION_TENANTFINISH_ENABLED"]["valueFrom"]["configMapKeyRef"] == {
+            "name": "userservice-configmap-env", "key": "DELETION_TENANTFINISH_ENABLED"
+        }
+
     conflicting, _ = render("--set", "global.keycloak.taskIdentities.provisionOnly=true")
     assert conflicting.returncode != 0, "enable and provisionOnly must be mutually exclusive"
 

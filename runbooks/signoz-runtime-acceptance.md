@@ -16,7 +16,8 @@ The command fails closed unless all of the following are true:
 - the ClickHouseInstallation exists and is not being deleted;
 - the ClickHouse operator, ClickHouse, SigNoz, and OTEL Collector rollouts are
   ready;
-- the telemetry-store migration job completed;
+- the telemetry-store migration completed, verified through the Job for Helm
+  or the matching Sync hook result for Argo CD;
 - the live collector configuration has OTLP HTTP and gRPC receivers plus a
   ClickHouse exporter in each trace, metric, and log pipeline;
 - every non-terminating ClickHouse data pod for the release is ready and meets
@@ -28,6 +29,8 @@ The command fails closed unless all of the following are true:
 - the node-local and cluster-wide `k8s-infra` collectors are ready;
 - pod, node, node-condition, and host metrics carry the intended environment
   and cluster identity;
+- fresh kubelet filesystem availability and capacity samples support the
+  node-disk alert;
 - collector self-metrics are present, so a silent collector failure is visible;
 - a synthetic Kubernetes Event is collected;
 - a representative nested ORISO JSON log is collected with trace correlation,
@@ -71,6 +74,25 @@ short-lived BusyBox log probe, and one namespaced synthetic Kubernetes Event.
 It removes the log probe after successful or failed readback and does not
 persist or print ClickHouse credentials. The Event contains only the random
 acceptance ID and expires under the cluster's normal Event retention policy.
+
+## Argo CD migration evidence
+
+After a full Argo CD sync, add `--argocd-application <argocd-namespace>/<application>`
+to the runtime acceptance command. Use the same Kubernetes context as the
+Application and its workloads. The Application must target
+`https://kubernetes.default.svc` and the namespace passed to
+`--namespace`. The operator needs read access to the named
+`applications.argoproj.io` resource as well as the normal workload access.
+
+An application must be `Synced` and its latest successful full sync must match
+its current source configuration and resolved revision or revisions. The gate
+uses that operation's successful `batch/v1` Sync hook result for
+`signoz-telemetrystore-migrator-sync` in the target namespace. Use
+`--argocd-migration-job <rendered-name>` if the configured migrator uses a
+custom name. This verifies completion after `HookSucceeded` removes the Job.
+The JSON report records the Application, Job name and revisions under
+`argocdMigration`. The mode uses the same rollout, pipeline and signal checks
+as the ordinary gate.
 
 ## Readiness-only diagnosis
 
@@ -118,6 +140,23 @@ The 60-minute correlation requires matching trace and span IDs from the same
 service and deployment environment. The command exits 1 on missing signals or
 trace identity violations and returns aggregate counts. For release evidence,
 run the full command once the fresh window reflects the reviewed rollout.
+
+When pod exec is unavailable, run the same read-only check through the trusted
+SigNoz HTTPS base URL for the environment. On Dev, use the canonical
+`https://dev.oriso.org/signoz/` URL. Set `SIGNOZ_API_KEY` in the process
+environment through the private credential route. The key needs access to the
+SigNoz V5 ClickHouse SQL query API.
+
+```bash
+python3 scripts/signoz_runtime_acceptance.py \
+  --namespace caritas --release caritas --environment dev \
+  --check-java-signals --signoz-url https://dev.oriso.org/signoz/
+```
+
+For either transport, pass `--since-unix-ms` with the start of a reviewed
+rollout or recovery to exclude older log, trace and metric samples. The
+timestamp can shorten the usual lookback windows. The JSON report includes the
+effective start of each window.
 
 ## Read ClickHouse retention and disk usage
 

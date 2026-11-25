@@ -1,0 +1,11 @@
+{{- if gt (.Values.replicas | default 1 | int) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: keycloak
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: keycloak
+{{- end }}

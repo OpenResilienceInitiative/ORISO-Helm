@@ -191,11 +191,6 @@ spec:
                 configMapKeyRef:
                   key: FEATURE_DEMOGRAPHICS_ENABLED
                   name: agencyservice-configmap-env
-            - name: JAVA_OPTS
-              valueFrom:
-                configMapKeyRef:
-                  key: JAVA_OPTS
-                  name: agencyservice-configmap-env
             - name: USER_ADMIN_SERVICE_API_URL
               valueFrom:
                 configMapKeyRef:
@@ -288,6 +283,13 @@ spec:
                   name: agencyservice-configmap-env
           ports:
             - containerPort: 8080
+          # Probe the Spring Boot port targeted by the Service.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8084
+            periodSeconds: 10
+            timeoutSeconds: 3
           securityContext:
             {{- include "oriso.containerSecurityContext" (dict) | nindent 12 }}
           volumeMounts:

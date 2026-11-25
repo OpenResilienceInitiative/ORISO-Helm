@@ -40,6 +40,13 @@ spec:
                 name: frontend-configmap
           ports:
             - containerPort: 8080
+          # Readiness requires the built application shell to be served.
+          readinessProbe:
+            httpGet:
+              path: /beratung-hilfe.html
+              port: 8080
+            periodSeconds: 5
+            timeoutSeconds: 3
           # The entrypoint writes build/config.js from the environment at start.
           securityContext:
             {{- include "oriso.containerSecurityContext" (dict "readOnly" false) | nindent 12 }}

@@ -52,6 +52,184 @@
     "severity": "critical",
     "clusterScoped": true
   },
+  "platformAlerts": [
+    {
+      "slug": "platform-node-not-ready",
+      "title": "Kubernetes node is not ready",
+      "description": "A Dev node reports NotReady or Unknown throughout four successive 30-second sampling intervals. Check its Ready condition, kubelet and node events. See Operations monitoring, section 3.8.",
+      "metric": "k8s.node.condition",
+      "timeAggregation": "latest",
+      "spaceAggregation": "max",
+      "op": "above",
+      "target": 0,
+      "severity": "critical"
+    },
+    {
+      "slug": "platform-critical-deployment-unavailable",
+      "title": "Critical Kubernetes deployment lacks available replicas",
+      "description": "A critical deployment stayed below desired replicas over ten 30-second intervals. Check the rollout, pod readiness and events. See Operations monitoring, section 3.3.",
+      "metric": "k8s.deployment.available",
+      "timeAggregation": "latest",
+      "spaceAggregation": "max",
+      "op": "above",
+      "target": 0,
+      "severity": "critical"
+    },
+    {
+      "slug": "platform-deployment-unavailable",
+      "title": "Kubernetes deployment lacks available replicas",
+      "description": "A deployment stayed below desired replicas over ten 30-second intervals. Check the rollout, pod readiness and events. See Operations monitoring, section 3.3.",
+      "metric": "k8s.deployment.available",
+      "timeAggregation": "latest",
+      "spaceAggregation": "max",
+      "op": "above",
+      "target": 0,
+      "severity": "warning"
+    },
+    {
+      "slug": "platform-statefulset-unready",
+      "title": "Kubernetes StatefulSet lacks ready replicas",
+      "description": "A StatefulSet stayed below desired replicas over ten 30-second intervals. Check pod readiness and volume attachment. See Operations monitoring, section 3.3.",
+      "metric": "k8s.statefulset.ready_pods",
+      "timeAggregation": "latest",
+      "spaceAggregation": "max",
+      "op": "above",
+      "target": 0,
+      "severity": "warning"
+    },
+    {
+      "slug": "platform-crashloop-backoff",
+      "title": "Kubernetes container is in CrashLoopBackOff",
+      "description": "Kubernetes reports CrashLoopBackOff for this container. Check its most recent exit and previous pod logs. See Operations monitoring, section 3.3.",
+      "metric": "k8s.container.status.reason",
+      "timeAggregation": "latest",
+      "spaceAggregation": "max",
+      "op": "above",
+      "target": 0,
+      "severity": "critical"
+    },
+    {
+      "slug": "platform-pvc-capacity",
+      "title": "Kubernetes persistent volume is running low on space",
+      "description": "A claim exceeded 75, 85 or 95 percent usage. The information, warning and critical tiers are exclusive. Check volume consumption and expansion options. See Operations monitoring, section 3.7.",
+      "metric": "k8s.volume.available",
+      "timeAggregation": "latest",
+      "spaceAggregation": "max",
+      "op": "above",
+      "target": 0,
+      "severity": "warning"
+    },
+    {
+      "slug": "platform-node-disk-capacity",
+      "title": "Kubernetes node filesystem is running low on space",
+      "description": "The kubelet node filesystem exceeded 85 percent usage. Check images, ephemeral storage and node logs. See Operations monitoring, section 3.8.",
+      "metric": "k8s.node.filesystem.available",
+      "timeAggregation": "latest",
+      "spaceAggregation": "max",
+      "op": "above",
+      "target": 0,
+      "severity": "warning"
+    },
+    {
+      "slug": "platform-anonymizer-unavailable",
+      "title": "Kubernetes IP anonymizer has no available replica",
+      "description": "The Dev IP anonymizer had no available replica in two successive 30-second intervals. Check deployment readiness and ingress authentication. See Operations monitoring, section 3.2.",
+      "metric": "k8s.deployment.available",
+      "timeAggregation": "latest",
+      "spaceAggregation": "max",
+      "op": "above",
+      "target": 0,
+      "severity": "critical"
+    },
+    {
+      "slug": "platform-ingress-5xx",
+      "title": "Kubernetes ingress 5xx request rate exceeds two percent",
+      "description": "More than 2 percent of observed ingress requests returned HTTP 5xx over five minutes. Check the IP anonymizer and the affected ingress backend. See Operations monitoring, section 3.2.",
+      "metric": "nginx_ingress_controller_requests",
+      "timeAggregation": "rate",
+      "spaceAggregation": "sum",
+      "op": "above",
+      "target": 0,
+      "severity": "critical"
+    },
+    {
+      "slug": "platform-container-restarts",
+      "title": "Kubernetes container restart count increased by more than three",
+      "description": "The Kubernetes restart count increased by more than three within 15 minutes of complete observations for the same pod and container. Check the most recent container exit and workload configuration. See Operations monitoring, section 3.3.",
+      "metric": "k8s.container.restarts",
+      "timeAggregation": "latest",
+      "spaceAggregation": "max",
+      "op": "above",
+      "target": 0,
+      "severity": "critical"
+    },
+    {
+      "slug": "platform-mariadb-unreachable",
+      "title": "Dev MariaDB is not reporting reachability",
+      "description": "MariaDB uptime was absent for five minutes while the Dev cluster collector kept reporting. Check the service and the monitoring user's scrape access.",
+      "metric": "mysql.uptime",
+      "timeAggregation": "latest",
+      "spaceAggregation": "max",
+      "op": "above",
+      "target": 0,
+      "severity": "critical"
+    },
+    {
+      "slug": "platform-mongodb-unreachable",
+      "title": "Dev MongoDB is not reporting reachability",
+      "description": "MongoDB uptime was absent for five minutes while the Dev cluster collector kept reporting. Check the service and the monitoring user's serverStatus access.",
+      "metric": "mongodb.uptime",
+      "timeAggregation": "latest",
+      "spaceAggregation": "max",
+      "op": "above",
+      "target": 0,
+      "severity": "critical"
+    },
+    {
+      "slug": "platform-rabbitmq-unreachable",
+      "title": "Dev RabbitMQ is not reporting reachability",
+      "description": "RabbitMQ node uptime was absent for five minutes while the Dev cluster collector kept reporting. Check the broker and the monitoring user's management API access.",
+      "metric": "rabbitmq.node.uptime",
+      "timeAggregation": "latest",
+      "spaceAggregation": "max",
+      "op": "above",
+      "target": 0,
+      "severity": "critical"
+    },
+    {
+      "slug": "platform-redis-unreachable",
+      "title": "Dev Redis has no successful exporter probe",
+      "description": "No successful Redis probe was observed for five minutes while the Dev cluster collector kept reporting. Check the Redis service and the exporter scrape independently.",
+      "metric": "redis_up",
+      "timeAggregation": "latest",
+      "spaceAggregation": "max",
+      "op": "above",
+      "target": 0,
+      "severity": "critical"
+    },
+    {
+      "slug": "platform-keycloak-login-failures",
+      "title": "Keycloak failed login count exceeds its baseline",
+      "description": "The Dev Keycloak login error count over ten minutes exceeded five times the preceding hour's average per ten minutes, with a minimum baseline of one. Check login errors and the affected realm in the protected Keycloak view. See Operations monitoring, section 3.5.",
+      "metric": "keycloak_user_events_total",
+      "timeAggregation": "rate",
+      "spaceAggregation": "sum",
+      "op": "above",
+      "target": 0,
+      "severity": "warning"
+    },
+    {
+      "slug": "platform-certificate-expiring",
+      "title": "TLS certificate expires in less than 21 days",
+      "description": "cert-manager reports less than 21 days until expiry for an ORISO Dev Certificate. Check renewal and issuer status. See Operations monitoring, section 3.2.",
+      "metric": "certmanager_certificate_expiration_timestamp_seconds",
+      "timeAggregation": "latest",
+      "spaceAggregation": "min",
+      "op": "above",
+      "target": 0,
+      "severity": "warning"
+    }
+  ],
   "alerts": [
     {"slug": "provisioning-compensation-failure", "title": "Provisioning compensation is incomplete", "description": "A UserService provisioning rollback left at least one resource unrepaired.", "metric": "userservice.provisioning.compensation.attempts", "timeAggregation": "rate", "spaceAggregation": "sum", "filter": "outcome = 'partial_failure'", "op": "above", "target": 0, "severity": "critical"},
     {"slug": "availability-store-failure", "title": "Live-chat availability store failed", "description": "Redis-backed live-chat availability operations are failing closed.", "metric": "oriso.live_chat.availability.store.operations", "timeAggregation": "rate", "spaceAggregation": "sum", "filter": "outcome = 'failure'", "op": "above", "target": 0, "severity": "critical"},

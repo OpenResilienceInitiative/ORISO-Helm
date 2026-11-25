@@ -1,0 +1,17 @@
+[Unit]
+Description=Check the persisted ORISO Dev SigNoz heartbeat
+
+[Service]
+Type=oneshot
+User=signoz-heartbeat-probe
+SupplementaryGroups=signoz-heartbeat
+Environment=SIGNOZ_HEARTBEAT_DB=/var/lib/oriso-signoz-heartbeat/heartbeat.sqlite3
+Environment=SIGNOZ_HEARTBEAT_CLUSTER=oriso-dev
+ExecStart=/usr/bin/python3 /opt/oriso/signoz-heartbeat/signoz_heartbeat_receiver.py
+TimeoutStartSec=10s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX

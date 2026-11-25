@@ -16,7 +16,7 @@
 {{- $_ := required "matrix.groupPolicy.tokenRevision is required; change on rotation" $cfg.tokenRevision -}}
 {{- $identitySuggestions := .Values.userService.identitySuggestions | default dict -}}
 {{- $mediaScanner := .Values.mediaScanner | default dict -}}
-{{- $reserved := list "matrix-secrets" "userservice-secret" "keycloak-secret" "redis-secret" "keycloak-backend-client-secrets" (dig "existingSecret" "name" "" (.Values.matrixrtcAuth | default dict)) (dig "existingSecret" "name" "" (.Values.matrixrtcLifecycle | default dict)) (dig "matrixAdminTokenSecret" "name" "" $identitySuggestions) (dig "requestSecret" "existingSecret" "" $mediaScanner) (dig "aiCheck" "existingSecret" "" $mediaScanner) -}}
+{{- $reserved := list "matrix-secrets" "matrix-synapse-credentials" "userservice-secret" "keycloak-secret" "redis-secret" "keycloak-backend-client-secrets" (dig "existingSecret" "name" "" (.Values.matrixrtcAuth | default dict)) (dig "existingSecret" "name" "" (.Values.matrixrtcLifecycle | default dict)) (dig "matrixAdminTokenSecret" "name" "" $identitySuggestions) (dig "requestSecret" "existingSecret" "" $mediaScanner) (dig "aiCheck" "existingSecret" "" $mediaScanner) -}}
 {{- if has $secret $reserved -}}
 {{- fail "AVV group policy requires a separate dedicated Secret resource" -}}
 {{- end -}}

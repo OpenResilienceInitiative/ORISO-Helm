@@ -1,4 +1,8 @@
 {{- $scenarioEnabled := dig "taskIdentities" "enabled" false .Values.global.keycloak -}}
+{{- $requiredTasks := "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,RUNTIME_POLICY" -}}
+{{- if eq (include "oriso.tenantDeletionFinishEnabled" .) "true" -}}
+{{- $requiredTasks = printf "%s,TENANT_DELETION" $requiredTasks -}}
+{{- end -}}
 {{- $taskMailClient := ternary (dig "taskIdentities" "mail" "clientId" "" .Values.global.keycloak) "" $scenarioEnabled -}}
 {{- $taskMailSubject := ternary (dig "taskIdentities" "mail" "serviceSubject" "" .Values.global.keycloak) "" $scenarioEnabled -}}
 apiVersion: v1
@@ -26,7 +30,7 @@ data:
   # TenantService validates task tokens from UserService; it has no client
   # credentials and cannot mint a task token itself.
   TASK_IDENTITY_MODEL: "FIVE_ACTORS"
-  TASK_IDENTITY_REQUIRED_TASKS: "CONFIG_WIZARD,INVITE_RESERVATIONS,NOTIFICATION_DISPATCH,RUNTIME_POLICY"
+  TASK_IDENTITY_REQUIRED_TASKS: {{ $requiredTasks | quote }}
   TASK_IDENTITY_AUDIENCE: "tenantservice"
   IDENTITY_SETUP_CLIENT_ID: {{ dig "taskIdentities" "setup" "clientId" "" .Values.global.keycloak | quote }}
   IDENTITY_SETUP_SERVICE_SUBJECT: {{ dig "taskIdentities" "setup" "serviceSubject" "" .Values.global.keycloak | quote }}

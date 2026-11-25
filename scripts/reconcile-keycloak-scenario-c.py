@@ -25,6 +25,7 @@ EXPECTED_PURPOSES = {
         "APPOINTMENT_SYNC",
         "APPOINTMENT_CLEANUP",
         "DELETION_AUDIT_READ",
+        "TENANT_DELETION",
     },
 }
 EXPECTED_ROLES = {
@@ -49,6 +50,7 @@ EXPECTED_ROLES = {
         "appointment-sync",
         "appointment-participant-cleanup",
         "deletion-audit-read",
+        "tenant-deletion",
     },
 }
 

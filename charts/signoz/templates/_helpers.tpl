@@ -85,6 +85,19 @@ Return the proper signoz image name
 {{- end -}}
 {{- end -}}
 
+{{- define "signoz.podSecurityContext" -}}
+{{- $context := get .settings "podSecurityContext" | default dict -}}
+{{- $environment := dig "observability" "deploymentEnvironment" "" (.global | default dict) -}}
+{{- $group := get .settings "devSQLiteFilesystemGroup" -}}
+{{- if and (eq $environment "dev") (not .externalDatabase) (dig "persistence" "enabled" true .settings) $group -}}
+  {{- $id := int $group -}}
+  {{- $defaults := dict "runAsNonRoot" true "runAsUser" $id "runAsGroup" $id
+      "fsGroup" $id "fsGroupChangePolicy" "OnRootMismatch" -}}
+  {{- $context = mergeOverwrite $defaults $context -}}
+{{- end -}}
+{{- toYaml $context -}}
+{{- end -}}
+
 {{/*
 Set signoz port
 */}}

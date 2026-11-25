@@ -1,0 +1,12 @@
+[Unit]
+Description=Check the public ORISO Dev SigNoz endpoints
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+ExecStart=/usr/bin/python3 /opt/oriso/signoz-uptime/signoz_external_uptime.py
+TimeoutStartSec=45s
+TimeoutStartFailureMode=kill
+KillMode=control-group
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+StandardOutput=journal

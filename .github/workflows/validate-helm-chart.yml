@@ -31,12 +31,12 @@ jobs:
 
     steps:
       - name: Check out chart
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Check out the reviewed receiver contract for offline tests
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: OpenResilienceInitiative/ORISO-Docs
           ref: 18d7fe0bf52028bb554ec7c3d209a2ae367219ce
@@ -47,10 +47,10 @@ jobs:
         run: mv "$GITHUB_WORKSPACE/_contract_docs" "$RUNNER_TEMP/oriso-docs-contract"
 
       - name: Set up Helm
-        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
           cache: pip
@@ -159,6 +159,7 @@ jobs:
           python tests/synapse_group_policy_bootstrap_recovery.py
           python tests/synapse_group_policy_integration.py --database=sqlite
           python tests/synapse_group_policy_integration.py --database=postgres
+          bash tests/matrix_puppet_token_cleanup_test.sh
 
       - name: Run shell guardrails
         shell: bash

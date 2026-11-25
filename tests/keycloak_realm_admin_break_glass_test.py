@@ -48,6 +48,14 @@ class RealmAdminBreakGlassTest(unittest.TestCase):
         # Existing realm as it looks today: realmadmin enabled with a password and a live session.
         existing = kc.strip_ids(self.realm)
         existing["realm"] = "bg-existing"
+        app = next(client for client in existing["clients"] if client["clientId"] == "app")
+        app.update(redirectUris=["https://old-installation.example.org/*"],
+                   webOrigins=["https://old-installation.example.org"])
+        post_logout = "post.logout.redirect.uris"
+        explicit_logout = kc.RENDER_APP_ORIGIN + "/admin"
+        app["attributes"][post_logout] = explicit_logout + "##https://old-installation.example.org/admin"
+        custom_attribute = "oriso.fixture.client-setting"
+        app["attributes"][custom_attribute] = "keep-existing"
         for user in existing["users"]:
             if user["username"] == "realmadmin":
                 user.update(enabled=True, requiredActions=[], email="realmadmin@synthetic.example", emailVerified=True,
@@ -61,10 +69,18 @@ class RealmAdminBreakGlassTest(unittest.TestCase):
         out = self.reconcile("bg-existing", subjects, PREPARE_ONLY="false", DISABLE_REALM_ADMIN="false")
         self.assertNotIn("REALM_ADMIN", out)
         self.assertIs(self.realm_admin("bg-existing")["enabled"], True)
+        self.assertIn("APP_CLIENT_URL_POLICY_RECONCILED", out)
+        [updated_app] = self.admin("GET", "/bg-existing/clients?clientId=app")
+        app_path = "/bg-existing/clients/" + updated_app["id"]
+        updated_app = self.admin("GET", app_path)
+        self.assertEqual({key: updated_app[key] for key in kc.APP_URL_POLICY}, kc.APP_URL_POLICY)
+        self.assertEqual(updated_app["attributes"][post_logout], explicit_logout)
+        self.assertEqual(updated_app["attributes"][custom_attribute], "keep-existing")
 
         for _ in range(2):
             out = self.reconcile("bg-existing", subjects, PREPARE_ONLY="false", DISABLE_REALM_ADMIN="true")
             self.assertIn("REALM_ADMIN_DISABLED", out)
+            self.assertEqual(self.admin("GET", app_path), updated_app)
             self.assertIs(self.realm_admin("bg-existing")["enabled"], False)
             self.assertEqual(self.admin("GET", "/bg-existing/users/" + uid + "/sessions"), [])
             self.assertIn(self.person_login("bg-existing"), (400, 401))

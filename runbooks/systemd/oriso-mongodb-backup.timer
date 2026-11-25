@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the ORISO Dev MongoDB backup every night at 02:20 UTC
+
+[Timer]
+OnCalendar=*-*-* 02:20:00 UTC
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

@@ -69,6 +69,22 @@ def main() -> None:
         f"caritas-clickhouse-operator-{namespace_hash}-cluster-discovery"
     )
     operator = find(enabled, "Deployment", "caritas-clickhouse-operator")
+    pod = operator["spec"]["template"]["spec"]
+    assert pod["securityContext"] == {
+        "runAsNonRoot": True,
+        "runAsUser": 65534,
+        "runAsGroup": 65534,
+        "seccompProfile": {"type": "RuntimeDefault"},
+    }, "The ClickHouse operator Pod must run without root"
+    assert {container["name"] for container in pod["containers"]} == {"operator", "metrics-exporter"}
+    for container in pod["containers"]:
+        assert container["securityContext"] == {
+            "allowPrivilegeEscalation": False,
+            "capabilities": {"drop": ["ALL"]},
+            "readOnlyRootFilesystem": True,
+        }, container["name"]
+    # Both processes discover ClickHouse installations through the Kubernetes API.
+    assert pod.get("automountServiceAccountToken") is not False
     cluster_role = find(
         enabled,
         "ClusterRole",
@@ -107,9 +123,7 @@ def main() -> None:
         "update",
     } & {verb for verbs in rules.values() for verb in verbs}
 
-    operator_service_account = operator["spec"]["template"]["spec"][
-        "serviceAccountName"
-    ]
+    operator_service_account = pod["serviceAccountName"]
     assert cluster_role_binding["roleRef"] == {
         "apiGroup": "rbac.authorization.k8s.io",
         "kind": "ClusterRole",
@@ -146,7 +160,7 @@ def main() -> None:
         cluster_role_name,
     ) not in disabled_names
 
-    print("PASS: SigNoz ClickHouse operator has least-privilege cluster discovery RBAC")
+    print("PASS: SigNoz ClickHouse operator has restricted security and least-privilege discovery RBAC")
 
 
 if __name__ == "__main__":

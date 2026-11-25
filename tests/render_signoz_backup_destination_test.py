@@ -147,6 +147,7 @@ def main() -> None:
         ("v1", (
             ("configmaps", "ConfigMap", True),
             ("persistentvolumeclaims", "PersistentVolumeClaim", True),
+            ("secrets", "Secret", True),
             ("persistentvolumes", "PersistentVolume", False),
         )),
         ("batch/v1", (("cronjobs", "CronJob", True),)),
@@ -183,6 +184,10 @@ def main() -> None:
         (chart / "Chart.yaml").write_text("apiVersion: v2\nname: backup-destination-fixture\nversion: 0.1.0\n")
         for template in ("templates/_helpers.tpl", "templates/signoz/signoz-data-protection.yaml"):
             copy2(Path(CHART_DIR) / template, chart / template)
+        copy2(
+            Path(CHART_DIR) / "charts/signoz/templates/_helpers.tpl",
+            chart / "templates/signoz/_subchart-helpers.tpl",
+        )
 
         config = Path(tmp) / "kubeconfig"
         config.write_text(yaml.safe_dump({

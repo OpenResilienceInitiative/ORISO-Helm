@@ -62,6 +62,7 @@ TEMPLATES = [
     "templates/_matrixGroupPolicy.tpl",
     "templates/matrix/matrix-configmaps.yaml",
     "templates/matrix/matrix-deployment.yaml",
+    "templates/matrix/matrix-synapse-credentials.yaml",
     "templates/userservice/userservice-configmap-env.yaml",
     "templates/agencyservice/agencyservice-configmap-env.yaml",
     "templates/tenantservice/tenantservice-configmap-env.yaml",
@@ -116,11 +117,11 @@ def build_minimal_chart(dst: str) -> None:
 def render(
     chart: str,
     server_public_ip: str,
-    registration_shared_secret: str = "test-shared-secret",
+    server_name: str = SENTINEL,
 ) -> str:
     """Render the minimal chart and return helm's raw stdout."""
     overlay = {
-        "matrix": {"matrixServerName": SENTINEL, "serverPublicIp": server_public_ip},
+        "matrix": {"matrixServerName": server_name, "serverPublicIp": server_public_ip},
         "postgres": {
             "postgresUser": "matrix-render-canary",
             "postgresPassword": "matrix-render-password-canary",
@@ -141,7 +142,7 @@ def render(
             },
             "secrets": {
                 "redisdefaultPass": "test-redis-pass",
-                "matrixRegistrationSharedSecret": registration_shared_secret,
+                "matrixRegistrationSharedSecret": "test-shared-secret",
                 "keycloakBackendTechnicalClientSecret": "render-only-technical-client-secret-canary",
                 "keycloakBackendAdminClientSecret": "render-only-admin-client-secret-canary",
             }
@@ -204,7 +205,7 @@ def main() -> None:
         stdout_c = render(
             chart,
             "",
-            "test-shared-secret-after-config-change",
+            f"updated.{SENTINEL}",
         )
 
         # --- Requirement 1: the rendered config parses as valid YAML -------------

@@ -9,6 +9,9 @@ metadata:
 spec:
   activeDeadlineSeconds: 600
   template:
+    metadata:
+      labels:
+        app: create-mongo-users
     spec:
       activeDeadlineSeconds: 600
       restartPolicy: Never

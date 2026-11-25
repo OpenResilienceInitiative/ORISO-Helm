@@ -65,7 +65,8 @@
         "MATRIX_AGENCY",
         "APPOINTMENT_SYNC",
         "APPOINTMENT_CLEANUP",
-        "DELETION_AUDIT_READ"
+        "DELETION_AUDIT_READ",
+        "TENANT_DELETION"
       ],
       "roles": [
         "runtime-policy",
@@ -73,7 +74,8 @@
         "matrix-agency-provision",
         "appointment-sync",
         "appointment-participant-cleanup",
-        "deletion-audit-read"
+        "deletion-audit-read",
+        "tenant-deletion"
       ]
     }
   ]

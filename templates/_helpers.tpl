@@ -162,6 +162,12 @@ Usage: include "oriso.validateHost" (list "global.domainName" $hostPort)
 {{- if .Values.global.enableTls }}https{{ else }}http{{ end }}://{{ include "oriso.domainName" . -}}
 {{- end -}}
 
+{{/* ADR-011: App and Admin share one origin. Allow their return paths under that host. */}}
+{{- define "oriso.keycloakAppClientUrlPolicy" -}}
+{{- $origin := include "oriso.publicOrigin" . -}}
+{{- dict "redirectUris" (list (printf "%s/*" $origin)) "webOrigins" (list $origin) | mustToJson -}}
+{{- end -}}
+
 {{/*
 An explicitly set public URL wins but must be absolute http(s), without
 trailing slash or placeholder; empty falls back to the derived URL.
@@ -190,6 +196,33 @@ in templates.
 */}}
 {{- define "oriso.imagePullPolicy" -}}
 {{- default "Always" .Values.global.imagePullPolicy -}}
+{{- end -}}
+
+{{- define "oriso.ingress.standardRoutePolicies" -}}
+{{- $enabled := dig "useStandardRoutePolicies" false (.Values.nginxController | default dict) -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "nginxController.useStandardRoutePolicies must be a boolean" -}}
+{{- end -}}
+{{- $enabled -}}
+{{- end -}}
+
+{{- define "oriso.ingress.permissionsPolicy" -}}
+camera=(self "{{ . }}"), microphone=(self "{{ . }}"), display-capture=(self "{{ . }}")
+{{- end -}}
+
+{{- define "oriso.ingress.permissionsPolicyAnnotation" -}}
+{{- if eq (include "oriso.ingress.standardRoutePolicies" .root) "true" -}}
+nginx.ingress.kubernetes.io/custom-headers: {{ printf "%s/%s" .root.Release.Namespace .configMap | quote }}
+{{- else -}}
+nginx.ingress.kubernetes.io/configuration-snippet: {{ printf "add_header Permissions-Policy '%s' always;" (include "oriso.ingress.permissionsPolicy" .origin) | quote }}
+{{- end -}}
+{{- end -}}
+
+{{- define "oriso.ingress.rateLimitStatusAnnotation" -}}
+{{- if ne (include "oriso.ingress.standardRoutePolicies" .) "true" -}}
+nginx.ingress.kubernetes.io/configuration-snippet: |
+  limit_req_status 429;
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -233,6 +266,10 @@ the bundled SigNoz chart is enabled, use its in-cluster collector service.
 {{- define "oriso.signozServiceName" -}}
 {{- $signoz := get .Values "signoz" | default dict -}}
 {{- default (include "oriso.signozFullname" .) (get $signoz "orisoServiceNameOverride" | default "") -}}
+{{- end -}}
+
+{{- define "oriso.signozRouteGatewayName" -}}
+{{- printf "%s-route-gateway" (include "oriso.signozServiceName" . | trunc 49 | trimSuffix "-") -}}
 {{- end -}}
 
 {{- define "oriso.signozInternalApiUrl" -}}
@@ -580,6 +617,26 @@ An unset or empty value means off. Returns "true" or "false".
 {{- end -}}
 {{- if not (kindIs "bool" $value) -}}
 {{- fail (printf "agencyService.deletionAuditOutboxEnabled must be true or false without quotes (got %s %q). Use --set, not --set-string, and do not quote it in a values file." (kindOf $value) (toString $value)) -}}
+{{- end -}}
+{{- ternary "true" "false" $value -}}
+{{- end -}}
+
+{{/*
+tenantService.tenantDeletionFinishEnabled as a real boolean, read once for both services
+(ORISO-Admin#1525). TenantService requires TENANT_DELETION when it is on; UserService finishes Träger
+deletions when it is on. Same rules as oriso.deletionAuditOutboxEnabled: a quoted value fails at
+render time, unset or empty means off. Returns "true" or "false".
+*/}}
+{{- define "oriso.tenantDeletionFinishEnabled" -}}
+{{- $value := dig "tenantDeletionFinishEnabled" false (.Values.tenantService | default dict) -}}
+{{- if kindIs "invalid" $value -}}
+{{- $value = false -}}
+{{- end -}}
+{{- if and (kindIs "string" $value) (eq $value "") -}}
+{{- $value = false -}}
+{{- end -}}
+{{- if not (kindIs "bool" $value) -}}
+{{- fail (printf "tenantService.tenantDeletionFinishEnabled must be true or false without quotes (got %s %q). Use --set, not --set-string, and do not quote it in a values file." (kindOf $value) (toString $value)) -}}
 {{- end -}}
 {{- ternary "true" "false" $value -}}
 {{- end -}}

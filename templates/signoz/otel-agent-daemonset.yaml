@@ -49,12 +49,15 @@ spec:
         - name: varlog
           hostPath:
             path: /var/log/pods
-        - name: varlibdockercontainers
+            type: Directory
+        - name: host-proc
           hostPath:
-            path: /var/lib/docker/containers
-        - name: hostfs
+            path: /proc
+            type: Directory
+        - name: host-sys
           hostPath:
-            path: /
+            path: /sys
+            type: Directory
       containers:
         - name: {{ $name }}
           image: {{ include "oriso.signozCollector.image" . }}
@@ -87,13 +90,12 @@ spec:
             - name: varlog
               mountPath: /var/log/pods
               readOnly: true
-            - name: varlibdockercontainers
-              mountPath: /var/lib/docker/containers
+            - name: host-proc
+              mountPath: /hostfs/proc
               readOnly: true
-            - name: hostfs
-              mountPath: /hostfs
+            - name: host-sys
+              mountPath: /hostfs/sys
               readOnly: true
-              mountPropagation: HostToContainer
           {{- include "oriso.signozCollector.probes" . | nindent 10 }}
           resources:
             {{- toYaml (get $c "resources" | default dict) | nindent 12 }}

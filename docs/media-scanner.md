@@ -44,8 +44,9 @@ Two further edges are closed on purpose:
   answers 5xx. There is no rule that quietly sends the request to Synapse.
 - **No unscanned route.** `blockDirectMediaAccess` (default `true`) answers 403
   on `/_matrix/media/{v3,r0,v1}/{download,thumbnail}` and
-  `/_matrix/client/v1/media/{download,thumbnail}`. Uploads stay open — the
-  scanner has to be able to fetch the file it is judging.
+  `/_matrix/client/v1/media/{download,thumbnail}`. The ingress-nginx denylist
+  covers IPv4 and IPv6 and returns the controller's HTML 403 response. Uploads
+  stay open so the scanner can fetch each file for inspection.
 
 One consequence deserves its own sentence: `allowedMimeTypes` is enforced on
 the download path, so it retroactively applies to media that was uploaded

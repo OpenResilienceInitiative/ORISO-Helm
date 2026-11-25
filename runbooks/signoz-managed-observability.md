@@ -116,12 +116,14 @@ own switch:
 |---|---|---|
 | `signoz.orisoObservability.enabled` | `false` | Render the ConfigMap and the hook Job. |
 | `signoz.orisoObservability.conformanceCheck` | `false` | Require fresh grouped data on the three core dashboards. Validate the optional E2E query responses. Execute the alert queries and verify collector freshness and separation. |
+| `signoz.orisoObservability.agentForwarding` | `false` | Add the existing private webhook alongside Slack on the six core alerts on Dev. Follow the [Dev forwarding runbook](signoz-dev.md#forward-dev-alerts-to-buzz-and-openclaw). |
 | `signoz.orisoObservability.channelName` | `oriso-alerts-slack` | Existing channel the rules route to. |
 | `signoz.orisoObservability.apiKeySecret.name` / `.key` | `""` / `apiKey` | Existing Secret with the SigNoz API key; the name is required when on. |
 
 With `conformanceCheck` off, a hook run upserts dashboards and rules and reads
-every dashboard, rule, the channel, and the routes back against the catalog. It
-does not need telemetry to flow yet. Turn `conformanceCheck` on only after the
+every dashboard, rule, the channel, and the routes back against the catalog.
+Enabling the optional Dev platform rules also requires their telemetry before
+any writes. Turn `conformanceCheck` on only after the
 UserService diagnostic metrics and the collectors are live in that environment.
 Exercise the approved scenarios for event-driven panels before running the full
 check. Each core dashboard query needs a complete interval with a finite sample
@@ -129,6 +131,144 @@ in the last 15 minutes. Every contributing series must have the panel's declared
 group keys. A numeric zero is valid. The optional E2E dashboards accept valid
 empty or sparse query results and legacy rows with a blank test ID. Verify their
 contents after a known test run as part of ORISO-E2E#97.
+
+## Dev platform alerts
+
+`signoz.orisoObservability.platformAlerts.enabled` defaults to `false`. Enable it
+on Dev after the Kubernetes collector, ingress-nginx app scrape, and data store
+metrics are reporting. The chart requires both `global.observability.appMetrics`
+and `global.observability.dbMetrics` to enable these rules. It also requires
+`global.observability.externalCertManagerNamespace` for certificate discovery.
+Each rule must return a current result, including a valid zero, for
+every eligible object observed by its metrics. The provisioner compares both
+queries at the same completed minute before any writes. Compare the reporting
+population with the cluster inventory during the installed acceptance check.
+
+| Rule | Trigger | Severity |
+| --- | --- | --- |
+| Node NotReady | `Ready=False` or `Ready=Unknown` in four consecutive populated 30-second intervals. | Critical |
+| Critical Deployment unavailable | Available replicas below desired in ten consecutive 30-second intervals for `ingress-nginx-controller`, `ip-anonymizer`, `keycloak`, `userservice`, `matrix-synapse`, or `frontend`. | Critical |
+| Deployment unavailable | Same replica check for other Deployments. | Warning |
+| StatefulSet unready | Ready replicas below desired in ten consecutive 30-second intervals. | Warning |
+| Container CrashLoopBackOff | A current `CrashLoopBackOff` condition in the last 30 seconds. | Critical |
+| Container restart count increase | The observed restart count rises by more than three in 15 minutes for the same Pod UID and container. | Critical |
+| IP anonymizer unavailable | Fewer than one available replica in two populated 30-second intervals for `caritas/ip-anonymizer`. | Critical |
+| Ingress 5xx rate | Strictly more than 2% of observed requests over five minutes, grouped by ingress namespace and name. | Critical |
+| Data store reachability | No successful observation of MariaDB, MongoDB, RabbitMQ or Redis for five minutes, with continuous collector coverage. Each service has its own rule. | Critical |
+| Keycloak login failures | More than five times the usual failed-login count over ten minutes. The reference is the previous hour, excluding the evaluated ten minutes. | Warning |
+| TLS certificate expiry | Less than 21 days until expiry, including certificates whose expiry has already passed, grouped by Certificate namespace and name. | Warning |
+| PVC capacity | Strictly above 75%, 85%, or 95% on its fullest reporting mount. Only the highest applicable tier matches. | Info / Warning / Critical |
+| Node filesystem capacity | Strictly above 85% using the kubelet's node filesystem measurements. | Warning |
+
+Replica checks pair observations for the same resource identity before grouping
+by name. A complete scaled-to-zero or recovered workload contributes zero.
+A missing interval or overlapping streams under a reused name leave the result
+unknown. CrashLoopBackOff reports the current Kubernetes condition. Its
+evaluation and readiness check exclude a Pod when one phase stream identifies
+its UID as Succeeded or Failed within five minutes. A missing or ambiguous
+phase leaves the container in scope. The restart rule joins samples by stable
+Pod UID and container name through changes of
+runtime container ID. It evaluates containers sampled at both ends of the
+15-minute window. Missing intervals, duplicate streams and observed resets of
+the Kubernetes restart count leave the result unknown.
+
+The ingress rule checks the controller's request counter per series before
+combining statuses and controller replicas. A sampled route with no 5xx
+series has zero observed errors. A route with unchanged, covered counters
+has zero observed requests. Missing or incomplete counter samples leave the
+result unknown.
+
+The authenticated data store receivers add a source marker and emit instance
+uptime metrics, including RabbitMQ nodes with no queues. Redis uses a successful
+`redis_up=1` observation from its annotated exporter. During provisioning, each
+store needs a successful sample within 150 seconds. At runtime, the same
+collector process must report in six consecutive one-minute intervals before
+the rules can infer a five-minute absence. During a collector gap or restart,
+the collector-staleness rule covers the shared failure. To investigate a Redis
+alarm, compare Prometheus scrape `up` with `redis_up` to distinguish the exporter
+path from the backend. The other store alarms call for checking the service and
+its monitoring-user access.
+
+The Keycloak rule combines observed counter increases across the Dev instances
+and realms. It compares whole counts from successive one-minute samples.
+It uses the app scrape on
+`/auth/metrics` and the `keycloak_user_events_total` login series. Successful
+scrapes in both windows and a recent login event series establish coverage.
+Allow at least 70 minutes of scrape history before enabling the rule. The
+reference count per ten minutes has a floor of one, so with a quiet
+reference the alert starts at six observed failures. A newly observed error
+counter can contribute its initial value when its scrape target was already
+healthy before the window. The alert carries only the cluster and environment.
+
+The Dev overlay discovers the cert-manager controller pods on their
+`http-metrics` port. The existing pod discovery permission covers the
+controller namespace. The collector retains the expiration gauge for
+Certificates in the release namespace and the scrape's own `up` series.
+The rule needs a recent successful scrape from each reporting instance and
+agreement on the issuer and expiry. It treats a zero timestamp, unavailable
+scrape and conflicting issuer streams as unknown. Compare the reported
+Certificate names with the Dev inventory during installed acceptance. The
+external S7 probe checks the TLS certificate actually served by the ingress.
+
+Storage rules compute the share of capacity unavailable to workloads from
+the kubelet's available bytes and total capacity. The node filesystem figure
+includes space the filesystem reserves. The PVC query pairs the capacity and
+available measurements for each mount before grouping by namespace and claim.
+Negative available bytes, zero capacity, or an unmatched measurement leave the
+result unknown. Alerts retain only environment, cluster, and the applicable
+Kubernetes names. The collector-staleness rule covers loss of collector data.
+
+Use `--platform-alerts` for a workstation check of an enabled installation.
+To turn it off, set the value to `false` while managed observability still runs.
+The next hook disables all existing ORISO-managed platform rules in place and
+retains their IDs. This path works with missing platform telemetry.
+See [Helm #542](https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/542)
+for the remaining platform alerts and external monitoring.
+
+## Dev heartbeat
+
+`signoz.orisoObservability.heartbeat.enabled` defaults to `false`. Before
+enabling it in Dev, provision a receiver outside the monitored cluster and
+configure its incident destination. In SigNoz, create the dedicated channel
+named by `signoz.orisoObservability.heartbeat.channelName` (default
+`oriso-dev-heartbeat`). Use one HTTPS webhook with certificate verification,
+Basic Auth and resolved delivery disabled. Keep its credentials in SigNoz
+and the receiver's secret store. The Helm hook checks the channel and fresh
+collector telemetry before writing assets.
+
+The rule `ORISO dev | SigNoz heartbeat` emits its evaluation timestamp in
+`oriso_evaluated_at`. It returns a timestamp while the named Dev cluster
+collector has supplied a sample within 150 seconds. The rule evaluates every
+minute and requests firing-only repeat notifications every minute.
+The pinned SigNoz Alertmanager groups subsequent deliveries at five-minute
+intervals. Measure the interval in the receiver before enabling incidents.
+
+Require authenticated callbacks for this rule and exact cluster and environment
+labels. Accept a single firing alert with a recent, strictly increasing
+`oriso_evaluated_at` timestamp in Unix seconds. Reject duplicate, stale, foreign
+and resolved messages without resetting the deadline. Set the watchdog to
+raise an incident after 600 seconds without an accepted pulse. Measure this
+from the last accepted receipt. Qualify the receiver with an approved outage
+and recovery test before relying on that deadline.
+
+Use `--heartbeat --heartbeat-channel-name <name>` with the workstation check to
+verify the stored rule, receiver configuration and current collector sample.
+To stop the heartbeat, put the external check in maintenance and set
+`heartbeat.enabled=false` while managed observability still runs. Keep the
+configured channel name for that upgrade. The hook disables the existing rule
+in place and retains its ID even if the telemetry is unavailable.
+
+## External Dev uptime and TLS
+
+From a runner outside the Dev cluster, verify the certificate for
+`signoz.oriso.org` and expect its HTTPS root to redirect to
+`https://dev.oriso.org/signoz/` with a successful final response. Warn when
+the certificate served by the alias has less than 21 days remaining.
+Check `https://dev.oriso.org/signoz/api/v1/health?live=1` independently for
+HTTP 200 and JSON with `"status": "ok"`. This is the SigNoz application
+liveness endpoint. The collector and stored-signals path is covered by the
+separate Dev heartbeat. Keep both checks and their incident delivery outside
+the monitored cluster.
 
 ## API key Secret (created out of band, never in values)
 
@@ -154,6 +294,35 @@ that wipes that store removes both, so the next upgrade fails the hook until
 someone recreates the `oriso-alerts-slack` channel and a new API key (written
 into the same Secret). Re-run `helm upgrade` afterwards; the hook then
 recreates every dashboard and rule with no further clicks.
+
+## SigNoz migrations with Argo CD
+
+The production overlay keeps SigNoz disabled by default. If SigNoz is enabled
+for an approved Argo CD application, keep
+`signoz.telemetryStoreMigrator.argocdSyncHook=true`. The migration runs as a
+named Sync hook alongside the provisioned Secret and ClickHouse resources.
+Its readiness phase waits for ClickHouse. The Job name stays the same across
+revisions. The hook keeps its successful result until the sync completes, then
+Argo CD deletes the completed Job.
+
+- Before switching an existing installation to this hook, pause automatic sync.
+  Find the prior SigNoz migration Jobs for the release, including old fixed or
+  revision-specific names. Wait for them to complete or fail and confirm all
+  their Pods have terminated. Apply the new hook through the owning application
+  with a full sync. Resume automatic sync after verifying the outcome.
+- Use the normal apply path for the hook. Leave Force and Replace disabled at
+  application and resource level. Run full syncs for migration-changing
+  revisions so Argo CD processes the hook.
+- A failed hook remains available for diagnostics. Collect its logs, confirm
+  the Job is terminal and all its Pods have terminated, then delete that failed
+  Job with foreground propagation before retrying the full sync.
+- Use the [Argo CD runtime acceptance](signoz-runtime-acceptance.md#argo-cd-migration-evidence)
+  to verify the successful Sync hook and workload readiness. Confirm end-to-end
+  ingestion after collector activation.
+
+The active replacement check for direct Helm upgrades uses live Kubernetes
+state. When deploying with direct Helm using the production values, set
+`signoz.telemetryStoreMigrator.argocdSyncHook=false` to use Helm's Job lifecycle.
 
 ## First installation in an environment
 

@@ -99,6 +99,7 @@ ACTORS = (
             "appointment-sync",
             "appointment-participant-cleanup",
             "deletion-audit-read",
+            "tenant-deletion",
         ),
         ("tenantservice", "agencyservice", "appointmentservice"),
     ),

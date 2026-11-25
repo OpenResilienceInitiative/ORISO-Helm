@@ -462,6 +462,7 @@ class RegistryContractTest(unittest.TestCase):
         self.assertEqual("MAIL", report["purposes"]["SMTP_SYNC"])
         self.assertEqual("RUNTIME", report["purposes"]["APPOINTMENT_CLEANUP"])
         self.assertEqual("RUNTIME", report["purposes"]["DELETION_AUDIT_READ"])
+        self.assertEqual("RUNTIME", report["purposes"]["TENANT_DELETION"])
         self.assertFalse(report["runtime_cutover"])
 
 

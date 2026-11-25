@@ -751,14 +751,8 @@
       "enabled": true,
       "alwaysDisplayInConsole": false,
       "clientAuthenticatorType": "client-secret",
-      "redirectUris": [
-        "*",
-        "https://{{ .Values.global.adminDomainName }}/*"
-      ],
-      "webOrigins": [
-        "https://{{ .Values.global.adminDomainName }}/*",
-        "*"
-      ],
+      "redirectUris": [],
+      "webOrigins": [],
       "notBefore": 0,
       "bearerOnly": false,
       "consentRequired": false,

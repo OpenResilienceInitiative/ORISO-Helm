@@ -1,0 +1,17 @@
+{{- if eq (include "oriso.ingress.standardRoutePolicies" .) "true" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: permissions-policy-call-host
+  namespace: {{ .Release.Namespace }}
+data:
+  Permissions-Policy: {{ include "oriso.ingress.permissionsPolicy" (printf "https://acme%s" .Values.global.domainName) | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: permissions-policy-main-host
+  namespace: {{ .Release.Namespace }}
+data:
+  Permissions-Policy: {{ include "oriso.ingress.permissionsPolicy" (printf "https://%s" .Values.global.domainName) | quote }}
+{{- end }}

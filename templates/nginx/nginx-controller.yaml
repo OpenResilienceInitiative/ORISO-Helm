@@ -3,6 +3,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ingress-nginx-controller
+  {{- if .Values.nginxController.keepBothRbacScopes }}
+  annotations:
+    oriso.org/keep-both-ingress-rbac-scopes: "true"
+  {{- end }}
   labels:
     app.kubernetes.io/name: ingress-nginx
     app.kubernetes.io/component: controller
@@ -25,7 +29,19 @@ spec:
         {{- include "oriso.appMetrics.podAnnotations" (dict "job" "ingress-nginx" "port" 10254 "path" "/metrics") | nindent 8 }}
       {{- end }}
     spec:
-      serviceAccountName: ingress-nginx
+      serviceAccountName: {{ if .Values.nginxController.scopeToReleaseNamespace }}ingress-nginx-scoped{{ else }}ingress-nginx{{ end }}
+      # Soft anti-affinity: replicas spread over nodes, yet still schedule on a single-node cluster.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: ingress-nginx
+                    app.kubernetes.io/component: controller
+                    app.kubernetes.io/instance: ingress-nginx
       # As in the upstream ingress-nginx manifest: www-data (101:82), NET_BIND_SERVICE for
       # ports 80/443, writable root because the controller rewrites /etc/nginx at runtime.
       securityContext:
@@ -41,6 +57,12 @@ spec:
             - --controller-class=k8s.io/ingress-nginx
             - --publish-service=$(POD_NAMESPACE)/ingress-nginx
             - --configmap=$(POD_NAMESPACE)/ingress-nginx-controller
+            {{- if .Values.nginxController.scopeToReleaseNamespace }}
+            - --watch-namespace=$(POD_NAMESPACE)
+            {{- end }}
+            # Keep serving for 10 s after SIGTERM, while the Service and an externalTrafficPolicy: Local
+            # load balancer stop sending to this pod (ORISO-Helm#544).
+            - --shutdown-grace-period=10
             {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
             # Per-ingress request counts, status codes and latency; labels carry the
             # ingress path pattern, never the client IP or the request query string.
@@ -55,6 +77,24 @@ spec:
             - name: metrics
               containerPort: 10254
             {{- end }}
+          # As in the upstream manifest. /healthz passes only once nginx has loaded its backends,
+          # so a new replica gets no traffic before it can route (it answered 503 without this).
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 10254
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 1
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 10254
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 1
+            failureThreshold: 3
           securityContext:
             {{- include "oriso.containerSecurityContext" (dict "readOnly" false "add" (list "NET_BIND_SERVICE")) | nindent 12 }}
           env:

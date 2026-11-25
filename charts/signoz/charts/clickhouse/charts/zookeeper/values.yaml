@@ -323,22 +323,30 @@ resources:
 ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
 ## @param podSecurityContext.enabled Enabled ZooKeeper pods' Security Context
 ## @param podSecurityContext.fsGroup Set ZooKeeper pod's Security Context fsGroup
+## @param podSecurityContext.seccompProfile.type Use the default container runtime seccomp profile
 ##
 podSecurityContext:
   enabled: true
   fsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
 ## Configure Container Security Context
 ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
 ## @param containerSecurityContext.enabled Enabled ZooKeeper containers' Security Context
 ## @param containerSecurityContext.runAsUser Set ZooKeeper containers' Security Context runAsUser
 ## @param containerSecurityContext.runAsNonRoot Set ZooKeeper containers' Security Context runAsNonRoot
 ## @param containerSecurityContext.allowPrivilegeEscalation Force the child process to be run as nonprivilege
+## @param containerSecurityContext.readOnlyRootFilesystem Use a temporary volume for filesystem writes
+## @param containerSecurityContext.capabilities.drop Linux capabilities to drop
 ##
 containerSecurityContext:
   enabled: true
   runAsUser: 1001
   runAsNonRoot: true
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
 ## @param hostAliases ZooKeeper pods host aliases
 ## https://kubernetes.io/docs/concepts/services-networking/add-entries-to-pod-etc-hosts-with-host-aliases/
 ##
@@ -559,6 +567,9 @@ networkPolicy:
   allowExternal: true
 
 ## @section Other Parameters
+
+## @param automountServiceAccountToken Mount the Kubernetes API token when a custom sidecar needs it
+automountServiceAccountToken: false
 
 ## Service account for ZooKeeper to use.
 ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/

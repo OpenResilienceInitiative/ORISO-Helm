@@ -1,0 +1,86 @@
+{{- $policies := get .Values "networkPolicies" | default dict -}}
+{{- $config := get $policies "keycloakIngress" | default dict -}}
+{{- $enabled := dig "enabled" false $config -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "networkPolicies.keycloakIngress.enabled must be a boolean" -}}
+{{- end -}}
+{{- if $enabled }}
+{{- $nginx := dig "enabled" false (.Values.nginxController | default dict) }}
+{{- $external := dig "externalNginxNamespace" "" $config }}
+{{- if not (and (kindIs "string" $external) (or (eq $external "") (and (le (len $external) 63) (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $external)))) }}
+{{- fail "networkPolicies.keycloakIngress.externalNginxNamespace must be a Kubernetes namespace name or empty" }}
+{{- end }}
+{{- if not (or $nginx $external) }}
+{{- fail "networkPolicies.keycloakIngress requires the bundled ingress-nginx controller or an externalNginxNamespace" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: keycloak-ingress
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: keycloak
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- if $nginx }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+              app.kubernetes.io/component: controller
+              app.kubernetes.io/instance: ingress-nginx
+        {{- end }}
+        {{- if $external }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $external | quote }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+              app.kubernetes.io/component: controller
+        {{- end }}
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - agencyservice
+                  - consultingtypeservice
+                  - tenantservice
+                  - userservice
+                  {{- if (.Values.addonService).enabled }}
+                  - addonservice
+                  {{- end }}
+                  - keycloak-bootstrap-users
+                  - keycloak-reconcile-mail-locales
+                  - keycloak-reconcile-service-identities
+                  - keycloak-reconcile-smtp-hook
+                  - keycloak-reconcile-smtp-schedule
+                  # This hook runs before the new policy is applied.
+                  - keycloak-reconcile-task-identities-clients
+                  - keycloak-verify-2fa-contract
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Preserve cache traffic while the previous Keycloak pod drains on upgrade.
+    - from:
+        - podSelector:
+            matchLabels:
+              app: keycloak
+      ports:
+        - protocol: TCP
+          port: 7800
+        - protocol: TCP
+          port: 57800
+    {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "oriso.signozCollector.selectorLabels" (dict "root" . "component" "otel-deployment") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 9000
+    {{- end }}
+{{- end }}

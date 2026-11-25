@@ -160,45 +160,6 @@ receivers:
           - ^xvd[a-z]\d+$
           - ^nvme\d+n\d+p\d+$
           match_type: regexp
-      filesystem:
-        exclude_fs_types:
-          fs_types:
-          - autofs
-          - binfmt_misc
-          - bpf
-          - cgroup2?
-          - configfs
-          - debugfs
-          - devpts
-          - devtmpfs
-          - fusectl
-          - hugetlbfs
-          - iso9660
-          - mqueue
-          - nsfs
-          - overlay
-          - proc
-          - procfs
-          - pstore
-          - rpc_pipefs
-          - securityfs
-          - selinuxfs
-          - squashfs
-          - sysfs
-          - tracefs
-          match_type: strict
-        exclude_mount_points:
-          match_type: regexp
-          mount_points:
-          - /dev/*
-          - /proc/*
-          - /sys/*
-          - /run/credentials/*
-          - /run/k3s/containerd/*
-          - /var/lib/docker/*
-          - /var/lib/containers/storage/*
-          - /var/lib/kubelet/*
-          - /snap/*
       load: {}
       memory: {}
       network:
@@ -222,7 +183,8 @@ receivers:
     extra_metadata_labels:
     - container.id
     - k8s.volume.type
-    insecure_skip_verify: true
+    ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    insecure_skip_verify: false
     k8s_api_config:
       auth_type: serviceAccount
     metric_groups:
@@ -248,6 +210,10 @@ receivers:
       k8s.container.memory_request_utilization:
         enabled: true
       k8s.node.cpu.usage:
+        enabled: true
+      k8s.node.filesystem.available:
+        enabled: true
+      k8s.node.filesystem.capacity:
         enabled: true
       k8s.node.uptime:
         enabled: true

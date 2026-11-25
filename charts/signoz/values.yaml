@@ -786,6 +786,9 @@ signoz:
     # signoz.serviceAccount.name - The name of the service account to use. If not set and `create` is true, a name is generated.
     # @default -- null
     name:
+  # signoz.automountServiceAccountToken -- Mount a Kubernetes API token for custom deployments that need it.
+  # @section -- SigNoz
+  automountServiceAccountToken: false
   # signoz.service -- Service configuration for SigNoz.
   # This allows you to configure how SigNoz is exposed within the Kubernetes cluster.
   # @section -- SigNoz Networking
@@ -864,9 +867,13 @@ signoz:
     signoz_alertmanager_signoz_external__url: http://localhost:8080
   # signoz.podSecurityContext -- Pod-level security context.
   # @section -- SigNoz
-  # @default -- {}
-  podSecurityContext: {}
-  # fsGroup: 2000
+  # SQLite datasets on older storage backends may need the image's original identity.
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  # signoz.devSQLiteFilesystemGroup -- Non-root identity for Dev's persistent SQLite volume on a compatible CSI driver.
+  # @section -- SigNoz
+  devSQLiteFilesystemGroup: null
 
   # signoz.podAnnotations -- Annotations for the SigNoz pod.
   # @section -- SigNoz
@@ -874,14 +881,11 @@ signoz:
   podAnnotations: {}
   # signoz.securityContext -- Container-level security context.
   # @section -- SigNoz
-  # @default -- {}
-  securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
 
   # signoz.additionalVolumeMounts -- Additional volume mounts for the SigNoz container.
   # @section -- SigNoz
@@ -1020,10 +1024,14 @@ telemetryStoreMigrator:
   # @default -- {}
   # @section -- Telemetry Store Migrator
   annotations: {}
-  # telemetryStoreMigrator.upgradeHelmHooks -- Enable Helm pre-upgrade hooks and ArgoCD Sync hooks.
+  # telemetryStoreMigrator.upgradeHelmHooks -- Enable the pre-upgrade hook for direct Helm upgrades.
   # @default -- true
   # @section -- Telemetry Store Migrator
   upgradeHelmHooks: true
+  # telemetryStoreMigrator.argocdSyncHook -- Use an Argo CD Sync hook with a fixed Job name and delete it only after success.
+  # @default -- false
+  # @section -- Telemetry Store Migrator
+  argocdSyncHook: false
   # telemetryStoreMigrator.enableReplication -- Whether to enable replication for the Telemetry Store Migrator.
   # @default -- true
   # @section -- Telemetry Store Migrator
@@ -1052,6 +1060,21 @@ telemetryStoreMigrator:
   # @section -- Telemetry Store Migrator
   # @default -- {}
   resources: {}
+  # telemetryStoreMigrator.podSecurityContext -- Security context for the migration Pod.
+  # @section -- Telemetry Store Migrator
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  # telemetryStoreMigrator.securityContext -- Shared security context for all migration phases.
+  # @section -- Telemetry Store Migrator
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
   # telemetryStoreMigrator.serviceAccount -- Service Account configuration for the Telemetry Store Migrator.
   # @section -- Telemetry Store Migrator
   serviceAccount:
@@ -1541,20 +1564,20 @@ otelCollector:
           app.kubernetes.io/component: otel-collector
   # otelCollector.podSecurityContext -- Pod-level security context.
   # @section -- Otel Collector
-  # @default -- {}
-  podSecurityContext: {}
-  # fsGroup: 2000
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
 
   # otelCollector.securityContext -- Container-level security context.
   # @section -- Otel Collector
-  # @default -- {}
-  securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
 
   # otelCollector.autoscaling -- Autoscaling configuration (HPA).
   # @section -- Otel Collector

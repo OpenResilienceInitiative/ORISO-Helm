@@ -18,3 +18,7 @@ spec:
       port: 8009
       targetPort: 8009
       protocol: TCP
+    - name: discovery
+      port: 8802
+      targetPort: discovery
+      protocol: TCP

@@ -1,0 +1,100 @@
+{{- $controller := .Values.nginxController -}}
+{{- if $controller.enabled -}}
+{{- $account := "ingress-nginx-scoped" -}}
+{{- $clusterRole := printf "%s-%s" $account .Release.Namespace -}}
+{{- if and .Release.IsUpgrade (not $controller.keepBothRbacScopes) -}}
+  {{- /* Both bindings must coexist until the controller has rolled to its replacement account. */ -}}
+  {{- $deployment := lookup "apps/v1" "Deployment" .Release.Namespace "ingress-nginx-controller" -}}
+  {{- if $deployment -}}
+    {{- $previousAccount := ternary "ingress-nginx" $account ($controller.scopeToReleaseNamespace | default false) -}}
+    {{- $currentAccount := dig "spec" "template" "spec" "serviceAccountName" "" $deployment -}}
+    {{- $retainingBoth := eq (dig "metadata" "annotations" "oriso.org/keep-both-ingress-rbac-scopes" "" $deployment) "true" -}}
+    {{- $replicas := int (dig "spec" "replicas" 1 $deployment) -}}
+    {{- $observed := int (dig "status" "observedGeneration" 0 $deployment) -}}
+    {{- $generation := int (dig "metadata" "generation" 1 $deployment) -}}
+    {{- $updated := int (dig "status" "updatedReplicas" 0 $deployment) -}}
+    {{- $ready := int (dig "status" "readyReplicas" 0 $deployment) -}}
+    {{- $total := int (dig "status" "replicas" 0 $deployment) -}}
+    {{- $rolloutIncomplete := or (lt $observed $generation) (ne $updated $replicas) (ne $ready $replicas) (ne $total $replicas) -}}
+    {{- if or (eq $currentAccount $previousAccount) (and $retainingBoth $rolloutIncomplete) -}}
+      {{- fail "switch ingress-nginx with nginxController.keepBothRbacScopes=true and wait for the Deployment rollout before removing its previous permissions" -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if or $controller.scopeToReleaseNamespace $controller.keepBothRbacScopes }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $account }}
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $account }}
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "endpoints", "pods", "secrets", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses/status"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    resourceNames: ["ingress-controller-leader"]
+    verbs: ["get", "update"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $account }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $account }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $account }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $clusterRole }}
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: [{{ .Release.Namespace | quote }}]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $clusterRole }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $clusterRole }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $account }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- end }}

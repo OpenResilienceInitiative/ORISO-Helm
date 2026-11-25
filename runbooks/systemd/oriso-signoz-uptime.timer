@@ -1,0 +1,10 @@
+[Unit]
+Description=Check public ORISO Dev SigNoz availability every minute
+
+[Timer]
+OnActiveSec=1s
+OnUnitActiveSec=60s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

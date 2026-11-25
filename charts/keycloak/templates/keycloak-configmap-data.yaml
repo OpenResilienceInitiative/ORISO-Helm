@@ -1,7 +1,22 @@
+{{- $realm := mustFromJson (tpl (.Files.Get "keycloak-resources/realm.json") .) -}}
+{{- $appPolicy := include "oriso.keycloakAppClientUrlPolicy" . | mustFromJson -}}
+{{- range $client := $realm.clients -}}
+{{- if eq $client.clientId "app" -}}
+{{- $_ := set $client "redirectUris" $appPolicy.redirectUris -}}
+{{- $_ := set $client "webOrigins" $appPolicy.webOrigins -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.global.healthDashboardOperatorAccess -}}
+{{- $operatorClient := mustFromJson (tpl (.Files.Get "keycloak-resources/dashboard-operator-client.json.tpl") .) -}}
+{{- $_ := set $realm "clients" (append $realm.clients $operatorClient) -}}
+{{- $role := dict "name" "view-helm-images" "description" "Read HealthDashboard image inventory" "composite" false "clientRole" true -}}
+{{- $_ := set $realm.roles.client $operatorClient.clientId (list $role) -}}
+{{- $_ := set $realm.clientScopeMappings $operatorClient.clientId (list (dict "client" $operatorClient.clientId "roles" (list $role.name))) -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: keycloak-configmap-data
 data:
   realm.json: |-
-{{ tpl (.Files.Get "keycloak-resources/realm.json") . | indent 4 }}
+{{ $realm | mustToPrettyJson | indent 4 }}

@@ -42,6 +42,15 @@ URL. Fail fast when the env var is missing or still points at another domain
 {{- end -}}
 {{- end -}}
 {{- $managed := get $signoz "orisoObservability" | default dict -}}
+{{- if hasKey $managed "agentForwarding" -}}
+{{- $forward := get $managed "agentForwarding" -}}
+{{- if not (kindIs "bool" $forward) -}}
+{{- fail "signoz.orisoObservability.agentForwarding must be a boolean" -}}
+{{- end -}}
+{{- if and $forward (or (not (get $managed "enabled")) (ne (get $globalObservability "deploymentEnvironment" | default "") "dev")) -}}
+{{- fail "signoz.orisoObservability.agentForwarding=true requires enabled Dev managed observability" -}}
+{{- end -}}
+{{- end -}}
 {{- if get $managed "enabled" | default false -}}
 {{- if not $signozEnabled -}}
 {{- fail "signoz.orisoObservability.enabled=true requires signoz.enabled=true" -}}

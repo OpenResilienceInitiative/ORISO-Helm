@@ -1,12 +1,16 @@
+{{- $viaSynapse := dig "routeServerDiscoveryViaSynapse" false .Values.matrix -}}
+{{- if not (kindIs "bool" $viaSynapse) -}}
+{{- fail "matrix.routeServerDiscoveryViaSynapse must be a boolean" -}}
+{{- end -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
     # Match the 10 MB limit promised by the chat attachment composer.
     nginx.ingress.kubernetes.io/proxy-body-size: {{ (.Values.matrix).maxUploadSize | default "10m" | quote }}
+    {{- if not $viaSynapse }}
     # Matrix server delegation. Without it, anything doing federation
     # discovery for this server name falls back to the default port 8448,
     # which nothing listens on. lk-jwt-service validates the OpenID token
@@ -20,6 +24,7 @@ metadata:
         add_header Access-Control-Allow-Origin *;
         return 200 '{"m.server": "{{ .Values.global.domainName }}:443"}';
       }
+    {{- end }}
   name: matrix-client-ingress
 spec:
   ingressClassName: nginx
@@ -41,3 +46,12 @@ spec:
               number: 8008
         path: /_synapse
         pathType: Prefix
+      {{- if $viaSynapse }}
+      - backend:
+          service:
+            name: matrix-synapse
+            port:
+              name: discovery
+        path: /.well-known/matrix/server
+        pathType: Exact
+      {{- end }}

@@ -197,6 +197,17 @@ def main() -> None:
         in decimal_grace.stderr
     )
 
+    # The embedded call takes its ICE configuration from LiveKit.
+    synapse = next(
+        document
+        for document in documents
+        if document.get("kind") == "ConfigMap"
+        and document.get("metadata", {}).get("name") == "matrix-homeserver-oidc"
+    )
+    homeserver = yaml.safe_load(synapse["data"]["homeserver.yaml"])
+    assert "turn_uris" not in homeserver, "Synapse must not ship public STUN defaults"
+    assert "turn_allow_guests" not in homeserver, "Synapse must not override guest TURN"
+
     # ORISO-Frontend#1828: TURN stays off unless an environment enables it.
     assert "turn" not in livekit_config(documents)
     assert all(

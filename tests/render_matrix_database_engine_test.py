@@ -104,7 +104,11 @@ def main() -> None:
         assert args.count("--keys-directory") == 1
         assert args[args.index("--keys-directory") + 1] == "/data"
         configs = [args[i + 1] for i, arg in enumerate(args) if arg == "--config-path"]
-        assert configs == ["/data/homeserver.yaml", "/secrets/synapse/homeserver-database.yaml"]
+        assert configs == [
+            "/data/homeserver.yaml",
+            "/secrets/synapse/homeserver-database.yaml",
+            "/secrets/synapse-credentials/homeserver-redis.yaml",
+        ]
         data = next(m for m in synapse["volumeMounts"] if m["mountPath"] == "/data")
         assert not data.get("readOnly", False)
         volume = next(v for v in spec["volumes"] if v["name"] == data["name"])

@@ -180,15 +180,28 @@ def assert_clamav_only(chart: str) -> None:
 
     # And the unscanned route is closed by default.
     blocker = get(documents, "Ingress", "media-scanner-direct-media-block-ingress")
-    blocked = [path["path"] for path in blocker["spec"]["rules"][0]["http"]["paths"]]
-    assert "/_matrix/media/v3/download" in blocked
-    assert "/_matrix/media/v3/thumbnail" in blocked
-    assert "/_matrix/client/v1/media/download" in blocked
-    assert not any("upload" in path for path in blocked), (
-        "uploads must stay reachable, otherwise the scanner has nothing to fetch"
+    blocked = blocker["spec"]["rules"][0]["http"]["paths"]
+    expected_paths = {
+        f"{prefix}/{operation}"
+        for prefix in (
+            "/_matrix/media/v3",
+            "/_matrix/media/r0",
+            "/_matrix/media/v1",
+            "/_matrix/client/v1/media",
+        )
+        for operation in ("download", "thumbnail")
+    }
+    assert len(blocked) == len(expected_paths)
+    assert {path["path"] for path in blocked} == expected_paths
+    for path in blocked:
+        assert path["pathType"] == "Prefix"
+        assert path["backend"]["service"] == {"name": "media-scanner", "port": {"number": 8080}}
+
+    annotations = blocker["metadata"]["annotations"]
+    assert annotations.get("nginx.ingress.kubernetes.io/denylist-source-range") == "0.0.0.0/0,::/0", (
+        "direct retrieval must be denied on IPv4 and IPv6 by the ingress controller"
     )
-    snippet = blocker["metadata"]["annotations"]["nginx.ingress.kubernetes.io/configuration-snippet"]
-    assert "return 403" in snippet
+    assert "nginx.ingress.kubernetes.io/configuration-snippet" not in annotations
 
     frontend = get(documents, "ConfigMap", "frontend-configmap")
     assert (

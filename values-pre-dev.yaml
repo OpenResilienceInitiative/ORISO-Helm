@@ -28,6 +28,11 @@
 # userService.supportAccess.enabled first: Dev pins it to "false", while ADR-018
 # Release 1 is exercised on Pre-Dev.
 
+# Keep the Dev-only application readiness opt-in out of this overlay.
+online-counseling-keycloak:
+  keycloakProbes:
+    useManagementPort: false
+
 global:
   # Public host of the Pre-Dev environment (main-ingress serves App, /admin, /auth
   # and /_matrix on it). Every public URL and mail link derives from it.
@@ -38,6 +43,7 @@ global:
       enabled: false
     # The external ingress-nginx controller exists only on Dev.
     externalIngressNginxNamespace: ""
+    externalCertManagerNamespace: ""
   # Pre-Dev keeps its existing database; do not seed dummy data.
   initializeDummyData: false
   matrix:
@@ -53,6 +59,7 @@ signoz:
   # Dev enables managed provisioning; Pre-Dev has no provisioning key configured.
   orisoObservability:
     enabled: false
+    agentForwarding: false
   signoz:
     ingress:
       enabled: false

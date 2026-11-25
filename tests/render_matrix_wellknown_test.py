@@ -17,10 +17,12 @@ import sys
 import yaml
 
 CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOMAIN = "predev.oriso.internal"
+DOMAIN = "public.oriso.internal"
+MATRIX_IDENTITY = "matrix-identity.oriso.internal"
+SERVER_PATH = "/.well-known/matrix/server"
 
 
-def render() -> list[dict]:
+def render(*extra_args: str) -> list[dict]:
     result = subprocess.run(
         [
             "helm", "template", "matrix-wellknown", CHART_DIR,
@@ -30,6 +32,9 @@ def render() -> list[dict]:
             "-f", os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
             "--set-string", "global.secrets.redisdefaultPass=test-redis-password",
             "--set", f"global.domainName={DOMAIN}",
+            "--set-string", f"matrix.matrixServerName={MATRIX_IDENTITY}",
+            "--set-string", f"global.matrix.matrixServerName={MATRIX_IDENTITY}",
+            *extra_args,
             "--set-string", "userService.smtpUser=smtp-canary-user",
             "--set-string", "userService.smtpPassword=smtp-canary-password",
         ],
@@ -63,31 +68,66 @@ def extract_location_block(snippet: str, path: str) -> str:
     return ""
 
 
-def main() -> None:
-    documents = render()
-    ingress = next(
-        doc
-        for doc in documents
-        if doc.get("kind") == "Ingress"
-        and doc["metadata"]["name"] == "matrix-client-ingress"
-    )
-    snippet = ingress["metadata"]["annotations"].get(
-        "nginx.ingress.kubernetes.io/server-snippet", ""
-    )
+def by_key(documents: list[dict]) -> dict[tuple[str, str], dict]:
+    return {(doc["kind"], doc["metadata"]["name"]): doc for doc in documents}
 
-    # Assert on the active handler itself, not on substrings of the whole
-    # snippet: a commented-out or differently-scoped block must not satisfy
-    # this guard.
-    block = extract_location_block(snippet, "/.well-known/matrix/server")
-    assert block, "no active `location = /.well-known/matrix/server` block"
+
+def main() -> None:
+    staged = by_key(render())
+    switched = by_key(render("--set", "matrix.routeServerDiscoveryViaSynapse=true"))
+    ingress_key = ("Ingress", "matrix-client-ingress")
+    legacy, active = staged[ingress_key], switched[ingress_key]
+    snippet = legacy["metadata"]["annotations"].get("nginx.ingress.kubernetes.io/server-snippet", "")
+    block = extract_location_block(snippet, SERVER_PATH)
+    assert block, "preparation must retain the existing ingress response"
     assert "return 200" in block
     assert "default_type application/json" in block
     assert "Access-Control-Allow-Origin *" in block
-    # The delegation must name port 443, never the unreachable federation
-    # default 8448 that caused the outage.
-    assert f'"m.server": "{DOMAIN}:443"' in block
-    assert "8448" not in block
-    print("PASS: matrix server delegation is published on :443")
+    assert f'"m.server": "{DOMAIN}:443"' in block and "8448" not in block
+
+    assert not any(key.endswith("-snippet") for key in active["metadata"]["annotations"]), (
+        "activation must remove the ingress server snippet"
+    )
+    legacy_paths = legacy["spec"]["rules"][0]["http"]["paths"]
+    active_paths = active["spec"]["rules"][0]["http"]["paths"]
+    assert active_paths == [*legacy_paths, {
+        "backend": {"service": {"name": "matrix-synapse", "port": {"name": "discovery"}}},
+        "path": SERVER_PATH, "pathType": "Exact",
+    }]
+    assert staged[("Ingress", "main-ingress")] == switched[("Ingress", "main-ingress")]
+
+    config_key = ("ConfigMap", "matrix-homeserver-oidc")
+    deployment_key = ("Deployment", "matrix-synapse")
+    assert staged[config_key] == switched[config_key]
+    assert staged[deployment_key] == switched[deployment_key], "activation must not restart Synapse"
+    config = staged[config_key]["data"]
+    homeserver = yaml.safe_load(config["homeserver.yaml"])
+    assert homeserver["server_name"] == MATRIX_IDENTITY
+    client_listener = next(item for item in homeserver["listeners"] if item["port"] == 8008)
+    listener = next(item for item in homeserver["listeners"] if item["port"] == 8802)
+    assert "additional_resources" not in client_listener
+    assert listener["resources"] == []
+    assert listener["additional_resources"] == {SERVER_PATH: {
+        "module": "oriso_server_discovery.ServerDiscoveryResource",
+        "config": {"delegated_server": f"{DOMAIN}:443"},
+    }}
+    assert config["oriso_server_discovery.py"].strip()
+    pod = staged[deployment_key]["spec"]["template"]["spec"]
+    module = next(volume for volume in pod["volumes"] if volume["name"] == "server-discovery-module")
+    assert module["configMap"] == {
+        "name": "matrix-homeserver-oidc",
+        "items": [{"key": "oriso_server_discovery.py", "path": "oriso_server_discovery.py"}],
+    }
+    service_key = ("Service", "matrix-synapse")
+    assert staged[service_key] == switched[service_key]
+    service_ports = staged[service_key]["spec"]["ports"]
+    assert {"name": "discovery", "port": 8802, "targetPort": "discovery", "protocol": "TCP"} in service_ports
+    container = pod["containers"][0]
+    assert {"name": "discovery", "containerPort": 8802, "protocol": "TCP"} in container["ports"]
+    module_paths = next(env["value"] for env in container["env"] if env["name"] == "PYTHONPATH").split(":")
+    assert "/opt/oriso-server-discovery" in module_paths
+    assert {"name": "server-discovery-module", "mountPath": "/opt/oriso-server-discovery", "readOnly": True} in container["volumeMounts"]
+    print("PASS: stage Matrix server discovery and switch only the exact ingress route")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,128 @@
+{{- /*
+SigNoz MCP server (#304). Deliberately keyless: SIGNOZ_API_KEY is never set, so
+every request needs the caller's own SigNoz API key in SIGNOZ-API-KEY or
+Authorization (otherwise HTTP 401) and SigNoz authorizes it. The object names and
+the pod selector match the earlier hand-applied deployment so Helm can adopt it.
+*/ -}}
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $mcp := get $signoz "orisoMcpServer" | default dict -}}
+{{- if and (get $signoz "enabled" | default false) (get $mcp "enabled" | default false) -}}
+{{- $image := required "signoz.orisoMcpServer.image is required" (get $mcp "image") -}}
+{{- if not (regexMatch "@sha256:[0-9a-f]{64}$" $image) -}}
+{{- fail "signoz.orisoMcpServer.image must be pinned by digest" -}}
+{{- end -}}
+{{- $signozService := dig "signoz" "service" dict $signoz -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: signoz-mcp-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: signoz-mcp-server
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: signoz-mcp-server
+  template:
+    metadata:
+      labels:
+        app: signoz-mcp-server
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: signoz-mcp-server
+          image: {{ $image | quote }}
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: SIGNOZ_URL
+              value: {{ printf "http://%s:%v" (include "oriso.signozServiceName" .) (get $signozService "port" | default 8080) | quote }}
+            - name: TRANSPORT_MODE
+              value: "http"
+            - name: MCP_SERVER_PORT
+              value: "8000"
+            - name: LOG_LEVEL
+              value: "info"
+            # Serve the docs snapshot shipped with the image instead of fetching docs from the internet.
+            - name: SIGNOZ_DOCS_REFRESH_INTERVAL
+              value: "0"
+            - name: SIGNOZ_DOCS_FULL_REFRESH_INTERVAL
+              value: "0"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml (get $mcp "resources" | default dict) | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: signoz-mcp-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  selector:
+    app: signoz-mcp-server
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: signoz-mcp-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: {{ dig "orisoIngress" "ingressClassName" "nginx" $signoz | quote }}
+  tls:
+    - hosts:
+        - {{ .Values.global.domainName | quote }}
+      secretName: {{ printf "%s-tls" (.Values.global.domainName | replace "." "-") }}
+  rules:
+    - host: {{ .Values.global.domainName | quote }}
+      http:
+        paths:
+          - path: /signoz-mcp(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: signoz-mcp-server
+                port:
+                  name: http
+{{- end }}

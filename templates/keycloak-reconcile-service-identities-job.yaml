@@ -106,6 +106,8 @@ spec:
             - name: DISABLE_REALM_ADMIN
               value: {{ and (not $migration.prepareOnly) (default false $realmAdmin.disableExisting) | toString | quote }}
             {{- if not $migration.prepareOnly }}
+            - name: APP_CLIENT_URL_POLICY
+              value: {{ include "oriso.keycloakAppClientUrlPolicy" . | quote }}
             # Ensures the SMTP sync realm client on existing realms (Helm#420).
             - name: SMTP_SYNC_CLIENT_ID
               value: {{ include "oriso.smtpSyncClientId" . | quote }}

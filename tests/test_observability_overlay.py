@@ -42,12 +42,13 @@ class ObservabilityOverlayTest(unittest.TestCase):
         self.assertIn("otlp/e2e", policy["receivers"])
         self.assertEqual(policy["service"]["pipelines"]["traces/e2e"]["receivers"], ["otlp/e2e"])
 
-    def check_effective(self, contents: str) -> subprocess.CompletedProcess[str]:
+    def check_effective(self, contents: str, *extra_inputs: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [
                 sys.executable,
                 str(CHART_DIR / "scripts" / "observability_overlay.py"),
                 "values-dev.yaml",
+                *extra_inputs,
                 "--check-effective",
             ],
             input=contents,
@@ -55,6 +56,34 @@ class ObservabilityOverlayTest(unittest.TestCase):
             text=True,
             timeout=10,
         )
+
+    def test_clickhouse_backup_requires_the_explicit_overlay_to_generate_and_verify(self) -> None:
+        option = "values-dev-clickhouse-signal-backup.yaml"
+        self.assertFalse(self.values["signoz"]["orisoDataProtection"]["signalBackup"]["enabled"])
+        values = overlay(CHART_DIR / "values-dev.yaml", CHART_DIR / option)
+        signoz = values["signoz"]
+        self.assertTrue(signoz["orisoDataProtection"]["signalBackup"]["enabled"])
+        self.assertTrue(signoz["clickhouse"]["additionalVolumeMounts"])
+        self.assertEqual(self.check_effective(yaml.safe_dump(values), option).returncode, 0)
+        missing = self.check_effective(yaml.safe_dump(self.values), option)
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn("signoz.orisoDataProtection.signalBackup.enabled", missing.stderr)
+        self.assertIn("signoz.clickhouse.additionalVolumeMounts", missing.stderr)
+
+    def test_check_rejects_stale_dev_backup_values_after_the_flag_is_disabled(self) -> None:
+        values = overlay(CHART_DIR / "values-dev.yaml", CHART_DIR / "values-dev-clickhouse-signal-backup.yaml")
+        values["signoz"]["orisoDataProtection"]["signalBackup"]["enabled"] = False
+        result = self.check_effective(yaml.safe_dump(values))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("signoz.clickhouse.files.config.d/97-oriso-signal-backup-disk.xml", result.stderr)
+        self.assertIn("signoz.clickhouse.additionalVolumes", result.stderr)
+        self.assertIn("signoz.clickhouse.additionalVolumeMounts", result.stderr)
+
+    def test_check_preserves_unrelated_clickhouse_volumes(self) -> None:
+        clickhouse = self.values["signoz"]["clickhouse"]
+        clickhouse["additionalVolumes"] = [{"name": "custom", "emptyDir": {}}]
+        clickhouse["additionalVolumeMounts"] = [{"name": "custom", "mountPath": "/custom"}]
+        self.assertEqual(self.check_effective(yaml.safe_dump(self.values)).returncode, 0)
 
     def test_check_accepts_dev_overlay_and_unrelated_values(self) -> None:
         self.values["global"]["domainName"] = "dev.oriso.org"

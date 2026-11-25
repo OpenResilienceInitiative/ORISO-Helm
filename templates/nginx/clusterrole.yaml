@@ -1,4 +1,4 @@
-{{- if .Values.nginxController.enabled }}
+{{- if and .Values.nginxController.enabled (or (not .Values.nginxController.scopeToReleaseNamespace) .Values.nginxController.keepBothRbacScopes) }}
 apiVersion: v1
 kind: ServiceAccount
 metadata:

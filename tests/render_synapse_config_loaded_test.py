@@ -35,13 +35,14 @@ SYNAPSE_CONFIG_KEYS = {
     "rc_message",
     "redis",
     "registration_shared_secret",
+    "registration_shared_secret_path",
     "report_stats",
     "server_name",
     "signing_key_path",
 }
 
 
-def render() -> list[dict]:
+def render(*helm_args: str) -> list[dict]:
     result = subprocess.run(
         [
             "helm",
@@ -56,6 +57,7 @@ def render() -> list[dict]:
             os.path.join(CHART_DIR, "secrets.yaml.default"),
             "-f",
             os.path.join(CHART_DIR, "tests", "fixtures", "render-required-secrets.yaml"),
+            *helm_args,
         ],
         capture_output=True,
         text=True,

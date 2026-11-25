@@ -1,4 +1,7 @@
 {{- if (.Values.ipAnonymizer).enabled }}
+{{- if gt (int .Values.ipAnonymizer.replicas) 1 }}
+{{- fail "ipAnonymizer.replicas must be 1: each pod keeps its sessions in memory, so a second replica hands the same browser a different X-Anon-Id on many requests (ORISO-Helm#544)." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,6 +26,14 @@ spec:
         - name: ip-anonymizer
           image: {{ .Values.ipAnonymizer.image | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          {{- with .Values.ipAnonymizer.sessionKeySecretName }}
+          env:
+            - name: ANON_SESSION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: ANON_SESSION_KEY
+          {{- end }}
           ports:
             - containerPort: 8080
           livenessProbe:

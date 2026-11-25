@@ -1,0 +1,26 @@
+{{- $policies := get .Values "networkPolicies" | default dict -}}
+{{- $config := get $policies "matrixPostgresIngress" | default dict -}}
+{{- $enabled := dig "enabled" false $config -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "networkPolicies.matrixPostgresIngress.enabled must be a boolean" -}}
+{{- end -}}
+{{- if $enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: matrix-postgres-ingress
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: matrix-postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: matrix-synapse
+      ports:
+        - protocol: TCP
+          port: 5432
+{{- end }}

@@ -284,6 +284,20 @@ securityContext:
   runAsGroup: 101
   fsGroup: 101
   fsGroupChangePolicy: OnRootMismatch
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Security context for the built-in ClickHouse containers
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# -- Enable only when a custom container needs to call the Kubernetes API
+automountServiceAccountToken: false
 
 # -- An allowlist of IP addresses or network masks the ClickHouse user is
 # allowed to access from. By default anything within a private network will be
@@ -614,9 +628,20 @@ clickhouseOperator:
     # signoz.io/port: '8888'
     # signoz.io/scrape: 'true'
 
-  # -- Clickhouse Operator pod-level security attributes and common container settings.
-  podSecurityContext: {}
-    # fsGroup: 2000
+  # -- Security context used by both ClickHouse operator processes.
+  podSecurityContext:
+    runAsNonRoot: true
+    # Numeric form of the nobody identity in the operator and exporter images.
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container-level security context for the operator and metrics exporter.
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+    readOnlyRootFilesystem: true
 
   # Clickhouse Operator secret for ClickHouse user password
   secret:

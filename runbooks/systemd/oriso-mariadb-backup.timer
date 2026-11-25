@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the ORISO Dev MariaDB backup every night at 02:00 UTC
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 UTC
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

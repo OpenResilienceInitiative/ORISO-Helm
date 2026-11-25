@@ -1,5 +1,6 @@
 {{- $signoz := get .Values "signoz" | default dict -}}
 {{- $orisoIngress := get $signoz "orisoIngress" | default dict -}}
+{{- $useGateway := get $orisoIngress "useRouteGateway" | default false -}}
 {{- $signozApp := get $signoz "signoz" | default dict -}}
 {{- $signozService := get $signozApp "service" | default dict -}}
 {{- if and (get $signoz "enabled" | default false) (dig "enabled" true $orisoIngress) -}}
@@ -14,10 +15,12 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    {{- if not $useGateway }}
     # The app only serves the UI under /signoz/ and does not redirect the
     # bare path itself.
     nginx.ingress.kubernetes.io/configuration-snippet: |
       rewrite ^/signoz$ /signoz/ permanent;
+    {{- end }}
 spec:
   ingressClassName: {{ get $orisoIngress "ingressClassName" | default "nginx" | quote }}
   # Served on the main domain under /signoz — reuses the main-ingress
@@ -40,6 +43,36 @@ spec:
                 name: {{ include "oriso.signozServiceName" . }}
                 port:
                   number: {{ get $signozService "port" | default 8080 }}
+{{- if $useGateway }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "oriso.signozServiceName" . }}-slash-redirect
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: {{ get $orisoIngress "ingressClassName" | default "nginx" | quote }}
+  tls:
+    - hosts:
+        - {{ .Values.global.domainName | quote }}
+      secretName: {{ printf "%s-tls" (.Values.global.domainName | replace "." "-") }}
+  rules:
+    - host: {{ .Values.global.domainName | quote }}
+      http:
+        paths:
+          # The shared host uses regex paths. Keep the bare redirect case-sensitive
+          # and anchored so the UI prefix still serves its own assets and API.
+          - path: "/(?-i:signoz)$"
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: {{ include "oriso.signozRouteGatewayName" . }}
+                port:
+                  name: http
+{{- end }}
 {{- end -}}
 
 {{- $o := get .Values.global "observability" | default dict }}
@@ -66,6 +99,7 @@ metadata:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-body-size: "32k"
     nginx.ingress.kubernetes.io/limit-rps: "10"
+    {{- if not $useGateway }}
     # Compressed bodies would slip past the size limit; the browser exporter
     # does not compress. The rewrite stays in this location: the
     # rewrite-target annotation would switch every path of the host to
@@ -74,6 +108,7 @@ metadata:
       if ($request_method != POST) { return 405; }
       if ($http_content_encoding != "") { return 415; }
       rewrite ^/signoz-rum/v1/metrics$ /v1/metrics break;
+    {{- end }}
 spec:
   ingressClassName: {{ get $orisoIngress "ingressClassName" | default "nginx" | quote }}
   tls:
@@ -88,9 +123,15 @@ spec:
             pathType: Exact
             backend:
               service:
+                {{- if $useGateway }}
+                name: {{ include "oriso.signozRouteGatewayName" . }}
+                port:
+                  name: http
+                {{- else }}
                 name: {{ include "oriso.signozOtelCollectorServiceName" . }}
                 port:
                   number: {{ dig "otelCollector" "ports" "otlp-rum" "servicePort" 4319 (get .Values "signoz" | default dict) }}
+                {{- end }}
 {{- end }}
 
 {{- $e2e := get $o "e2eTraceIngest" | default dict }}
@@ -124,12 +165,14 @@ metadata:
     nginx.ingress.kubernetes.io/auth-realm: "ORISO E2E trace ingest"
     nginx.ingress.kubernetes.io/proxy-body-size: "256k"
     nginx.ingress.kubernetes.io/limit-rps: "5"
+    {{- if not $useGateway }}
     # Other ingresses on the shared host can turn Exact into a regex location.
     nginx.ingress.kubernetes.io/configuration-snippet: |
       if ($request_uri != "/signoz-e2e/v1/traces") { return 404; }
       if ($request_method != POST) { return 405; }
       if ($http_content_encoding != "") { return 415; }
       rewrite ^/signoz-e2e/v1/traces$ /v1/traces break;
+    {{- end }}
 spec:
   ingressClassName: {{ get $orisoIngress "ingressClassName" | default "nginx" | quote }}
   tls:
@@ -144,7 +187,13 @@ spec:
             pathType: Exact
             backend:
               service:
+                {{- if $useGateway }}
+                name: {{ include "oriso.signozRouteGatewayName" . }}
+                port:
+                  name: http
+                {{- else }}
                 name: {{ include "oriso.signozOtelCollectorServiceName" . }}
                 port:
                   number: {{ dig "otelCollector" "ports" "otlp-e2e" "servicePort" 4321 (get .Values "signoz" | default dict) }}
+                {{- end }}
 {{- end }}

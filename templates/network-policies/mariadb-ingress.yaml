@@ -1,0 +1,55 @@
+{{- $policies := get .Values "networkPolicies" | default dict -}}
+{{- $config := get $policies "mariadbIngress" | default dict -}}
+{{- $enabled := dig "enabled" false $config -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "networkPolicies.mariadbIngress.enabled must be a boolean" -}}
+{{- end -}}
+{{- if $enabled }}
+{{- $tenantBootstrap := .Values.tenantService.bootstrapTenants | default dict }}
+{{- $topicBootstrap := .Values.consultingTypeService.bootstrapTopics | default dict }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mariadb-ingress
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: mariadb
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- range list "agencyservice" "consultingtypeservice" "keycloak" "tenantservice" "userservice" }}
+        - podSelector:
+            matchLabels:
+              app: {{ . }}
+        {{- end }}
+        {{- if dig "enabled" true $tenantBootstrap }}
+        - podSelector:
+            matchLabels:
+              app: tenant-bootstrap
+        {{- end }}
+        {{- if dig "enabled" true $topicBootstrap }}
+        - podSelector:
+            matchLabels:
+              app: topic-bootstrap
+        {{- end }}
+        {{- if (.Values.addonService).enabled }}
+        {{- range list "addonservice" "addonservice-db-init" }}
+        - podSelector:
+            matchLabels:
+              app: {{ . }}
+        {{- end }}
+        {{- end }}
+        {{- if eq (include "oriso.dbMetrics.enabled" .) "true" }}
+        - podSelector:
+            matchLabels:
+              app: db-monitoring-reconcile
+        - podSelector:
+            matchLabels:
+              {{- include "oriso.signozCollector.selectorLabels" (dict "root" . "component" "otel-deployment") | nindent 14 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 3306
+{{- end }}

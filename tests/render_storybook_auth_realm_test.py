@@ -79,7 +79,7 @@ class StorybookAuthRealmTest(unittest.TestCase):
                          "ORISO Storybook")
         paths = ingress["spec"]["rules"][0]["http"]["paths"]
         self.assertEqual({path["path"] for path in paths}, {
-            "/storybook-admin(/|$)(.*)", "/storybook-frontend(/|$)(.*)",
+            "/storybook-admin/(.*)", "/storybook-frontend/(.*)",
         })
         for path in paths:
             backend = path["backend"]["service"]

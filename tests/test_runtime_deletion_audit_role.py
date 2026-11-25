@@ -17,6 +17,7 @@ RUNTIME_ROLES = {
     "appointment-sync",
     "appointment-participant-cleanup",
     "deletion-audit-read",
+    "tenant-deletion",
 }
 RUNTIME_AUDIENCES = {"tenantservice", "agencyservice", "appointmentservice"}
 

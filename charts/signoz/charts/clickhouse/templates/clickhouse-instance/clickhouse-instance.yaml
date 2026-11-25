@@ -1,3 +1,10 @@
+{{- $mountLogDirectory := .Values.containerSecurityContext.readOnlyRootFilesystem -}}
+{{- range .Values.additionalVolumeMounts -}}
+  {{- if eq .mountPath "/var/log/clickhouse-server" -}}
+    {{- $mountLogDirectory = false -}}
+  {{- end -}}
+{{- end -}}
+{{- $mountUdfTemp := and .Values.containerSecurityContext.readOnlyRootFilesystem .Values.initContainers.enabled .Values.initContainers.udf.enabled -}}
 apiVersion: clickhouse.altinity.com/v1
 kind: ClickHouseInstallation
 metadata:
@@ -148,6 +155,7 @@ spec:
         spec:
           {{- include "clickhouse.imagePullSecrets" . | indent 10 }}
           serviceAccountName: {{ include "clickhouse.serviceAccountName" . }}
+          automountServiceAccountToken: {{ .Values.automountServiceAccountToken }}
           priorityClassName: {{ .Values.priorityClassName | quote }}
           {{- if .Values.affinity }}
           affinity: {{ toYaml .Values.affinity | nindent 12 }}
@@ -168,6 +176,14 @@ spec:
           volumes:
             - name: shared-binary-volume
               emptyDir: {}
+          {{- if $mountLogDirectory }}
+            - name: clickhouse-runtime-logs
+              emptyDir: {}
+          {{- end }}
+          {{- if $mountUdfTemp }}
+            - name: clickhouse-udf-tmp
+              emptyDir: {}
+          {{- end }}
             - name: custom-functions-volume
               configMap:
                 name: {{ include "clickhouse.fullname" . }}-custom-functions
@@ -197,16 +213,22 @@ spec:
             - name: {{ include "clickhouse.fullname" . }}-udf-init
               image: {{ include "clickhouse.initContainers.udf.image" . }}
               imagePullPolicy: {{ .Values.initContainers.udf.image.pullPolicy }}
+              securityContext: {{ toYaml .Values.containerSecurityContext | nindent 16 }}
               command:
                 {{- toYaml .Values.initContainers.udf.command | nindent 16 }}
               volumeMounts:
                 - name: shared-binary-volume
                   mountPath: /var/lib/clickhouse/user_scripts
+              {{- if $mountUdfTemp }}
+                - name: clickhouse-udf-tmp
+                  mountPath: /tmp
+              {{- end }}
             {{- end }}
             {{- if .Values.initContainers.init.enabled }}
             - name: {{ include "clickhouse.fullname" . }}-init
               image: {{ include "clickhouse.initContainers.init.image" . }}
               imagePullPolicy: {{ .Values.initContainers.init.image.pullPolicy }}
+              securityContext: {{ toYaml .Values.containerSecurityContext | nindent 16 }}
               command:
                 {{- toYaml .Values.initContainers.init.command | nindent 16 }}
             {{- end }}
@@ -217,6 +239,7 @@ spec:
               # https://github.com/SigNoz/signoz/blob/main/deploy/docker/clickhouse-setup/docker-compose.yaml#L5
               image: {{ template "clickhouse.image" . }}
               imagePullPolicy: {{ .Values.image.pullPolicy }}
+              securityContext: {{ toYaml .Values.containerSecurityContext | nindent 16 }}
               command:
                 - /bin/bash
                 - -c
@@ -279,6 +302,10 @@ spec:
                   mountPath: /etc/clickhouse-server/functions
                 - name: scripts
                   mountPath: /scripts
+              {{- if $mountLogDirectory }}
+                - name: clickhouse-runtime-logs
+                  mountPath: /var/log/clickhouse-server
+              {{- end }}
               {{- if and (not .Values.templates.volumeClaimTemplates) (not .Values.persistence.enabled) }}
                 - name: data-volume
                   mountPath: /var/lib/clickhouse
@@ -306,6 +333,7 @@ spec:
             - name: logs-system-exporter
               image: {{ include "logs.system.image" . }}
               imagePullPolicy: {{ .Values.logs.system.image.pullPolicy }}
+              securityContext: {{ toYaml .Values.containerSecurityContext | nindent 16 }}
               command:
                 - /signoz-collector
               args:

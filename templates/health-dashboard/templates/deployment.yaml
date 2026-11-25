@@ -1,3 +1,20 @@
+{{- $environment := deepCopy (.Values.healthDashboard.env | default dict) -}}
+{{- $operatorAccess := .Values.global.healthDashboardOperatorAccess -}}
+{{- if and (hasKey .Values.global "healthDashboardOperatorAccess") (not (kindIs "bool" $operatorAccess)) -}}
+{{- fail "global.healthDashboardOperatorAccess must be a boolean" -}}
+{{- end -}}
+{{- if $operatorAccess -}}
+{{- $ingress := .Values.healthDashboard.ingress -}}
+{{- if or (not $ingress.enabled) (not (kindIs "bool" $ingress.basicAuth)) $ingress.basicAuth -}}
+{{- fail "HealthDashboard operator access requires a public ingress with basicAuth: false" -}}
+{{- end -}}
+{{- if not .Values.global.enableTls -}}
+{{- fail "HealthDashboard operator access requires global.enableTls" -}}
+{{- end -}}
+{{- $realm := required "global.keycloak.realm is required for HealthDashboard operator access" .Values.global.keycloak.realm -}}
+{{- $_ := set $environment "ORISO_DASHBOARD_OIDC_ISSUER" (printf "%s/auth/realms/%s" (include "oriso.publicOrigin" .) $realm) -}}
+{{- $_ := set $environment "ORISO_DASHBOARD_OIDC_CLIENT_ID" "health-dashboard" -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,7 +50,7 @@ spec:
           containerPort: {{ .Values.healthDashboard.service.targetPort }}
           protocol: TCP
         env:
-        {{- range $key, $value := .Values.healthDashboard.env }}
+        {{- range $key, $value := $environment }}
         - name: {{ $key }}
           value: {{ $value | quote }}
         {{- end }}

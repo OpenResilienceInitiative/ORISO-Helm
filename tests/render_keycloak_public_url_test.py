@@ -14,6 +14,7 @@ Two misconfigurations broke /admin login on a fresh install (#331):
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -58,8 +59,27 @@ def configmap(documents: list[dict], name: str) -> dict:
     )
 
 
+
+def assert_app_client_policy(documents: list[dict], origin: str) -> None:
+    realm = json.loads(configmap(documents, "keycloak-configmap-data")["realm.json"])
+    client = next(client for client in realm["clients"] if client["clientId"] == "app")
+    expected = {"redirectUris": [f"{origin}/*"], "webOrigins": [origin]}
+    assert {key: client[key] for key in expected} == expected
+    assert client["attributes"]["post.logout.redirect.uris"] == "+"
+    assert client["standardFlowEnabled"] and client["directAccessGrantsEnabled"]
+
+    job = next(
+        doc for doc in documents if doc["kind"] == "Job"
+        and doc["metadata"]["name"] == "keycloak-reconcile-service-identities"
+    )
+    env = job["spec"]["template"]["spec"]["containers"][0]["env"]
+    policy = next(item["value"] for item in env if item["name"] == "APP_CLIENT_URL_POLICY")
+    assert json.loads(policy) == expected
+
+
 def main() -> None:
     documents = render()
+    assert_app_client_policy(documents, f"https://{DOMAIN}")
 
     admin = configmap(documents, "admin-configmap")
     frontend = configmap(documents, "frontend-configmap")
@@ -73,7 +93,9 @@ def main() -> None:
     assert keycloak["KEYCLOAK_HOSTNAME"] == f"https://{DOMAIN}/auth", keycloak
 
     # Non-TLS installs keep working; only the scheme flips.
-    plain = configmap(render("--set", "global.enableTls=false"), "keycloak-configmap-env")
+    plain_documents = render("--set", "global.enableTls=false")
+    assert_app_client_policy(plain_documents, f"http://{DOMAIN}")
+    plain = configmap(plain_documents, "keycloak-configmap-env")
     assert plain["KEYCLOAK_HOSTNAME"] == f"http://{DOMAIN}/auth", plain
 
     print("PASS: admin and Keycloak use the public Keycloak URL")

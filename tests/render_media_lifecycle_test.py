@@ -138,6 +138,8 @@ class MediaLifecycleRenderTest(unittest.TestCase):
             {"matrixrtcLifecycle.livekit.existingConfigSecret.name": ""},
             {"matrixrtcLifecycle.livekit.existingConfigSecret.name": "livekit-config-runtime"},
             {"matrixrtcLifecycle.existingSecret.name": "matrixrtc-auth-secrets"},
+            {"matrixrtcLifecycle.existingSecret.name": "matrix-synapse-credentials"},
+            {"matrixrtcLifecycle.livekit.existingConfigSecret.name": "matrix-synapse-credentials"},
             {"matrixrtcLifecycle.livekit.nodeIp": ""},
             {"matrixrtcLifecycle.livekit.nodeIp": "999.1.2.3"},
             {"matrixrtcLifecycle.livekit.nodeIp": "127.0.0.1"},

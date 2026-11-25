@@ -53,7 +53,6 @@ data:
   MULTITENANCY_ENABLED: {{ .Values.global.multitenancyEnabled | quote }}
   FEATURE_TOPICS_ENABLED: {{ .Values.global.featureTopicsEnabled | quote }}
   FEATURE_DEMOGRAPHICS_ENABLED: {{ .Values.global.demographicsEnabled | quote }}
-  JAVA_OPTS: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
   USER_ADMIN_SERVICE_API_URL: "http://userservice.{{ .Release.Namespace }}:8080"
   FEATURE_APPOINTMENT_ENABLED:  "false"
   APPOINTMENT_SERVICE_API_URL: "http://appointmentservice.{{ .Release.Namespace }}:8080"

@@ -359,3 +359,38 @@ zookeeper: tls.quorum.enabled
     enable auto-generated certificates.
 {{- end -}}
 {{- end -}}
+
+{{/*
+Use the same manifest bytes for emission and the Pod checksum, even on the
+first render when the Secret contains newly generated values.
+*/}}
+{{- define "zookeeper.renderSecretOnce" -}}
+{{- $cacheKey := printf "zookeeper/manifest/%s" .name -}}
+{{- if not (hasKey .context $cacheKey) -}}
+    {{- $_ := set .context $cacheKey (include .name .context) -}}
+{{- end -}}
+{{- get .context $cacheKey -}}
+{{- end -}}
+
+{{- define "zookeeper.managedTlsPassword" -}}
+{{- if .password -}}
+    {{- .password | toString | b64enc | quote -}}
+{{- else -}}
+    {{- include "common.secrets.lookup" (dict "secret" .secret "key" .key "defaultValue" (randAlphaNum 24) "context" .context) | quote -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "zookeeper.tlsPasswordEnv" -}}
+{{- range $scope := list "client" "quorum" -}}
+  {{- if (index $.Values.tls $scope).enabled -}}
+    {{- $secret := include (printf "zookeeper.%s.tlsPasswordsSecret" $scope) $ -}}
+    {{- range $purpose := list "Keystore" "Truststore" }}
+- name: ZOO_TLS_{{ upper $scope }}_{{ upper $purpose }}_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ $secret }}
+      key: {{ include (printf "zookeeper.%s.tlsPassword%sKey" $scope $purpose) $ }}
+    {{- end }}
+  {{- end -}}
+{{- end -}}
+{{- end -}}

@@ -10,7 +10,7 @@
 {{- end }}
 {{- if not $basicAuth }}
 {{- /* Without Basic Auth the dashboard is public, so the app must withhold internal details (#57). */}}
-{{- $publicMode := (index (.Values.healthDashboard.env | default dict) "ORISO_PUBLIC_MODE") | default "true" | toString | lower | trim }}
+{{- $publicMode := dig "ORISO_PUBLIC_MODE" "true" (.Values.healthDashboard.env | default dict) | toString | lower | trim }}
 {{- if eq $publicMode "false" }}
 {{- fail "healthDashboard.ingress.basicAuth=false makes /health public and requires public mode: remove healthDashboard.env.ORISO_PUBLIC_MODE=false" }}
 {{- end }}

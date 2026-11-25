@@ -24,6 +24,8 @@ spec:
         # homeserver.yaml is mounted with subPath, so ConfigMap updates do not
         # reach an existing pod. Roll the Deployment when its source changes.
         checksum/homeserver-config: {{ include "oriso.matrix.homeserverConfigMap" . | sha256sum }}
+        # Synapse reads the credentials at startup.
+        checksum/synapse-credentials: {{ include (print $.Template.BasePath "/matrix/matrix-synapse-credentials.yaml") . | sha256sum }}
         # Synapse reads the database block only at start, so a switch of the engine
         # must replace the pod, in both directions (runbooks/matrix-sqlite-to-postgres.md).
         checksum/database-engine: {{ (.Values.matrix.database | default dict).engine | default "sqlite3" | sha256sum | quote }}
@@ -57,21 +59,21 @@ spec:
         image: {{ include "oriso.immutableImage" (list "matrix.image" .Values.matrix.image) | quote }}
         imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
         # start.py adds the default /data/homeserver.yaml only when no --config-path is
-        # given, so the DB secret file is passed explicitly as a second config (merged by Synapse).
+        # given, so pass the base config and both Secret-backed config fragments explicitly.
         args:
           - run
           - --config-path
           - /data/homeserver.yaml
           - --config-path
           - /secrets/synapse/homeserver-database.yaml
+          - --config-path
+          - /secrets/synapse-credentials/homeserver-redis.yaml
           # Otherwise Synapse generates keys beside the last config, in the read-only Secret.
           - --keys-directory
           - /data
         env:
-          {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
           - name: PYTHONPATH
-            value: /opt/oriso-modules
-          {{- end }}
+            value: "/opt/oriso-server-discovery{{ if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}:/opt/oriso-modules{{ end }}"
           - name: SYNAPSE_SERVER_NAME
             valueFrom:
               configMapKeyRef:
@@ -95,6 +97,9 @@ spec:
           {{- end }}
           - containerPort: 8008
             protocol: TCP
+          - name: discovery
+            containerPort: 8802
+            protocol: TCP
           - containerPort: 8009
             protocol: TCP
           {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
@@ -116,18 +121,19 @@ spec:
             scheme: HTTP
           initialDelaySeconds: 10
           periodSeconds: 10
+        # Host values.yaml copies written before matrix.resources existed keep
+        # the previous fixed values through this fallback.
+        {{- $synapseResources := .Values.matrix.resources | default (dict "requests" (dict "cpu" "250m" "memory" "512Mi") "limits" (dict "cpu" "500m" "memory" "1Gi")) }}
         resources:
-          limits:
-            cpu: 500m
-            memory: 1Gi
-          requests:
-            cpu: 250m
-            memory: 512Mi
+          {{- toYaml $synapseResources | nindent 10 }}
         securityContext:
           {{- include "oriso.containerSecurityContext" (dict) | nindent 10 }}
         volumeMounts:
           - mountPath: /tmp
             name: tmp
+          - mountPath: /opt/oriso-server-discovery
+            name: server-discovery-module
+            readOnly: true
           {{- if eq (include "oriso.matrixGroupPolicy.enabled" .) "true" }}
           - name: group-policy-module
             mountPath: /opt/oriso-modules
@@ -143,6 +149,9 @@ spec:
             subPath: homeserver.yaml
           - mountPath: /secrets/synapse
             name: homeserver-database-secret
+            readOnly: true
+          - mountPath: /secrets/synapse-credentials
+            name: synapse-credentials
             readOnly: true
       volumes:
         - name: tmp
@@ -164,9 +173,24 @@ spec:
         - name: homeserver-config
           configMap:
             name: matrix-homeserver-oidc
+        - name: server-discovery-module
+          configMap:
+            name: matrix-homeserver-oidc
+            items:
+              - key: oriso_server_discovery.py
+                path: oriso_server_discovery.py
         - name: homeserver-database-secret
           secret:
             secretName: matrix-postgres-secret
             items:
               - key: homeserver-database.yaml
                 path: homeserver-database.yaml
+        - name: synapse-credentials
+          secret:
+            secretName: matrix-synapse-credentials
+            defaultMode: 0444
+            items:
+              - key: registration-shared-secret
+                path: registration-shared-secret
+              - key: homeserver-redis.yaml
+                path: homeserver-redis.yaml

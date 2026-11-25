@@ -1,0 +1,32 @@
+# Explicit Dev opt-in for #499. See runbooks/signoz-clickhouse-recovery.md.
+signoz:
+  clickhouse:
+    files:
+      # Protected destination for native signal archives (#499); the only
+      # disk BACKUP may write to. No storage policy uses it.
+      config.d/97-oriso-signal-backup-disk.xml: |
+        <clickhouse>
+          <storage_configuration>
+            <disks>
+              <oriso_signal_backup>
+                <type>local</type>
+                <path>/var/lib/clickhouse-signal-backup/</path>
+              </oriso_signal_backup>
+            </disks>
+          </storage_configuration>
+          <backups>
+            <allowed_disk>oriso_signal_backup</allowed_disk>
+          </backups>
+        </clickhouse>
+    # The claim is created and kept by signoz.orisoDataProtection.signalBackup.
+    additionalVolumes:
+      - name: signal-backup
+        persistentVolumeClaim:
+          claimName: signoz-clickhouse-signal-backup
+    additionalVolumeMounts:
+      - name: signal-backup
+        mountPath: /var/lib/clickhouse-signal-backup/
+  # Daily at 03:15 UTC, seven archives kept.
+  orisoDataProtection:
+    signalBackup:
+      enabled: true

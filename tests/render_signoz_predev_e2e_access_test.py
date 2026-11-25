@@ -5,14 +5,17 @@ from render_signoz_dev_observability_test import by_key, render
 
 
 PRIVATE = "oriso-predev-j08"
-HOSTED = "oriso-predev-e2e-report"
+REPORT = "oriso-predev-e2e-report"
 PREDEV = ("values-dev.yaml", "values-pre-dev.yaml")
 FLAG = "signoz.orisoPreDevE2EAccess.enabled"
 ENABLED = ("--set", f"{FLAG}=true")
 KINDS = {"ServiceAccount", "Role", "RoleBinding"}
-ACCESS_KEYS = {(kind, name) for kind in KINDS for name in (PRIVATE, HOSTED)}
+ACCESS_KEYS = {(kind, name) for kind in KINDS for name in (PRIVATE, REPORT)}
 COMMON_DEPLOYMENTS = ["frontend", "userservice", "matrix-synapse"]
 MATRIXRTC_DEPLOYMENTS = ["element-call", "matrixrtc-auth-policy-gateway", "matrixrtc-authorization-service", "livekit"]
+APP_DEPLOYMENTS = ["admin", "agencyservice", "tenantservice", "consultingtypeservice"]
+SCANNER_DEPLOYMENT = "media-scanner"
+SCANNER_CONFIG = "media-scanner-config"
 
 
 def rule(group, resource, verb, names=None):
@@ -64,7 +67,24 @@ def main():
             assert passwords.pop(key)
     assert all(selected[key] == value for key, value in baseline.items()), "Existing chart objects changed"
     assert_identity(selected, PRIVATE, COMMON_DEPLOYMENTS, [rule("", "services/proxy", "create", ["http:caritas-signoz:8080"])])
-    assert_identity(selected, HOSTED, COMMON_DEPLOYMENTS + MATRIXRTC_DEPLOYMENTS, [])
+    assert_identity(
+        selected,
+        REPORT,
+        COMMON_DEPLOYMENTS + MATRIXRTC_DEPLOYMENTS + APP_DEPLOYMENTS + [SCANNER_DEPLOYMENT],
+        [rule("", "configmaps", "get", [SCANNER_CONFIG])],
+    )
+    assert all(("Deployment", deployment) in selected for deployment in APP_DEPLOYMENTS)
+    scanner = by_key(render(
+        *PREDEV,
+        helm_args=(
+            *ENABLED,
+            "--set", "mediaScanner.enabled=true",
+            "--set", "mediaScanner.requestSecret.existingSecret=synthetic-scanner-secret",
+        ),
+    ))
+    assert ("Deployment", SCANNER_DEPLOYMENT) in scanner
+    assert ("ConfigMap", SCANNER_CONFIG) in scanner
+    assert scanner[("Role", REPORT)] == selected[("Role", REPORT)]
     service = selected[("Service", "caritas-signoz")]
     assert any(port["port"] == 8080 for port in service["spec"]["ports"])
 

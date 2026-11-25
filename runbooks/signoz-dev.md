@@ -45,7 +45,8 @@ ssh dev-server
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 cd /root/ORISO-Helm && git fetch origin && git checkout <merged dev commit>
 observability_file=/root/observability-dev.yaml
-python3 scripts/observability_overlay.py values-dev.yaml > "$observability_file"
+observability_inputs=(values-dev.yaml)
+python3 scripts/observability_overlay.py "${observability_inputs[@]}" > "$observability_file"
 values_files=(values.yaml secrets.yaml "$observability_file")
 ```
 
@@ -93,9 +94,14 @@ values_drift
 
 Resolve the listed paths before continuing. Use the approved ordered values
 files, image pin overrides and post-renderer for both the preview and upgrade.
+For a separately approved ClickHouse signal backup, include its values in the
+same projection and check as described in
+[Activate the scheduled archives](signoz-clickhouse-recovery.md#activate-the-scheduled-archives).
 Dev's application images can be updated independently of Helm. The image check
 compares the current direct Helm-managed Deployments, StatefulSets, DaemonSets
 and CronJobs with the proposed manifest, including their init containers.
+The ClickHouse storage check compares the rendered data claim template with
+the running installation and every data claim mounted by its owned Pods.
 
 The first rollout restarts Keycloak, Synapse (`Recreate`, a short Matrix gap),
 Redis, the four Java services, Frontend and Admin. Announce it before starting
@@ -117,9 +123,8 @@ kubectl -n caritas get pods -o json | jq -er '
 
 Require a ready row with a start time for each ClickHouse pod.
 
-Run this preflight on the Dev master. For a staged rollout, set
-`expected_observability` to the values file that declares its approved
-observability settings.
+Run this preflight on the Dev master. Use the same approved
+`observability_inputs` array that generated the rollout projection.
 
 ```bash
 # Put the approved image overrides and --post-renderer arguments here.
@@ -133,7 +138,6 @@ signoz_helm_args() {
   done
   helm_args+=("${extra_helm_args[@]}")
 }
-expected_observability=values-dev.yaml
 preflight_signoz() (
   set +x
   set -uo pipefail
@@ -142,9 +146,11 @@ preflight_signoz() (
   test "$(head -n 1 <<<"$drift")" = 0 || { printf '%s\n' "$drift"; exit 1; }
   preview=$(helm upgrade "${helm_args[@]}" --dry-run=server --hide-secret -o json) || exit 1
   printf '%s' "$preview" | jq -e '.config' |
-    python3 scripts/observability_overlay.py "$expected_observability" --check-effective || exit 1
+    python3 scripts/observability_overlay.py "${observability_inputs[@]}" --check-effective || exit 1
   printf '%s' "$preview" | jq -er '.manifest' |
-    python3 scripts/check_helm_workload_images.py --namespace caritas --release caritas "$@"
+    python3 scripts/check_helm_workload_images.py --namespace caritas --release caritas "$@" || exit 1
+  printf '%s' "$preview" | jq -er '.manifest' |
+    python3 -m scripts.check_signoz_clickhouse_storage --namespace caritas --release caritas
 )
 preflight_signoz
 ```
@@ -233,6 +239,170 @@ retrying. The keep annotation also leaves the live Ingress in place when a
 later render omits the alias. Retire the alias through a separately reviewed
 removal of the Ingress and its public DNS record.
 
+### Adopt the SigNoz MCP server
+
+Since 2026-10-14, Dev has had a hand-applied `signoz-mcp-server` Deployment,
+Service and Ingress at `https://dev.oriso.org/signoz-mcp`. That server held a
+SigNoz API key, so anyone could use it without credentials. The Dev overlay now
+renders the same three objects with `signoz.orisoMcpServer.enabled`. The image
+is pinned, the server runs as non-root with a read-only root filesystem, and it
+holds no API key. Each client sends its own SigNoz API key in a
+`SIGNOZ-API-KEY` header, and requests without one get HTTP 401.
+
+In the approved Dev upgrade window, give the three existing objects Helm
+ownership so the upgrade replaces them instead of failing on existing objects:
+
+```bash
+for kind in deployment service ingress; do
+  kubectl -n caritas label "$kind" signoz-mcp-server app.kubernetes.io/managed-by=Helm --overwrite
+  kubectl -n caritas annotate "$kind" signoz-mcp-server \
+    meta.helm.sh/release-name=caritas meta.helm.sh/release-namespace=caritas --overwrite
+done
+```
+
+After the upgrade, revoke the SigNoz API key the old Deployment used
+(**Settings → API Keys**). It was usable through the public route. Then check
+from outside the cluster:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://dev.oriso.org/signoz-mcp/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+Expect 401. Clients configure the URL `https://dev.oriso.org/signoz-mcp/mcp`
+with their own key in the `SIGNOZ-API-KEY` header.
+
+### Operations surfaces on Dev (#304)
+
+Dev observations for the DPIA technical and organisational measures annex.
+The external readback was recorded on 2026-11-21. The MCP deployment was
+checked separately through Kubernetes metadata on 2026-11-21 UTC.
+
+| Surface | Control on Dev |
+| --- | --- |
+| SigNoz UI `/signoz` | SigNoz login. The page loads, but its API returns 401 without a session. Basic Auth cannot sit in front because SigNoz sends its own `Authorization: Bearer` header. |
+| SigNoz MCP | Kubernetes reports the hand-applied Deployment as ready, and its configuration still includes a setting for a server-held key. After Helm adoption and rollout, the Deployment runs in keyless mode and clients authenticate with their own SigNoz keys. Revoke the old key and verify client authentication after rollout. |
+| Storybook `/storybook-*` | The chart renders Basic Auth (`storybook.ingress.authSecret`). Live is still a hand-applied Ingress without auth until the `storybook-basic-auth` Secret exists and Helm owns the route. |
+| HealthDashboard `/health` | Public status only, by design (ORISO-HealthDashboard#57). |
+| Redis Commander, Status page | Not deployed on Dev. Both paths fall through to the App. |
+
+### External HTTPS, TLS expiry and liveness
+
+Run the credential-free probe at least hourly on a runner outside the Dev
+cluster and its hosting provider.
+
+```sh
+python3 scripts/signoz_external_uptime.py
+```
+
+The probe verifies TLS trust and hostname on each connection. It requires the
+public alias to redirect to `https://dev.oriso.org/signoz/` and checks that
+page directly. It also requires HTTP 200 and JSON status `ok` at
+`/signoz/api/v1/health?live=1`. The pinned SigNoz handler checks its
+ClickHouse connection on that path. Stored telemetry and authenticated use
+have their own acceptance checks.
+
+Use the runner's system trust store or pass it with `--ca-file`. The JSON
+output includes UTC certificate expiry for both hosts. The exit codes follow
+the monitoring plugin convention.
+
+| Exit | Result | Meaning |
+| --- | --- | --- |
+| 0 | OK | Both public routes and liveness pass, and both certificates have at least 21 days left. |
+| 1 | WARNING | A certificate has fewer than 21 days left (S7 P2). |
+| 2 | CRITICAL | A public check failed or a certificate has fewer than seven days left (S7 P1 for expiry). |
+| 3 | UNKNOWN | The probe could not initialize its configured trust store. |
+
+Configure the external runner to deliver incidents and recovery to the
+approved operations destination. The SigNoz heartbeat uses a separate
+receiver and tracks whether the collector continues to supply samples.
+
+#### Schedule the check on Linux
+
+The systemd service runs once a minute with a transient account and a
+45-second deadline. It uses the host trust store and allows outbound DNS
+and HTTPS. The service needs Python 3.10 or newer and systemd 246 or newer.
+[Unit files](systemd/)
+
+On the approved runner, install `scripts/signoz_external_uptime.py` as
+`/opt/oriso/signoz-uptime/signoz_external_uptime.py`. Make the path and file
+readable by the service and writable only by the operator. Install
+`oriso-signoz-uptime.service` and `oriso-signoz-uptime.timer` from
+`runbooks/systemd` in `/etc/systemd/system`, then run these commands.
+
+```sh
+systemd-analyze verify /etc/systemd/system/oriso-signoz-uptime.service \
+  /etc/systemd/system/oriso-signoz-uptime.timer
+systemctl daemon-reload
+systemctl enable --now oriso-signoz-uptime.timer
+systemctl show oriso-signoz-uptime.service \
+  -p Result -p ExecMainCode -p ExecMainStatus -p ExecMainExitTimestamp
+journalctl -u oriso-signoz-uptime.service -n 10 --no-pager
+```
+
+Use the timed result of a completed invocation for incident and recovery
+delivery. Monitor missed executions from outside the runner so a stopped
+timer or host is also detected.
+
+#### Read completed checks for the incident consumer
+
+Run the read-only journal reader from an account with access to the local
+system journal. It reads the two check units above and in the
+[heartbeat receiver runbook](signoz-heartbeat-receiver.md). It uses
+systemd's structured manager events, verified on systemd 255. Keep the
+provided oneshot definitions and their default successful exit status.
+
+```sh
+python3 scripts/signoz_check_journal.py --since '10 minutes ago'
+python3 scripts/signoz_check_journal.py --cursor "$last_accepted_cursor"
+```
+
+Each page contains up to 24 completed starts in journal order. It includes
+normal probe exit statuses, failed starts and timeouts. Missing completion
+details map to `UNKNOWN`. Use machine, boot, unit and invocation ID to
+deduplicate retries. Use the completion cursor as the identifier when
+systemd reports a job failure without an invocation ID. Keep the
+original probe JSON for diagnostics.
+
+Store `next_cursor` only after the destination accepts the page and keep
+fetching while `more` is true. If the start window is empty, keep it until
+the first cursor is available. A missing resume cursor exits 3 so the
+operator can investigate a journal gap. Treat missing or stale results as
+monitoring failures. A successful read with an empty page provides no
+health result.
+
+The [off-site backup monitoring scope](offsite-backup.md#monitor-the-backup-jobs)
+uses its own cursor for the two backup units and includes a sanitized archive
+freshness snapshot on every poll.
+
+#### Watch the check runner from another host
+
+Install the same journal reader on the check runner. From the independent
+monitoring host, invoke it once per minute for each installed check over the
+approved SSH route. Use pinned host keys, a bounded SSH deadline and an
+account whose command is restricted to the expected read-only checks.
+Establish a first completed run for each timer before arming its watcher.
+
+```sh
+timeout --kill-after=2s 30s ssh -T -o BatchMode=yes -o StrictHostKeyChecking=yes \
+  -o ConnectTimeout=5 sig-check-runner \
+  python3 /opt/oriso/signoz-uptime/signoz_check_journal.py --check-cadence uptime
+```
+
+Use `--check-cadence heartbeat` against the runner that hosts the heartbeat
+check timer. Alert separately for each check. Exit 0 means its timer is
+active and has an attributable completion younger than 180 seconds on this
+boot. The three-minute window allows for the one-minute schedule and probe
+runtime. The response gives the age in monotonic seconds and the last probe
+state. Use earlier completion pages for the probe's own incident and recovery.
+
+Exit 2 means the timer is inactive or the current boot has no completion
+inside the window. Exit 3 means the runner state or latest completion could
+not be verified. Treat an SSH failure, outer timeout or missing or invalid
+JSON as a separate unreachable-runner incident. Recover each incident only
+after a fresh cadence result succeeds. [systemd journal timestamps](https://www.freedesktop.org/software/systemd/man/latest/systemd.journal-fields.html)
+
 ## Proof
 
 ClickHouse, from the Dev master (heredoc, because quoting over ssh breaks):
@@ -297,8 +467,12 @@ its own approved network and identity setup.
 ## nginx metrics (ingress-nginx)
 
 The ingress controller runs in the namespace `ingress-nginx`, outside the Helm
-release. `global.observability.externalIngressNginxNamespace: ingress-nginx`
-(Dev) makes the cluster collector scrape its pod IPs on port 10254. The chart
+release. See [Dev ingress HTTP/2 mitigation](dev-ingress-http2.md) before
+reinstalling the controller ConfigMap.
+`global.observability.externalIngressNginxNamespace: ingress-nginx` (Dev)
+makes the cluster collector scrape its pod IPs on port 10254. This
+setting requires `signozCollector.enabled=true`. It works with general
+application metrics disabled. The chart
 cannot switch metrics on in the controller: it must run with
 `--enable-metrics=true` (Dev does since 2026-11-06). The collector's cluster
 ClusterRole already allows `list`/`watch` on pods in all namespaces.
@@ -307,6 +481,70 @@ After the rollout, in SigNoz open Metrics and search `nginx_ingress_controller_r
 data from the last 5 minutes must appear. If it does not, check the controller
 args (`kubectl -n ingress-nginx get deploy ingress-nginx-controller -o yaml | grep enable-metrics`)
 and the collector log for `ingress-nginx` scrape errors.
+
+## Forward Dev alerts to Buzz and OpenClaw
+
+Keep `oriso-alerts-slack` as the Slack channel. Confirm the first delivered
+Slack alert and the approved private route from Dev to the Dreambau forwarder
+before activating the second channel. Verify the forwarder's dedicated Buzz
+and OpenClaw identities. [Slack delivery #468](https://github.com/OpenResilienceInitiative/ORISO-Helm/issues/468) · [Dreambau forwarder](https://github.com/Storypapst/dreambau/pull/223)
+
+With forwarding off, append a read-only Secret mount to the existing SigNoz
+application container volumes. Mount the approved webhook credential as
+`/var/run/oriso-signoz-agent/token` and verify it is readable in the
+container. Use `signoz.signoz.additionalVolumes` and
+`signoz.signoz.additionalVolumeMounts` in the reviewed Dev override.
+Create the existing-channel dependency `oriso-alerts-agents` in SigNoz
+with the approved private route and file-backed credential:
+
+```json
+{
+  "name": "oriso-alerts-agents",
+  "webhook_configs": [{
+    "url": "https://<approved-private-host>/signoz/alerts",
+    "send_resolved": false,
+    "http_config": {
+      "follow_redirects": false,
+      "authorization": {
+        "type": "Bearer",
+        "credentials_file": "/var/run/oriso-signoz-agent/token"
+      }
+    }
+  }]
+}
+```
+
+Allow the Alertmanager configuration sync after changing the channel.
+SigNoz v0.135.1 uses a one-minute polling interval. [Pinned sync configuration](https://github.com/SigNoz/signoz/blob/v0.135.1/pkg/alertmanager/config.go#L38-L44)
+
+Set `signoz.orisoObservability.agentForwarding=true` in the approved Dev
+override and run the managed provisioning Job. The provisioner verifies the
+Slack and webhook channel types before writing rules. The six core catalog
+rules use both channels and include the fixed rule slug and unitless value.
+The forwarder configuration maps the slugs to these services.
+
+| Rule | Service |
+| --- | --- |
+| `provisioning-compensation-failure` | `userservice` |
+| `availability-store-failure` | `userservice` |
+| `notification-failure` | `userservice` |
+| `unencrypted-room` | `userservice` |
+| `clickhouse-capacity` | `clickhouse` |
+| `collector-staleness` | `collector` |
+
+Read back the rules with the existing Dev key and
+`--mode check --skip-telemetry --agent-forwarding`. For the approved live
+test, select a rule with a real numeric sample and use
+`--mode test-rule --rule <slug> --agent-forwarding`. The evaluation count
+confirms the query produced an alert. Verify the Slack, Buzz and OpenClaw
+receipts and check that the latter two contain the fixed rule, service and
+value. The forwarder handles measured firing values. It leaves No Data and
+resolved delivery to the configured SigNoz channels.
+
+To restore Slack-only routing, set `agentForwarding=false` and run the
+managed Job again. Read back the same six rule IDs with Slack routes and
+the forwarding fields removed before retiring the private webhook and
+credential mount.
 
 ## ClickHouse memory and old system tables
 
@@ -355,6 +593,36 @@ kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse-client --query "DROP 
 ```
 
 ## ClickHouse internal log retention
+
+For an approved expansion, put the agreed `signoz.clickhouse.persistence.size`
+in the reviewed Dev overlay input. Include that file in `observability_inputs`
+both when generating `observability_file` and when running the preflight. This
+keeps the size change within the approved observability paths checked by
+`values_drift`. The preflight compares the rendered ClickHouseInstallation
+with the request and reported capacity of each existing claim. A provider may
+report more capacity than requested. Confirm the desired size with the
+operator if the planned request falls below the reported capacity.
+
+Confirm the StorageClass supports expansion and record the current PVC and
+filesystem capacity before a size change. Record the PVC UID, bound PV name
+and reclaim policy, and the StatefulSet and Pod UIDs. The preflight also
+compares the size against the live StatefulSet's data claim template. Growing
+that template requires the StatefulSet to retain data claims both when it
+scales down and when it is deleted. Kubernetes defaults either unset field
+to `Retain`.
+
+Plan the expansion for an approved maintenance window. Altinity 0.21.2 falls
+back to recreating the StatefulSet when the Kubernetes update fails on an
+immutable claim template. It scales the old StatefulSet to zero first.
+This interrupts the single-replica Dev ClickHouse installation.
+[Operator update and recreation](https://github.com/Altinity/clickhouse-operator/blob/0.21.2/pkg/controller/chi/worker.go#L1463-L1491)
+· [StatefulSet claim retention](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#persistentvolumeclaim-retention)
+
+After the operator and CSI reconcile, require the same PVC UID and PV binding,
+the approved size in both the claim request and reported capacity, and a Ready
+ClickHouse Pod on the retained claim. Check the mounted filesystem and
+ClickHouse's unreserved writable space before running the SigNoz signal
+acceptance checks. Server dry-run admission is a preflight checkpoint.
 
 The Dev overlay sets a three-day deletion TTL for new `query_log`, `part_log`,
 `trace_log`, `asynchronous_metric_log`, `metric_log`, `zookeeper_log`,
@@ -690,16 +958,25 @@ A Helm rollback reapplies the saved manifest. Check the approved target
 revision on the Dev master before using it.
 
 ```bash
-set -o pipefail
 helm history caritas -n caritas
-helm get manifest caritas -n caritas --revision "${revision:?Set the approved target revision}" |
-  python3 scripts/check_helm_workload_images.py --namespace caritas --release caritas
+verify_signoz_rollback() (
+  set +x
+  set -euo pipefail
+  manifest=$(helm get manifest caritas -n caritas --revision "${revision:?Set the approved target revision}")
+  printf '%s' "$manifest" |
+    python3 scripts/check_helm_workload_images.py --namespace caritas --release caritas
+  printf '%s' "$manifest" |
+    python3 -m scripts.check_signoz_clickhouse_storage --namespace caritas --release caritas
+)
+verify_signoz_rollback
 ```
 
-An image mismatch requires the forward upgrade with the current pins. Apply
-the same check to the target of any automatic rollback before enabling it.
-Review the rollback's resource removals and hook Jobs separately, and require
-it to retain the SigNoz, ClickHouse, ZooKeeper and backup claims.
+An image or storage mismatch requires the forward upgrade with the current
+image pins and capacity settings. Apply both checks to the target of any
+automatic rollback before enabling it. Leave automatic rollback off for an
+expansion if the saved revision requests less than the planned new capacity.
+Review the rollback's resource removals and hook Jobs separately, and
+require it to retain the SigNoz, ClickHouse, ZooKeeper and backup claims.
 
 ## E2E trace ingest (Dev nightly)
 

@@ -56,6 +56,18 @@ data:
         resources:
           - names: [client, federation]
             compress: false
+      # A separate listener keeps the public delegation host independent of the
+      # Matrix identity and leaves the built-in client discovery tree intact.
+      - port: 8802
+        tls: false
+        type: http
+        bind_addresses: ["0.0.0.0"]
+        resources: []
+        additional_resources:
+          /.well-known/matrix/server:
+            module: oriso_server_discovery.ServerDiscoveryResource
+            config:
+              delegated_server: {{ printf "%s:443" .Values.global.domainName | quote }}
       {{- if eq (include "oriso.matrixGroupPolicy.enabled" $) "true" }}
       # No global register_web_resource: that would mount the history API on
       # every HTTP listener, including the public Matrix client surface.
@@ -95,13 +107,6 @@ data:
           policy_url: http://userservice:8080/internal/matrix/group-join-policy
     {{- end }}
 
-    redis:
-      enabled: true
-      host: redis
-      port: 6379
-      password: {{ .Values.global.secrets.redisdefaultPass | quote }}
-      dbid: 0
-
     caches:
       global_factor: 1.0
       per_cache_factors:
@@ -113,7 +118,7 @@ data:
     # KDG epic #282 task 2: require authenticated media.
     enable_authenticated_media: true
 
-    registration_shared_secret: {{ .Values.global.secrets.matrixRegistrationSharedSecret }}
+    registration_shared_secret_path: /secrets/synapse-credentials/registration-shared-secret
     report_stats: false
     # KDG epic #282 task 2: accounts are provisioned only via Keycloak/UserService (ADR-005).
     enable_registration: false
@@ -126,12 +131,6 @@ data:
     trusted_key_servers:
       - server_name: "matrix.org"
         accept_keys_insecurely: true
-
-    # TURN/STUN configuration for WebRTC calls
-    turn_uris:
-      - "stun:stun.l.google.com:19302"
-      - "stun:stun1.l.google.com:19302"
-    turn_allow_guests: true
 
     # KDG epic #282 task 2: the rc_* blocks previously set every rate limit to
     # 100000/s, which effectively disabled Synapse's built-in abuse protection
@@ -165,13 +164,57 @@ data:
         per_second: {{ dig "loginAccount" "perSecond" 0.1 $rateLimits }}
         burst_count: {{ dig "loginAccount" "burstCount" 20 $rateLimits }}
 
+    # rc_invites (ORISO-UserService#1736). Every new enquiry gets an agency
+    # holding room and UserService invites every counsellor of the agency into
+    # it, so one enquiry can exceed the shipped per-room/per-issuer burst of 10,
+    # and a counsellor or supervisor invited into many new rooms hits the
+    # shipped per-user rate of one invite per ~5.5 minutes. Defaults below are
+    # Synapse's shipped values; deployments raise them in their values file.
+    rc_invites:
+      per_room:
+        per_second: {{ dig "invitesPerRoom" "perSecond" 0.3 $rateLimits }}
+        burst_count: {{ dig "invitesPerRoom" "burstCount" 10 $rateLimits }}
+      per_user:
+        per_second: {{ dig "invitesPerUser" "perSecond" 0.003 $rateLimits }}
+        burst_count: {{ dig "invitesPerUser" "burstCount" 5 $rateLimits }}
+      per_issuer:
+        per_second: {{ dig "invitesPerIssuer" "perSecond" 0.3 $rateLimits }}
+        burst_count: {{ dig "invitesPerIssuer" "burstCount" 10 $rateLimits }}
+
+    # rc_message (ORISO-UserService#1737). Besides messages it limits each user's
+    # room creation and membership events. The agency service account invites a
+    # department into every new enquiry's holding room and then creates the next
+    # enquiry's room, so the shipped 0.2/s burst 10 refused that creation with a
+    # ~3 s retry on Dev. Defaults are Synapse's shipped values.
+    rc_message:
+      per_second: {{ dig "messages" "perSecond" 0.2 $rateLimits }}
+      burst_count: {{ dig "messages" "burstCount" 10 $rateLimits }}
+
+    # rc_joins_per_room (ORISO-UserService#1744). Every enquiry joins its asker
+    # and the agency helpers into the shared agency holding room, so busy
+    # agencies exceed the shipped 1/s burst 10 per room; Synapse answered 429
+    # and left Dev session 258 without a room. Defaults are Synapse's shipped values.
+    rc_joins_per_room:
+      per_second: {{ dig "joinsPerRoom" "perSecond" 1 $rateLimits }}
+      burst_count: {{ dig "joinsPerRoom" "burstCount" 10 $rateLimits }}
+
     # Enable Sliding Sync (Matrix 2.0) for INSTANT real-time synchronization
     # MSC4140 delayed events let Element Call schedule a crash-safe leave event.
     max_event_delay_duration: 24h
 
+    {{- with .Values.matrix.deleteStaleDevicesAfter }}
+    # Devices unused for this long are deleted with their access tokens. Every
+    # E2EE key is sent to every device of every member, so forgotten devices
+    # multiply to-device traffic (ORISO-Helm#628). Unset keeps Synapse's
+    # default: never delete.
+    delete_stale_devices_after: {{ . | quote }}
+    {{- end }}
+
     experimental_features:
       msc3575_enabled: true
       msc3575_for_workers: true
+  oriso_server_discovery.py: |
+{{ .Files.Get "files/matrix/oriso_server_discovery.py" | indent 4 }}
 kind: ConfigMap
 metadata:
   name: matrix-homeserver-oidc

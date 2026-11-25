@@ -1,0 +1,16 @@
+{
+  "storageBox": {
+    "host": "uXXXXXX.your-storagebox.de",
+    "port": 23,
+    "user": "uXXXXXX-sub1",
+    "identityFile": "/root/.ssh/oriso-dev-storagebox_ed25519",
+    "knownHostsFile": "/root/.ssh/oriso-dev-storagebox.known_hosts",
+    "remoteBase": "oriso-dev"
+  },
+  "sources": [
+    {"prefix": "mariadb", "root": "/root/db-backups/mariadb-helm"},
+    {"prefix": "mongodb", "root": "/root/db-backups/mongodb-helm"},
+    {"prefix": "matrix-postgres", "root": "/root/db-backups/matrix-postgres-helm"}
+  ],
+  "retention": {"daily": 30, "weekly": 12, "maxAgeHours": 36, "localKeepDays": 14}
+}

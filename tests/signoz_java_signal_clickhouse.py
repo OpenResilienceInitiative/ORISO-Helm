@@ -47,6 +47,23 @@ def fixture_tables(extra_version: str) -> dict[str, str]:
         samples.append(f"('default', 'Unspecified', 'jvm.memory', {identity}, {SPAN_MS}, 0.0, 0)")
     traces.append(trace(EXTRA_SPAN_SERVICE, len(SERVICES) + 1, extra_version))
 
+    # Identical storage keys may belong to multiple Java services. Duplicate
+    # series snapshots must not multiply the counts for a service.
+    series.append(series[0])
+    shared_attrs = f"map('service.name', 'agency-service', 'deployment.environment', '{ENVIRONMENT}')"
+    series.append(f"('default', 'Unspecified', 'jvm.memory', 1, {SPAN_MS}, {shared_attrs})")
+    fresh_start = END_MS - GATE.JAVA_FRESHNESS_MINUTES * 60_000
+    samples.extend([
+        f"('default', 'Unspecified', 'jvm.memory', 1, {fresh_start}, 1.0, 0)",
+        f"('default', 'Unspecified', 'jvm.memory', 1, {fresh_start - 1}, 1.0, 0)",
+        f"('default', 'Unspecified', 'jvm.memory', 1, {END_MS}, 1.0, 0)",
+        f"('default', 'Unspecified', 'jvm.memory', 1, {SPAN_MS}, 1.0, 1)",
+        f"('default', 'Unspecified', 'jvm.memory', 1, {SPAN_MS}, toFloat64('nan'), 0)",
+        f"('other', 'Unspecified', 'jvm.memory', 1, {SPAN_MS}, 1.0, 0)",
+        f"('default', 'Cumulative', 'jvm.memory', 1, {SPAN_MS}, 1.0, 0)",
+        f"('default', 'Unspecified', 'jvm.other', 1, {SPAN_MS}, 1.0, 0)",
+    ])
+
     # Replace only the four relations. Query predicates and result handling stay live.
     return {
         "signoz_logs.distributed_logs_v2": (
@@ -94,6 +111,10 @@ class JavaSignalClickHouseContract(unittest.TestCase):
         self.assertCountEqual(report["services"], SERVICES)
         self.assertEqual(report["missing"], [])
         self.assertEqual(report["services"][EXTRA_SPAN_SERVICE]["traces"], 2)
+        self.assertEqual(
+            {service: samples["metrics"] for service, samples in report["services"].items()},
+            {"user-service": 2, "agency-service": 3, "tenant-service": 1, "consulting-type-service": 1},
+        )
         return report
 
     def test_distinct_populated_versions_pass(self) -> None:

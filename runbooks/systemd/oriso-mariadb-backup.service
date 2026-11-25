@@ -1,0 +1,17 @@
+[Unit]
+Description=Nightly logical backup of the ORISO Dev MariaDB StatefulSet
+Documentation=https://github.com/OpenResilienceInitiative/ORISO-Helm/blob/dev/runbooks/mariadb-host-backup.md
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+UMask=0077
+# Fail before touching MariaDB when the ready pod cannot be confirmed.
+ExecStartPre=/usr/bin/python3 -I /opt/oriso/mariadb-backup/backup_mariadb.py /etc/rancher/k3s/k3s.yaml default caritas --check-target
+ExecStart=/usr/bin/python3 -I /opt/oriso/mariadb-backup/backup_mariadb.py /etc/rancher/k3s/k3s.yaml default caritas /root/db-backups/mariadb-helm
+TimeoutStartSec=45min
+TimeoutStartFailureMode=terminate
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal

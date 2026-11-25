@@ -49,6 +49,9 @@ spec:
         - name: mongodb
           image: {{ .Values.imageName }}:{{ .Values.imageVersion }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
+          {{- with .Values.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
           - --bind_ip_all
           - --oplogSize

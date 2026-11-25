@@ -167,6 +167,57 @@ def check_deployment_identity(default_documents: list[dict[str, Any]]) -> None:
     assert result.returncode != 0 and "enabled must be a boolean" in result.stderr, result.stderr
 
 
+def check_platform_alerts() -> None:
+    flag = ("--set", "signoz.orisoObservability.platformAlerts.enabled=true")
+    app = ("--set", "global.observability.appMetrics=true")
+    db = ("--set", "global.observability.dbMetrics=true")
+    certs = ("--set-string", "global.observability.externalCertManagerNamespace=cert-manager")
+    args = flag + app + db + certs
+    docs = render(enabled=True, environment="dev", cluster_name="oriso-dev", extra_args=args)
+    job = find(docs, "Job", "caritas-signoz-observability")
+    env = job["spec"]["template"]["spec"]["containers"][0]["env"]
+    assert {"name": "ORISO_PLATFORM_ALERTS_ENABLED", "value": "true"} in env
+    for options, expected in (
+        ({"environment": "pre-dev"}, "platform alerts require Dev"),
+        ({"environment": "prod"}, "platform alerts require Dev"),
+        ({"collector_enabled": False}, "named Kubernetes collector"),
+        ({"cluster_name": ""}, "named Kubernetes collector"),
+        ({"enabled": False}, "managed observability"),
+        ({"extra_args": flag + app + db}, "platform alerts require externalCertManagerNamespace"),
+        ({"extra_args": flag + app}, "platform alerts require appMetrics and dbMetrics"),
+        ({"extra_args": flag + db}, "platform alerts require appMetrics and dbMetrics"),
+        ({"extra_args": ("--set-string", "signoz.orisoObservability.platformAlerts.enabled=false")},
+         "must be a boolean"),
+    ):
+        settings = {"enabled": True, "environment": "dev", "cluster_name": "oriso-dev", "extra_args": args}
+        result = render_result(**{**settings, **options})
+        assert result.returncode != 0 and expected in result.stderr, result.stderr
+
+
+def check_heartbeat() -> None:
+    prefix = "signoz.orisoObservability.heartbeat"
+    scope = {"enabled": True, "environment": "dev", "cluster_name": "oriso-dev"}
+    for flags, expected_enabled, expected_channel in (
+        ((), "false", "oriso-dev-heartbeat"),
+        (("--set", f"{prefix}.enabled=true", "--set-string", f"{prefix}.channelName=watchdog"), "true", "watchdog"),
+    ):
+        job = find(render(**scope, extra_args=flags), "Job", "caritas-signoz-observability")
+        env = job["spec"]["template"]["spec"]["containers"][0]["env"]
+        assert {"name": "ORISO_HEARTBEAT_ENABLED", "value": expected_enabled} in env
+        assert {"name": "ORISO_HEARTBEAT_CHANNEL_NAME", "value": expected_channel} in env
+    enabled = ("--set", f"{prefix}.enabled=true")
+    for options, expected in (
+        ({"environment": "pre-dev"}, "heartbeat requires Dev"),
+        ({"collector_enabled": False}, "named Kubernetes collector"),
+        ({"enabled": False}, "managed observability"),
+        ({"extra_args": enabled + ("--set-string", f"{prefix}.channelName=oriso-alerts-slack")},
+         "heartbeat requires a separate notification channel"),
+        ({"extra_args": ("--set-string", f"{prefix}.enabled=false")}, "must be a boolean"),
+    ):
+        result = render_result(**{**scope, "extra_args": enabled, **options})
+        assert result.returncode and expected in result.stderr, result.stderr
+
+
 def browser_schedule_args(environment: str, secret: str = BROWSER_READER_SECRET) -> tuple[str, ...]:
     return (
         "--set", "global.observability.webVitals.enabled=true",
@@ -256,6 +307,8 @@ def check_browser_schedule() -> None:
 def main() -> None:
     predev = render(enabled=True)
     check_deployment_identity(predev)
+    check_platform_alerts()
+    check_heartbeat()
     config = find(predev, "ConfigMap", "caritas-signoz-observability")
     job = find(predev, "Job", "caritas-signoz-observability")
 
@@ -263,6 +316,7 @@ def main() -> None:
     catalog = yaml.safe_load(config["data"]["observability-catalog.json"])
     assert len(catalog["dashboards"]) == 3
     assert len(catalog["alerts"]) == 6
+    assert len(catalog["platformAlerts"]) == 16
 
     annotations = job["metadata"]["annotations"]
     assert "post-install" in annotations["helm.sh/hook"]
@@ -281,6 +335,7 @@ def main() -> None:
     assert container["resources"]["limits"]["memory"]
 
     env = {item["name"]: item for item in container["env"]}
+    assert env["ORISO_PLATFORM_ALERTS_ENABLED"]["value"] == "false"
     assert env["ORISO_ENVIRONMENT"]["value"] == "pre-dev"
     assert env["ORISO_CLUSTER_NAME"]["value"] == "oriso-predev"
     assert env["SIGNOZ_API_KEY"]["valueFrom"]["secretKeyRef"] == {
@@ -377,6 +432,24 @@ def main() -> None:
     }
     assert dev_env["ORISO_ENVIRONMENT"]["value"] == "dev"
     assert dev_env["ORISO_CLUSTER_NAME"]["value"] == "oriso-dev"
+    assert dev_env["ORISO_AGENT_FORWARDING"]["value"] == "false"
+    forward_args = ("--set", "signoz.orisoObservability.agentForwarding=true")
+    forwarded = render(enabled=True, environment="dev", cluster_name="oriso-dev", extra_args=forward_args)
+    forward_job = find(forwarded, "Job", "caritas-signoz-observability")
+    forward_env = forward_job["spec"]["template"]["spec"]["containers"][0]["env"]
+    assert {"name": "ORISO_AGENT_FORWARDING", "value": "true"} in forward_env
+    for result in (
+        render_result(enabled=True, extra_args=forward_args),
+        render_result(enabled=False, environment="dev", cluster_name="oriso-dev", extra_args=forward_args),
+    ):
+        assert result.returncode != 0
+        assert "agentForwarding=true requires enabled Dev managed observability" in result.stderr
+    invalid_forward = render_result(
+        enabled=True, environment="dev", cluster_name="oriso-dev",
+        extra_args=("--set-string", "signoz.orisoObservability.agentForwarding=false"),
+    )
+    assert invalid_forward.returncode != 0
+    assert "agentForwarding must be a boolean" in invalid_forward.stderr
 
     disabled_names = {
         (item.get("kind"), item.get("metadata", {}).get("name"))

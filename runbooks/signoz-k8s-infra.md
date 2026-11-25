@@ -12,6 +12,12 @@ Both export over OTLP/HTTP to the bundled SigNoz collector. They attach
 (`pre-dev`, `oriso-predev`) from Dev (`dev`, `oriso-dev`). OTLP host ports are
 disabled because application SDK ingestion remains on the central collector.
 
+The node agent authenticates to the kubelet with its service account. The
+kubelet's serving certificate must match the Pod's host IP and chain to the
+projected Kubernetes CA. Before rolling out to a cluster, verify those
+properties for each node and check that the Kubelet metrics arrive afterwards.
+Use a serving certificate issued by the trusted CA for new nodes.
+
 ## Where the configuration lives
 
 | what | where |
@@ -41,6 +47,19 @@ RBAC, and the collector self-telemetry identity — is proven by
 `tests/render_signoz_k8s_infra_test.py`; keep it in the required CI set.
 
 Bumping the collector: change `signozCollector.image.tag`, then re-run that test.
+
+## Node filesystems and pod logs
+
+The node agent mounts `/var/log/pods`, `/proc` and `/sys` read-only. The host
+receiver uses the proc and sys views for CPU, disk I/O, load, memory and
+network metrics. Node filesystem alerts and dashboards use
+`k8s.node.filesystem.available` and `k8s.node.filesystem.capacity` from the
+kubelet. The raw `system.filesystem.*` series for arbitrary host mount points
+were retired when the host-root mount was removed.
+
+The filelog receiver reads Kubernetes CRI logs under `/var/log/pods`, as used
+by Containerd on ORISO Dev. The node agent still needs hostPath admission for
+its three read-only directories.
 
 ## Log privacy contract
 

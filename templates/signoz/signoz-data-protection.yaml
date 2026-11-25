@@ -102,6 +102,35 @@ each chart uses; existingClaim wins, none without persistence. */ -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- /* The native ClickHouse signal archive claim (#499), mounted by ClickHouse as disk oriso_signal_backup. */ -}}
+{{- $signal := get $dp "signalBackup" | default dict -}}
+{{- $signalClaim := get $signal "claim" | default "signoz-clickhouse-signal-backup" -}}
+{{- /* Like the claims above: an external ClickHouse has nothing here to back up. Everything else
+lives in ClickHouse's namespace, beside the claim ClickHouse mounts. */ -}}
+{{- $signalOn := and (get $signal "enabled") (hasKey $clickhouse "enabled" | ternary (get $clickhouse "enabled") true) -}}
+{{- if $signalOn -}}
+{{- /* One BACKUP statement on one pod covers only that pod's shard and replica. */ -}}
+{{- if or (gt (int (get $layout "shardsCount" | default 1)) 1) (gt (int (get $layout "replicasCount" | default 1)) 1) -}}
+{{- fail "signoz.orisoDataProtection.signalBackup supports one ClickHouse shard and replica; a larger layout needs BACKUP ON CLUSTER" -}}
+{{- end -}}
+{{- /* ClickHouse must mount the claim and register the disk, or BACKUP fails at night instead of now. */ -}}
+{{- $signalVolume := "" -}}
+{{- range (get $clickhouse "additionalVolumes" | default list) -}}
+{{- if eq (dig "persistentVolumeClaim" "claimName" "" .) $signalClaim -}}{{- $signalVolume = .name -}}{{- end -}}
+{{- end -}}
+{{- $signalMounted := false -}}
+{{- range (get $clickhouse "additionalVolumeMounts" | default list) -}}
+{{- if and $signalVolume (eq .name $signalVolume) (eq (trimSuffix "/" .mountPath) "/var/lib/clickhouse-signal-backup") (not .readOnly) -}}{{- $signalMounted = true -}}{{- end -}}
+{{- end -}}
+{{- $signalDisk := false -}}
+{{- range $file := (get $clickhouse "files" | default dict) -}}
+{{- if contains "<oriso_signal_backup>" (toString $file) -}}{{- $signalDisk = true -}}{{- end -}}
+{{- end -}}
+{{- if not (and $signalMounted $signalDisk) -}}
+{{- fail (printf "signoz.orisoDataProtection.signalBackup needs signoz.clickhouse to mount claim %s writable at /var/lib/clickhouse-signal-backup/ and a files entry defining disk <oriso_signal_backup>" $signalClaim) -}}
+{{- end -}}
+{{- $defaultClaims = append $defaultClaims (printf "%s/%s" $chNamespace $signalClaim) -}}
+{{- end -}}
 {{- /* An explicit claims list names claims in the release namespace unless given as <namespace>/<claim>. */ -}}
 {{- $claims := list -}}
 {{- range $claim := get $dp "claims" | default $defaultClaims -}}
@@ -363,10 +392,17 @@ spec:
           tolerations:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          # signoz.db and its WAL belong to root, like the SigNoz container.
+          # Keep access to the backup destination. Share the source group
+          # without applying fsGroup ownership changes to either claim.
           securityContext:
             runAsUser: 0
             runAsGroup: 0
+            {{- with include "signoz.podSecurityContext" (dict "settings" $signozValues "global" .Values.global "externalDatabase" (dig "postgresql" "enabled" false $signoz)) | fromYaml }}
+            {{- if hasKey . "fsGroup" }}
+            supplementalGroups:
+              - {{ get . "fsGroup" }}
+            {{- end }}
+            {{- end }}
             seccompProfile:
               type: RuntimeDefault
           containers:
@@ -413,5 +449,145 @@ spec:
             - name: backup
               persistentVolumeClaim:
                 claimName: {{ $destination | quote }}
+{{- end }}
+{{- if $signalOn }}
+{{- $signalName := printf "%s-signal-backup" ($name | trunc 38 | trimSuffix "-") -}}
+{{- /* Same class rule as the ClickHouse data claim; a bound claim keeps the class it has. */ -}}
+{{- $signalClass := get (get .Values "global" | default dict) "storageClass" | default (get $chPersistence "storageClass") | default "" -}}
+{{- with lookup "v1" "PersistentVolumeClaim" $chNamespace $signalClaim }}
+{{- $signalClass = hasKey .spec "storageClassName" | ternary (.spec.storageClassName | default "-") "" -}}
+{{- end }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $signalClaim }}
+  namespace: {{ $chNamespace }}
+  annotations:
+    # Uninstalling the release must not take the signal archives with it;
+    # the retain hook also switches the bound volume to reclaim Retain.
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ get $signal "size" | default "10Gi" }}
+  {{- if eq $signalClass "-" }}
+  storageClassName: ""
+  {{- else if $signalClass }}
+  storageClassName: {{ $signalClass | quote }}
+  {{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $signalName }}
+  namespace: {{ $chNamespace }}
+data:
+  signal_backup.py: |
+    {{- .Files.Get "files/signoz/signal_backup.py" | nindent 4 }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $signalName }}
+  namespace: {{ $chNamespace }}
+type: Opaque
+stringData:
+  {{- /* Helm merges the ClickHouse chart's defaults into these values. */}}
+  user: {{ get $clickhouse "user" | default "admin" | quote }}
+  password: {{ get $clickhouse "password" | default "" | quote }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $signalName }}
+  namespace: {{ $chNamespace }}
+spec:
+  schedule: {{ get $signal "schedule" | default "15 3 * * *" | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # A retry would write a second archive; the next night is the retry.
+      backoffLimit: 0
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: signoz-signal-backup
+            app.kubernetes.io/instance: {{ .Release.Name }}
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          affinity:
+            podAffinity:
+              # The claim is ReadWriteOnce and ClickHouse has it attached.
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    # clickhouse.selectorLabels of the vendored chart.
+                    matchLabels:
+                      app.kubernetes.io/name: {{ get $clickhouse "nameOverride" | default "clickhouse" | trunc 63 | trimSuffix "-" }}
+                      app.kubernetes.io/instance: {{ .Release.Name }}
+                      app.kubernetes.io/component: {{ get $clickhouse "name" | default "clickhouse" }}
+          {{- with get $clickhouse "tolerations" }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # ClickHouse's UID/GID, which owns the archives this job verifies and prunes.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: {{ $image | quote }}
+              command: ["python3", "/scripts/signal_backup.py"]
+              terminationMessagePolicy: File
+              env:
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: KEEP
+                  value: {{ get $signal "keep" | default 7 | toString | quote }}
+                - name: CLICKHOUSE_URL
+                  value: {{ printf "http://%s.%s.svc:8123/" $chName $chNamespace | quote }}
+                - name: CLICKHOUSE_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $signalName }}
+                      key: user
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $signalName }}
+                      key: password
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                - name: backup
+                  mountPath: /backup
+          volumes:
+            - name: scripts
+              configMap:
+                name: {{ $signalName }}
+            - name: backup
+              persistentVolumeClaim:
+                claimName: {{ $signalClaim }}
 {{- end }}
 {{- end }}

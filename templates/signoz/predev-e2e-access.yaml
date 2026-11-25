@@ -14,9 +14,10 @@
 {{- end -}}
 {{- $deployments := list "frontend" "userservice" "matrix-synapse" -}}
 {{- $matrixRtc := list "element-call" "matrixrtc-auth-policy-gateway" "matrixrtc-authorization-service" "livekit" -}}
+{{- $applicationEvidence := list "admin" "agencyservice" "tenantservice" "consultingtypeservice" "media-scanner" -}}
 {{- range $identity := list
       (dict "name" "oriso-predev-j08" "deployments" $deployments "sigNozProxy" true)
-      (dict "name" "oriso-predev-e2e-report" "deployments" (concat $deployments $matrixRtc) "sigNozProxy" false) }}
+      (dict "name" "oriso-predev-e2e-report" "deployments" (concat $deployments $matrixRtc $applicationEvidence) "scannerConfig" true) }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -45,6 +46,12 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["list"]
+  {{- if $identity.scannerConfig }}
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["media-scanner-config"]
+    verbs: ["get"]
+  {{- end }}
   {{- if $identity.sigNozProxy }}
   - apiGroups: [""]
     resources: ["services/proxy"]

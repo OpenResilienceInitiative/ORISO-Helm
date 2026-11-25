@@ -28,6 +28,10 @@ EVENTS_CONFIG = {'eventsEnabled': True, 'eventsExpiration': 2592000,
                  'adminEventsEnabled': True, 'adminEventsDetailsEnabled': False}
 # Admin events expire through a realm attribute, not events/config (seconds, same 30 days).
 ADMIN_EVENTS_EXPIRATION = '2592000'
+APP_CLIENT_ID = 'app'
+ADMIN_API_SCOPE = 'kc-admin-api'
+POST_LOGOUT_REDIRECT_URIS = 'post.logout.redirect.uris'
+DNS_LABEL = r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
 
 
 def required(env, name):
@@ -41,6 +45,23 @@ def flag(env, name):
     return value == 'true'
 
 
+def app_client_url_policy(env):
+    failure = 'APP_CLIENT_URL_POLICY_INVALID'
+    try:
+        policy = json.loads(required(env, 'APP_CLIENT_URL_POLICY'))
+    except ValueError:
+        raise Error(failure) from None
+    origins = policy.get('webOrigins') if isinstance(policy, dict) else None
+    if not isinstance(origins, list) or len(origins) != 1:
+        raise Error(failure)
+    origin = origins[0]
+    if not isinstance(origin, str) or not re.fullmatch(rf'https?://{DNS_LABEL}(?:\.{DNS_LABEL})*', origin):
+        raise Error(failure)
+    if policy != {'webOrigins': [origin], 'redirectUris': [origin + '/*']}:
+        raise Error(failure)
+    return policy
+
+
 def configuration(env):
     names = ('KEYCLOAK_URL', 'KEYCLOAK_REALM', 'POD_NAMESPACE', 'KEYCLOAK_ADMIN_USERNAME',
              'KEYCLOAK_ADMIN_PASSWORD', 'TECHNICAL_CLIENT_ID', 'ADMIN_CLIENT_ID', 'HUMAN_CLIENT_ID',
@@ -50,7 +71,7 @@ def configuration(env):
     c['KEYCLOAK_URL'] = smtp.base_url(c['KEYCLOAK_URL'], 'keycloak', c['POD_NAMESPACE'])
     if c['KEYCLOAK_REALM'] == 'master':
         raise Error('BACKEND_CLIENT_CONFIGURATION_INVALID: protected realm')
-    reserved = {c['HUMAN_CLIENT_ID'], 'admin-cli', 'account', 'broker', 'security-admin-console', 'realm-management'}
+    reserved = {APP_CLIENT_ID, c['HUMAN_CLIENT_ID'], 'admin-cli', 'account', 'broker', 'security-admin-console', 'realm-management'}
     ids = [c['TECHNICAL_CLIENT_ID'], c['ADMIN_CLIENT_ID']]
     if ids[0] == ids[1] or any(i in reserved or not re.fullmatch(r'[A-Za-z0-9_-]+', i) for i in ids):
         raise Error('BACKEND_CLIENT_CONFIGURATION_INVALID: client ids')
@@ -72,6 +93,7 @@ def configuration(env):
             raise Error('BACKEND_CLIENT_CONFIGURATION_INVALID: realm admin')
         c['REALM_ADMIN_USERNAME'] = name
     if not c['prepare']:
+        c['app_client_urls'] = app_client_url_policy(env)
         # SMTP sync realm client (Helm#420); preparation leaves it alone.
         c['SMTP_SYNC_CLIENT_ID'] = required(env, 'SMTP_SYNC_CLIENT_ID')
         c['SMTP_SYNC_CLIENT_SECRET'] = required(env, 'SMTP_SYNC_CLIENT_SECRET')
@@ -108,6 +130,20 @@ class Admin:
                 or any(c.get(k) is not False for k in ('directAccessGrantsEnabled', 'standardFlowEnabled', 'implicitFlowEnabled', 'fullScopeAllowed'))):
             raise Error('BACKEND_CLIENT_INVALID: existing client is not dedicated')
 
+    def admin_api_scope(self):
+        scopes = self.request('GET', 'client-scopes')
+        if not isinstance(scopes, list) or any(not isinstance(scope, dict) for scope in scopes):
+            raise Error('BACKEND_CLIENT_INVALID: realm client scopes')
+        matches = [scope for scope in scopes if scope.get('name') == ADMIN_API_SCOPE]
+        if not matches:
+            # Keycloak versions before the Admin REST audience check have no built-in scope.
+            return None
+        scope = matches[0]
+        if (len(matches) != 1 or scope.get('protocol') != 'openid-connect'
+                or not isinstance(scope.get('id'), str) or not scope['id']):
+            raise Error('BACKEND_CLIENT_INVALID: Admin REST client scope')
+        return scope['id']
+
     def subject(self, client):
         user = self.request('GET', 'clients/' + quote(client['id'], safe='') + '/service-account-user')
         if not isinstance(user, dict) or not isinstance(user.get('id'), str) or not user['id']:
@@ -135,7 +171,7 @@ class Admin:
         if management_roles and not any(m['id'] == management_id for m in mappings.values()):
             self.request('POST', path + '/clients/' + quote(management_id, safe=''), management_roles)
 
-    def reconcile(self, client, subject, secret, realm_roles, management_roles, management_id):
+    def reconcile(self, client, subject, secret, realm_roles, management_roles, management_id, admin_api_scope=None):
         cid = quote(client['id'], safe='')
         uid = quote(subject, safe='')
         # Inherited group roles would escape direct-role reconciliation.
@@ -143,11 +179,16 @@ class Admin:
             self.request('DELETE', 'users/' + uid + '/groups/' + quote(group['id'], safe=''))
         self.replace_mappings('users/' + uid + '/role-mappings', realm_roles, management_roles, management_id)
         self.replace_mappings('clients/' + cid + '/scope-mappings', realm_roles, management_roles, management_id)
-        # Only the standard role-claim mapper is needed. No optional scope grants.
-        for scope_kind in ('default-client-scopes', 'optional-client-scopes'):
-            for scope in self.request('GET', 'clients/' + cid + '/' + scope_kind):
-                if scope_kind == 'optional-client-scopes' or scope.get('name') != 'roles':
-                    self.request('DELETE', 'clients/' + cid + '/' + scope_kind + '/' + quote(scope['id'], safe=''))
+        default_scopes = 'clients/' + cid + '/default-client-scopes'
+        optional_scopes = 'clients/' + cid + '/optional-client-scopes'
+        defaults = self.request('GET', default_scopes)
+        for scope in defaults:
+            if scope.get('name') != 'roles' and scope['id'] != admin_api_scope:
+                self.request('DELETE', default_scopes + '/' + quote(scope['id'], safe=''))
+        for scope in self.request('GET', optional_scopes):
+            self.request('DELETE', optional_scopes + '/' + quote(scope['id'], safe=''))
+        if admin_api_scope and all(scope['id'] != admin_api_scope for scope in defaults):
+            self.request('PUT', default_scopes + '/' + quote(admin_api_scope, safe=''))
         self.request('PUT', 'clients/' + cid, {'secret': secret, 'enabled': True})
 
     def realm(self):
@@ -198,7 +239,7 @@ def verify_client_token(http, config, client, subject, admin):
         raise Error('BACKEND_CLIENT_TOKEN_CONTRACT_MISMATCH')
 
 
-def reconcile_smtp_sync(api, config, client, management):
+def reconcile_smtp_sync(api, config, client, management, admin_api_scope):
     # Native Keycloak needs manage-realm to update SMTP settings; nothing else.
     name = config['SMTP_SYNC_CLIENT_ID']
     if not client:
@@ -211,7 +252,8 @@ def reconcile_smtp_sync(api, config, client, management):
             raise Error('BACKEND_CLIENT_INVALID: client creation failed')
     manage_realm = api.request('GET', 'clients/' + quote(management['id'], safe='') + '/roles/manage-realm')
     subject = api.subject(client)
-    api.reconcile(client, subject, config['SMTP_SYNC_CLIENT_SECRET'], [], [manage_realm], management['id'])
+    api.reconcile(client, subject, config['SMTP_SYNC_CLIENT_SECRET'], [], [manage_realm], management['id'],
+                  admin_api_scope=admin_api_scope)
     verify_smtp_sync_token(api.http, config, subject)
     print('SMTP_SYNC_CLIENT_RECONCILED')
 
@@ -264,6 +306,54 @@ def reconcile_events(api):
     print('REALM_EVENTS_RECONCILED')
 
 
+def app_client(api):
+    client = api.find_client(APP_CLIENT_ID)
+    if (not client or client.get('clientId') != APP_CLIENT_ID
+            or client.get('protocol') != 'openid-connect' or client.get('publicClient') is not True
+            or not isinstance(client.get('id'), str) or not client['id']):
+        raise Error('APP_CLIENT_URL_POLICY_CLIENT_INVALID')
+    return client
+
+
+def bounded_logout_policy(configured, origin, root_url):
+    # Keycloak's absent value and "+" inherit login redirects. "-" explicitly disables them.
+    if not configured:
+        return configured
+    entries = re.split(r'\s*##\s*', configured)
+    if entries[0] == '-':
+        return configured
+    relative_to_installation = not root_url or root_url == origin or root_url.startswith(origin + '/')
+    bounded = [
+        origin + '/*' if entry == '*' else entry
+        for entry in entries
+        if (entry in ('*', '+', origin) or entry.startswith(origin + '/')
+            or relative_to_installation and entry.startswith('/') and not entry.startswith('//'))
+    ]
+    if bounded == entries:
+        return configured
+    # An explicit list that lost every return must not fall back to the login policy.
+    return '##'.join(dict.fromkeys(bounded)) or '-'
+
+
+def reconcile_app_client_urls(api, client, policy):
+    path = 'clients/' + quote(client['id'], safe='')
+    current = api.request('GET', path)
+    attributes = current.get('attributes') or {}
+    configured = attributes.get(POST_LOGOUT_REDIRECT_URIS)
+    logout = bounded_logout_policy(configured, policy['webOrigins'][0], current.get('rootUrl'))
+    changes = {key: value for key, value in policy.items() if current.get(key) != value}
+    if logout != configured:
+        # Keycloak's client update applies supplied attributes one key at a time.
+        changes['attributes'] = {POST_LOGOUT_REDIRECT_URIS: logout}
+    if changes:
+        api.request('PUT', path, changes)
+        observed = api.request('GET', path)
+        if (any(observed.get(key) != value for key, value in policy.items())
+                or (observed.get('attributes') or {}).get(POST_LOGOUT_REDIRECT_URIS) != logout):
+            raise Error('APP_CLIENT_URL_POLICY_READBACK_FAILED')
+    print('APP_CLIENT_URL_POLICY_RECONCILED')
+
+
 def reconcile(config):
     api = Admin(config)
     names = (config['TECHNICAL_CLIENT_ID'], config['ADMIN_CLIENT_ID'])
@@ -273,6 +363,7 @@ def reconcile(config):
             api.validate_client(client)
     if not config['prepare'] and not all(clients):
         raise Error('BACKEND_CLIENT_PREPARATION_REQUIRED: clients are missing; nothing changed')
+    browser_client = None if config['prepare'] else app_client(api)
     sync_client = None if config['prepare'] else api.find_client(config['SMTP_SYNC_CLIENT_ID'])
     if sync_client:
         api.validate_client(sync_client)
@@ -286,6 +377,7 @@ def reconcile(config):
     management = api.find_client('realm-management')
     if not management:
         raise Error('BACKEND_CLIENT_INVALID: realm-management missing')
+    admin_api_scope = api.admin_api_scope()
     roles = [api.request('GET', 'roles/' + role) for role in ('technical', 'otp-config-admin')]
     management_roles = [api.request('GET', 'clients/' + quote(management['id'], safe='') + '/roles/' + role)
                         for role in ('manage-users', 'view-users', 'query-users', 'view-realm', 'query-clients')]
@@ -301,14 +393,16 @@ def reconcile(config):
                 raise Error('BACKEND_CLIENT_INVALID: client creation failed')
         subject = api.subject(clients[i])
         api.reconcile(clients[i], subject, config['TECHNICAL_CLIENT_SECRET' if i == 0 else 'ADMIN_CLIENT_SECRET'],
-                      [roles[i]], [] if i == 0 else management_roles, management['id'])
+                      [roles[i]], [] if i == 0 else management_roles, management['id'],
+                      admin_api_scope=admin_api_scope if i == 1 else None)
         actual_subjects.append(subject)
     for i, name in enumerate(names):
         verify_client_token(api.http, config, name, actual_subjects[i], i == 1)
     print('TECHNICAL_SERVICE_SUBJECT=' + actual_subjects[0])
     print('ADMIN_SERVICE_SUBJECT=' + actual_subjects[1])
     if not config['prepare']:
-        reconcile_smtp_sync(api, config, sync_client, management)
+        reconcile_app_client_urls(api, browser_client, config['app_client_urls'])
+        reconcile_smtp_sync(api, config, sync_client, management, admin_api_scope)
         print(retire_published_client(api))
         reconcile_events(api)
     if config['retire']:

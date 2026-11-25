@@ -3,6 +3,9 @@ cert-manager:
   enabled: true
 
 global:
+  # Enable with a public HealthDashboard ingress and its role-aware image.
+  healthDashboardOperatorAccess: false
+
   # Kubernetes service DNS suffix, supplied by the cluster operator.
   clusterDomain: "cluster.local"
   # Enable only after the lifecycle endpoint and candidate report are verified.
@@ -38,6 +41,8 @@ global:
     otlpCollectorHost: ""
     # Application and data-store metrics require signozCollector.enabled=true.
     appMetrics: false
+    # Optional namespace of the cluster-owned cert-manager controller.
+    externalCertManagerNamespace: ""
     dbMetrics: false
     tracingSamplingProbability: ""
     testRunBaggage: false
@@ -200,6 +205,20 @@ global:
 
 matrix:
   image: "matrixdotorg/synapse:v1.158.0"
+  # Synapse container resources. Synapse is a single Python process; CFS
+  # throttling at the limit delays every client request, including the
+  # MatrixRTC token check behind /livekit/jwt/sfu/get. Raise per environment.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  # Synapse delete_stale_devices_after (e.g. "90d"). Empty = never delete.
+  # A deleted browser device signs that browser out of Matrix and drops its
+  # encryption keys, so set it per environment after the product decision.
+  deleteStaleDevicesAfter: ""
   # Synapse rc_login. All browser logins reach Synapse through UserService, so
   # the address limit applies to the whole platform. failed_attempts is not set
   # on purpose: it keeps Synapse's default and limits wrong passwords.
@@ -210,6 +229,24 @@ matrix:
     loginAccount:
       perSecond: 0.1
       burstCount: 20
+    # Synapse rc_invites, shipped defaults (ORISO-UserService#1736). Raise them
+    # per environment: a new enquiry invites every counsellor of the agency into
+    # its holding room. invitesPerUser limits invites RECEIVED by one user.
+    invitesPerRoom:
+      perSecond: 0.3
+      burstCount: 10
+    invitesPerUser:
+      perSecond: 0.003
+      burstCount: 5
+    invitesPerIssuer:
+      perSecond: 0.3
+      burstCount: 10
+    # Synapse rc_message, shipped defaults (ORISO-UserService#1737): also limits a
+    # user's room creation and membership events, which the agency service account
+    # sends in bursts for every new enquiry.
+    messages:
+      perSecond: 0.2
+      burstCount: 10
   # Per-IP limit at the ingress for logins from outside the cluster. Browsers do
   # not log in here; they get their Matrix token from UserService.
   loginRateLimit:
@@ -239,8 +276,10 @@ matrix:
     engine: "sqlite3"
   # In-cluster Service name of the PostgreSQL StatefulSet (Service metadata.name and serviceName).
   postgresServiceName: "matrix-postgres-service"
-  # Host Synapse and the PITR backup job connect to. Empty = postgresServiceName.
+  # Host used by Synapse and the PITR backup script. Empty = postgresServiceName.
   postgresHost: ""
+  # Enable networkPolicies.matrixPostgresIngress.enabled only after checking external callers.
+  # The chart defaults the policy to false. See runbooks/matrix-sqlite-to-postgres.md.
   synapseServerName: "your-server.local"
   synapseReportStats: "no"
   synapseEnableAuthenticatedMedia: "false"
@@ -249,13 +288,16 @@ matrix:
   # 10,485,760 bytes). Keep it at or above ATTACHMENT_MAX_SIZE_IN_MB in
   # ORISO-Frontend (10,000,000 bytes) and below Synapse's max_upload_size (50M).
   maxUploadSize: "10m"
+  # First roll out Synapse and verify its server discovery response on port 8802.
+  # Then enable this exact Ingress route to remove the legacy server snippet.
+  routeServerDiscoveryViaSynapse: false
   matrixServerName: "your-server.local"
   # Public IP exempt from Synapse rate limiting; set per environment (ADR-005).
   serverPublicIp: ""
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call:2.0.17"
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.18"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Storybook is a development surface and stays absent unless an environment
@@ -327,14 +369,26 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "2.0.17"
+  imageVersion: "2.0.18"
 # MongoDB
 online-counseling-mongodb:
+  # Size container requests and limits in the environment overlay.
+  resources: {}
   imageName: "mongo"
   imageVersion: "5.0"
 
+networkPolicies:
+  mongodbIngress:
+    # Verify out-of-chart consumers for the installation before enabling.
+    enabled: false
+  mariadbIngress:
+    # Verify out-of-chart consumers for the installation before enabling.
+    enabled: false
+
 # MariaDB
 online-counseling-mariadb:
+  # Size container requests and limits in the environment overlay.
+  resources: {}
   imageName: "mariadb"
   imageVersion: "11.0.6"
   maxconnections: "1000"
@@ -386,10 +440,10 @@ matrixrtcAuth:
   # The dev branch tracks the dev tag; release branches pin these by digest
   # because they are the LiveKit authorization boundary.
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.17"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.18"
     pullPolicy: ""
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.17"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.18"
     pullPolicy: ""
   service:
     port: 3010
@@ -442,6 +496,8 @@ livekit:
     certRevision: ""
 
 # RabbitMQ
+# networkPolicies.rabbitmqIngress.enabled defaults to false. Confirm off-chart
+# AMQP clients and management access before opting in.
 online-counseling-rabbitmq:
   imageName: "rabbitmq"
   imageVersion: "3-management"
@@ -454,8 +510,11 @@ online-counseling-redis:
 
 # Keycloak
 online-counseling-keycloak:
+  # Set 2 or more after validating shared database capacity and peer traffic.
+  # Multiple replicas use JDBC discovery and private readiness checks.
+  replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
-  imageVersion: "2.0.14"
+  imageVersion: "2.0.18"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
@@ -477,7 +536,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.17"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.18"
   # Deletion-log outbox (OBP 2.1 #130). With task identities on, an AgencyService image older
   # than ORISO-AgencyService#356 refuses to start once DELETION_AUDIT_READ is required. Switch this
   # on in the same release that deploys that image; until then the outbox stays unreadable.
@@ -498,7 +557,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "2.0.17"
+  imageVersion: "2.0.18"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -522,6 +581,11 @@ keycloakSmtpReconcile:
 
 # Tenant Service
 tenantService:
+  # Finishing Träger deletions (ORISO-Admin#1525): UserService's nightly job removes a Träger in
+  # deletion once nothing references it, as the RUNTIME actor with tenant-deletion. With task
+  # identities on, a TenantService image older than that change refuses to start once
+  # TENANT_DELETION is required. Switch this on in the release that deploys that image.
+  tenantDeletionFinishEnabled: false
   # Pins for TenantService's constrained OWN-server system-mail endpoint.
   # Blank values deny every call. Operators set the actual Keycloak user `sub`
   # and token `azp` from the environment before enabling OWN-server delivery.
@@ -529,7 +593,7 @@ tenantService:
   systemEmailDeliveryServiceClient: ""
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "2.0.17"
+  imageVersion: "2.0.18"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -578,6 +642,8 @@ addonService:
 
 # User service
 userService:
+  # Size container requests and limits in the environment overlay.
+  resources: {}
   accountInactivity:
     enabled: false
     dryRun: true
@@ -601,7 +667,7 @@ userService:
     requestsPerSecond: 5
     burstMultiplier: 2
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.17"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.18"
   serviceURL: "http://userservice:8080"
 
   springProfilesActive: "prod"
@@ -643,6 +709,11 @@ userService:
   # proposal is 90; set that value in the environment overlay once approved.
   teamDiscussion:
     archiveRetentionDays: 0
+
+  # Notification retention. Non-positive values disable the corresponding cutoff.
+  eventNotificationRetention:
+    readDays: 90
+    absoluteDays: 365
 
   # 2FA / OTP login posture — enabled by default.
   otpAllowedForUsers: "true"
@@ -688,27 +759,55 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.17"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.18"
 
+# networkPolicies.keycloakIngress.enabled defaults to false. Specify
+# networkPolicies.keycloakIngress.externalNginxNamespace for a separate controller.
+# Verify the ingress source and any off-chart Keycloak callers before enabling.
 nginxController:
+  # Switch only after migrating the routes. See docs/ingress-snippet-shutdown.md.
+  disableSnippetAnnotations: false
   enabled: true
-  replicas: 1
+  # Enable after the serving controller accepts Permissions-Policy and uses 429 for rate limits.
+  useStandardRoutePolicies: false
+  # Two replicas, spread over nodes, with a PodDisruptionBudget (ORISO-Helm#544).
+  replicas: 2
+  # See docs/ingress-controller-scope.md for staged upgrades of existing controllers.
+  scopeToReleaseNamespace: false
+  keepBothRbacScopes: false
 
 # IP anonymization proxy — replaces X-Real-IP/X-Forwarded-For with a
 # session-scoped UUID so no ORISO backend ever sees a real client IP.
 ipAnonymizer:
   enabled: false
+  # Must stay 1 until sessions are shared between pods; the render fails above 1 (ORISO-Helm#544).
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:2.0.17"
+  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:2.0.18"
+  # Before deploying the stateless image, name an existing Secret in the release
+  # namespace with ANON_SESSION_KEY set to a standard-base64 32-byte random key.
+  sessionKeySecretName: ""
 
 
 # ---------- Observability ----------------------------------------------------------------
 # SigNoz backend, collection agents, and optional ORISO dashboards/alerts.
 signoz:
   enabled: false
+  orisoIngress:
+    # Prepare the route gateway before switching public SigNoz routes to it.
+    prepareRouteGateway: false
+    useRouteGateway: false
   orisoObservability:
     enabled: false
     conformanceCheck: false
+    # Opt in on Dev after the private agent receiver and Slack route have been verified.
+    agentForwarding: false
+    # Optional Dev platform rules in the managed catalog.
+    platformAlerts:
+      enabled: false
+    # Optional Dev heartbeat. Its pre-created webhook is separate from Slack.
+    heartbeat:
+      enabled: false
+      channelName: oriso-dev-heartbeat
     image: "python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844"
     # Existing SigNoz Editor API-key Secret; required only when enabled.
     apiKeySecret:
@@ -728,9 +827,26 @@ signoz:
       signoz_global_external__url: "https://your-domain.example.com/signoz"
   telemetryStoreMigrator:
     upgradeHelmHooks: false
+  # networkPolicies.clickhouseIngress.enabled defaults to false. It applies to
+  # embedded ClickHouse in the release namespace. Inventory separately managed
+  # backup clients and metrics scrapers before enabling it.
   clickhouse:
     persistence:
       size: 20Gi
+  # SigNoz MCP server at /signoz-mcp (templates/signoz/signoz-mcp-server.yaml, #304).
+  # It never holds a SigNoz API key: each request must carry the caller's own
+  # key in the SIGNOZ-API-KEY (or Authorization) header, which SigNoz checks;
+  # without one the server answers 401.
+  orisoMcpServer:
+    enabled: false
+    image: "docker.io/signoz/signoz-mcp-server:v0.20.0@sha256:b739763a41a0e50741c886fceb9bf2acae45b8adba22d313e1960b35cd5880af"
+    resources:
+      requests:
+        cpu: 25m
+        memory: 128Mi
+      limits:
+        # Upstream asks for at least 512Mi in containers.
+        memory: 512Mi
   # Data protection (templates/signoz/signoz-data-protection.yaml): volumes
   # switched to reclaim Retain after every upgrade, daily signoz.db backup.
   orisoDataProtection:
@@ -741,6 +857,16 @@ signoz:
       schedule: "30 2 * * *"
       keep: 14
       size: 1Gi
+    # Daily native ClickHouse archive of the six SigNoz databases onto a kept,
+    # Retain claim that ClickHouse mounts as disk oriso_signal_backup (#499).
+    # Enabling also needs that mount and disk under signoz.clickhouse; see
+    # values-dev-clickhouse-signal-backup.yaml. The render fails if they are missing.
+    signalBackup:
+      enabled: false
+      claim: signoz-clickhouse-signal-backup
+      schedule: "15 3 * * *"
+      keep: 7
+      size: 10Gi
   # Collector resources and exposed protocols. The ORISO collector policy lives
   # in charts/signoz/files/oriso-otel-collector-policy.yaml.
   otelCollector:
@@ -812,7 +938,7 @@ healthDashboard:
     authSecret: "health-dashboard-basic-auth"
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: "2.0.17"
+    tag: "2.0.18"
     pullPolicy: ""
   replicas: 1
   namespace: ""

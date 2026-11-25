@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the ORISO Dev Synapse PostgreSQL backup every night at 02:40 UTC
+
+[Timer]
+OnCalendar=*-*-* 02:40:00 UTC
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

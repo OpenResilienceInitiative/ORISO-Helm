@@ -7,6 +7,7 @@ import importlib.util
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 ROOT = Path(__file__).parents[1]
 SCRIPT = ROOT / "files" / "signoz" / "signoz_observability.py"
@@ -28,6 +29,159 @@ class AssetContractTest(unittest.TestCase):
             cluster_name="oriso-predev",
             channel_name="oriso-alerts-slack",
         )
+
+    def test_heartbeat_is_bound_to_current_collector_data_and_one_webhook(self) -> None:
+        rule = MODULE._heartbeat_alert("dev", "oriso-dev", "watchdog-only", enabled=True)
+        condition = rule["condition"]
+        query = condition["compositeQuery"]["queries"][0]["spec"]["query"]
+        self.assertIn("time()", query)
+        self.assertIn("otelcol_receiver_accepted_metric_points", query)
+        self.assertIn('"k8s.cluster.name"="oriso-dev"', query)
+        self.assertEqual(rule["annotations"]["oriso_evaluated_at"], "{{$value}}")
+        self.assertFalse(condition.get("alertOnAbsent"))
+        self.assertEqual(condition["thresholds"]["spec"][0]["channels"], ["watchdog-only"])
+        self.assertEqual(rule["notificationSettings"]["renotify"], {
+            "enabled": True, "interval": "1m", "alertStates": ["firing"],
+        })
+
+    def test_heartbeat_webhook_requires_tls_auth_and_firing_only(self) -> None:
+        client = Mock()
+        hook = {
+            "url": "https://receiver.example.invalid/watchdog",
+            "send_resolved": False,
+            "http_config": {"basic_auth": {"username": "fixture", "password": "fixture-only"}},
+        }
+
+        def configure(replacements):
+            client.request.return_value = {
+                "data": [{"name": "watchdog-only", "type": "webhook", "data": json.dumps({
+                    "webhook_configs": [hook | replacements],
+                })}],
+            }
+
+        configure({})
+        MODULE.require_heartbeat_channel(client, "watchdog-only")
+        for replacements in (
+            {"send_resolved": True},
+            {"url": "http://receiver.example.invalid/watchdog"},
+            {"http_config": {}},
+            {"http_config": hook["http_config"] | {"tls_config": {"insecure_skip_verify": True}}},
+        ):
+            with self.subTest(replacements=replacements):
+                configure(replacements)
+                with self.assertRaisesRegex(RuntimeError, "dedicated HTTPS"):
+                    MODULE.require_heartbeat_channel(client, "watchdog-only")
+
+    def test_platform_rule_readback_detects_query_evaluation_and_route_drift(self) -> None:
+        dashboards, alerts = MODULE.load_assets(ASSETS, platform_alerts=True)
+        scope = {"environment": "dev", "cluster_name": "oriso-dev", "channel_name": "oriso-alerts-slack"}
+        dashboards, alerts = MODULE.materialize_assets(dashboards, alerts, **scope)
+        MODULE.validate_asset_contract(dashboards, alerts, **scope)
+        expected = next(item for item in alerts if item["_orisoSlug"] == MODULE.NODE_NOT_READY_SLUG)
+        baseline = json.loads(json.dumps(expected))
+        def validate(current):
+            return MODULE.validate_live_alert(
+                current, expected, environment=scope["environment"], channel_name=scope["channel_name"],
+            )
+
+        validate(baseline)
+        for drift, error in (
+            (("condition", "selectedQueryName"), "query"),
+            (("evaluation", "spec", "frequency"), "evaluation"),
+            (("notificationSettings", "groupBy"), "grouping"),
+            (("condition", "thresholds", "kind"), "threshold"),
+        ):
+            with self.subTest(drift=drift):
+                current = json.loads(json.dumps(baseline))
+                value = current
+                for key in drift[:-1]:
+                    value = value[key]
+                value[drift[-1]] = "wrong"
+                with self.assertRaisesRegex(RuntimeError, f"stored alert {error} drift"):
+                    validate(current)
+
+    def test_platform_capacity_tiers_are_exclusive_and_routes_are_checked(self) -> None:
+        dashboards, alerts = MODULE.load_assets(ASSETS, platform_alerts=True)
+        scope = {"environment": "dev", "cluster_name": "oriso-dev", "channel_name": "oriso-alerts-slack"}
+        dashboards, alerts = MODULE.materialize_assets(dashboards, alerts, **scope)
+        MODULE.validate_asset_contract(dashboards, alerts, **scope)
+        expected = next(item for item in alerts if item["_orisoSlug"] == "platform-pvc-capacity")
+        thresholds = expected["condition"]["thresholds"]["spec"]
+        self.assertEqual([(item["name"], item["target"], item["op"]) for item in thresholds], [
+            ("info", 1, "equal"), ("warning", 2, "equal"), ("critical", 3, "equal"),
+        ])
+        self.assertNotIn("severity", expected["labels"])
+        current = json.loads(json.dumps(expected))
+        current["labels"]["severity"] = "warning"
+        with self.assertRaisesRegex(RuntimeError, "stored alert threshold drift"):
+            MODULE.validate_live_alert(
+                current, expected, environment=scope["environment"], channel_name=scope["channel_name"],
+            )
+        del current["labels"]["severity"]
+        current["condition"]["thresholds"]["spec"][2]["channels"] = ["another-channel"]
+        with self.assertRaisesRegex(RuntimeError, "stored alert route drift"):
+            MODULE.validate_live_alert(
+                current, expected, environment=scope["environment"], channel_name=scope["channel_name"],
+            )
+
+    def test_platform_ingress_and_restart_rules_keep_only_operator_grouping(self) -> None:
+        _, alerts = MODULE.load_assets(ASSETS, platform_alerts=True)
+        rules = {item["_orisoSlug"]: item for item in alerts}
+        expected_groups = {
+            "platform-ingress-5xx": ["environment", "namespace", "ingress"],
+            "platform-anonymizer-unavailable": ["environment", "k8s.namespace.name", "k8s.deployment.name"],
+            "platform-container-restarts": ["environment", "k8s.namespace.name", "k8s.pod.name", "k8s.container.name"],
+        }
+        for slug, groups in expected_groups.items():
+            with self.subTest(slug=slug):
+                rule = rules[slug]
+                self.assertEqual(rule["notificationSettings"]["groupBy"], groups)
+                self.assertEqual(rule["labels"]["severity"], "critical")
+                self.assertEqual(rule["condition"]["thresholds"]["spec"][0]["target"], 0)
+
+    def test_keycloak_failure_spike_uses_scoped_scrapes_and_disjoint_baseline(self) -> None:
+        slug = "platform-keycloak-login-failures"
+        _, alerts = MODULE.load_assets(ASSETS, platform_alerts=True)
+        rule = next(alert for alert in alerts if alert["_orisoSlug"] == slug)
+        self.assertEqual(rule["labels"]["severity"], "warning")
+        self.assertEqual(rule["notificationSettings"]["groupBy"], ["environment"])
+        query = MODULE._platform_query(slug, "dev", "oriso-dev", guarded=True)["query"]
+        for matcher in ('"service.name"="keycloak"', '"k8s_namespace_name"="caritas"',
+                        '"event"="login"', '"error"!=""', '"error"!="none"', "[1h:1m] offset 10m"):
+            self.assertIn(matcher, query)
+        readiness = MODULE._platform_query(slug, "dev", "oriso-dev", guarded=False)["query"]
+        self.assertIn('"up"', readiness)
+        self.assertIn("present_over_time", readiness)
+        self.assertNotIn("sum_over_time", readiness)
+
+    def test_crashloop_queries_exclude_only_unambiguous_terminal_pod_uids(self) -> None:
+        scope = '"deployment.environment"="dev","k8s.cluster.name"="oriso-dev"'
+        pod = '"deployment.environment", "k8s.cluster.name", "k8s.namespace.name", "k8s.pod.name", "k8s.pod.uid"'
+        phase = '{"k8s.pod.phase",' + scope + ',"k8s.pod.uid"!=""}'
+        status = '{"k8s.container.status.reason",' + scope + ',"k8s.container.status.reason"="CrashLoopBackOff"}'
+        for guarded in (False, True):
+            with self.subTest(guarded=guarded):
+                query = MODULE._platform_query("platform-crashloop-backoff", "dev", "oriso-dev", guarded=guarded)["query"]
+                self.assertIn(f"last_over_time({phase}[5m]) == 3", query)
+                self.assertIn(f"last_over_time({phase}[5m]) == 4", query)
+                self.assertIn(f"count by ({pod}) (present_over_time({phase}[5m])) == 1", query)
+                status_checks = (
+                    (f"(last_over_time({status}[30s]) > bool 0)", f"present_over_time({status}[30s])")
+                    if guarded else (f"present_over_time({status}[5m])",)
+                )
+                for check in status_checks:
+                    self.assertIn(f"{check} unless on ({pod})", query)
+
+    def test_certificate_expiry_uses_the_certificate_namespace_and_clock(self) -> None:
+        slug = "platform-certificate-expiring"
+        _, alerts = MODULE.load_assets(ASSETS, platform_alerts=True)
+        rule = next(alert for alert in alerts if alert["_orisoSlug"] == slug)
+        self.assertEqual(rule["labels"]["severity"], "warning")
+        self.assertEqual(rule["notificationSettings"]["groupBy"], ["environment", "namespace", "name"])
+        query = MODULE._platform_query(slug, "dev", "oriso-dev", guarded=True)["query"]
+        for matcher in ('"service.name"="cert-manager"', '"namespace"="caritas"',
+                        "certmanager_certificate_expiration_timestamp_seconds", "time()", "1814400"):
+            self.assertIn(matcher, query)
 
     def test_assets_cover_diagnosis_and_platform_failure_modes(self) -> None:
         self.assertEqual(

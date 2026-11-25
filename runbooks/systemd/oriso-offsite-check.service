@@ -1,0 +1,16 @@
+[Unit]
+Description=Check that the newest off-site ORISO Dev backups are fresh and complete
+Documentation=https://github.com/OpenResilienceInitiative/ORISO-Helm/blob/dev/runbooks/offsite-backup.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+UMask=0077
+StateDirectory=oriso-offsite-backup
+StateDirectoryMode=0700
+# Exit status 1 puts this unit into the failed state, which is what monitoring should watch.
+ExecStart=/usr/bin/python3 -I /opt/oriso/offsite-backup/offsite_backup.py check --config /etc/oriso/offsite-backup.json --status-file /var/lib/oriso-offsite-backup/check.json
+TimeoutStartSec=10min
+StandardOutput=journal
+StandardError=journal

@@ -26,6 +26,13 @@ python3 tests/render_storybook_auth_realm_test.py
 helm lint . -f values.yaml.default -f secrets.yaml.default -f values-dev.yaml
 ```
 
+If Dev still has a hand-managed `storybook-dev-ingress`, coordinate its adoption
+into the `caritas` Helm release with the operator before the upgrade. Verify the
+Basic Auth Secret exists, reconcile the existing host and TLS settings, and
+hand off ownership of this one Ingress. Stop the previous deployment process
+from reapplying it. The chart will own the content route and two separate
+trailing-slash redirects.
+
 Install or upgrade the Dev overlay from a checkout of this chart:
 
 ```sh
@@ -46,7 +53,7 @@ helm upgrade --install caritas . \
 
 After deployment, verify the boundary and the current story:
 
-1. An unauthenticated request to `/storybook-frontend/` returns `401`.
+1. Unauthenticated requests to both trailing-slash routes and their `index.json` files return `401`.
 2. Requests to `/storybook-frontend` and `/storybook-admin` redirect to the
    trailing-slash routes.
 3. An authenticated browser opens both Storybook indexes.

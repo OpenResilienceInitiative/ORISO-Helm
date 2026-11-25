@@ -161,11 +161,6 @@ spec:
                 configMapKeyRef:
                   key: MULTITENANCY_ENABLED
                   name: consultingtypeservice-configmap-env
-            - name: JAVA_OPTS
-              valueFrom:
-                configMapKeyRef:
-                  key: JAVA_OPTS
-                  name: consultingtypeservice-configmap-env
             - name: APP_BASE_URL
               valueFrom:
                 configMapKeyRef:
@@ -248,6 +243,13 @@ spec:
                   name: consultingtypeservice-configmap-env
           ports:
             - containerPort: 8080
+          # Probe the Spring Boot port targeted by the Service.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8083
+            periodSeconds: 10
+            timeoutSeconds: 3
           securityContext:
             {{- include "oriso.containerSecurityContext" (dict) | nindent 12 }}
           volumeMounts:

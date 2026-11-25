@@ -21,6 +21,9 @@
 {{- $_ := required "matrixrtcLifecycle.existingSecret.tokenKey is required" $cfg.existingSecret.tokenKey -}}
 {{- $config := required "matrixrtcLifecycle.livekit.existingConfigSecret.name must name a separately provisioned lifecycle config secret" $cfg.livekit.existingConfigSecret.name -}}
 {{- $_ := required "matrixrtcLifecycle.livekit.existingConfigSecret.key is required" $cfg.livekit.existingConfigSecret.key -}}
+{{- if has "matrix-synapse-credentials" (list $secret $config) -}}
+{{- fail "matrixrtcLifecycle credentials must be separate from matrix-synapse-credentials" -}}
+{{- end -}}
 {{- if eq $config .Values.livekit.existingConfigSecret.name -}}
 {{- fail "matrixrtcLifecycle must use a separate LiveKit config secret, not the legacy host-network config" -}}
 {{- end -}}

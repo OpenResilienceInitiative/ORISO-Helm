@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ AUTH_ERROR = (
 
 
 def render(*overlays: str, health_dashboard: dict | None = None,
+           global_values: dict | None = None,
            expect_error: bool = False, domain: str = "health.oriso.internal") -> list[dict] | str:
     command = [
         "helm", "template", "health-auth-test", str(CHART_DIR),
@@ -38,9 +40,14 @@ def render(*overlays: str, health_dashboard: dict | None = None,
     for overlay in overlays:
         command.extend(["-f", str(CHART_DIR / overlay)])
     with tempfile.TemporaryDirectory(prefix="health-auth-render-") as directory:
+        values = {}
         if health_dashboard is not None:
+            values["healthDashboard"] = health_dashboard
+        if global_values is not None:
+            values["global"] = global_values
+        if values:
             override = Path(directory) / "override.yaml"
-            override.write_text(yaml.safe_dump({"healthDashboard": health_dashboard}))
+            override.write_text(yaml.safe_dump(values))
             command.extend(["-f", str(override)])
         result = subprocess.run(command, capture_output=True, text=True, check=False)
     if expect_error:
@@ -62,6 +69,65 @@ def health_resources(docs: list[dict]) -> dict[str, dict]:
 
 
 class HealthDashboardIngressAuthTest(unittest.TestCase):
+    def test_operator_access_configures_only_the_dashboard_client_and_role(self) -> None:
+        origin = "https://health.oriso.internal"
+        docs = render(health_dashboard={"ingress": {"basicAuth": False}}, global_values={
+            "healthDashboardOperatorAccess": True,
+            "keycloak": {"realm": "online-beratung"},
+        })
+        resources = health_resources(docs)
+        self.assertNotIn("nginx.ingress.kubernetes.io/auth-type", resources["Ingress"]["metadata"]["annotations"])
+        container = resources["Deployment"]["spec"]["template"]["spec"]["containers"][0]
+        env = {item["name"]: item.get("value") for item in container["env"]}
+        self.assertEqual(env["ORISO_DASHBOARD_OIDC_ISSUER"], f"{origin}/auth/realms/online-beratung")
+        self.assertEqual(env["ORISO_DASHBOARD_OIDC_CLIENT_ID"], "health-dashboard")
+
+        config = next(doc for doc in docs if doc["kind"] == "ConfigMap" and
+                      doc["metadata"]["name"] == "keycloak-configmap-data")
+        realm = json.loads(config["data"]["realm.json"])
+        client = next(client for client in realm["clients"] if client["clientId"] == "health-dashboard")
+        self.assertTrue(client["publicClient"])
+        self.assertTrue(client["standardFlowEnabled"])
+        for flag in ("implicitFlowEnabled", "directAccessGrantsEnabled", "serviceAccountsEnabled", "fullScopeAllowed"):
+            self.assertFalse(client[flag])
+        self.assertEqual(client["redirectUris"], [f"{origin}/health/auth/callback"])
+        self.assertEqual(client["webOrigins"], [origin])
+        self.assertEqual(client["attributes"]["post.logout.redirect.uris"], f"{origin}/health/")
+        self.assertEqual(client["attributes"]["pkce.code.challenge.method"], "S256")
+        mappers = {entry["protocolMapper"]: entry["config"] for entry in client["protocolMappers"]}
+        self.assertEqual(mappers["oidc-audience-mapper"]["included.client.audience"], "health-dashboard")
+        self.assertEqual(mappers["oidc-usermodel-client-role-mapper"]["claim.name"], "resource_access.health-dashboard.roles")
+        roles = realm["roles"]["client"]["health-dashboard"]
+        self.assertEqual([role["name"] for role in roles], ["view-helm-images"])
+        self.assertEqual(realm["clientScopeMappings"]["health-dashboard"], [{
+            "client": "health-dashboard",
+            "roles": ["view-helm-images"],
+        }])
+
+    def test_operator_access_requires_a_public_dashboard_on_https(self) -> None:
+        flags = {"healthDashboardOperatorAccess": True, "keycloak": {"realm": "online-beratung"}}
+        for values in ({"ingress": {"basicAuth": True}}, {"ingress": {"enabled": False}}):
+            with self.subTest(values=values):
+                self.assertIn("HealthDashboard operator access requires a public ingress",
+                              render(health_dashboard=values, global_values=flags, expect_error=True))
+        self.assertIn("HealthDashboard operator access requires global.enableTls",
+                      render(health_dashboard={"ingress": {"basicAuth": False}},
+                             global_values={**flags, "enableTls": False}, expect_error=True))
+        self.assertIn("global.healthDashboardOperatorAccess must be a boolean",
+                      render(health_dashboard={"ingress": {"basicAuth": False}},
+                             global_values={**flags, "healthDashboardOperatorAccess": "false"},
+                             expect_error=True))
+
+    def test_default_chart_has_no_dashboard_oidc_configuration(self) -> None:
+        docs = render()
+        deployment = health_resources(docs)["Deployment"]
+        env = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+        self.assertFalse(any(item["name"].startswith("ORISO_DASHBOARD_OIDC_") for item in env))
+        config = next(doc for doc in docs if doc["kind"] == "ConfigMap" and
+                      doc["metadata"]["name"] == "keycloak-configmap-data")
+        realm = json.loads(config["data"]["realm.json"])
+        self.assertFalse(any(client["clientId"] == "health-dashboard" for client in realm["clients"]))
+
     def test_explicit_off_disables_only_external_ingress(self) -> None:
         resources = health_resources(render(health_dashboard={"ingress": {"enabled": False}}))
         self.assertEqual(set(resources), {"Deployment", "Service"})
@@ -260,17 +326,28 @@ class HealthDashboardIngressAuthTest(unittest.TestCase):
                 )
 
     def test_basic_auth_false_requires_public_mode(self) -> None:
-        for value in ("false", "FALSE", " False "):
+        for value in (False, "false", "FALSE", " False "):
             with self.subTest(value=value):
                 error = render(health_dashboard={
                     "ingress": {"enabled": True, "basicAuth": False},
                     "env": {"ORISO_PUBLIC_MODE": value},
                 }, expect_error=True)
                 self.assertIn("healthDashboard.ingress.basicAuth=false makes /health public and requires public mode", error)
+        for value in (True, "true"):
+            with self.subTest(value=value):
+                resources = health_resources(render(health_dashboard={
+                    "ingress": {"enabled": True, "basicAuth": False},
+                    "env": {"ORISO_PUBLIC_MODE": value},
+                }))
+                self.assertNotIn("nginx.ingress.kubernetes.io/auth-type",
+                                 resources["Ingress"]["metadata"]["annotations"])
+
+    def test_basic_auth_allows_private_application_mode(self) -> None:
         resources = health_resources(render(health_dashboard={
-            "ingress": {"enabled": True, "basicAuth": False}, "env": {"ORISO_PUBLIC_MODE": "true"},
+            "ingress": {"basicAuth": True}, "env": {"ORISO_PUBLIC_MODE": False},
         }))
-        self.assertNotIn("nginx.ingress.kubernetes.io/auth-type", resources["Ingress"]["metadata"]["annotations"])
+        self.assertEqual(resources["Ingress"]["metadata"]["annotations"][
+            "nginx.ingress.kubernetes.io/auth-type"], "basic")
 
     def test_basic_auth_rejects_non_boolean(self) -> None:
         for value in ("false", "no", 0, None):

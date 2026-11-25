@@ -16,6 +16,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import _keycloak_container as kc
 
 REVISION = 3
+# Keycloak 26.8.2 multi-platform manifest, where the Admin REST audience is required.
+AUDIENCE_IMAGE = "quay.io/keycloak/keycloak@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3"
 SNAPSHOT = {
     "globalFeatureSystemNotificationEmailsEnabled": True, "globalSmtpEnabled": True,
     "globalSmtpHost": "smtp.synthetic.example", "globalSmtpPort": "587", "globalSmtpSecure": False,
@@ -67,9 +69,12 @@ def fake_admin_settings(acks):
 
 
 class SmtpSyncClientTest(unittest.TestCase):
+    image = kc.IMAGE
+    admin_api_scope_required = False
+
     @classmethod
     def setUpClass(cls):
-        cls.keycloak = kc.KeycloakContainer("oriso-smtp-sync-fixture").start()
+        cls.keycloak = kc.KeycloakContainer("oriso-smtp-sync-fixture", image=cls.image).start()
         cls.addClassCleanup(cls.keycloak.stop)
         cls.base = cls.keycloak.base
         cls.realm = kc.rendered_realm()
@@ -85,6 +90,26 @@ class SmtpSyncClientTest(unittest.TestCase):
         realm.pop("id", None)
         kc.request(self.base, "POST", "/admin/realms", realm, kc.master_admin(self.base), timeout=90)
 
+    def prove_admin_api_scope(self, realm):
+        base = self.base
+        prefix = "/admin/realms/" + realm
+        installer = kc.master_admin(base)
+        for client, expected in (("backend-admin", True), ("smtp-sync", True),
+                                 ("backend-technical", False), ("app", False)):
+            [result] = kc.request(base, "GET", prefix + "/clients?clientId=" + client, token=installer)
+            paths = prefix + "/clients/" + result["id"]
+            for kind in ("default", "optional"):
+                scopes = kc.request(base, "GET", paths + "/" + kind + "-client-scopes", token=installer)
+                self.assertEqual(any(s["name"] == "kc-admin-api" for s in scopes), expected and kind == "default")
+
+        token = kc.request(base, "POST", "/realms/" + realm + "/protocol/openid-connect/token",
+                           {"grant_type": "client_credentials", "client_id": "backend-admin",
+                            "client_secret": kc.SECRETS["ADMIN_CLIENT_SECRET"]}, form=True)["access_token"]
+        self.assertIsInstance(kc.request(base, "GET", prefix + "/clients", token=token), list)
+        [admin_user] = kc.request(base, "GET", prefix + "/users?username=service-account-backend-admin&exact=true",
+                                  token=token)
+        self.assertEqual(admin_user["id"], kc.claims(token)["sub"])
+
     def prove(self, realm_name, subjects):
         base = self.base
         common = {"KEYCLOAK_URL": base, "KEYCLOAK_REALM": realm_name, "POD_NAMESPACE": "fixture",
@@ -94,6 +119,8 @@ class SmtpSyncClientTest(unittest.TestCase):
         out = kc.run_script("keycloak-reconcile-service-clients.py",
                             kc.service_identity_env(base, realm_name, PREPARE_ONLY="false", **subjects))
         self.assertIn("SMTP_SYNC_CLIENT_RECONCILED", out)
+        if self.admin_api_scope_required:
+            self.prove_admin_api_scope(realm_name)
         # SMTP Job: no master credential in its environment at all.
         out = kc.run_script("keycloak-reconcile-smtp.py", common)
         self.assertIn("SMTP_RECONCILE_APPLIED", out)
@@ -144,6 +171,11 @@ class SmtpSyncClientTest(unittest.TestCase):
         clients = kc.request(self.base, "GET", "/admin/realms/smtp-fgap/clients?clientId=smtp-sync",
                              token=kc.master_admin(self.base))
         self.assertEqual(clients, [], "nothing changed: smtp-sync was not created")
+
+
+class SmtpSyncClientWithAdminApiScopeTest(SmtpSyncClientTest):
+    image = AUDIENCE_IMAGE
+    admin_api_scope_required = True
 
 
 if __name__ == "__main__":

@@ -1,9 +1,19 @@
+{{- $probes := .Values.keycloakProbes | default dict -}}
+{{- $configuredReplicas := dig "replicas" 1 .Values.AsMap -}}
+{{- $replicas := int64 $configuredReplicas -}}
+{{- if or (not (regexMatch "^[1-9][0-9]*$" (toString $configuredReplicas))) (lt $replicas 1) (gt $replicas 2147483647) -}}
+{{- fail "online-counseling-keycloak.replicas must be a positive 32-bit integer" -}}
+{{- end -}}
+{{- $clustered := gt $replicas 1 -}}
+{{- $managementProbes := or $clustered ($probes.useManagementPort | default false) -}}
+{{- $scrapeMetrics := eq (include "oriso.appMetrics.enabled" .) "true" -}}
+{{- $management := or $scrapeMetrics $managementProbes -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: keycloak
 spec:
-  replicas: 1
+  replicas: {{ $replicas }}
   selector:
     matchLabels:
       app: keycloak
@@ -18,11 +28,22 @@ spec:
         app: keycloak
       annotations:
         checksum/email-identity: {{ printf "%s\x00%s" (include "oriso.emailBrandingName" .) (include "oriso.emailLegalOrganisationName" .) | sha256sum | quote }}
-        {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
+        {{- if $scrapeMetrics }}
         {{- include "oriso.appMetrics.podAnnotations" (dict "job" "keycloak" "port" 9000 "path" "/auth/metrics") | nindent 8 }}
         {{- end }}
     spec:
       terminationGracePeriodSeconds: 60
+      {{- if $clustered }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: keycloak
+                topologyKey: kubernetes.io/hostname
+      {{- end }}
       securityContext:
         {{- include "oriso.podSecurityContext" (dict "user" 1000) | nindent 8 }}
       {{- if .Values.keycloakServiceAccount }}
@@ -43,8 +64,14 @@ spec:
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
           ports:
             - containerPort: 8080
-            {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
-            # Management interface (metrics), cluster-internal only; no ingress routes it.
+            {{- if $clustered }}
+            - name: cache-transport
+              containerPort: 7800
+            - name: cache-failure
+              containerPort: 57800
+            {{- end }}
+            {{- if $management }}
+            # Management health checks and metrics are served only on the pod port.
             - name: management
               containerPort: 9000
             {{- end }}
@@ -60,6 +87,9 @@ spec:
             # Keep this out of lifecycle hooks so pod restarts never re-import over live data.
             - --import-realm
           env:
+            # Keep this mitigation until all deployed Java builds fix CVE-2026-114938.
+            - name: JAVA_OPTS_APPEND
+              value: "-XX:-UseBASE64Intrinsics"
             - name: KC_DB
               valueFrom:
                 configMapKeyRef:
@@ -97,10 +127,22 @@ spec:
                   name: keycloak-secret-env
             - name: KC_HTTP_RELATIVE_PATH
               value: "/auth"
-            {{- if eq (include "oriso.appMetrics.enabled" .) "true" }}
-            # Served on the management port 9000 under the relative path: /auth/metrics.
+            {{- if $clustered }}
+            - name: KC_CACHE
+              value: "ispn"
+            - name: KC_CACHE_STACK
+              value: "jdbc-ping"
+            {{- end }}
+            {{- if $managementProbes }}
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            {{- end }}
+            {{- if $management }}
+            # Readiness includes the DB connection pool check when metrics are enabled.
             - name: KC_METRICS_ENABLED
               value: "true"
+            {{- end }}
+            {{- if $scrapeMetrics }}
             # Login/2FA event counters tagged by realm, IdP and client only, never by user.
             - name: KC_EVENT_METRICS_USER_ENABLED
               value: "true"
@@ -151,28 +193,33 @@ spec:
           # transaction logs and temp files under data/.
           securityContext:
             {{- include "oriso.containerSecurityContext" (dict "readOnly" false) | nindent 12 }}
-          {{- if .Values.keycloakProbes }}
+          {{- if or $managementProbes (hasKey $probes "startup") (hasKey $probes "liveness") (hasKey $probes "readiness") }}
+          {{- $healthPath := ternary "/auth/health" "/health" $managementProbes }}
+          {{- $probePort := ternary "management" 8080 $managementProbes }}
+          {{- $startup := $probes.startup | default dict }}
+          {{- $liveness := $probes.liveness | default dict }}
+          {{- $readiness := $probes.readiness | default dict }}
           startupProbe:
             httpGet:
-              path: {{ .Values.keycloakProbes.startup.path | default "/health/started" }}
-              port: 8080
-            initialDelaySeconds: {{ .Values.keycloakProbes.startup.initialDelaySeconds | default 10 }}
-            periodSeconds: {{ .Values.keycloakProbes.startup.periodSeconds | default 10 }}
-            failureThreshold: {{ .Values.keycloakProbes.startup.failureThreshold | default 60 }}
+              path: {{ $startup.path | default (printf "%s/started" $healthPath) | quote }}
+              port: {{ $probePort }}
+            initialDelaySeconds: {{ $startup.initialDelaySeconds | default 10 }}
+            periodSeconds: {{ $startup.periodSeconds | default 10 }}
+            failureThreshold: {{ $startup.failureThreshold | default 60 }}
           livenessProbe:
             httpGet:
-              path: {{ .Values.keycloakProbes.liveness.path | default "/health/live" }}
-              port: 8080
-            initialDelaySeconds: {{ .Values.keycloakProbes.liveness.initialDelaySeconds | default 60 }}
-            periodSeconds: {{ .Values.keycloakProbes.liveness.periodSeconds | default 30 }}
-            failureThreshold: {{ .Values.keycloakProbes.liveness.failureThreshold | default 3 }}
+              path: {{ $liveness.path | default (printf "%s/live" $healthPath) | quote }}
+              port: {{ $probePort }}
+            initialDelaySeconds: {{ $liveness.initialDelaySeconds | default 60 }}
+            periodSeconds: {{ $liveness.periodSeconds | default 30 }}
+            failureThreshold: {{ $liveness.failureThreshold | default 3 }}
           readinessProbe:
             httpGet:
-              path: {{ .Values.keycloakProbes.readiness.path | default "/health/ready" }}
-              port: 8080
-            initialDelaySeconds: {{ .Values.keycloakProbes.readiness.initialDelaySeconds | default 30 }}
-            periodSeconds: {{ .Values.keycloakProbes.readiness.periodSeconds | default 10 }}
-            failureThreshold: {{ .Values.keycloakProbes.readiness.failureThreshold | default 3 }}
+              path: {{ $readiness.path | default (printf "%s/ready" $healthPath) | quote }}
+              port: {{ $probePort }}
+            initialDelaySeconds: {{ $readiness.initialDelaySeconds | default 30 }}
+            periodSeconds: {{ $readiness.periodSeconds | default 10 }}
+            failureThreshold: {{ $readiness.failureThreshold | default 3 }}
           {{- end }}
           volumeMounts:
             - mountPath: /opt/keycloak/themes/custom-theme/login

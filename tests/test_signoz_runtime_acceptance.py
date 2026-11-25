@@ -107,6 +107,8 @@ class ReadbackContractTest(unittest.TestCase):
             {
                 "podMetrics",
                 "nodeMetrics",
+                "nodeFilesystemAvailable",
+                "nodeFilesystemCapacity",
                 "hostMetrics",
                 "nodeCondition",
                 "collectorSelfMetrics",
@@ -123,6 +125,8 @@ class ReadbackContractTest(unittest.TestCase):
 
         self.assertIn("startsWith(metric_name, 'k8s.pod.')", queries["podMetrics"])
         self.assertIn("startsWith(metric_name, 'k8s.node.')", queries["nodeMetrics"])
+        self.assertIn("metric_name = 'k8s.node.filesystem.available'", queries["nodeFilesystemAvailable"])
+        self.assertIn("metric_name = 'k8s.node.filesystem.capacity'", queries["nodeFilesystemCapacity"])
         self.assertIn("startsWith(metric_name, 'system.')", queries["hostMetrics"])
         self.assertIn("metric_name = 'k8s.node.condition'", queries["nodeCondition"])
         self.assertIn(
@@ -134,6 +138,8 @@ class ReadbackContractTest(unittest.TestCase):
         for metric_query in (
             "podMetrics",
             "nodeMetrics",
+            "nodeFilesystemAvailable",
+            "nodeFilesystemCapacity",
             "hostMetrics",
             "nodeCondition",
             "collectorSelfMetrics",
@@ -157,6 +163,8 @@ class ReadbackContractTest(unittest.TestCase):
         healthy = {
             "podMetrics": 1,
             "nodeMetrics": 1,
+            "nodeFilesystemAvailable": 1,
+            "nodeFilesystemCapacity": 1,
             "hostMetrics": 1,
             "nodeCondition": 1,
             "collectorSelfMetrics": 1,
@@ -166,11 +174,12 @@ class ReadbackContractTest(unittest.TestCase):
         }
 
         self.assertEqual(MODULE.infra_readback_failures(healthy), [])
+        healthy["nodeFilesystemCapacity"] = 0
         healthy["hostMetrics"] = 0
         healthy["forbiddenLogBody"] = 1
         self.assertEqual(
             MODULE.infra_readback_failures(healthy),
-            ["hostMetrics missing", "forbiddenLogBody leaked"],
+            ["nodeFilesystemCapacity missing", "hostMetrics missing", "forbiddenLogBody leaked"],
         )
 
     def test_infra_rollouts_cover_node_and_cluster_collectors(self) -> None:
@@ -202,7 +211,10 @@ class RuntimeReadinessContractTest(unittest.TestCase):
             "spec": {"replicas": replicas},
         }
 
-    def runner(self, statefulsets: list[dict], failing_rollout: str = "") -> mock.Mock:
+    def runner(
+        self, statefulsets: list[dict], failing_rollout: str = "", jobs: tuple = (),
+        application: dict | None = None,
+    ) -> mock.Mock:
         runner = mock.Mock(spec=MODULE.Runner)
 
         def run(command: list[str]) -> subprocess.CompletedProcess:
@@ -214,6 +226,14 @@ class RuntimeReadinessContractTest(unittest.TestCase):
                 "get", "statefulset", "-l", "clickhouse.altinity.com/chi=caritas-clickhouse", "-o", "json",
             ]:
                 output = json.dumps({"items": statefulsets})
+            elif arguments == [
+                "get", "job", "-l", "app.kubernetes.io/instance=caritas,oriso.org/signoz-migrator", "-o", "json",
+            ]:
+                output = json.dumps({"items": jobs})
+            elif command[1:] == [
+                "-n", "argocd", "get", "applications.argoproj.io", "oriso", "-o", "json",
+            ]:
+                output = json.dumps(application)
             elif failing_rollout and failing_rollout in arguments:
                 raise subprocess.CalledProcessError(1, command)
             return subprocess.CompletedProcess(command, 0, stdout=output)
@@ -224,6 +244,119 @@ class RuntimeReadinessContractTest(unittest.TestCase):
     def checked_rollouts(self, runner: mock.Mock) -> list[str]:
         commands = [call.args[0][3:] for call in runner.run.call_args_list]
         return [command[2] for command in commands if command[:2] == ["rollout", "status"]]
+
+    def test_waits_for_the_managed_migration_job_instead_of_the_previous_hook(self) -> None:
+        runner = self.runner([self.statefulset("chi-caritas-clickhouse-cluster-0-0")], jobs=(
+            {"metadata": {"name": "old-hook", "labels": {"oriso.org/signoz-migrator": "hook"}}},
+            {"metadata": {"name": "current-job", "labels": {"oriso.org/signoz-migrator": "managed"}}},
+        ))
+        MODULE._check_runtime_readiness(runner, "caritas", "caritas", "15s")
+        self.assertEqual(runner.run.call_args.args[0][-2:], ["job/current-job", "--timeout=15s"])
+
+    def argocd_application(self, job_name: str = MODULE.ARGOCD_MIGRATION_JOB) -> dict:
+        source = {"repoURL": "https://example.test/helm", "path": "chart", "targetRevision": "main"}
+        destination = {"server": "https://kubernetes.default.svc", "namespace": "caritas"}
+        return {
+            "spec": {"source": source.copy(), "destination": destination.copy()},
+            "status": {
+                "sync": {
+                    "status": "Synced",
+                    "revision": "current",
+                    "comparedTo": {"source": source.copy(), "destination": destination.copy()},
+                },
+                "operationState": {
+                    "phase": "Succeeded",
+                    "operation": {"sync": {"prune": True}},
+                    "syncResult": {
+                        "revision": "current",
+                        "source": source.copy(),
+                        "resources": [{
+                            "group": "batch", "version": "v1", "kind": "Job",
+                            "namespace": "caritas", "name": job_name, "hookType": "Sync",
+                            "syncPhase": "Sync", "hookPhase": "Succeeded",
+                        }],
+                    },
+                },
+            },
+        }
+
+    def test_argo_readiness_uses_application_receipt_after_hook_cleanup(self) -> None:
+        job_name = "custom-migrator-sync"
+        runner = self.runner([self.statefulset("clickhouse")], application=self.argocd_application(job_name))
+        receipt = MODULE._check_runtime_readiness(
+            runner, "caritas", "caritas", "15s",
+            argocd_application="argocd/oriso", argocd_migration_job=job_name,
+        )
+        self.assertEqual(receipt, {
+            "application": "argocd/oriso", "job": job_name, "revisions": ["current"],
+        })
+        self.assertEqual(runner.run.call_args.args[0], [
+            "kubectl", "-n", "argocd", "get", "applications.argoproj.io", "oriso", "-o", "json",
+        ])
+        self.assertTrue(all("job" not in call.args[0] and "wait" not in call.args[0]
+                            for call in runner.run.call_args_list))
+
+    def test_argo_readiness_rejects_stale_or_incomplete_application_receipts(self) -> None:
+        for path, override in (
+            (("operation",), {"sync": {}}),
+            (("status", "sync", "status"), "OutOfSync"),
+            (("status", "operationState", "phase"), "Running"),
+            (("status", "operationState", "operation", "sync", "dryRun"), True),
+            (("status", "operationState", "operation", "sync", "resources"), [{"kind": "Job"}]),
+            (("status", "operationState", "operation", "sync", "manifests"), ["local override"]),
+            (("status", "operationState", "syncResult", "revision"), "older"),
+            (("spec", "source", "helm"), {"parameters": [{"name": "image", "value": "new"}]}),
+            (("spec", "destination", "namespace"), "other"),
+            (("spec", "destination", "server"), "https://another-cluster.example.test"),
+        ):
+            with self.subTest(path=path):
+                application = self.argocd_application()
+                value = application
+                for key in path[:-1]:
+                    value = value[key]
+                value[path[-1]] = override
+                runner = self.runner([], application=application)
+                with self.assertRaisesRegex(RuntimeError, "Argo CD Application argocd/oriso"):
+                    MODULE._check_argocd_migration(runner, "caritas", "argocd/oriso", MODULE.ARGOCD_MIGRATION_JOB)
+
+    def test_argo_readiness_matches_the_exact_successful_sync_job(self) -> None:
+        for key, value in (
+            ("name", "other-sync"), ("namespace", "unrelated"), ("group", "custom.io"),
+            ("kind", "Deployment"), ("version", "v1beta1"), ("hookType", "PreSync"),
+            ("syncPhase", "PreSync"), ("hookPhase", "Failed"),
+        ):
+            with self.subTest(key=key):
+                application = self.argocd_application()
+                application["status"]["operationState"]["syncResult"]["resources"][0][key] = value
+                runner = self.runner([], application=application)
+                with self.assertRaisesRegex(RuntimeError, "no successful Sync hook"):
+                    MODULE._check_argocd_migration(runner, "caritas", "argocd/oriso", MODULE.ARGOCD_MIGRATION_JOB)
+
+    def test_argo_readiness_requires_all_current_source_revisions_in_order(self) -> None:
+        application = self.argocd_application()
+        comparison = application["status"]["sync"]
+        result = application["status"]["operationState"]["syncResult"]
+        sources = [application["spec"].pop("source"), {"repoURL": "https://example.test/values", "ref": "values"}]
+        revisions = ["current", "values-current"]
+        application["spec"]["sources"] = sources
+        comparison["comparedTo"]["sources"] = sources
+        comparison["revisions"] = revisions
+        result["sources"] = sources
+        result["revisions"] = revisions.copy()
+        runner = self.runner([], application=application)
+        receipt = MODULE._check_argocd_migration(runner, "caritas", "argocd/oriso", MODULE.ARGOCD_MIGRATION_JOB)
+        self.assertEqual(receipt["revisions"], revisions)
+        result["revisions"] = ["values-current", "current"]
+        with self.assertRaisesRegex(RuntimeError, "current sources and revisions"):
+            MODULE._check_argocd_migration(runner, "caritas", "argocd/oriso", MODULE.ARGOCD_MIGRATION_JOB)
+
+    def test_two_current_managed_migration_jobs_fail_the_readback(self) -> None:
+        runner = self.runner([], jobs=tuple(
+            {"metadata": {"name": name, "labels": {"oriso.org/signoz-migrator": "managed"}}}
+            for name in ("job-first", "job-second")
+        ))
+        with self.assertRaisesRegex(RuntimeError, "Multiple SigNoz migration Jobs"):
+            MODULE._current_migration_job(runner, "caritas", "caritas")
 
     def test_checks_all_actual_statefulsets_owned_by_the_current_installation(self) -> None:
         runner = self.runner([
@@ -585,6 +718,11 @@ class JavaSignalContractTest(unittest.TestCase):
         self.assertIn("JSONEachRow", command)
         sql = command[-1]
         self.assertIn("signoz_metrics.distributed_samples_v4", sql)
+        self.assertIn(
+            "(s.env, s.temporality, s.metric_name, s.fingerprint) GLOBAL IN (\n"
+            "        SELECT env, temporality, metric_name, fingerprint FROM metric_identities",
+            sql,
+        )
         self.assertIn("(service_name, trace_id, span_id) GLOBAL IN", sql)
         self.assertIn("resources_string['deployment.environment'] = 'dev'", sql)
         return mock.Mock(stdout="\n".join(json.dumps(row) for row in self.rows))
@@ -611,6 +749,84 @@ class JavaSignalContractTest(unittest.TestCase):
         })
         self.assertEqual((report["freshnessMinutes"], report["correlationMinutes"]), (15, 60))
         self.runner.run.assert_called_once()
+
+    def set_up_signoz_api(self) -> tuple[mock.Mock, dict]:
+        self.enterContext(mock.patch.dict(MODULE.os.environ, {"SIGNOZ_API_KEY": "test-key"}))
+        opener = self.enterContext(mock.patch("urllib.request.build_opener")).return_value
+        result = {
+            "queryName": "JavaSignals", "nextCursor": "",
+            "rows": [{"data": {"wrong_environment": 0, "invalid_version": 0, **row}} for row in self.rows],
+        }
+        response = opener.open.return_value.__enter__.return_value
+        response.status = 200
+        response.read.side_effect = lambda _limit: json.dumps({
+            "status": "success", "data": {"type": "raw", "data": {"results": [result]}},
+        }).encode()
+        return opener, result
+
+    def test_java_signoz_api_reuses_the_gate_with_a_post_recovery_cutoff(self) -> None:
+        opener, _ = self.set_up_signoz_api()
+        end_ms = 1_800_000_000_000
+        since_ms = end_ms - 120_000
+        with mock.patch.object(MODULE.time, "time_ns", return_value=end_ms * 1_000_000):
+            report = self.run_gate(
+                "--check-java-signals", "--signoz-url", "https://dev.example.org/signoz/",
+                "--since-unix-ms", str(since_ms),
+            )
+        self.assertEqual(report["missing"], [])
+        self.assertEqual(report["freshnessStartUnixMs"], since_ms)
+        self.assertEqual(report["correlationStartUnixMs"], since_ms)
+        self.runner.run.assert_not_called()
+        request = opener.open.call_args.args[0]
+        self.assertEqual(request.full_url, "https://dev.example.org/signoz/api/v5/query_range")
+        self.assertEqual(request.method, "POST")
+        self.assertEqual(request.get_header("Signoz-api-key"), "test-key")
+        payload = json.loads(request.data)
+        self.assertEqual((payload["start"], payload["end"], payload["requestType"]), (since_ms, end_ms, "raw"))
+        query, = payload["compositeQuery"]["queries"]
+        self.assertEqual(query["type"], "clickhouse_sql")
+        sql = query["spec"]["query"]
+        self.assertIn(f"timestamp >= {since_ms * 1_000_000}", sql)
+        self.assertIn(f"t.timestamp >= fromUnixTimestamp64Milli({since_ms})", sql)
+        self.assertIn(f"s.unix_milli >= {since_ms}", sql)
+        self.assertIn(f"unix_milli >= {since_ms - 3_600_000}", sql)
+
+    def test_java_signoz_api_empty_result_fails_the_same_presence_checks(self) -> None:
+        _, result = self.set_up_signoz_api()
+        result["rows"] = None
+        report = self.run_gate(
+            "--check-java-signals", "--signoz-url", "https://dev.example.org/signoz/",
+            failure="Java signal readback missing",
+        )
+        self.assertEqual(len(report["missing"]), 16)
+
+    def test_java_signoz_api_rejects_partial_or_unexpected_response_data(self) -> None:
+        opener, result = self.set_up_signoz_api()
+        flags = ["--check-java-signals", "--signoz-url", "https://dev.example.org/signoz/"]
+        for field, value in (("nextCursor", "more"), ("warnings", ["partial"]), ("queryName", "other")):
+            with self.subTest(field=field), mock.patch.dict(result, {field: value}):
+                with self.assertRaisesRegex(RuntimeError, "invalid Java signal readback"):
+                    self.run_gate(*flags)
+        result["rows"][0]["data"]["body"] = "unexpected"
+        with self.assertRaisesRegex(RuntimeError, "invalid Java signal readback"):
+            self.run_gate(*flags)
+        self.assertEqual(opener.open.call_count, 4)
+        self.runner.run.assert_not_called()
+
+    def test_java_signoz_api_rejects_invalid_cutoff_and_endpoint_before_requests(self) -> None:
+        opener, _ = self.set_up_signoz_api()
+        with mock.patch.object(MODULE.time, "time_ns", return_value=1_800_000_000_000_000_000):
+            for cutoff in ("-1", "1800000000000"):
+                with self.subTest(cutoff=cutoff), self.assertRaisesRegex(RuntimeError, "--since-unix-ms"):
+                    self.run_gate(
+                        "--check-java-signals", "--signoz-url", "https://dev.example.org/signoz/",
+                        "--since-unix-ms", cutoff,
+                    )
+        for url in ("http://dev.example.org/signoz/", "https://user@dev.example.org/signoz/"):
+            with self.subTest(url=url), self.assertRaisesRegex(RuntimeError, "trusted HTTPS"):
+                self.run_gate("--check-java-signals", "--signoz-url", url)
+        opener.open.assert_not_called()
+        self.runner.run.assert_not_called()
 
     def test_java_signal_diagnosis_fails_with_the_exact_missing_pair(self) -> None:
         self.rows = [row for row in self.rows if (
@@ -951,9 +1167,16 @@ class RunnerContractTest(unittest.TestCase):
 
         self.assertEqual(pod_name, "signoz-log-acceptance-12345678")
         commands = [call.args[0] for call in runner.run.call_args_list]
-        self.assertIn("create", commands[0])
-        self.assertIn("event", commands[0])
-        self.assertIn("--for=namespace/caritas", commands[0])
+        # kubectl has no "create event" subcommand; the Event must come from a manifest.
+        self.assertEqual(commands[0], ["kubectl", "-n", "caritas", "create", "-f", "-"])
+        event = json.loads(runner.run.call_args_list[0].kwargs["input_text"])
+        self.assertEqual(event["kind"], "Event")
+        self.assertEqual(event["metadata"]["name"], "signoz-acceptance-12345678")
+        self.assertEqual(event["involvedObject"]["name"], "caritas")
+        # The API rejects an Event whose involvedObject.namespace differs from its own.
+        self.assertEqual(event["involvedObject"]["namespace"], "caritas")
+        self.assertEqual(event["message"], "acceptance-12345678")
+        self.assertRegex(event["lastTimestamp"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
         self.assertIn("run", commands[1])
         self.assertIn("sleep 5; printf '%s\\n' \"$1\"; sleep 10", commands[1])
         self.assertTrue(any("forbidden-marker-1234" in arg for arg in commands[1]))

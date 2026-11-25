@@ -47,11 +47,19 @@ processors:
     - action: insert
       key: deployment.environment
       value: ${env:DEPLOYMENT_ENVIRONMENT}
+{{- if eq (include "oriso.dbMetrics.enabled" .) "true" }}
+  resource/datastore-receiver:
+    attributes:
+    - {action: upsert, key: oriso.signal.source, value: datastore-receiver}
+    - {action: upsert, key: k8s.namespace.name, value: "${env:K8S_NAMESPACE}"}
+{{- end }}
   resourcedetection:
     detectors:
     - env
     override: false
     timeout: 2s
+{{- $podScrape := eq (include "oriso.podScrape.enabled" .) "true" }}
+{{- $ingressNs := get (get (.Values.global | default dict) "observability" | default dict) "externalIngressNginxNamespace" | default "" }}
 receivers:
   k8s_cluster:
     allocatable_types_to_report:
@@ -88,7 +96,7 @@ receivers:
     auth_type: serviceAccount
     namespaces:
     - ${env:K8S_NAMESPACE}
-{{- if eq (include "oriso.podScrape.enabled" .) "true" }}
+{{- if $podScrape }}
   # Pod metrics (global.observability.appMetrics or dbMetrics): scrapes only pods in
   # the release namespace that carry oriso.io/scrape="true", on the port and
   # path from their oriso.io/* annotations. `$$` escapes the collector's own
@@ -125,8 +133,7 @@ receivers:
         - source_labels: [__meta_kubernetes_pod_name]
           target_label: k8s_pod_name
 {{- end }}
-{{- $ingressNs := get (get (.Values.global | default dict) "observability" | default dict) "externalIngressNginxNamespace" | default "" }}
-{{- if and $ingressNs (eq (include "oriso.appMetrics.enabled" .) "true") }}
+{{- if $ingressNs }}
   # Cluster-wide ingress-nginx that is not installed by this chart (Dev): scraped by
   # pod IP on the controller's metrics port, only in the named namespace.
   prometheus/oriso-ingress-nginx:
@@ -153,6 +160,32 @@ receivers:
         - source_labels: [__meta_kubernetes_pod_name]
           target_label: k8s_pod_name
 {{- end }}
+{{- $certificateNs := get (get (.Values.global | default dict) "observability" | default dict) "externalCertManagerNamespace" | default "" }}
+{{- if and $certificateNs (eq (include "oriso.appMetrics.enabled" .) "true") }}
+  # Discover the external controller directly. Only the release namespace's
+  # certificate expiry metric is collected from its /metrics endpoint.
+  prometheus/oriso-cert-manager:
+    config:
+      scrape_configs:
+      - job_name: cert-manager
+        scrape_interval: 60s
+        scrape_timeout: 10s
+        kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - {{ $certificateNs | quote }}
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name, __meta_kubernetes_pod_label_app_kubernetes_io_component, __meta_kubernetes_pod_container_port_name, __meta_kubernetes_pod_phase]
+          action: keep
+          regex: cert-manager;controller;http-metrics;Running
+        metric_relabel_configs:
+        - source_labels: [__name__, namespace]
+          action: keep
+          regex: {{ printf "certmanager_certificate_expiration_timestamp_seconds;%s" (regexQuoteMeta .Release.Namespace) | quote }}
+        - action: labelkeep
+          regex: __name__|job|instance|namespace|name|issuer_name|issuer_kind|issuer_group
+{{- end }}
 {{- if eq (include "oriso.dbMetrics.enabled" .) "true" }}
   # Data store metrics (global.observability.dbMetrics): status counters only,
   # read with the monitoring users db-monitoring-reconcile-job maintains.
@@ -175,11 +208,17 @@ receivers:
       # receiver logs "could not find key" on every collection.
       mongodb.flushes.rate:
         enabled: false
+      mongodb.uptime:
+        enabled: true
   rabbitmq:
     endpoint: http://rabbitmq.{{ .Release.Namespace }}:15672
     username: oriso-monitor
     password: ${env:DBMON_RABBITMQ_PASSWORD}
     collection_interval: 60s
+    metrics:
+      # Node-wide and available even for a healthy broker without queues.
+      rabbitmq.node.uptime:
+        enabled: true
 {{- end }}
 service:
   extensions:
@@ -207,7 +246,7 @@ service:
       - batch
       receivers:
       - k8s_cluster
-{{- if eq (include "oriso.podScrape.enabled" .) "true" }}
+{{- if or $podScrape $ingressNs }}
     metrics/apps:
       exporters:
       - otlphttp
@@ -216,9 +255,14 @@ service:
       - resourcedetection
       - batch
       receivers:
+{{- if $podScrape }}
       - prometheus/oriso-apps
-{{- if and $ingressNs (eq (include "oriso.appMetrics.enabled" .) "true") }}
+{{- end }}
+{{- if $ingressNs }}
       - prometheus/oriso-ingress-nginx
+{{- end }}
+{{- if and $certificateNs (eq (include "oriso.appMetrics.enabled" .) "true") }}
+      - prometheus/oriso-cert-manager
 {{- end }}
 {{- end }}
 {{- if eq (include "oriso.dbMetrics.enabled" .) "true" }}
@@ -228,6 +272,7 @@ service:
       processors:
       - resource/deployenv
       - resourcedetection
+      - resource/datastore-receiver
       - batch
       receivers:
       - mysql

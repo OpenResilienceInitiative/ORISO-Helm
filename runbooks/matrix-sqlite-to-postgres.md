@@ -66,6 +66,12 @@ UUIDs from a deleted realm. See `runbooks/backend-service-clients.md`.
 - If the environment is synced by ArgoCD, pause auto-sync for the release, or
   it scales Synapse back up during the port.
 - Make sure the PVC has room for two extra copies of `homeserver.db`.
+- The chart's optional `networkPolicies.matrixPostgresIngress.enabled` setting defaults
+  to `false`. When enabled, it allows only Synapse Pods in the release namespace to
+  reach the chart's PostgreSQL Pods. The `matrix-port-db` helper below has a different
+  identity. When migrating to the chart's PostgreSQL Service, arrange a temporary
+  allowance for that helper or keep the policy off until the port is complete.
+  Confirm access for any separately operated backup or monitoring clients before enabling.
 
 ```sh
 NS=caritas   # namespace of the release

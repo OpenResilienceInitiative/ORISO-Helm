@@ -1,0 +1,25 @@
+[Unit]
+Description=ORISO Dev SigNoz heartbeat receiver
+
+[Service]
+Type=exec
+User=signoz-heartbeat
+Group=signoz-heartbeat
+UMask=0027
+StateDirectory=oriso-signoz-heartbeat
+StateDirectoryMode=0750
+Environment=SIGNOZ_HEARTBEAT_DB=/var/lib/oriso-signoz-heartbeat/heartbeat.sqlite3
+Environment=SIGNOZ_HEARTBEAT_CLUSTER=oriso-dev
+LoadCredential=webhook-password:/etc/oriso/signoz-heartbeat/webhook-password
+Environment=SIGNOZ_HEARTBEAT_PASSWORD_FILE=%d/webhook-password
+ExecStart=/opt/oriso/signoz-heartbeat/venv/bin/gunicorn --chdir /opt/oriso/signoz-heartbeat --bind 127.0.0.1:9785 --preload --no-control-socket --timeout 10 signoz_heartbeat_receiver:from_environment()
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_INET
+
+[Install]
+WantedBy=multi-user.target

@@ -59,22 +59,44 @@ def assert_ingress_scrape(config: dict) -> None:
 
 def main() -> None:
     metrics = ("--set", "global.observability.appMetrics=true")
-    on = cluster_config(
-        *metrics,
+    external_ingress = (
         "--set-string",
         "global.observability.externalIngressNginxNamespace=ingress-nginx",
     )
+    external_only = cluster_config(*external_ingress)
+    assert_ingress_scrape(external_only)
+    assert "prometheus/oriso-apps" not in external_only["receivers"]
+    pipeline = external_only["service"]["pipelines"]["metrics/apps"]
+    assert pipeline["receivers"] == [INGRESS_RECEIVER]
+    assert pipeline["processors"] == ["resource/deployenv", "resourcedetection", "batch"]
+    assert pipeline["exporters"] == ["otlphttp"]
+
+    on = cluster_config(*metrics, *external_ingress)
     assert_ingress_scrape(on)
+    assert on["service"]["pipelines"]["metrics/apps"]["receivers"] == [
+        "prometheus/oriso-apps", INGRESS_RECEIVER,
+    ]
 
     off = cluster_config(*metrics)
     assert INGRESS_RECEIVER not in off["receivers"]
     assert INGRESS_RECEIVER not in off["service"]["pipelines"]["metrics/apps"]["receivers"]
 
-    without_app_metrics = cluster_config(
+    database_and_ingress = cluster_config(
         "--set", "global.observability.dbMetrics=true",
-        "--set-string", "global.observability.externalIngressNginxNamespace=ingress-nginx",
+        *external_ingress,
     )
-    assert INGRESS_RECEIVER not in without_app_metrics["receivers"]
+    assert_ingress_scrape(database_and_ingress)
+    assert "metrics/dbs" in database_and_ingress["service"]["pipelines"]
+
+    stock = cluster_config()
+    assert INGRESS_RECEIVER not in stock["receivers"]
+    assert "metrics/apps" not in stock["service"]["pipelines"]
+
+    disabled = base.documents(
+        base.render(signoz_enabled=True, infra_enabled=False, extra=external_ingress)
+    )
+    assert not any(item["metadata"]["name"] == COLLECTOR for item in disabled)
+
     # Dev turns the scrape on, and the cluster collector may list/watch pods in
     # every namespace (the scrape discovers pods in ingress-nginx).
     docs = dev_cluster_docs()

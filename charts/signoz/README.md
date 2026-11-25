@@ -665,7 +665,16 @@ tls: []</pre>
                 <div style="max-width: 300px;"><pre lang="yaml">true</pre>
 </div>
             </td>
-            <td>Enable Helm pre-upgrade hooks and ArgoCD Sync hooks.</td>
+            <td>Enable the pre-upgrade hook for direct Helm upgrades.</td>
+        </tr>
+        <tr>
+            <td id="telemetryStoreMigrator--argocdSyncHook"><a href="./values.yaml#L1030">telemetryStoreMigrator.argocdSyncHook</a></td>
+            <td>bool</td>
+            <td>
+                <div style="max-width: 300px;"><pre lang="yaml">false</pre>
+</div>
+            </td>
+            <td>Use an Argo CD Sync hook with a fixed Job name and delete it only after success.</td>
         </tr>
         <tr>
             <td id="telemetryStoreMigrator--enableReplication"><a href="./values.yaml#L1030">telemetryStoreMigrator.enableReplication</a></td>

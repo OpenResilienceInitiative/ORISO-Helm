@@ -1,0 +1,17 @@
+[Unit]
+Description=Copy the encrypted ORISO Dev backups to the Hetzner Storage Box and apply retention
+Documentation=https://github.com/OpenResilienceInitiative/ORISO-Helm/blob/dev/runbooks/offsite-backup.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+UMask=0077
+StateDirectory=oriso-offsite-backup
+StateDirectoryMode=0700
+ExecStart=/usr/bin/python3 -I /opt/oriso/offsite-backup/offsite_backup.py push --config /etc/oriso/offsite-backup.json --status-file /var/lib/oriso-offsite-backup/push.json
+TimeoutStartSec=3h
+KillMode=control-group
+Nice=10
+StandardOutput=journal
+StandardError=journal

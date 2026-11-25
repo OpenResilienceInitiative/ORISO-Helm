@@ -1,0 +1,121 @@
+{{- $signoz := get .Values "signoz" | default dict -}}
+{{- $ingress := get $signoz "orisoIngress" | default dict -}}
+{{- if get $signoz "enabled" -}}
+{{- range $setting := list "prepareRouteGateway" "useRouteGateway" -}}
+  {{- if and (hasKey $ingress $setting) (not (kindIs "bool" (get $ingress $setting))) -}}
+    {{- fail (printf "signoz.orisoIngress.%s must be a boolean" $setting) -}}
+  {{- end -}}
+{{- end -}}
+{{- if and (get $ingress "useRouteGateway") (not (get $ingress "prepareRouteGateway")) -}}
+  {{- fail "signoz.orisoIngress.useRouteGateway=true requires signoz.orisoIngress.prepareRouteGateway=true" -}}
+{{- end -}}
+{{- $observability := get .Values.global "observability" | default dict -}}
+{{- $ui := dig "enabled" true $ingress -}}
+{{- $rum := dig "webVitals" "enabled" false $observability -}}
+{{- $e2e := dig "e2eTraceIngest" "enabled" false $observability -}}
+{{- if and (get $ingress "prepareRouteGateway") (or $ui $rum $e2e) -}}
+{{- $name := include "oriso.signozRouteGatewayName" . -}}
+{{- $collector := include "oriso.signozOtelCollectorServiceName" . -}}
+{{- $domain := .Values.global.domainName -}}
+{{- if and $ui (not (regexMatch "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$" $domain)) -}}
+  {{- fail "global.domainName must be a DNS hostname for the SigNoz route gateway" -}}
+{{- end -}}
+{{- if and (or $rum $e2e) (not (regexMatch "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" $collector)) -}}
+  {{- fail "the SigNoz collector backend must be a Service name for the route gateway" -}}
+{{- end -}}
+{{- $settings := dict "domain" $domain "uiEnabled" $ui "rum" "" "e2e" "" -}}
+{{- if $rum -}}
+  {{- $_ := set $settings "rum" (printf "%s:%d" $collector (int (dig "otelCollector" "ports" "otlp-rum" "servicePort" 4319 $signoz))) -}}
+{{- end -}}
+{{- if $e2e -}}
+  {{- $_ := set $settings "e2e" (printf "%s:%d" $collector (int (dig "otelCollector" "ports" "otlp-e2e" "servicePort" 4321 $signoz))) -}}
+{{- end -}}
+{{- $source := required "files/signoz/ingress-route-gateway.conf is required" (.Files.Get "files/signoz/ingress-route-gateway.conf") -}}
+{{- $config := tpl $source $settings -}}
+{{- $labels := dict "app.kubernetes.io/name" "signoz-route-gateway" "app.kubernetes.io/instance" .Release.Name -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+data:
+  nginx.conf: |
+{{- $config | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+spec:
+  selector: {{- toYaml $labels | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {{- toYaml $labels | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- toYaml $labels | nindent 8 }}
+      annotations:
+        checksum/config: {{ $config | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "oriso.podSecurityContext" (dict "user" 101 "group" 101 "fsGroup" 101) | nindent 8 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- toYaml $labels | nindent 14 }}
+      containers:
+        - name: nginx
+          image: ghcr.io/nginx/nginx-unprivileged@sha256:8432c57ac86f178741af2b89948bd9087cb9df1c415bc1ab4d23735c4f0e3e61
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/sbin/nginx"]
+          args: ["-c", "/conf/nginx.conf", "-g", "daemon off;"]
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          securityContext:
+            {{- include "oriso.containerSecurityContext" (dict "readOnly" true) | nindent 12 }}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+            - name: temp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+        - name: temp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Mi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {{- toYaml $labels | nindent 6 }}
+{{- end -}}
+{{- end -}}

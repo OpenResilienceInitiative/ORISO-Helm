@@ -175,9 +175,13 @@ def main() -> None:
         if "hostPath" in volume
     }
     log_mounts = {mount["name"]: mount for mount in container(agent)["volumeMounts"]}
-    assert log_volumes["varlog"] == "/var/log/pods"
+    assert log_volumes == {"varlog": "/var/log/pods", "host-proc": "/proc", "host-sys": "/sys"}
     assert log_mounts["varlog"]["mountPath"] == "/var/log/pods"
-    assert log_mounts["varlog"]["readOnly"] is True
+    assert log_mounts["host-proc"]["mountPath"] == "/hostfs/proc"
+    assert log_mounts["host-sys"]["mountPath"] == "/hostfs/sys"
+    for volume in log_volumes:
+        assert log_mounts[volume]["readOnly"] is True
+        assert "mountPropagation" not in log_mounts[volume]
 
     agent_config = parse_config(
         find(enabled, "ConfigMap", "caritas-k8s-infra-otel-agent"),
@@ -186,6 +190,13 @@ def main() -> None:
     assert {"filelog/k8s", "hostmetrics", "kubeletstats"} <= set(
         agent_config["receivers"]
     )
+    hostmetrics = agent_config["receivers"]["hostmetrics"]
+    assert hostmetrics["root_path"] == "/hostfs"
+    assert set(hostmetrics["scrapers"]) == {"cpu", "disk", "load", "memory", "network"}
+    kubelet_metrics = agent_config["receivers"]["kubeletstats"]["metrics"]
+    for metric in ("k8s.node.filesystem.available", "k8s.node.filesystem.capacity"):
+        assert kubelet_metrics[metric]["enabled"] is True
+
     filelog = agent_config["receivers"]["filelog/k8s"]
     assert filelog["include"] == ["/var/log/pods/${env:K8S_NAMESPACE}_*/*/*.log"]
     assert filelog["start_at"] == "end"
@@ -232,6 +243,12 @@ def main() -> None:
     assert "log.logger" in statements
     for forbidden in ("log.message", "log.stack", "correlationId", "email", "token"):
         assert forbidden not in statements
+
+    kubelet = agent_config["receivers"]["kubeletstats"]
+    assert kubelet["auth_type"] == "serviceAccount"
+    assert kubelet["endpoint"] == "${env:K8S_HOST_IP}:10250"
+    assert kubelet["ca_file"] == "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    assert kubelet["insecure_skip_verify"] is False
 
     log_pipeline = agent_config["service"]["pipelines"]["logs"]
     assert log_pipeline["receivers"] == ["filelog/k8s"]

@@ -1,4 +1,4 @@
-{{- if .Values.nginxController.enabled }}
+{{- define "oriso.nginx.controllerConfigMap" -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -10,6 +10,10 @@ metadata:
 data:
   allow-snippet-annotations: "true"
   annotations-risk-level: "Critical"
+  {{- if eq (include "oriso.ingress.standardRoutePolicies" .) "true" }}
+  global-allowed-response-headers: "Permissions-Policy"
+  limit-req-status-code: "429"
+  {{- end }}
   # KDG epic #282 task 7: the ingress-nginx default upstream log format logs
   # $remote_addr (client IP) and $request, which embeds the full request URI
   # including the query string — magic-link / password-reset tokens travel as
@@ -29,4 +33,26 @@ data:
   global-auth-response-headers: "X-Anon-Id"
   proxy-set-headers: "{{ .Release.Namespace }}/nginx-ip-anonymizer-headers"
 {{- end }}
-{{- end }}
+  # Retain the bundled controller's effective HTTPS policy explicitly.
+  hsts: "true"
+  hsts-max-age: "31536000"
+  hsts-include-subdomains: "true"
+  hsts-preload: "false"
+{{- end -}}
+{{- if .Values.nginxController.enabled -}}
+  {{- $disableSnippets := get .Values.nginxController "disableSnippetAnnotations" -}}
+  {{- if and (hasKey .Values.nginxController "disableSnippetAnnotations") (not (kindIs "bool" $disableSnippets)) -}}
+    {{- fail "nginxController.disableSnippetAnnotations must be a boolean" -}}
+  {{- end -}}
+  {{- $rendered := include "oriso.nginx.controllerConfigMap" . -}}
+  {{- if $disableSnippets -}}
+    {{- include "oriso.nginx.checkRenderedSnippetPolicy" . -}}
+    {{- include "oriso.nginx.checkLiveSnippetPolicy" . -}}
+    {{- $manifest := fromYaml $rendered -}}
+    {{- $_ := set $manifest.data "allow-snippet-annotations" "false" -}}
+    {{- $_ := set $manifest.data "annotations-risk-level" "High" -}}
+    {{- toYaml $manifest -}}
+  {{- else -}}
+    {{- $rendered -}}
+  {{- end -}}
+{{- end -}}

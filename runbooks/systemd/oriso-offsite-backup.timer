@@ -1,0 +1,10 @@
+[Unit]
+Description=Copy the ORISO Dev backups off-site every night at 03:00 UTC, after the 02:00 to 02:40 dumps
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

@@ -19,7 +19,6 @@ data:
   # (`key=true,key2=false`). Empty keeps whatever MongoDB holds.
   RELEASE_TOGGLE_OVERRIDES: {{ default "" .Values.consultingTypeService.releaseToggleOverrides | quote }}
   TENANT_SERVICE_API_URL: "http://tenantservice.{{ .Release.Namespace }}:8081"
-  JAVA_OPTS: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
   SPRING_DATASOURCE_URL: "jdbc:mariadb://mariadb.{{ .Release.Namespace }}:3306/consultingtypeservice"
   KEYCLOAK_CORS: "false"
   KEYCLOAK_AUTH_SERVER_URL: {{ .Values.global.keycloak.authServerUrl }}

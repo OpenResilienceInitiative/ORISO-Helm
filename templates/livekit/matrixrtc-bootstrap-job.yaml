@@ -7,10 +7,8 @@
 {{- $manualMembershipToken := default "" .Values.matrixrtcAuth.membershipToken -}}
 {{- $usesManualToken := and $manualMembershipToken (ne $manualMembershipToken "changeme") (ne $manualMembershipToken "pending-bootstrap") -}}
 {{- $readerPassword := default "" .Values.matrixrtcAuth.membershipReaderPassword -}}
-{{- $registrationSecret := default "" .Values.global.secrets.matrixRegistrationSharedSecret -}}
 {{- if not $usesManualToken -}}
 {{- $readerPassword = required "matrixrtcAuth.membershipReaderPassword is required when matrixrtcAuth.bootstrap.enabled=true and matrixrtcAuth.membershipToken is blank/changeme; set it in secrets.yaml" .Values.matrixrtcAuth.membershipReaderPassword -}}
-{{- $registrationSecret = required "global.secrets.matrixRegistrationSharedSecret is required for MatrixRTC Matrix user bootstrap" .Values.global.secrets.matrixRegistrationSharedSecret -}}
 {{- end -}}
 apiVersion: v1
 kind: ServiceAccount
@@ -93,8 +91,13 @@ spec:
               value: {{ .Values.matrixrtcAuth.membershipReaderUserId | quote }}
             - name: MATRIXRTC_PASSWORD
               value: {{ $readerPassword | quote }}
+            {{- if not $usesManualToken }}
             - name: MATRIX_REGISTRATION_SHARED_SECRET
-              value: {{ $registrationSecret | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: matrix-synapse-credentials
+                  key: registration-shared-secret
+            {{- end }}
             - name: TARGET_SECRET_NAME
               value: {{ .Values.matrixrtcAuth.existingSecret.name | quote }}
             - name: MEMBERSHIP_TOKEN_KEY
@@ -119,7 +122,6 @@ spec:
               base_url = os.environ["MATRIX_BASE_URL"].rstrip("/")
               user_id = os.environ["MATRIXRTC_USER_ID"]
               password = os.environ["MATRIXRTC_PASSWORD"]
-              shared_secret = os.environ["MATRIX_REGISTRATION_SHARED_SECRET"]
               target_secret = os.environ["TARGET_SECRET_NAME"]
               token_key = os.environ["MEMBERSHIP_TOKEN_KEY"]
               manual_token = os.environ.get("MANUAL_MEMBERSHIP_TOKEN", "")
@@ -127,6 +129,7 @@ spec:
               if manual_token and manual_token not in ("changeme", "pending-bootstrap"):
                   token = manual_token
               else:
+                  shared_secret = os.environ["MATRIX_REGISTRATION_SHARED_SECRET"]
                   if not user_id.startswith("@") or ":" not in user_id:
                       raise SystemExit(f"Invalid MATRIXRTC_USER_ID: {user_id}")
                   localpart = user_id[1:].split(":", 1)[0]

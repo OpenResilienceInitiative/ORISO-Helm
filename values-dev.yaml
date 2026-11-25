@@ -8,6 +8,11 @@
 # only. Matrix room encryption rollout is configured separately per environment;
 # this generic dev overlay does not opt in. See docs/infrastructure-report-2026-07.md §7.
 
+# Gate sign-in traffic on Keycloak's private application readiness check.
+online-counseling-keycloak:
+  keycloakProbes:
+    useManagementPort: true
+
 global:
   # Telemetry to the bundled SigNoz (https://dev.oriso.org/signoz). Every trace
   # is kept on Dev; the cluster collector also scrapes nginx, Keycloak, Synapse
@@ -22,6 +27,7 @@ global:
     # --enable-metrics=true (live change, verified 2026-11-06); on a cluster whose
     # controller has metrics off the target just stays down.
     externalIngressNginxNamespace: "ingress-nginx"
+    externalCertManagerNamespace: "cert-manager"
     dbMetrics: true
     webVitals:
       enabled: true
@@ -51,6 +57,9 @@ signoz:
     apiKeySecret:
       name: "signoz-observability-api-key"
   signoz:
+    # The existing Dev ext4 CSI volume uses fsGroupPolicy: File. Kubelet
+    # gives access to the root-owned SQLite data without copying the database.
+    devSQLiteFilesystemGroup: 65532
     env:
       signoz_global_external__url: "https://dev.oriso.org/signoz"
   clickhouse:
@@ -105,6 +114,10 @@ signoz:
         <clickhouse>
           <trace_log remove="1"/>
         </clickhouse>
+  # Add values-dev-clickhouse-signal-backup.yaml only for an approved rollout.
+  orisoDataProtection:
+    signalBackup:
+      enabled: false
   otelCollector:
     ports:
       otlp-e2e:
@@ -113,6 +126,9 @@ signoz:
       ORISO_DEPLOYMENT_ENVIRONMENT: "dev"
   orisoIngress:
     devAliasRedirect: true
+  # Replaces the hand-applied, keyed MCP server (#304); callers bring their own key.
+  orisoMcpServer:
+    enabled: true
 
 # Node agent (pod logs, host and kubelet metrics) and cluster collector.
 signozCollector:
@@ -196,6 +212,54 @@ userService:
 matrix:
   synapseServerName: "matrix.oriso.org"
   matrixServerName: "matrix.oriso.org"
+  # Synapse CPU on Dev (2026-11-21). At the shipped 500m limit Synapse was CFS
+  # throttled: cgroup cpu.stat showed 20,506 throttled periods and 1,737 s
+  # throttled against 1,337 s of CPU used. /livekit/jwt/sfu/get timed out
+  # while it waited on Synapse, and 1:1 calls failed with "Call service
+  # unavailable (503)". Dev was raised by hand with kubectl set resources;
+  # this keeps the value across helm upgrades. Memory stays at the default.
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 1500m
+      memory: 1Gi
+  # Stale Matrix devices on Dev (ORISO-Helm#628). On 2026-11-21, 114 users held
+  # 2,706 devices (p90 74, max 310; 1,169 unseen for 7+ days), mostly fresh E2E
+  # browser profiles and the UserService admin login. Each E2EE key goes to every
+  # device, which pushed Synapse into CPU throttling during calls. 7d (product
+  # owner decision, 2026-11-21): no device on Dev was older than 30 days, so 30d
+  # removed nothing while E2E runs added new devices every day.
+  deleteStaleDevicesAfter: "7d"
+  # Synapse rc_invites for Dev (ORISO-UserService#1736). A new enquiry in
+  # Springfield QA Dev invites ~17 counsellors into its holding room at once;
+  # with the shipped burst of 10 the rest waits, and the standing supervisor's
+  # invite after an accept was refused for ~270 s (per_user: one invite per
+  # ~5.5 min once 5 are used). Room/issuer bursts cover two backfills plus
+  # supervisors; per_user allows one invite every 10 s with a burst of 20.
+  rateLimits:
+    invitesPerRoom:
+      perSecond: 1
+      burstCount: 40
+    invitesPerIssuer:
+      perSecond: 1
+      burstCount: 40
+    invitesPerUser:
+      perSecond: 0.1
+      burstCount: 20
+    # rc_message (ORISO-UserService#1737): the agency service account creates a
+    # holding room and invites ~17 counsellors per enquiry; with the shipped
+    # 0.2/s burst 10 the next enquiry's room creation was refused (Dev sessions
+    # 206, 223, 226). Burst 60 at 1/s covers three back-to-back enquiries.
+    messages:
+      perSecond: 1
+      burstCount: 60
+    # rc_joins_per_room (ORISO-UserService#1744): joins into the shared agency
+    # holding room returned 429 on 23 Nov (session 258 left without a room).
+    joinsPerRoom:
+      perSecond: 5
+      burstCount: 100
 matrixrtcAuth:
   membershipReaderUserId: "@matrixrtc-auth:matrix.oriso.org"
 

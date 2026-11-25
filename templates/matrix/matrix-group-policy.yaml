@@ -35,11 +35,12 @@ spec:
       app: matrix-synapse
   policyTypes: [Ingress]
   ingress:
-    # Preserve existing Matrix client, media and metrics reachability. This
+    # Allow public Matrix client, media and discovery traffic and metrics. This
     # intentionally says nothing about those ports' independent access policy.
     - ports:
         - {protocol: TCP, port: 8008}
         - {protocol: TCP, port: 8009}
+        - {protocol: TCP, port: 8802}
         - {protocol: TCP, port: 9000}
     - from:
         - podSelector:

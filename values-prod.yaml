@@ -34,6 +34,7 @@ global:
     otlpCollectorHost: ""
     deploymentEnvironment: "production"
     appMetrics: false
+    externalIngressNginxNamespace: ""
     dbMetrics: false
     webVitals:
       enabled: false
@@ -44,6 +45,9 @@ signozCollector:
   enabled: false
 
 signoz:
+  telemetryStoreMigrator:
+    # This overlay is applied by Argo CD. SigNoz itself remains opt-in.
+    argocdSyncHook: true
   orisoIngress:
     enabled: false
   orisoObservability:

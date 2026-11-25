@@ -48,11 +48,13 @@ def pick(values: dict[str, Any], path: tuple[str, ...]) -> Any:
     return values
 
 
-def overlay(environment_file: Path, *, include_defaults: bool = True) -> dict[str, Any]:
+def overlay(*environment_files: Path, include_defaults: bool = True) -> dict[str, Any]:
     defaults = {}
     if include_defaults:
         defaults = yaml.safe_load((CHART_DIR / "values.yaml.default").read_text(encoding="utf-8")) or {}
-    environment = yaml.safe_load(environment_file.read_text(encoding="utf-8")) or {}
+    environment = {}
+    for path in environment_files:
+        environment = merge(environment, yaml.safe_load(path.read_text(encoding="utf-8")) or {})
     out: dict[str, Any] = {}
     for path in KEYS:
         value = merge(pick(defaults, path), pick(environment, path))
@@ -77,18 +79,55 @@ def differing_paths(expected: Any, actual: Any, path: tuple[str, ...] = ()) -> l
     return [".".join(path)]
 
 
+
+def unexpected_signal_backup_paths(expected: dict[str, Any], actual: dict[str, Any]) -> list[str]:
+    signal = ("signoz", "orisoDataProtection", "signalBackup")
+    clickhouse = ("signoz", "clickhouse")
+    if pick(expected, (*signal, "enabled")) is not False or pick(actual, (*clickhouse, "enabled")) is False:
+        return []
+
+    disk_path = (*clickhouse, "files", "config.d/97-oriso-signal-backup-disk.xml")
+    volumes_path = (*clickhouse, "additionalVolumes")
+    mounts_path = (*clickhouse, "additionalVolumeMounts")
+    claim = pick(actual, (*signal, "claim"))
+    if claim is ABSENT:
+        claim = "signoz-clickhouse-signal-backup"
+
+    disk = pick(actual, disk_path)
+    volumes = pick(actual, volumes_path)
+    mounts = pick(actual, mounts_path)
+    has_signal_volume = isinstance(volumes, list) and any(
+        isinstance(volume, dict)
+        and pick(volume, ("persistentVolumeClaim", "claimName")) == claim
+        for volume in volumes
+    )
+    has_signal_mount = isinstance(mounts, list) and any(
+        isinstance(mount, dict)
+        and str(mount.get("mountPath", "")).rstrip("/") == "/var/lib/clickhouse-signal-backup"
+        for mount in mounts
+    )
+    return [
+        ".".join(path)
+        for path, present in (
+            (disk_path, isinstance(disk, str) and "oriso_signal_backup" in disk),
+            (volumes_path, has_signal_volume),
+            (mounts_path, has_signal_mount),
+        )
+        if present and pick(expected, path) is ABSENT
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("environment_file", type=Path)
+    parser.add_argument("environment_files", type=Path, nargs="+")
     parser.add_argument(
         "--check-effective",
         action="store_true",
         help="verify the environment's declared observability keys against Helm values on stdin",
     )
     args = parser.parse_args()
-    environment_file = args.environment_file
-    if not environment_file.is_absolute():
-        environment_file = CHART_DIR / environment_file
+    files = [p if p.is_absolute() else CHART_DIR / p for p in args.environment_files]
+    source_names = " + ".join(p.name for p in files)
     if args.check_effective:
         try:
             actual = yaml.safe_load(sys.stdin)
@@ -97,19 +136,20 @@ def main() -> int:
         if not isinstance(actual, dict):
             print("Cannot read effective Helm values as a mapping", file=sys.stderr)
             return 1
-        expected = overlay(environment_file, include_defaults=False)
+        expected = overlay(*files, include_defaults=False)
         if not expected:
             print("No observability values declared in the environment overlay", file=sys.stderr)
             return 1
         mismatches = differing_paths(expected, actual)
+        mismatches.extend(unexpected_signal_backup_paths(expected, actual))
         if mismatches:
             print("Missing or different observability values:", file=sys.stderr)
             print(*sorted(mismatches), sep="\n", file=sys.stderr)
             return 1
-        print(f"PASS: effective observability values match {environment_file.name}")
+        print(f"PASS: effective observability values match {source_names}")
         return 0
-    print(f"# Generated from values.yaml.default + {environment_file.name}; do not edit.")
-    print(yaml.safe_dump(overlay(environment_file), sort_keys=False), end="")
+    print(f"# Generated from values.yaml.default + {source_names}; do not edit.")
+    print(yaml.safe_dump(overlay(*files), sort_keys=False), end="")
     return 0
 
 

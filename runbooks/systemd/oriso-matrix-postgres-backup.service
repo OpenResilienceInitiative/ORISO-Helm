@@ -1,0 +1,17 @@
+[Unit]
+Description=Nightly encrypted logical backup of the ORISO Dev Synapse PostgreSQL StatefulSet
+Documentation=https://github.com/OpenResilienceInitiative/ORISO-Helm/blob/dev/runbooks/datastore-host-backup.md
+After=network-online.target k3s.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+UMask=0077
+# Fail before reading any data when the ready pod cannot be confirmed.
+ExecStartPre=/usr/bin/python3 -I /opt/oriso/datastore-backup/backup_datastores.py /etc/rancher/k3s/k3s.yaml default caritas matrix-postgres --check-target
+ExecStart=/usr/bin/python3 -I /opt/oriso/datastore-backup/backup_datastores.py /etc/rancher/k3s/k3s.yaml default caritas matrix-postgres /root/db-backups/matrix-postgres-helm --age-recipients-file /etc/oriso/backup.age-recipients
+TimeoutStartSec=45min
+TimeoutStartFailureMode=terminate
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal
