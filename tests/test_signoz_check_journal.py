@@ -310,6 +310,16 @@ class DevNightlyJournalTest(TestCase):
         self.assertEqual(result["state"], "CRITICAL")
         self.assertNotIn("probe", result)
 
+        run.update(status="in_progress", conclusion=None)
+        report["state"] = "stalled"
+        run["problem"].update(status="waiting", conclusion=None)
+        run["problem"].pop("step")
+        run["problems"] = [run["problem"], call_check]
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["run"]["problems"], run["problems"])
+        self.assertIn("Dev nightly specs (waiting)", result["probe"]["detail"])
+        self.assertIn("Check public Dev video call prerequisites (failure)", result["probe"]["detail"])
+
     def test_recent_pending_probe_has_healthy_cadence_without_recovering_the_probe(self):
         completed = event(reader.JOB_FAILED, UNIT=DEV_NIGHTLY, JOB_RESULT="failed",
                           __MONOTONIC_TIMESTAMP="100000000")

@@ -186,8 +186,8 @@ def nightly_problem(problem, run_url, state):
     if job not in NIGHTLY_JOBS or not re.fullmatch(re.escape(run_url) + r"/job/" + GITHUB_NUMBER, url):
         raise ValueError("invalid nightly job identity")
     projected = {"job": job, "url": url, **action_state(problem)}
-    stalled = state == "stalled"
-    if stalled != (projected["status"] != "completed") or projected["conclusion"] == "success":
+    active = projected["status"] != "completed"
+    if (active and state != "stalled") or projected["conclusion"] == "success":
         raise ValueError("job state disagrees with the nightly result")
     if "step" in problem:
         step = problem["step"]
@@ -195,8 +195,8 @@ def nightly_problem(problem, run_url, state):
         if not github_number(number) or not isinstance(name, str):
             raise ValueError("invalid nightly step")
         status = action_state(step)
-        if (stalled and status["status"] != "in_progress") or (
-            not stalled and (status["status"] != "completed" or status["conclusion"] in {"success", "skipped"})
+        if (active and status["status"] != "in_progress") or (
+            not active and (status["status"] != "completed" or status["conclusion"] in {"success", "skipped"})
         ):
             raise ValueError("step state disagrees with the nightly result")
         projected["step"] = {"number": number, "name": name if name in NIGHTLY_STEPS else f"Step {number}", **status}
