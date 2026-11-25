@@ -87,8 +87,8 @@ def test_override_is_empty_by_default_and_in_prod() -> None:
     assert override(render("prod")) == ""
 
 
-def test_dev_switches_new_notifications_on() -> None:
-    assert override(render("dev")) == "enableNewNotifications=true"
+def test_dev_switches_new_notifications_and_practice_area_on() -> None:
+    assert override(render("dev")) == "enableNewNotifications=true,enablePracticeArea=true"
 
 
 def test_pre_dev_resets_the_dev_override() -> None:
@@ -100,7 +100,7 @@ def test_pre_dev_resets_the_dev_override() -> None:
 if __name__ == "__main__":
     try:
         test_override_is_empty_by_default_and_in_prod()
-        test_dev_switches_new_notifications_on()
+        test_dev_switches_new_notifications_and_practice_area_on()
         test_pre_dev_resets_the_dev_override()
         test_override_change_rolls_out_cts()
     except AssertionError as exc:
