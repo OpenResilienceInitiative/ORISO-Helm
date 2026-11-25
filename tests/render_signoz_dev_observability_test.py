@@ -474,7 +474,9 @@ def assert_second_review_findings() -> None:
         "namespace": "telemetry",
         "layout": {"shardsCount": 2, "replicasCount": 2},
         "zookeeper": {"replicaCount": 3, "namespaceOverride": "coordination"},
-    }, "orisoDataProtection": {"signalBackup": {"enabled": False}}}})
+    }, "orisoDataProtection": {"signalBackup": {"enabled": False}}},
+        # The ClickHouse ingress policy (on in Dev) supports only the release namespace.
+        "networkPolicies": {"clickhouseIngress": {"enabled": False}}})
     chi = "data-volumeclaim-template-chi-caritas-clickhouse-cluster"
     assert retain_claims(docs)[1:] == [
         f"telemetry/{chi}-0-0-0", f"telemetry/{chi}-0-1-0", f"telemetry/{chi}-1-0-0", f"telemetry/{chi}-1-1-0",
@@ -916,7 +918,9 @@ def assert_signal_backup(dev: dict[tuple[str, str], dict[str, Any]]) -> None:
     assert not any("signal-backup" in name for _, name in external)
     # ClickHouse in its own namespace: the claim, script, Secret and CronJob follow it.
     split = render_dev_with(
-        {"signoz": {"clickhouse": {"namespace": "telemetry"}}}, extra_values=(SIGNAL_BACKUP_OVERLAY,),
+        {"signoz": {"clickhouse": {"namespace": "telemetry"}},
+         "networkPolicies": {"clickhouseIngress": {"enabled": False}}},
+        extra_values=(SIGNAL_BACKUP_OVERLAY,),
     )
     signal = {kind: doc for (kind, name), doc in split.items() if "signal-backup" in name}
     assert set(signal) == {"PersistentVolumeClaim", "ConfigMap", "Secret", "CronJob"}, set(signal)

@@ -47,6 +47,12 @@ global:
   matrix:
     matrixServerName: "matrix.oriso.org"
 
+networkPolicies:
+  # Only SigNoz, its collector, migrator and the ClickHouse operator reach ClickHouse (#675).
+  # Checked 2026-11-25: no other Dev client, and nothing scrapes ClickHouse's 9363.
+  clickhouseIngress:
+    enabled: true
+
 signoz:
   enabled: true
   # Dashboards and alert rules from files/signoz/observability-catalog.json, applied
