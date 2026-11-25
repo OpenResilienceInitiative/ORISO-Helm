@@ -336,6 +336,11 @@ class DevNightlyJournalTest(TestCase):
         self.assertIn("Dev nightly specs / Check Dev telemetry prerequisites", result["probe"]["detail"])
         self.assertIn("Dev Test Access readiness / Check scoped Dev Test Access", result["probe"]["detail"])
 
+        broker["step"]["name"] = "Check encrypted Dev chat history"
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["run"]["problems"], run["problems"])
+        self.assertIn("Dev Test Access readiness / Check encrypted Dev chat history", result["probe"]["detail"])
+
     def test_recent_pending_probe_has_healthy_cadence_without_recovering_the_probe(self):
         completed = event(reader.JOB_FAILED, UNIT=DEV_NIGHTLY, JOB_RESULT="failed",
                           __MONOTONIC_TIMESTAMP="100000000")

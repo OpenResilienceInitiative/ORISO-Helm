@@ -83,6 +83,8 @@ NIGHTLY_STEPS = {
     "Verify the tested Dev source before accessing credentials",
     "Fail fast when secrets are absent or the hub rejects the token",
     "Check Dev telemetry prerequisites", "Check scoped Dev Test Access",
+    "Resolve the reviewed Test Access source", "Install reviewed Test Access and Chromium",
+    "Check encrypted Dev chat history",
     "Typecheck the E2E suite", "Run the Dev spec set", "Verify stored Dev traces",
     "Job summary with counts and trace ids of failures", "Upload Playwright report and exported spans",
     "Prepare the sanitized Dev nightly JUnit artifact", "Upload the sanitized Dev nightly JUnit artifact", "Complete job",
