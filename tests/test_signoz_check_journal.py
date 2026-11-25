@@ -320,6 +320,22 @@ class DevNightlyJournalTest(TestCase):
         self.assertIn("Dev nightly specs (waiting)", result["probe"]["detail"])
         self.assertIn("Check public Dev video call prerequisites (failure)", result["probe"]["detail"])
 
+    def test_telemetry_and_test_access_failures_are_both_in_the_incident(self):
+        report = self.report()
+        run = report["run"]
+        run["problem"]["step"]["name"] = "Check Dev telemetry prerequisites"
+        broker = {
+            "job": "Dev Test Access readiness", "url": f"{self.run_url}/job/458",
+            "status": "completed", "conclusion": "failure",
+            "step": {"number": 4, "name": "Check scoped Dev Test Access",
+                     "status": "completed", "conclusion": "failure"},
+        }
+        run["problems"] = [run["problem"], broker]
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["run"]["problems"], run["problems"])
+        self.assertIn("Dev nightly specs / Check Dev telemetry prerequisites", result["probe"]["detail"])
+        self.assertIn("Dev Test Access readiness / Check scoped Dev Test Access", result["probe"]["detail"])
+
     def test_recent_pending_probe_has_healthy_cadence_without_recovering_the_probe(self):
         completed = event(reader.JOB_FAILED, UNIT=DEV_NIGHTLY, JOB_RESULT="failed",
                           __MONOTONIC_TIMESTAMP="100000000")

@@ -71,7 +71,9 @@ RUNNING_ACTION_STATES = {"queued", "requested", "waiting", "pending", "in_progre
 ACTION_CONCLUSIONS = {
     "success", "failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale", "skipped", "neutral",
 }
-NIGHTLY_JOBS = {"Workflow and reporter contract", "Dev nightly specs", "Public Dev call readiness"}
+NIGHTLY_JOBS = {
+    "Workflow and reporter contract", "Dev nightly specs", "Public Dev call readiness", "Dev Test Access readiness",
+}
 # Known names stay legible. New or unreviewed names use the step number until reviewed here.
 NIGHTLY_STEPS = {
     "Set up job", "Resolve the reviewed Dev source", "Verify the checked-out workflow matches the launcher",
@@ -80,6 +82,7 @@ NIGHTLY_STEPS = {
     "Check public Dev video call prerequisites",
     "Verify the tested Dev source before accessing credentials",
     "Fail fast when secrets are absent or the hub rejects the token",
+    "Check Dev telemetry prerequisites", "Check scoped Dev Test Access",
     "Typecheck the E2E suite", "Run the Dev spec set", "Verify stored Dev traces",
     "Job summary with counts and trace ids of failures", "Upload Playwright report and exported spans",
     "Prepare the sanitized Dev nightly JUnit artifact", "Upload the sanitized Dev nightly JUnit artifact", "Complete job",
