@@ -41,9 +41,6 @@ global:
     otlpCollectorHost: ""
     # Application and data-store metrics require signozCollector.enabled=true.
     appMetrics: false
-    # Optional cluster-owned ingress-nginx controller to scrape. Environment
-    # overlays must opt in because this chart does not install the controller.
-    externalIngressNginxNamespace: ""
     # Optional namespace of the cluster-owned cert-manager controller.
     externalCertManagerNamespace: ""
     dbMetrics: false
@@ -300,7 +297,7 @@ matrix:
 
 elementCall:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/element-call:dev"
+  image: "ghcr.io/openresilienceinitiative/element-call:2.0.17"
   healthcheckImage: "docker.io/curlimages/curl@sha256:9a1ed35addb45476afa911696297f8e115993df459278ed036182dd2cd22b67b"
 
 # Storybook is a development surface and stays absent unless an environment
@@ -372,7 +369,7 @@ mediaScanner:
 admin:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-admin"
-  imageVersion: "dev"
+  imageVersion: "2.0.17"
 # MongoDB
 online-counseling-mongodb:
   # Size container requests and limits in the environment overlay.
@@ -430,13 +427,6 @@ matrixrtcAuth:
   # Optional: namespace of the ingress controller for the call NetworkPolicies.
   # Empty means "ingress-nginx". The release namespace is always admitted as well.
   ingressControllerNamespace: ""
-  # Optional: canonical IPv4 node CIDRs (/24 to /32, e.g. "10.0.0.5/32") of the LiveKit nodes that
-  # may send the signed /sfu_webhook callback to the authorization receiver.
-  # LiveKit uses hostNetwork, so some CNIs see its traffic as node traffic that the
-  # pod selector does not match across nodes. Every listed address also reaches
-  # the receiver's token endpoints directly, so list only LiveKit-eligible nodes.
-  # Empty keeps the pod-only boundary.
-  livekitNodeCidrs: []
   bootstrap:
     enabled: true
     backoffLimit: 6
@@ -450,10 +440,10 @@ matrixrtcAuth:
   # The dev branch tracks the dev tag; release branches pin these by digest
   # because they are the LiveKit authorization boundary.
   gateway:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:dev"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-auth-policy-gateway:2.0.17"
     pullPolicy: ""
   upstream:
-    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:dev"
+    image: "ghcr.io/openresilienceinitiative/matrixrtc-authorization-service:2.0.17"
     pullPolicy: ""
   service:
     port: 3010
@@ -524,7 +514,7 @@ online-counseling-keycloak:
   # Multiple replicas use JDBC discovery and private readiness checks.
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-keycloak"
-  imageVersion: "dev"
+  imageVersion: "2.0.14"
 
   dbVendor: "mariadb"
   dbServer: "mariadb"
@@ -546,7 +536,7 @@ online-counseling-keycloak:
 # Agency service
 agencyService:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:dev"
+  image: "ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.17"
   # Deletion-log outbox (OBP 2.1 #130). With task identities on, an AgencyService image older
   # than ORISO-AgencyService#356 refuses to start once DELETION_AUDIT_READ is required. Switch this
   # on in the same release that deploys that image; until then the outbox stays unreadable.
@@ -567,7 +557,7 @@ agencyService:
 consultingTypeService:
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-consultingtypeservice"
-  imageVersion: "dev"
+  imageVersion: "2.0.17"
   serviceURL: "http://consultingtypeservice:8080"
 
   keycloakResource: "consultingtype-service"
@@ -603,7 +593,7 @@ tenantService:
   systemEmailDeliveryServiceClient: ""
   replicas: 1
   imageName: "ghcr.io/openresilienceinitiative/oriso-tenantservice"
-  imageVersion: "dev"
+  imageVersion: "2.0.17"
   springProfilesActive: "prod"
   liquibaseChangeLog: "classpath:db/changelog/tenantservice-master.xml"
   liquibaseContexts: "seed"
@@ -677,7 +667,7 @@ userService:
     requestsPerSecond: 5
     burstMultiplier: 2
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-userservice:dev"
+  image: "ghcr.io/openresilienceinitiative/oriso-userservice:2.0.17"
   serviceURL: "http://userservice:8080"
 
   springProfilesActive: "prod"
@@ -769,7 +759,7 @@ userService:
 # Frontend
 frontend:
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/oriso-frontend:dev"
+  image: "ghcr.io/openresilienceinitiative/oriso-frontend:2.0.17"
 
 # networkPolicies.keycloakIngress.enabled defaults to false. Specify
 # networkPolicies.keycloakIngress.externalNginxNamespace for a separate controller.
@@ -792,7 +782,7 @@ ipAnonymizer:
   enabled: false
   # Must stay 1 until sessions are shared between pods; the render fails above 1 (ORISO-Helm#544).
   replicas: 1
-  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:latest"
+  image: "ghcr.io/openresilienceinitiative/ip-anonymizer:2.0.17"
   # Before deploying the stateless image, name an existing Secret in the release
   # namespace with ANON_SESSION_KEY set to a standard-base64 32-byte random key.
   sessionKeySecretName: ""
@@ -806,9 +796,6 @@ signoz:
     # Prepare the route gateway before switching public SigNoz routes to it.
     prepareRouteGateway: false
     useRouteGateway: false
-  # Separate Kubernetes identities for the protected Pre-Dev E2E workflow.
-  orisoPreDevE2EAccess:
-    enabled: false
   orisoObservability:
     enabled: false
     conformanceCheck: false
@@ -821,22 +808,11 @@ signoz:
     heartbeat:
       enabled: false
       channelName: oriso-dev-heartbeat
-    deploymentIdentity:
-      enabled: false
-      # Approved deployment pin and runtime digest set for each Java workload.
-      expectedImages: {}
-    # Also provision the "E2E test health" and "E2E flaky" dashboards over the
-    # oriso-e2e test spans (ORISO-E2E#97). Needs signoz.orisoObservability.enabled.
-    e2eDashboards: false
     image: "python:3.13.7-alpine3.22@sha256:9ba6d8cbebf0fb6546ae71f2a1c14f6ffd2fdab83af7fa5669734ef30ad48844"
     # Existing SigNoz Editor API-key Secret; required only when enabled.
     apiKeySecret:
       name: ""
       key: apiKey
-    # Optional recurring RUM readback with a separate query-only API key.
-    browserVitalsCheck:
-      enabled: false
-      apiKeySecretName: ""
     # Existing SigNoz notification channel; the chart does not create it.
     channelName: "oriso-alerts-slack"
     resources:
@@ -881,8 +857,6 @@ signoz:
       schedule: "30 2 * * *"
       keep: 14
       size: 1Gi
-      # Existing, separately provisioned PVC for a cluster-connected upgrade.
-      replacementClaim: ""
     # Daily native ClickHouse archive of the six SigNoz databases onto a kept,
     # Retain claim that ClickHouse mounts as disk oriso_signal_backup (#499).
     # Enabling also needs that mount and disk under signoz.clickhouse; see
@@ -964,7 +938,7 @@ healthDashboard:
     authSecret: "health-dashboard-basic-auth"
   image:
     repository: ghcr.io/openresilienceinitiative/health-dashboard
-    tag: dev
+    tag: "2.0.17"
     pullPolicy: ""
   replicas: 1
   namespace: ""
