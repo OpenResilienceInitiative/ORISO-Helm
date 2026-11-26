@@ -62,8 +62,8 @@ spec:
         - name: tmp
           emptyDir: {}
         - name: init-sql
-          configMap:
-            name: mariadb-configmap-initsql
+          secret:
+            secretName: mariadb-initsql
         - name: config
           configMap:
             name: mariadb-configmap
