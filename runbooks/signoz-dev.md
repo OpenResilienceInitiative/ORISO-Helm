@@ -382,6 +382,9 @@ completion includes a `probe` object scoped to the same boot and
 invocation. The incident text includes the schedule slot and launcher
 revision. Each reported job has its own link and the step when available.
 This includes the public Dev call check and the app smoke when both fail.
+A successful workflow with a missing required check produces a critical
+incident. The journal identifies the missing checks by their reviewed names
+and keeps the link to the GitHub attempt.
 When a checkout was verified in the same attempt, the incident adds the E2E
 test source SHA alongside the launcher revision. The run evidence records any
 deployed application builds observed by the browser.

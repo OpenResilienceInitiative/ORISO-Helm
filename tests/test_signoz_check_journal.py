@@ -341,6 +341,43 @@ class DevNightlyJournalTest(TestCase):
         self.assertEqual(result["probe"]["run"]["problems"], run["problems"])
         self.assertIn("Dev Test Access readiness / Check encrypted Dev chat history", result["probe"]["detail"])
 
+    def test_successful_workflow_with_missing_required_checks_is_a_critical_incident(self):
+        report = self.report()
+        run = report["run"]
+        run.pop("problem")
+        missing = [
+            "Dev Test Access readiness / Check encrypted Dev chat history",
+            "Protected Dev video call",
+        ]
+        run.update(conclusion="success", missingProofs=missing, testSourceSha="a" * 40)
+        report["detail"] = "unreviewed value"
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["run"], run)
+        self.assertEqual(
+            result["probe"]["detail"],
+            f"Missing successful checks: {'; '.join(missing)}. E2E test source {'a' * 40}.",
+        )
+        self.assertNotIn("unreviewed value", json.dumps(result))
+
+        for invalid in ([], [missing[0], missing[0]], ["unreviewed name"], [{}]):
+            run["missingProofs"] = invalid
+            result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+            self.assertNotIn("probe", result)
+
+    def test_unverified_success_keeps_the_run_link_in_an_unknown_incident(self):
+        report = self.report()
+        report.update(state="lookup-failed", detail="Could not verify GitHub attempt jobs.")
+        run = report["run"]
+        run.pop("problem")
+        run.update(conclusion="success")
+        completion = {"state": "UNKNOWN", "exit_status": 3, "completed_at": "2026-11-24T04:00:00Z"}
+        probe = reader.project_nightly_probe(json.dumps(report), completion)
+        self.assertEqual(probe["run"], run)
+        self.assertEqual(probe["detail"], report["detail"])
+        report["detail"] = "unreviewed value"
+        with self.assertRaises(ValueError):
+            reader.project_nightly_probe(json.dumps(report), completion)
+
     def test_incident_keeps_verified_e2e_source_separate_from_launcher(self):
         report = self.report()
         tested = "d" * 40

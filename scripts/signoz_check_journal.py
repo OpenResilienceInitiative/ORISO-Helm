@@ -75,6 +75,13 @@ NIGHTLY_JOBS = {
     "Workflow and reporter contract", "Dev nightly specs", "Public Dev call readiness", "Dev Test Access readiness",
     "Dev video runner readiness", "Protected Dev video call", "Dev video acceptance",
 }
+NIGHTLY_REQUIRED_CHECKS = NIGHTLY_JOBS | {
+    "Dev nightly specs / Run the Dev spec set",
+    "Dev nightly specs / Verify stored Dev traces",
+    "Dev Test Access readiness / Check encrypted Dev chat history",
+    "Protected Dev video call / Run the protected Dev video call",
+}
+NIGHTLY_ATTEMPT_UNVERIFIED = "Could not verify GitHub attempt jobs."
 # Known names stay legible. New or unreviewed names use the step number until reviewed here.
 NIGHTLY_STEPS = {
     "Set up job", "Resolve the reviewed Dev source", "Verify the checked-out workflow matches the launcher",
@@ -256,7 +263,8 @@ def project_nightly_probe(message, completion):
             raise ValueError("invalid nightly default branch SHA")
         probe["defaultBranchSha"] = report["defaultBranchSha"]
     detail = report.get("detail")
-    if state in {"running", "stalled", "green", "red"}:
+    unverified_attempt = state == "lookup-failed" and "run" in report
+    if state in {"running", "stalled", "green", "red"} or unverified_attempt:
         run = report["run"]
         url, attempt, sha = run["url"], run["attempt"], run["launcherSha"]
         if not re.fullmatch(re.escape(DEV_NIGHTLY_RUN_URL) + GITHUB_NUMBER, url) or not github_number(attempt):
@@ -264,12 +272,29 @@ def project_nightly_probe(message, completion):
         if sha is not None and not GIT_SHA.fullmatch(sha):
             raise ValueError("invalid nightly launcher SHA")
         projected = {"url": url, "attempt": attempt, "launcherSha": sha, **action_state(run)}
+        missing_checks = "missingProofs" in run
         if (
             (state in {"running", "stalled"}) != (projected["status"] != "completed")
-            or (state == "green") != (projected["conclusion"] == "success")
+            or (state == "green" or missing_checks or unverified_attempt) != (projected["conclusion"] == "success")
         ):
             raise ValueError("run state disagrees with the nightly result")
-        if "problem" in run or "problems" in run:
+        has_problems = "problem" in run or "problems" in run
+        if missing_checks:
+            missing = run["missingProofs"]
+            if (
+                state != "red" or sha is None or has_problems or not isinstance(missing, list) or not missing
+                or len(missing) > len(NIGHTLY_REQUIRED_CHECKS)
+                or any(not isinstance(check, str) or check not in NIGHTLY_REQUIRED_CHECKS for check in missing)
+                or len(set(missing)) != len(missing)
+            ):
+                raise ValueError("invalid missing nightly checks")
+            projected["missingProofs"] = missing
+            probe["detail"] = f"Missing successful checks: {'; '.join(missing)}."
+        elif unverified_attempt:
+            if detail != NIGHTLY_ATTEMPT_UNVERIFIED or has_problems:
+                raise ValueError("invalid unverified nightly run")
+            probe["detail"] = NIGHTLY_ATTEMPT_UNVERIFIED
+        elif has_problems:
             if state not in {"red", "stalled"} or sha is None:
                 raise ValueError("unattributed nightly problem")
             problems = nightly_problems(run, url, state)
@@ -277,16 +302,16 @@ def project_nightly_probe(message, completion):
             if len(problems) > 1:
                 projected["problems"] = problems
             probe["detail"] = " ".join(map(describe_nightly_problem, problems))
-            if "testSourceSha" in run:
-                tested = run["testSourceSha"]
-                if not isinstance(tested, str) or not GIT_SHA.fullmatch(tested) or tested == "0" * 40:
-                    raise ValueError("invalid nightly E2E test source SHA")
-                projected["testSourceSha"] = tested
-                probe["detail"] += f" E2E test source {tested}."
-        elif "testSourceSha" in run:
-            raise ValueError("unattributed nightly E2E test source")
         elif state in {"red", "stalled"} and isinstance(detail, str) and detail in NIGHTLY_DIAGNOSTIC_DETAILS:
             probe["detail"] = detail
+        if "testSourceSha" in run:
+            tested = run["testSourceSha"]
+            if "missingProofs" not in projected and "problem" not in projected:
+                raise ValueError("unattributed nightly E2E test source")
+            if not isinstance(tested, str) or not GIT_SHA.fullmatch(tested) or tested == "0" * 40:
+                raise ValueError("invalid nightly E2E test source SHA")
+            projected["testSourceSha"] = tested
+            probe["detail"] += f" E2E test source {tested}."
         probe["run"] = projected
     elif "run" in report:
         raise ValueError("nightly report unexpectedly has a run")
