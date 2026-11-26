@@ -112,9 +112,9 @@ class NetworkPolicyScopeTest(unittest.TestCase):
             for policy in MATRIXRTC_POLICIES:
                 self.assertEqual(enabled[policy], disabled[policy])
 
-    def test_agency_and_consulting_type_services_expose_only_http(self):
+    def test_backend_services_expose_only_http(self):
         for profile, resources in (("default", self.defaults), ("dev", self.dev_enabled)):
-            for name, target_port in (("agencyservice", 8084), ("consultingtypeservice", 8083)):
+            for name, target_port in (("agencyservice", 8084), ("consultingtypeservice", 8083), ("userservice", 8082)):
                 with self.subTest(profile=profile, service=name):
                     service = resources["Service", name]
                     self.assertEqual(
