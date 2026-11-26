@@ -11,6 +11,7 @@ if helm upgrade "$RELEASE" . -n "$NS" $(values_args) --dry-run=server >"$out" 2>
 	grep -E '^\s+image: ' "$out" | sed 's/^ *//' | sort -u
 else
 	echo "dry run: FAILED"
-	grep -vE 'password|secret|token|key' "$out.err" | head -40
+	# Helm names the missing or invalid setting; quoted values are masked so nothing secret leaks.
+	grep -vE '^coalesce.go' "$out.err" | sed -E 's/"[^"]*"/"…"/g; s/'"'"'[^'"'"']*'"'"'/'"'"'…'"'"'/g' | head -40
 fi
 rm -f "$out.err"
