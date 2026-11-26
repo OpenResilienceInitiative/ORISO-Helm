@@ -437,7 +437,8 @@ collector telemetry, or cross-environment telemetry.
 
 Rule slugs for `--mode test-rule`: `provisioning-compensation-failure`,
 `availability-store-failure`, `notification-failure`, `unencrypted-room`,
-`clickhouse-capacity`, `collector-staleness`.
+`clickhouse-capacity`, `collector-staleness`, and, with `--deployment-identity`,
+`deployment-identity-mismatch` (see [Java deployment identity alert](#java-deployment-identity-alert)).
 
 ### What the test notification does and does not prove
 
@@ -498,6 +499,169 @@ the managed observability hook enabled for the upgrade. The hook disables
 the previously owned rule and preserves the six baseline rules. If the entire
 hook is disabled in the same upgrade, disable the rule in SigNoz during the
 approved rollback.
+
+### Dev operator steps (#513)
+
+Steps without a marker are read-only. Steps marked ROLLOUT need the Helm
+rollout that has not happened yet and the Dev window approval. Nothing here
+has been run on Dev.
+
+Pin the Java images in the same upgrade. The observer compares each live
+Deployment's `@sha256` image with the approved entry. On 2026-11-21 all four
+Dev Deployments ran digest-pinned images set outside Helm, while Helm release
+17 still records the `2.0.17` tags. An upgrade without image pins reverts the
+Deployments to tags, and the observer then reports four real mismatches.
+
+1. Collect the evidence. Do not reuse digests from an old issue comment: the
+   2026-11-19 table no longer matches the live Deployments. Compare these
+   values with the approved release record.
+
+   ```bash
+   kubectl -n caritas get deploy agencyservice consultingtypeservice tenantservice userservice \
+     -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.template.spec.containers[0].image}{" ready="}{.status.readyReplicas}{"\n"}{end}'
+   kubectl -n caritas get pods -l 'app in (agencyservice,consultingtypeservice,tenantservice,userservice)' \
+     -o jsonpath='{range .items[*]}{.metadata.labels.app}{" "}{.status.containerStatuses[0].imageID}{"\n"}{end}'
+   kubectl -n caritas get cronjob,job -o name | grep deployment-identity || echo "observer absent"
+   ```
+
+   The Deployment `image` digest goes into `expectedImages.<service>.image`.
+   Every digest the approved record allows for the running image goes into
+   that entry's `runtimeDigests`. On Dev the `imageID` digest equals the spec
+   digest. If the record names an OCI index digest as well, list both.
+
+2. Write the opt-in file on the Dev master as `/root/identity-dev.yaml`
+   (outside git). It pins the four images to the same digests:
+
+   ```yaml
+   signoz:
+     orisoObservability:
+       deploymentIdentity:
+         enabled: true
+         expectedImages:
+           agencyservice:
+             image: ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.17@sha256:<digest>
+             runtimeDigests: ["sha256:<digest>"]
+           consultingtypeservice:
+             image: ghcr.io/openresilienceinitiative/oriso-consultingtypeservice:2.0.17@sha256:<digest>
+             runtimeDigests: ["sha256:<digest>"]
+           tenantservice:
+             image: ghcr.io/openresilienceinitiative/oriso-tenantservice:2.0.17@sha256:<digest>
+             runtimeDigests: ["sha256:<digest>"]
+           userservice:
+             image: ghcr.io/openresilienceinitiative/oriso-userservice:2.0.17@sha256:<digest>
+             runtimeDigests: ["sha256:<digest>"]
+   agencyService:
+     image: ghcr.io/openresilienceinitiative/oriso-agencyservice:2.0.17@sha256:<digest>
+   consultingTypeService:
+     imageName: ghcr.io/openresilienceinitiative/oriso-consultingtypeservice
+     imageVersion: 2.0.17@sha256:<digest>
+   tenantService:
+     imageName: ghcr.io/openresilienceinitiative/oriso-tenantservice
+     imageVersion: 2.0.17@sha256:<digest>
+   userService:
+     image: ghcr.io/openresilienceinitiative/oriso-userservice:2.0.17@sha256:<digest>
+   ```
+
+   Rendered against origin/dev, this adds the `<release>-signoz-deployment-identity`
+   ConfigMap, ServiceAccount, Role, RoleBinding and CronJob, sets
+   `ORISO_DEPLOYMENT_IDENTITY_ENABLED=true` on the provisioning hook and writes
+   the four image strings. The default render has none of them. `values-dev.yaml`
+   does not declare these keys, so `--check-effective` does not compare them.
+   The observer ignores the tag. A tag added to a live digest-only string
+   changes the pod template and rolls that service (single replica, short
+   gap). Reuse the live string exactly to avoid it where the chart value shape
+   allows.
+
+3. ROLLOUT. Follow [the Dev rollout](signoz-dev.md#rollout), including its
+   note on the master's local edits, with `/root/identity-dev.yaml` appended
+   to `values_files` after the observability projection. The preflight must
+   pass first. Blast radius: the first-rollout restarts listed there, plus
+   the Java services only if step 2 changes their strings. ClickHouse
+   restarts only if the same upgrade carries the signal backup overlay
+   ([#499](signoz-clickhouse-recovery.md)).
+
+4. ROLLOUT. Within five minutes read the stored gauges with this read-only
+   SELECT (`kubectl exec ... clickhouse-client --readonly=1`). Expect eight
+   rows: `mismatch` and `unverified` for `agency-service`,
+   `consulting-type-service`, `tenant-service` and `user-service`, all `0`,
+   `environment=dev`, `cluster=oriso-dev`, `age_seconds` below 180. A service
+   in the `unverified` state emits only `unverified=1`. Before the rollout
+   the query returns only its header (checked read-only on Dev 2026-11-21).
+
+   ```sql
+   SELECT t.metric_name,
+          JSONExtractString(t.labels, 'service.name') AS service,
+          JSONExtractString(t.labels, 'deployment.environment') AS environment,
+          JSONExtractString(t.labels, 'k8s.cluster.name') AS cluster,
+          argMax(s.value, s.unix_milli) AS latest_value, count() AS samples,
+          dateDiff('second', fromUnixTimestamp64Milli(max(s.unix_milli)), now()) AS age_seconds
+   FROM signoz_metrics.distributed_samples_v4 AS s
+   INNER JOIN (
+       SELECT DISTINCT fingerprint, metric_name, labels
+       FROM signoz_metrics.distributed_time_series_v4
+       WHERE metric_name IN ('oriso.deployment.identity.mismatch', 'oriso.deployment.identity.unverified')
+         AND unix_milli >= toUnixTimestamp(now() - INTERVAL 1 DAY) * 1000
+   ) AS t ON s.fingerprint = t.fingerprint
+   WHERE s.metric_name IN ('oriso.deployment.identity.mismatch', 'oriso.deployment.identity.unverified')
+     AND s.unix_milli >= toUnixTimestamp(now() - INTERVAL 1 HOUR) * 1000
+   GROUP BY t.metric_name, service, environment, cluster
+   ORDER BY service, t.metric_name
+   FORMAT TSVWithNames
+   ```
+
+   If a service shows `unverified=1` or a mismatch, read the latest observer
+   Job log and fix the cause. Do not run the alert test.
+
+5. ROLLOUT. Confirm the rule (read-only, Editor API key as above). Expect the
+   six baseline rules plus `deployment-identity-mismatch`.
+
+   ```bash
+   python3 files/signoz/signoz_observability.py --mode check --deployment-identity \
+     --api-url "$signoz_target" --environment dev --cluster-name oriso-dev
+   ```
+
+6. ROLLOUT, separate authorization. This writes one synthetic metric point and
+   sends one Slack message. `--mode test-rule` sends nothing unless the rule
+   query already returns a series above 0, so post one synthetic mismatch
+   first. It uses its own service name and touches no real service series:
+
+   ```bash
+   payload() { cat <<JSON
+   {"resourceMetrics":[{"resource":{"attributes":[
+     {"key":"service.name","value":{"stringValue":"oriso-identity-synthetic"}},
+     {"key":"deployment.environment","value":{"stringValue":"dev"}},
+     {"key":"k8s.cluster.name","value":{"stringValue":"oriso-dev"}}]},
+    "scopeMetrics":[{"scope":{"name":"oriso.deployment-identity"},"metrics":[{
+     "name":"oriso.deployment.identity.mismatch",
+     "gauge":{"dataPoints":[{"timeUnixNano":"$(date +%s%N)","asInt":"$1"}]}}]}]}]}
+   JSON
+   }
+   post() { payload "$1" | kubectl -n caritas run identity-synthetic --quiet --rm --restart=Never \
+     --attach --stdin --image=curlimages/curl:8.12.1 -- -fsS -X POST \
+     -H 'Content-Type: application/json' --data-binary @- \
+     http://caritas-signoz-otel-collector:4318/v1/metrics; }
+   post 1
+   python3 files/signoz/signoz_observability.py --mode test-rule --rule deployment-identity-mismatch \
+     --deployment-identity --api-url "$signoz_target" --environment dev --cluster-name oriso-dev
+   ```
+
+   Expected: `PASS: test notification ... (alertCount=1)`. `NOT SENT` (exit 2)
+   means the point is not stored yet; wait a minute and repeat only the
+   second command. Record the Slack message time and its title (the rule name
+   with ` [test]`) from the channel, and the scheduled rule's history entry.
+
+7. ROLLOUT. Right after the receipt, in the same shell, post `post 0` and
+   rerun the step 4 query: `oriso-identity-synthetic` must show
+   `latest_value=0`. The two stored points cannot be removed without a
+   ClickHouse mutation. They sit under a metric no dashboard reads and expire
+   with metric retention. Do not run `ALTER ... DELETE`.
+
+Rollback. Upgrade again with `deploymentIdentity.enabled: false`. The CronJob,
+Role and ConfigMap are removed, and the hook disables its owned rule while the
+six baseline rules stay. Keep the four image keys in a values file that stays,
+or the same upgrade unpins the images back to the base values. Emergency stop
+without Helm: `kubectl -n caritas patch cronjob <release>-signoz-deployment-identity -p '{"spec":{"suspend":true}}'`
+and disable the rule in the SigNoz UI. The next upgrade restores both.
 
 ## Promotion
 
@@ -573,3 +737,14 @@ kubectl -n caritas get jobs \
   --sort-by=.metadata.creationTimestamp
 kubectl -n caritas logs "job/${job_name:?Set the observed Job name}" -c check-browser-vitals
 ```
+
+## Production monitoring stance (proposed, ORISO-Helm#542)
+
+Status: proposed until the production owner decides (ADR-031 in ORISO-Docs is still Proposed). The chart keeps production passive: `signoz.enabled: false`, `observability.otlpEnabled: false`, `orisoObservability.enabled: false`.
+
+Until decided, production is covered only by the hoster's monitoring. Decide before enabling anything:
+
+1. Owner: who is paged for production, the project team or the hoster.
+2. Coverage: SigNoz in production with the platform alerts and external heartbeat, or the hoster's stack watching nodes, pods, PVCs, certificates, ingress 5xx and backups.
+3. Platform alerts and heartbeat are Dev-only opt-ins (`platformAlerts`, `heartbeat`); production needs a separate review of retention, authentication, privacy boundary (#497) and recovery.
+4. Backup alerts wait for the backups in #282 Task 9.

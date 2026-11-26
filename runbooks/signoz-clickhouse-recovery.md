@@ -152,3 +152,194 @@ SETTINGS allow_non_empty_tables = 0
 [ClickHouse backup and restore to disk](https://clickhouse.com/docs/concepts/features/backup-restore/local-disk)
 · [Native backup and restore status](https://clickhouse.com/docs/reference/system-tables/backups)
 · [Production telemetry boundary](https://github.com/OpenResilienceInitiative/ORISO-Docs/pull/261)
+
+## Dev operator steps for the protected archive (#499)
+
+Read-only on 2026-11-21: Dev runs ClickHouse 25.12.5.44 with one `default`
+disk, zero rows in `system.backups`, 133 tables in the six databases, 316 MiB
+of active parts, a seven-day trace TTL, and a 25 GiB data claim on
+`hcloud-volumes` (WaitForFirstConsumer, reclaim Delete). No signal-backup
+claim or CronJob exists. Nothing below has been run on Dev.
+
+### Decision first: enable the Dev signal backup or not
+
+ClickHouse refuses `BACKUP` to any disk that is not on its allowlist, so a
+native archive on Dev needs the `oriso_signal_backup` disk and its volume.
+
+- **Path A, enable it.** Adds a 10 GiB claim, a mount and the disk file to the
+  ClickHouseInstallation. The operator restarts the ClickHouse pod, so SigNoz
+  queries and ingestion pause until it is Ready again. Daily archives at
+  03:15 UTC, seven kept. Use the opt-in overlay
+  `values-dev-clickhouse-signal-backup.yaml` once PR #611 has merged. Until
+  then origin/dev's `values-dev.yaml` already sets these keys, so any Dev
+  observability rollout of that file (#513, #494) takes Path A implicitly.
+  Merge #611 first, or remove those keys from the projection, so the decision
+  is not made by accident.
+- **Path B, do not enable it.** The chart has no other destination. Without the
+  disk no native archive and no restore evidence can be produced, so the
+  third acceptance item of #499 stays open. A different destination (an
+  object-store disk) needs chart work, credentials and approval, and is not
+  prepared here.
+
+### Path A steps
+
+**Dev volume pre-provisioned on 21 November 2026.** The claim
+`signoz-clickhouse-signal-backup` exists and is Bound: 10 GiB on
+`hcloud-volumes`, volume `pvc-b9af13bd-8ff8-42d1-9199-62bc5e89dc36`, reclaim
+policy already `Retain`. A short test pod on the ClickHouse node
+`oriso-dev-workers-79a6f89ec12a5d07` attached, formatted and wrote to it, then
+was deleted, so the volume is detached. The claim carries Helm's ownership
+metadata (release `caritas`, `app.kubernetes.io/managed-by: Helm`), so the
+upgrade adopts it instead of failing on an existing object. On Dev the rollout
+therefore only re-attaches a known-good volume to the same node. In step 1 the
+claim shows as adopted rather than new. Step 3's second upgrade is not needed;
+run only its verification.
+
+Read-only preconditions:
+
+```bash
+kubectl get sc hcloud-volumes -o jsonpath='{.allowVolumeExpansion} {.volumeBindingMode}{"\n"}'
+kubectl -n caritas get pod chi-caritas-clickhouse-cluster-0-0-0 -o wide   # node and zone for the new volume
+kubectl -n caritas get chi caritas-clickhouse -o jsonpath='{.status.status}{"\n"}'   # Completed
+```
+
+1. ROLLOUT. Follow [the Dev rollout](signoz-dev.md#rollout) with the overlay in
+   the same input list for the projection and the preflight. The chart render
+   fails without the mount, the disk file, or with more than one shard or
+   replica. Review the server dry-run: only the ClickHouseInstallation, the
+   data-protection ConfigMap, the new claim and the CronJob may change, and the
+   25 GiB claim template must not. Record the ClickHouse pod UID and start
+   time first, as that runbook describes. Blast radius: one ClickHouse
+   restart, plus whatever else the rollout it joins restarts.
+2. ROLLOUT. After the upgrade check: CHI `Completed`, pod `1/1`, a SigNoz query
+   works, the claim is `Bound`, and `SELECT name, path FROM system.disks` lists
+   `oriso_signal_backup` at `/var/lib/clickhouse-signal-backup/`.
+3. ROLLOUT. Run the same `helm upgrade` once more. The retain hook only sees
+   volumes that exist when Helm renders, and it switches the claim's volume
+   to `Retain` after the claim binds. Verify:
+
+   ```bash
+   pv=$(kubectl -n caritas get pvc signoz-clickhouse-signal-backup -o jsonpath='{.spec.volumeName}')
+   kubectl get pv "$pv" -o jsonpath='{.spec.persistentVolumeReclaimPolicy}{"\n"}'   # Retain
+   ```
+
+4. ROLLOUT, separate authorization (writes one archive to the new claim). Do
+   not wait for 03:15 UTC:
+
+   ```bash
+   job=signal-backup-manual-$(date -u +%Y%m%d%H%M%S)
+   kubectl -n caritas create job --from=cronjob/caritas-signoz-data-protection-signal-backup "$job"
+   kubectl -n caritas wait --for=condition=complete "job/$job" --timeout=20m
+   kubectl -n caritas get pod -l job-name="$job" \
+     -o jsonpath='{.items[0].status.containerStatuses[0].state.terminated.message}{"\n"}'
+   ```
+
+   Expect JSON with `backupId`, `archive` (`signal-<UTC>.zip`), `sha256` and
+   `bytes`. Record them and the elapsed time. Read it back independently
+   (read-only, `clickhouse-client --readonly=1`). Expect `BACKUP_CREATED` for
+   that `backupId`:
+
+   ```sql
+   SELECT id, status, num_files, formatReadableSize(total_size) AS size, start_time, end_time
+   FROM system.backups ORDER BY start_time DESC LIMIT 3 FORMAT TSV
+   ```
+
+   Capture the source reference at the same time, for the restore comparison:
+
+   ```sql
+   SELECT database, name, total_rows, extract(engine_full, 'TTL .*') AS ttl
+   FROM system.tables
+   WHERE database IN ('signoz_analytics','signoz_logs','signoz_metadata','signoz_meter','signoz_metrics','signoz_traces')
+     AND engine LIKE '%MergeTree' ORDER BY database, name FORMAT TSV
+   ```
+
+5. Copy the archive to the approved protected destination. The claim shares
+   the source's cloud account and node storage class, so it is not independent.
+   Stream it over a read-only exec and check the digest against the Job
+   receipt:
+
+   ```bash
+   a=signal-<UTC stamp>.zip
+   for f in "$a" "$a.sha256"; do
+     kubectl -n caritas exec chi-caritas-clickhouse-cluster-0-0-0 -c clickhouse -- \
+       cat "/var/lib/clickhouse-signal-backup/$f" > "$f"
+   done
+   sha256sum -c "$a.sha256"      # prints OK; the digest must equal the receipt sha256
+   ```
+
+   Store both files under the approved access and retention policy. Record
+   the destination, retention period and readers.
+
+### Restore into a separate environment (both paths need an archive)
+
+Use a machine that cannot reach Dev services and holds no Dev credentials.
+This recipe uses the installed image with embedded Keeper. The same disk and
+statements round-tripped a replicated table in a local test with this config.
+A full six-database restore is not yet rehearsed with it. Create
+`restore/config.d/90-restore-target.xml`:
+
+```xml
+<clickhouse>
+  <macros><cluster>cluster</cluster><shard>01</shard><replica>restore1</replica></macros>
+  <default_replica_path>/clickhouse/tables/{uuid}/{shard}</default_replica_path>
+  <default_replica_name>{replica}</default_replica_name>
+  <remote_servers><cluster><shard><internal_replication>true</internal_replication>
+    <replica><host>127.0.0.1</host><port>9000</port></replica>
+  </shard></cluster></remote_servers>
+  <keeper_server>
+    <tcp_port>9181</tcp_port><server_id>1</server_id>
+    <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+    <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+    <raft_configuration><server><id>1</id><hostname>127.0.0.1</hostname><port>9234</port></server></raft_configuration>
+  </keeper_server>
+  <zookeeper><node><host>127.0.0.1</host><port>9181</port></node></zookeeper>
+  <distributed_ddl><path>/clickhouse/ddl</path></distributed_ddl>
+  <storage_configuration><disks><oriso_signal_backup>
+    <type>local</type><path>/var/lib/clickhouse-signal-backup/</path>
+  </oriso_signal_backup></disks></storage_configuration>
+  <backups><allowed_disk>oriso_signal_backup</allowed_disk></backups>
+</clickhouse>
+```
+
+```bash
+cd restore && (cd backups && sha256sum -c "$a.sha256")     # digest before anything starts
+docker run -d --name restore-ch \
+  -v "$PWD/config.d:/etc/clickhouse-server/config.d:ro" \
+  -v "$PWD/backups:/var/lib/clickhouse-signal-backup:ro" \
+  docker.io/clickhouse/clickhouse-server:25.12.5
+docker exec restore-ch clickhouse-client -q "SELECT count() FROM system.databases WHERE name LIKE 'signoz%'"   # 0
+start=$(date +%s)
+docker exec restore-ch clickhouse-client --format TSV -q "
+  RESTORE DATABASE signoz_analytics, DATABASE signoz_logs, DATABASE signoz_metadata,
+          DATABASE signoz_meter, DATABASE signoz_metrics, DATABASE signoz_traces
+  FROM Disk('oriso_signal_backup', '$a') SETTINGS allow_non_empty_tables = 0"
+echo "recovery seconds: $(( $(date +%s) - start ))"
+```
+
+Expect one row with `RESTORED`. After any failure remove the container and its
+data and start a new one. Do not retry on the same state.
+
+Then verify and record:
+
+- 133 tables exist across the six databases
+  (`SELECT count() FROM system.tables WHERE database LIKE 'signoz%'`).
+- The row-count and TTL query from step 4 matches the source reference. Live
+  Dev keeps growing, so compare with the reference, not with current Dev.
+- `system.replicas` shows no readonly replica or lost session.
+- The TTL clauses equal the approved retention (Dev traces seven days) before
+  anyone treats the data as a recovered environment.
+- Independent application readback: run SigNoz (installed image, with the
+  SQLite archive restored per #524) against this server. Compare the Java
+  signal counts and one trace by ID through its query API. This step is not
+  rehearsed here.
+
+Cleanup: `docker rm -f restore-ch`, delete `restore/`, and remove scratch copies
+of the archive under the approved procedure.
+
+### Rollback (Path A)
+
+Set the job flag to `false`, remove only the signal volume and mount entries
+and replace the disk file with `<clickhouse/>`, as described above. This
+restarts ClickHouse once more. The claim has `helm.sh/resource-policy: keep`
+and a `Retain` volume, so the archives stay. Delete the claim only with
+explicit approval after the last verified archive is stored elsewhere.

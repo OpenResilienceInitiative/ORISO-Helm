@@ -1,8 +1,19 @@
 
 cert-manager:
+  # Disable this template when the cluster operator owns letsencrypt-prod.
   enabled: true
+  # Supply the ACME account contact in environment values for a new installation.
+  acmeEmail: ""
 
 global:
+  # PriorityClass for the stateful data stores (MariaDB), Helm#576. Empty name
+  # keeps the pods at the cluster default priority. create: true renders the
+  # cluster-scoped PriorityClass; set it on one release per cluster only.
+  datastorePriorityClass:
+    name: ""
+    create: false
+    value: 1000000
+
   # Enable with a public HealthDashboard ingress and its role-aware image.
   healthDashboardOperatorAccess: false
 

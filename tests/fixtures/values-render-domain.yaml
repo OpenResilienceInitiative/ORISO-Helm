@@ -17,3 +17,7 @@ matrix:
   synapseServerName: "matrix.render.oriso.internal"
 matrixrtcAuth:
   membershipReaderUserId: "@matrixrtc-auth:matrix.render.oriso.internal"
+
+# Synthetic contact for chart renders that include the managed ClusterIssuer.
+cert-manager:
+  acmeEmail: "acme-fixture@example.invalid"

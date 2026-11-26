@@ -54,6 +54,22 @@ roleRef:
   name: matrixrtc-bootstrap
   apiGroup: rbac.authorization.k8s.io
 ---
+# The reader password and a manual membership token are credentials, so the Job
+# reads them from this Secret instead of carrying them in its spec (ORISO-Helm#303).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: matrixrtc-bootstrap-credentials
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: matrixrtc-bootstrap
+    app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+type: Opaque
+stringData:
+  reader-password: {{ $readerPassword | quote }}
+  manual-membership-token: {{ default "" .Values.matrixrtcAuth.membershipToken | quote }}
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -90,7 +106,10 @@ spec:
             - name: MATRIXRTC_USER_ID
               value: {{ .Values.matrixrtcAuth.membershipReaderUserId | quote }}
             - name: MATRIXRTC_PASSWORD
-              value: {{ $readerPassword | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: matrixrtc-bootstrap-credentials
+                  key: reader-password
             {{- if not $usesManualToken }}
             - name: MATRIX_REGISTRATION_SHARED_SECRET
               valueFrom:
@@ -103,7 +122,10 @@ spec:
             - name: MEMBERSHIP_TOKEN_KEY
               value: {{ .Values.matrixrtcAuth.existingSecret.membershipTokenKey | quote }}
             - name: MANUAL_MEMBERSHIP_TOKEN
-              value: {{ default "" .Values.matrixrtcAuth.membershipToken | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: matrixrtc-bootstrap-credentials
+                  key: manual-membership-token
           command:
             - /bin/sh
             - -ec

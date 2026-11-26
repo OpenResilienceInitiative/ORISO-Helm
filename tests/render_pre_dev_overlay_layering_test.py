@@ -29,6 +29,7 @@ def render_stack() -> tuple[str, list[dict]]:
             "-f", os.path.join(CHART_DIR, "values-dev.yaml"),
             "-f", os.path.join(CHART_DIR, "values-pre-dev.yaml"),
             "--set-string", "global.emailLegalOrganisationName=Render Test Foundation",
+            "--set-string", "cert-manager.acmeEmail=acme-fixture@example.invalid",
         ],
         capture_output=True,
         text=True,
