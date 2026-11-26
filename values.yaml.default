@@ -387,6 +387,13 @@ networkPolicies:
   mariadbIngress:
     # Verify out-of-chart consumers for the installation before enabling.
     enabled: false
+  # Default-deny ingress for the release namespace (templates/network-policies/namespace-ingress.yaml).
+  # Requires the datastore and Keycloak policies above and below to be enabled too.
+  # Other namespaces then reach chart pods only through the ingress controller
+  # (matrixrtcAuth.ingressControllerNamespace). Redis stays open until Helm#538
+  # decides how hostNetwork LiveKit is admitted.
+  namespaceIngress:
+    enabled: false
 
 # MariaDB
 online-counseling-mariadb:
