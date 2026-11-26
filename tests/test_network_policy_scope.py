@@ -45,7 +45,7 @@ class NetworkPolicyScopeTest(unittest.TestCase):
     def setUpClass(cls):
         cls.defaults = render()
         cls.omitted = render("--set-json", "networkPolicies=null")
-        cls.dev_disabled = render("--set", "networkPolicies.mongodbIngress.enabled=false", dev=True)
+        cls.dev_disabled = render("--set", "networkPolicies.mongodbIngress.enabled=false", "--set", "networkPolicies.namespaceIngress.enabled=false", dev=True)
         cls.enabled = render("--set", "networkPolicies.mongodbIngress.enabled=true")
         cls.dev_enabled = render("--set", "networkPolicies.mongodbIngress.enabled=true", dev=True)
 

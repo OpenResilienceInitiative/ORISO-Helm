@@ -39,6 +39,7 @@ class MariaDbIngressPolicyTest(unittest.TestCase):
         cls.dev_without_mariadb_policy = render(
             *ADDON_AND_MONGODB_ENABLED,
             "--set", "networkPolicies.mariadbIngress.enabled=false",
+            "--set", "networkPolicies.namespaceIngress.enabled=false",
             dev=True,
         )
 

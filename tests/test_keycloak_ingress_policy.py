@@ -12,7 +12,7 @@ TASK_HOOK = ("Job", "keycloak-reconcile-task-identities-clients")
 POLICY = ("NetworkPolicy", "keycloak-ingress")
 ENABLED = ("--set", "networkPolicies.keycloakIngress.enabled=true")
 # values-dev.yaml enables the policy for the external controller (#538).
-DISABLED = ("--set", "networkPolicies.keycloakIngress.enabled=false")
+DISABLED = ("--set", "networkPolicies.keycloakIngress.enabled=false", "--set", "networkPolicies.namespaceIngress.enabled=false")
 NO_EXTERNAL = ("--set-string", "networkPolicies.keycloakIngress.externalNginxNamespace=")
 EXTERNAL = (
     "--set", "nginxController.enabled=false",
@@ -51,7 +51,8 @@ class KeycloakIngressPolicyTest(unittest.TestCase):
             *NO_EXTERNAL,
         )
         before = resources(*profile, args=(*flags, *DISABLED))
-        after = resources(*profile, args=(*flags, *ENABLED))
+        # Compare with this policy alone: DISABLED also switches off the namespace default-deny.
+        after = resources(*profile, args=(*flags, *ENABLED, *DISABLED[2:]))
         policy = after.pop(POLICY)
         self.assertEqual(set(after), set(before))
         self.assertEqual(policy["metadata"]["namespace"], "caritas")

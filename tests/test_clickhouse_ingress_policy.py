@@ -10,7 +10,7 @@ NAMESPACE = "caritas"
 POLICY = ("NetworkPolicy", f"{RELEASE}-ingress")
 ENABLED = ("--set", "networkPolicies.clickhouseIngress.enabled=true")
 # values-dev.yaml enables the policy (#675); baselines switch it off explicitly.
-DISABLED = ("--set", "networkPolicies.clickhouseIngress.enabled=false")
+DISABLED = ("--set", "networkPolicies.clickhouseIngress.enabled=false", "--set", "networkPolicies.namespaceIngress.enabled=false")
 
 
 def dev(*args, signal_backup=False):
@@ -38,7 +38,8 @@ class ClickHouseIngressPolicyTest(unittest.TestCase):
 
     def test_peers_are_the_rendered_release_workloads(self):
         baseline = dev(*DISABLED, signal_backup=True)
-        chart = dev(*ENABLED, signal_backup=True)
+        # Compare with this policy alone: DISABLED also switches off the namespace default-deny.
+        chart = dev(*ENABLED, *DISABLED[2:], signal_backup=True)
         policy = chart.pop(POLICY)
         self.assertEqual(policy["metadata"]["namespace"], NAMESPACE)
         self.assertEqual(set(chart), set(baseline))

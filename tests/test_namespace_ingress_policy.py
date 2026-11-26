@@ -166,8 +166,11 @@ class NamespaceIngressPolicyTest(unittest.TestCase):
                 self.assertTrue(allowed(self.policies, labels, port, client_labels, named_ports=named_ports))
 
     def test_off_by_default(self):
-        for documents in (render(dev=False), render()):
-            self.assertFalse(NEW_POLICIES & set(policies(documents)))
+        self.assertFalse(NEW_POLICIES & set(policies(render(dev=False))))
+        self.assertFalse(NEW_POLICIES & set(policies(render("--set", "networkPolicies.namespaceIngress.enabled=false"))))
+
+    def test_dev_enables_the_default_deny(self):
+        self.assertIn("namespace-default-deny-ingress", policies(render()))
 
     def test_requires_every_store_policy(self):
         for missing in STORE_POLICIES:
