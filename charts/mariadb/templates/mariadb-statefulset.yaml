@@ -24,6 +24,9 @@ spec:
         app: mariadb
     spec:
       automountServiceAccountToken: false
+      {{- with ((.Values.global).datastorePriorityClass).name }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
       securityContext:
         {{- include "oriso.podSecurityContext" (dict "user" 999 "fsGroup" 999) | nindent 8 }}
       containers:

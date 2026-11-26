@@ -14,6 +14,12 @@ online-counseling-keycloak:
     useManagementPort: true
 
 global:
+  # MariaDB loses no scheduling or eviction contest to stateless pods on Dev
+  # (Helm#576). Dev is a single-release cluster, so the chart creates the class.
+  datastorePriorityClass:
+    name: "oriso-datastore"
+    create: true
+    value: 1000000
   # Telemetry to the bundled SigNoz (https://dev.oriso.org/signoz). Every trace
   # is kept on Dev; the cluster collector also scrapes nginx, Keycloak, Synapse
   # and the data stores.

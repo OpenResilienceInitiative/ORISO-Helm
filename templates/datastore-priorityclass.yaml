@@ -1,0 +1,15 @@
+{{- /*
+PriorityClass for the stateful data stores (Helm#576). Opt-in and
+cluster-scoped: create it from one release per cluster only.
+*/ -}}
+{{- $pc := .Values.global.datastorePriorityClass | default dict -}}
+{{- if and $pc.create $pc.name }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ $pc.name | quote }}
+value: {{ $pc.value | default 1000000 | int }}
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: "ORISO stateful data stores: scheduled first and evicted last."
+{{- end }}
