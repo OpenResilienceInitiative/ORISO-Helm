@@ -1,6 +1,9 @@
 
 cert-manager:
+  # Disable this template when the cluster operator owns letsencrypt-prod.
   enabled: true
+  # Supply the ACME account contact in environment values for a new installation.
+  acmeEmail: ""
 
 global:
   # Enable with a public HealthDashboard ingress and its role-aware image.

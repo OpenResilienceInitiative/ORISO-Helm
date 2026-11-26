@@ -1,4 +1,22 @@
-{{- if index .Values "cert-manager" "enabled" }}
+{{- $settings := get .Values "cert-manager" | default dict -}}
+{{- if get $settings "enabled" -}}
+{{- $email := get $settings "acmeEmail" -}}
+{{- if not (kindIs "string" $email) -}}
+  {{- fail "cert-manager.acmeEmail must be a string" -}}
+{{- end -}}
+{{- $email = trim $email -}}
+{{- if and (not $email) .Release.IsUpgrade -}}
+  {{- $issuer := lookup "cert-manager.io/v1" "ClusterIssuer" "" "letsencrypt-prod" -}}
+  {{- $ownership := dig "metadata" "annotations" (dict) $issuer -}}
+  {{- $managedBy := dig "metadata" "labels" "app.kubernetes.io/managed-by" "" $issuer -}}
+  {{- if and (eq $managedBy .Release.Service) (eq (get $ownership "meta.helm.sh/release-name") .Release.Name) (eq (get $ownership "meta.helm.sh/release-namespace") .Release.Namespace) -}}
+    {{- $email = trim (dig "spec" "acme" "email" "" $issuer) -}}
+  {{- end -}}
+{{- end -}}
+{{- /* Local part limited to URI-safe characters: cert-manager sends it unescaped as a mailto: URI to Let's Encrypt. */ -}}
+{{- if and $email (not (regexMatch "^[A-Za-z0-9_+-]+(\\.[A-Za-z0-9_+-]+)*@([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\\.)+([A-Za-z]{2,}|xn--[A-Za-z0-9-]*[A-Za-z0-9])$" $email)) -}}
+  {{- fail "cert-manager.acmeEmail must be an email address" -}}
+{{- end }}
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:
@@ -6,7 +24,9 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: jrogg@neusta.de
+    {{- with $email }}
+    email: {{ . | quote }}
+    {{- end }}
     privateKeySecretRef:
       name: letsencrypt-prod
     solvers:
