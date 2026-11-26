@@ -22,3 +22,5 @@ mode 600). The old checkout `/root/ORISO-Helm` is only read.
 
 Run logs are public: scripts print names, versions, images and Helm errors, never values,
 secrets or rendered manifests.
+
+Full upgrade from the Oct 2026 chart and the wasm-artcraft install: [UPGRADE.md](UPGRADE.md).
