@@ -11,6 +11,9 @@ RELEASE = "keycloak-policy"
 TASK_HOOK = ("Job", "keycloak-reconcile-task-identities-clients")
 POLICY = ("NetworkPolicy", "keycloak-ingress")
 ENABLED = ("--set", "networkPolicies.keycloakIngress.enabled=true")
+# values-dev.yaml enables the policy for the external controller (#538).
+DISABLED = ("--set", "networkPolicies.keycloakIngress.enabled=false")
+NO_EXTERNAL = ("--set-string", "networkPolicies.keycloakIngress.externalNginxNamespace=")
 EXTERNAL = (
     "--set", "nginxController.enabled=false",
     "--set", "networkPolicies.keycloakIngress.externalNginxNamespace=ingress-nginx",
@@ -36,7 +39,7 @@ def tcp(*ports):
 class KeycloakIngressPolicyTest(unittest.TestCase):
     def test_default_does_not_isolate_keycloak(self):
         self.assertNotIn(POLICY, resources())
-        self.assertNotIn(POLICY, resources("values-dev.yaml"))
+        self.assertNotIn(POLICY, resources("values-dev.yaml", args=DISABLED))
         self.assertNotIn(POLICY, resources(args=("--set", "nginxController.enabled=false")))
 
     def test_bundled_controller_and_all_chart_clients_use_the_public_http_port(self):
@@ -45,8 +48,9 @@ class KeycloakIngressPolicyTest(unittest.TestCase):
             "--set", "addonService.enabled=true",
             "--set-string", "global.secrets.addonServiceDbPassword=render-only-db-password",
             "--set-string", f"addonService.tokenPrivateKeyPem={RENDER_ONLY_KEY}",
+            *NO_EXTERNAL,
         )
-        before = resources(*profile, args=flags)
+        before = resources(*profile, args=(*flags, *DISABLED))
         after = resources(*profile, args=(*flags, *ENABLED))
         policy = after.pop(POLICY)
         self.assertEqual(set(after), set(before))
@@ -110,7 +114,8 @@ class KeycloakIngressPolicyTest(unittest.TestCase):
         self.assertEqual(set(callers), set(base_callers))
 
     def test_external_controller_is_restricted_to_the_explicit_namespace_and_pods(self):
-        chart = resources("values-dev.yaml", args=(*ENABLED, *EXTERNAL))
+        # Dev's own values supply the policy and the external namespace.
+        chart = resources("values-dev.yaml", args=EXTERNAL[:2])
         self.assertNotIn(("Deployment", "ingress-nginx-controller"), chart)
         web = chart[POLICY]["spec"]["ingress"][0]
         self.assertEqual(web["from"][0], {
@@ -132,7 +137,7 @@ class KeycloakIngressPolicyTest(unittest.TestCase):
         for overlays in ((), ("values-dev.yaml",)):
             with self.subTest(overlays=overlays):
                 with self.assertRaisesRegex(AssertionError, "requires the bundled ingress-nginx controller or an externalNginxNamespace"):
-                    resources(*overlays, args=(*ENABLED, "--set", "nginxController.enabled=false"))
+                    resources(*overlays, args=(*ENABLED, *NO_EXTERNAL, "--set", "nginxController.enabled=false"))
 
     def test_bad_policy_settings_fail_rendering(self):
         with self.assertRaisesRegex(AssertionError, "networkPolicies.keycloakIngress.enabled must be a boolean"):

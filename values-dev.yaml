@@ -52,6 +52,20 @@ networkPolicies:
   # Checked 2026-11-25: no other Dev client, and nothing scrapes ClickHouse's 9363.
   clickhouseIngress:
     enabled: true
+  # Checked 2026-11-26 (#538): every live and configured Dev client of these stores
+  # is an allowed peer; the only CronJobs are SigNoz backup and Keycloak SMTP.
+  mariadbIngress:
+    enabled: true
+  mongodbIngress:
+    enabled: true
+  rabbitmqIngress:
+    enabled: true
+  matrixPostgresIngress:
+    enabled: true
+  keycloakIngress:
+    enabled: true
+    # Dev uses the cluster-wide controller, not the bundled one.
+    externalNginxNamespace: ingress-nginx
 
 signoz:
   enabled: true
