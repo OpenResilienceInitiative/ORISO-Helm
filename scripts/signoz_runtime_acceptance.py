@@ -37,6 +37,8 @@ CLICKHOUSE_LOG_TABLES = (
     "query_log", "text_log", "trace_log", "metric_log", "asynchronous_metric_log",
     "part_log", "zookeeper_log", "aggregated_zookeeper_log", "processors_profile_log",
 )
+# shortcut: Dev also removes zookeeper_log (#519) but the existing table keeps its 3-day TTL, so the
+# check treats it as enabled; a fresh ClickHouse volume reports it missing. Add it here if that happens.
 CLICKHOUSE_REMOVABLE_WRITERS = ("metric_log", "trace_log")
 CLICKHOUSE_LOG_RETENTION_DAYS = 3
 MAX_CLICKHOUSE_DISK_USED_PERCENT = 75

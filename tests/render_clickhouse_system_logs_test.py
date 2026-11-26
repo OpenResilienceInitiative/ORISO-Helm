@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render guard: Dev ClickHouse must not write system.metric_log or system.trace_log."""
+"""Render guard: Dev ClickHouse must not write system.metric_log, trace_log or zookeeper_log."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ CHART_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURE_DOMAIN = "render.oriso.internal"
 DEV_METRIC_LOG_FILE = "config.d/99-oriso-disable-metric-log.xml"
 DEV_TRACE_LOG_FILE = "config.d/99-oriso-disable-trace-log.xml"
+DEV_ZOOKEEPER_LOG_FILE = "config.d/99-oriso-disable-zookeeper-log.xml"
 HELM_TIMEOUT_SECONDS = 180
 
 
@@ -75,7 +76,9 @@ def main() -> int:
     files = installations[0]["spec"]["configuration"]["files"]
     # Parse the XML so a commented-out element cannot satisfy the check.
     dev_log_files = ((DEV_METRIC_LOG_FILE, "metric_log"), (DEV_TRACE_LOG_FILE, "trace_log"))
-    for file_name, element in dev_log_files:
+    # Not in dev_log_files: that list also pins the legacy Pre-Dev reset below (#519).
+    dev_only_files = ((DEV_ZOOKEEPER_LOG_FILE, "zookeeper_log"),)
+    for file_name, element in (*dev_log_files, *dev_only_files):
         root = ET.fromstring(files.get(file_name, "<clickhouse/>"))
         found = root.findall(element)
         if len(found) != 1 or found[0].get("remove") != "1":
@@ -86,7 +89,7 @@ def main() -> int:
     if len(default) != 1:
         print(f"expected one default ClickHouseInstallation, found {len(default)}", file=sys.stderr)
         return 1
-    if any(file_name in default[0]["spec"]["configuration"]["files"] for file_name, _ in dev_log_files):
+    if any(file_name in default[0]["spec"]["configuration"]["files"] for file_name, _ in (*dev_log_files, *dev_only_files)):
         print("Dev writer removals must be absent from the default chart", file=sys.stderr)
         return 1
 
