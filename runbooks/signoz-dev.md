@@ -50,6 +50,48 @@ python3 scripts/observability_overlay.py "${observability_inputs[@]}" > "$observ
 values_files=(values.yaml secrets.yaml "$observability_file")
 ```
 
+#### While the Dev master carries local edits
+
+As of Release 2.0.17 (`d4e1e69`), `/root/ORISO-Helm` has uncommitted edits to
+`templates/health-dashboard/templates/ingress.yaml` and
+`basic-auth-secret.yaml`. They are a hand backport of the optional Basic Auth
+that origin/dev now ships, and the installed release was deployed from that
+tree. Do not `git checkout`, stash or reset there. Render from a clean
+worktree instead. It does not contain the gitignored `values.yaml`, so name
+both hand-kept files by absolute path. The worktree is detached and does not
+touch the working tree of the master.
+
+```bash
+rollout_sha=<approved origin/dev commit>
+git -C /root/ORISO-Helm fetch origin
+git -C /root/ORISO-Helm worktree add --detach /root/oriso-helm-rollout "$rollout_sha"
+cd /root/oriso-helm-rollout
+observability_file=/root/observability-dev.yaml
+python3 scripts/observability_overlay.py values-dev.yaml > "$observability_file"
+values_files=(/root/ORISO-Helm/values.yaml /root/ORISO-Helm/secrets.yaml "$observability_file")
+```
+
+The deploy command in `helm deploy.txt` passes only `secrets.yaml` and takes
+`values.yaml` from the chart directory, never `values-dev.yaml`. The list above
+is therefore explicit and the observability projection is the only Dev overlay
+applied. Before approving, show that the backport changes nothing the release
+needs:
+
+```bash
+for tree in /root/ORISO-Helm /root/oriso-helm-rollout; do
+  (cd "$tree" && helm template caritas . -n caritas -f /root/ORISO-Helm/values.yaml \
+    -f /root/ORISO-Helm/secrets.yaml -f "$observability_file" \
+    --show-only templates/health-dashboard/templates/ingress.yaml) > "/tmp/ingress-$(basename "$tree").yaml"
+done
+diff /tmp/ingress-ORISO-Helm.yaml /tmp/ingress-oriso-helm-rollout.yaml && echo SAME_INGRESS
+```
+
+Expect `SAME_INGRESS` with `healthDashboard.ingress.basicAuth: false` in
+`secrets.yaml` (the live Ingress has no `auth-type` annotation). Otherwise stop
+and reconcile the values. Remove the worktree after the rollout with
+`git -C /root/ORISO-Helm worktree remove --force /root/oriso-helm-rollout`
+and keep the local edits for their owner to retire.
+
 Pass the hand-kept `values.yaml` explicitly so Helm preserves base settings
 recorded as user-supplied in the installed revision. Add every other approved
 values file to `values_files` in its intended order. The drift check and both
