@@ -397,7 +397,9 @@ def test_derived_admin_reset_url_carries_admin_prefix() -> None:
 def test_non_tls_flips_the_scheme() -> None:
     docs = rendered(
         helm_template(
-            "-f", os.path.join(CHART_DIR, "values-dev.yaml"), "--set", "global.enableTls=false"
+            "-f", os.path.join(CHART_DIR, "values-dev.yaml"), "--set", "global.enableTls=false",
+            # The HealthDashboard operator login needs TLS (HealthDashboard#58).
+            "--set", "global.healthDashboardOperatorAccess=false",
         ),
         "values-dev.yaml with enableTls=false",
     )

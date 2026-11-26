@@ -277,14 +277,17 @@ class HealthDashboardIngressAuthTest(unittest.TestCase):
         self.assertEqual(backend["port"]["number"], resources["Service"]["spec"]["ports"][0]["port"])
         self.assertEqual(resources["Service"]["spec"]["ports"][0]["targetPort"], 9300)
 
-    def test_dev_enables_auth_and_can_be_disabled(self) -> None:
+    def test_dev_is_public_with_operator_login_and_can_be_disabled(self) -> None:
+        # Product decision 25 Nov 2026: /health is public on Dev only; the Helm
+        # image inventory needs the Keycloak operator login (HealthDashboard#58).
         resources = health_resources(render("values-dev.yaml", domain="dev.oriso.org"))
-        annotations = resources["Ingress"]["metadata"]["annotations"]
-        self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-type"], "basic")
-        self.assertEqual(annotations["nginx.ingress.kubernetes.io/auth-secret"], "health-dashboard-basic-auth")
+        annotations = resources["Ingress"]["metadata"].get("annotations") or {}
+        self.assertNotIn("nginx.ingress.kubernetes.io/auth-type", annotations)
+        self.assertNotIn("nginx.ingress.kubernetes.io/auth-secret", annotations)
+        # Without an ingress there is no operator login either.
         disabled = health_resources(render("values-dev.yaml", domain="dev.oriso.org", health_dashboard={"ingress": {
             "enabled": False, "authSecret": None,
-        }}))
+        }}, global_values={"healthDashboardOperatorAccess": False}))
         self.assertEqual(set(disabled), {"Deployment", "Service"})
 
     def test_other_overlays_keep_ingress_guarded_and_allow_explicit_off(self) -> None:
