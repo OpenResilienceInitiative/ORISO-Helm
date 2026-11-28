@@ -207,31 +207,6 @@ userService:
   smtpSecure: false
   smtpFrom: "ORISO Platform <monty.burns@oriso.org>"
 
-  # Requests only, from Dev SigNoz samples 20-22 Nov 2026 (#583): working set
-  # p95 1.1-1.4 GiB, peak 1.44 GiB; CPU p95 46-81m, startup peaks 1.5-2.8 cores.
-  # No limits: the JVM has no -Xmx and sizes its heap from the memory limit,
-  # and a CPU limit would slow the startup burst past the readiness probe.
-  resources:
-    requests:
-      cpu: 100m
-      memory: 1536Mi
-
-# Database requests only, from the same Dev samples (#583). The requests stop
-# these pods being BestEffort; limits wait for representative load.
-# MariaDB: working set peak 265 MiB, CPU p95 4-9m.
-online-counseling-mariadb:
-  resources:
-    requests:
-      cpu: 50m
-      memory: 320Mi
-
-# MongoDB: working set peak 417 MiB, CPU p95 about 100m.
-online-counseling-mongodb:
-  resources:
-    requests:
-      cpu: 150m
-      memory: 448Mi
-
 # Matrix federation identity (ADR-005 canonical server_name). Fixed across
 # environments; values.yaml.default ships a placeholder ("your-server.local").
 matrix:
