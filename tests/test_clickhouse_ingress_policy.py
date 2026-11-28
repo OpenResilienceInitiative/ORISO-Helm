@@ -26,6 +26,10 @@ class ClickHouseIngressPolicyTest(unittest.TestCase):
     def test_dev_enables_the_policy(self):
         self.assertIn(POLICY, dev())
 
+    def test_predev_does_not_inherit_the_dev_policy(self):
+        chart = by_key(render("values-dev.yaml", "values-pre-dev.yaml", release=RELEASE))
+        self.assertNotIn(POLICY, set(chart))
+
     def test_external_clickhouse_has_no_policy(self):
         chart = dev(
             *ENABLED,
