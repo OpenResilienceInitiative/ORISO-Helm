@@ -120,6 +120,14 @@ signoz:
         <clickhouse>
           <trace_log remove="1"/>
         </clickhouse>
+      # Measured on Dev, 2026-11-26: system.zookeeper_log held 3.8 GB within its
+      # 3-day TTL (32 M rows a day) and pushed the system logs past the 10 GiB
+      # budget (#519). No query in the retained system.query_log window reads it.
+      # The bundled operator config turns it on; ClickHouse's own default is off.
+      config.d/99-oriso-disable-zookeeper-log.xml: |
+        <clickhouse>
+          <zookeeper_log remove="1"/>
+        </clickhouse>
   # Add values-dev-clickhouse-signal-backup.yaml only for an approved rollout.
   orisoDataProtection:
     signalBackup:

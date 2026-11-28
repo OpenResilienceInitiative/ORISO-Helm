@@ -989,6 +989,20 @@ verify that the active configuration reports `trace_log` on every pod:
 kubectl -n caritas exec "$POD" -c clickhouse -- clickhouse extract-from-config --config-file /etc/clickhouse-server/config.xml --key trace_log.table
 ```
 
+### system.zookeeper_log
+
+Dev also turns `system.zookeeper_log` off
+(`config.d/99-oriso-disable-zookeeper-log.xml`). The bundled ClickHouse operator
+configuration enables it; ClickHouse's own default is off. Measured read-only on
+Dev on 2026-11-26: 3.8 GB active within its 3-day TTL, about 32 M rows a day,
+and no query in the retained `system.query_log` window selects from it. With it,
+the system logs used 12.3 GB of the 10 GiB budget in #519.
+
+The existing table stays on disk and expires through its 3-day TTL, so no drop
+is needed. Confirm the restart and active configuration as for `trace_log`
+above, with `--key zookeeper_log`. To resume it, set the file's contents to
+`<clickhouse/>`.
+
 ## Rollback
 
 For a targeted reversal, use the reviewed previous chart and overlay with the
