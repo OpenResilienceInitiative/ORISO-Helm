@@ -42,6 +42,10 @@ if any("SHOW DATABASES" in arg for arg in args):
         print("userservice")
         sys.exit(1)
     print("information_schema\\nmysql\\nperformance_schema\\nsys")
+    if scenario == "lost-found":
+        print("#mysql50#lost+found")
+    if scenario == "legacy-name":
+        print("#mysql50#legacy-schema")
     if scenario != "no-app-schemas":
         print("tenantservice\\nuserservice")
     sys.exit(0)
@@ -201,6 +205,22 @@ class MariaDbBackupTest(unittest.TestCase):
                 result = self.run_backup(scenario)
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertFalse(self.output.exists())
+
+    def test_volume_lost_found_entry_is_skipped_but_other_unsafe_names_stop_the_run(self):
+        result = self.run_backup("lost-found")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        directory, = self.output.iterdir()
+        self.assertEqual(
+            {file.name for file in directory.iterdir()},
+            {"tenantservice.sql.gz", "userservice.sql.gz"},
+        )
+        self.assertFalse(any("lost+found" in arg for args in self.calls_recorded() for arg in args))
+
+        shutil.rmtree(self.output)
+        result = self.run_backup("legacy-name")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("unsuitable for a backup filename", result.stderr)
+        self.assertFalse(self.output.exists())
 
     def test_failed_dump_hides_partial_and_earlier_successful_files(self):
         self.output.mkdir(mode=0o700)
