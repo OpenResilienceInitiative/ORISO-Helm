@@ -381,11 +381,26 @@ online-counseling-mongodb:
   imageVersion: "5.0"
 
 networkPolicies:
+  rabbitmqIngress:
+    # Verify out-of-chart consumers for the installation before enabling.
+    enabled: false
+  matrixPostgresIngress:
+    # Verify out-of-chart consumers for the installation before enabling.
+    enabled: false
+  keycloakIngress:
+    # Verify out-of-chart callers before enabling. With the cluster-wide
+    # ingress controller instead of the bundled one, name its namespace here.
+    enabled: false
+    externalNginxNamespace: ""
   mongodbIngress:
     # Verify out-of-chart consumers for the installation before enabling.
     enabled: false
   mariadbIngress:
     # Verify out-of-chart consumers for the installation before enabling.
+    enabled: false
+  clickhouseIngress:
+    # Only SigNoz, its collector, migrator and the ClickHouse operator may reach
+    # ClickHouse. Verify the installation's clients before enabling (#675).
     enabled: false
 
 # MariaDB
