@@ -17,6 +17,7 @@ SigNoz database back. Collector internals: `signoz-k8s-infra.md`.
 | `signozCollector.enabled` | `true` | node agent (pod logs) and cluster collector |
 | `signoz.orisoDataProtection` | default on | volumes on `Retain`, daily `signoz.db` backup |
 | `signoz.clickhouse.resources` | request 2 GiB, limit 4 GiB | ClickHouse cannot fill the worker |
+| `networkPolicies.clickhouseIngress.enabled` | `true` | limits ClickHouse ingress to its SigNoz clients |
 
 A deployed Helm revision can be healthy while running without the Dev
 observability overlay. Verify the overlay after every Dev install or upgrade:
@@ -26,8 +27,9 @@ helm get values caritas -n caritas --all -o yaml |
   python3 scripts/observability_overlay.py values-dev.yaml --check-effective
 ```
 
-The check compares the keys declared by the Dev observability overlay and
-prints only the paths of missing or different settings. A failure requires
+The check compares the keys declared by the Dev observability overlay, including
+the ClickHouse ingress policy, and prints only paths of missing or different
+settings. A failure requires
 the rollout procedure below and a fresh runtime check.
 
 ## Rollout
@@ -38,7 +40,7 @@ Before the first upgrade that renders the existing public alias, follow
 Live Dev is deployed from `/root/ORISO-Helm` with a hand-kept `values.yaml`
 that is older than `values.yaml.default`, and `values-dev.yaml` also carries
 deltas Dev does not run today (Matrix server name, dummy data). So the rollout
-takes only the observability keys, defaults included:
+takes only the observability keys and ClickHouse ingress policy, defaults included:
 
 ```bash
 ssh dev-server

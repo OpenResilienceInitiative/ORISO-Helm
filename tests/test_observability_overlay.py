@@ -1,4 +1,4 @@
-"""scripts/observability_overlay.py takes over observability values only."""
+"""Check the scoped Dev observability rollout projection."""
 
 from __future__ import annotations
 
@@ -18,9 +18,11 @@ class ObservabilityOverlayTest(unittest.TestCase):
     def setUp(self) -> None:
         self.values = overlay(CHART_DIR / "values-dev.yaml")
 
-    def test_only_observability_keys(self) -> None:
-        self.assertEqual(set(self.values), {"global", "signoz", "signozCollector", "dbMonitoring"})
+    def test_only_rollout_keys(self) -> None:
+        self.assertEqual(set(self.values), {"global", "signoz", "signozCollector", "dbMonitoring", "networkPolicies"})
         self.assertEqual(set(self.values["global"]), {"observability"})
+        self.assertEqual(set(self.values["networkPolicies"]), {"clickhouseIngress"})
+        self.assertIs(self.values["networkPolicies"]["clickhouseIngress"]["enabled"], True)
 
     def test_environment_wins_over_defaults(self) -> None:
         observability = self.values["global"]["observability"]
@@ -90,6 +92,17 @@ class ObservabilityOverlayTest(unittest.TestCase):
         self.values["frontend"] = {"image": "example/dev:fixture"}
         result = self.check_effective(yaml.safe_dump(self.values))
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_check_detects_missing_clickhouse_policy(self) -> None:
+        self.values.pop("networkPolicies")
+        result = self.check_effective(yaml.safe_dump(self.values))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("networkPolicies", result.stderr)
+
+        self.values["networkPolicies"] = {"clickhouseIngress": {"enabled": False}}
+        result = self.check_effective(yaml.safe_dump(self.values))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("networkPolicies.clickhouseIngress.enabled", result.stderr)
 
     def test_check_detects_lost_dev_overlay_without_printing_values(self) -> None:
         self.values["signozCollector"]["enabled"] = False

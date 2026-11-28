@@ -9,6 +9,8 @@ RELEASE = "clickhouse-audit"
 NAMESPACE = "caritas"
 POLICY = ("NetworkPolicy", f"{RELEASE}-ingress")
 ENABLED = ("--set", "networkPolicies.clickhouseIngress.enabled=true")
+# values-dev.yaml enables the policy (#675); baselines switch it off explicitly.
+DISABLED = ("--set", "networkPolicies.clickhouseIngress.enabled=false")
 
 
 def dev(*args, signal_backup=False):
@@ -18,8 +20,15 @@ def dev(*args, signal_backup=False):
 
 class ClickHouseIngressPolicyTest(unittest.TestCase):
     def test_policy_is_opt_in(self):
-        self.assertNotIn(POLICY, dev())
+        self.assertNotIn(POLICY, dev(*DISABLED))
         self.assertNotIn(POLICY, by_key(render(release=RELEASE, helm_args=ENABLED)))
+
+    def test_dev_enables_the_policy(self):
+        self.assertIn(POLICY, dev())
+
+    def test_predev_does_not_inherit_the_dev_policy(self):
+        chart = by_key(render("values-dev.yaml", "values-pre-dev.yaml", release=RELEASE))
+        self.assertNotIn(POLICY, set(chart))
 
     def test_external_clickhouse_has_no_policy(self):
         chart = dev(
@@ -32,7 +41,7 @@ class ClickHouseIngressPolicyTest(unittest.TestCase):
         self.assertFalse(any(kind == "ClickHouseInstallation" for kind, name in chart))
 
     def test_peers_are_the_rendered_release_workloads(self):
-        baseline = dev(signal_backup=True)
+        baseline = dev(*DISABLED, signal_backup=True)
         chart = dev(*ENABLED, signal_backup=True)
         policy = chart.pop(POLICY)
         self.assertEqual(policy["metadata"]["namespace"], NAMESPACE)
@@ -121,7 +130,7 @@ class ClickHouseIngressPolicyTest(unittest.TestCase):
 
     def test_split_namespace_is_rejected_only_on_opt_in(self):
         args = ("--set", "signoz.clickhouse.namespace=storage-fixture")
-        self.assertNotIn(POLICY, dev(*args))
+        self.assertNotIn(POLICY, dev(*DISABLED, *args))
         with self.assertRaisesRegex(AssertionError, "ClickHouse and SigNoz in the release namespace"):
             dev(*ENABLED, *args)
 

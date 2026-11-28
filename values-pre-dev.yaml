@@ -49,6 +49,12 @@ global:
   matrix:
     matrixServerName: "predev.oriso.org"
 
+networkPolicies:
+  # Dev's ClickHouse client inventory does not cover Pre-Dev. Keep its existing
+  # access until Pre-Dev clients and policy enforcement are checked separately.
+  clickhouseIngress:
+    enabled: false
+
 signoz:
   clickhouse:
     files:
