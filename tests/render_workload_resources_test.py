@@ -50,13 +50,23 @@ def container(workloads, name):
 
 
 class WorkloadResourcesTest(unittest.TestCase):
-    def test_default_and_explicit_empty_values_preserve_pod_templates(self):
-        for overrides in ({}, dict.fromkeys(VALUES, {})):
-            with self.subTest(overrides=overrides):
-                workloads = render(overrides)
-                self.assertEqual(container(workloads, "userservice")["resources"], {})
-                for name in ("mariadb", "mongodb"):
-                    self.assertNotIn("resources", container(workloads, name))
+    def test_defaults_request_measured_resources_without_limits(self):
+        # Baseline requests from Dev measurements (#583); limits stay unset.
+        workloads = render({})
+        expected = {
+            "userservice": {"requests": {"cpu": "100m", "memory": "1536Mi"}},
+            "mariadb": {"requests": {"cpu": "50m", "memory": "320Mi"}},
+            "mongodb": {"requests": {"cpu": "150m", "memory": "448Mi"}},
+        }
+        for name, requirements in expected.items():
+            with self.subTest(workload=name):
+                self.assertEqual(container(workloads, name).get("resources"), requirements)
+
+    def test_explicit_empty_values_preserve_pod_templates(self):
+        workloads = render(dict.fromkeys(VALUES, {}))
+        self.assertEqual(container(workloads, "userservice")["resources"], {})
+        for name in ("mariadb", "mongodb"):
+            self.assertNotIn("resources", container(workloads, name))
 
     def test_resources_stay_on_the_selected_containers(self):
         expected = {

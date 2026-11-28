@@ -386,8 +386,13 @@ admin:
   imageVersion: "dev"
 # MongoDB
 online-counseling-mongodb:
-  # Size container requests and limits in the environment overlay.
-  resources: {}
+  # Requests only, from Dev SigNoz samples 20-22 Nov 2026 (#583): working set
+  # peak 417 MiB, CPU p95 about 100m. The requests stop the pod being
+  # BestEffort; limits wait for representative load. Override per environment.
+  resources:
+    requests:
+      cpu: 150m
+      memory: 448Mi
   imageName: "mongo"
   imageVersion: "5.0"
 
@@ -401,8 +406,12 @@ networkPolicies:
 
 # MariaDB
 online-counseling-mariadb:
-  # Size container requests and limits in the environment overlay.
-  resources: {}
+  # Requests only, from Dev SigNoz samples 20-22 Nov 2026 (#583): working set
+  # peak 265 MiB, CPU p95 4-9m. Limits wait for representative load.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 320Mi
   imageName: "mariadb"
   imageVersion: "11.0.6"
   maxconnections: "1000"
@@ -663,8 +672,14 @@ addonService:
 
 # User service
 userService:
-  # Size container requests and limits in the environment overlay.
-  resources: {}
+  # Requests only, from Dev SigNoz samples 20-22 Nov 2026 (#583): working set
+  # p95 1.1-1.4 GiB, peak 1.44 GiB; CPU p95 46-81m, startup peaks 1.5-2.8 cores.
+  # No limits: the JVM has no -Xmx and sizes its heap from the memory limit,
+  # and a CPU limit would slow the startup burst past the readiness probe.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 1536Mi
   accountInactivity:
     enabled: false
     dryRun: true
