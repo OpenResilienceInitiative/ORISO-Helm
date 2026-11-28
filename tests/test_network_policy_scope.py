@@ -45,7 +45,7 @@ class NetworkPolicyScopeTest(unittest.TestCase):
     def setUpClass(cls):
         cls.defaults = render()
         cls.omitted = render("--set-json", "networkPolicies=null")
-        cls.dev_disabled = render("--set", "networkPolicies.mongodbIngress.enabled=false", dev=True)
+        cls.dev_disabled = render("--set", "networkPolicies.mongodbIngress.enabled=false", "--set", "networkPolicies.namespaceIngress.enabled=false", dev=True)
         cls.enabled = render("--set", "networkPolicies.mongodbIngress.enabled=true")
         cls.dev_enabled = render("--set", "networkPolicies.mongodbIngress.enabled=true", dev=True)
 
@@ -83,6 +83,11 @@ class NetworkPolicyScopeTest(unittest.TestCase):
                 ("Job", "create-mongo-users", {"app": "create-mongo-users"}),
             ],
         )
+
+    def test_dev_enables_every_datastore_policy(self):
+        dev = render(dev=True)
+        for name in ("mariadb", "mongodb", "rabbitmq", "keycloak", "matrix-postgres", f"{RELEASE}-clickhouse"):
+            self.assertIn(("NetworkPolicy", f"{name}-ingress"), dev)
 
     def test_dev_opt_in_also_admits_the_monitoring_hook_and_cluster_collector(self):
         self.assert_policy(

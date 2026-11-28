@@ -1,0 +1,171 @@
+{{- /*
+Namespace default-deny for ingress (Helm#538). Off by default.
+
+With it on, a pod in the release namespace accepts only what a policy allows:
+- datastores and Keycloak: their own opt-in policies, which must be on too;
+- the application tier (every other chart pod, except the two matrixrtc pods that
+  keep their own policies): the ingress controller and pods in this namespace;
+- ZooKeeper: ClickHouse and itself;
+- entry points that take outside traffic directly: the bundled ingress controller
+  and LiveKit (hostPort when it doesn't run with hostNetwork);
+- Redis: everyone, see the shortcut note below.
+Pods in other namespaces reach nothing except through the ingress controller.
+*/ -}}
+{{- $policies := get .Values "networkPolicies" | default dict -}}
+{{- $config := get $policies "namespaceIngress" | default dict -}}
+{{- $enabled := dig "enabled" false $config -}}
+{{- if not (kindIs "bool" $enabled) -}}
+{{- fail "networkPolicies.namespaceIngress.enabled must be a boolean" -}}
+{{- end -}}
+{{- if $enabled }}
+{{- /* ClickHouse and ZooKeeper can live in other namespaces; this namespace's policies only cover them here. */ -}}
+{{- $clickhouseHere := false }}
+{{- $zookeeperHere := false }}
+{{- if and .Values.signoz.enabled .Values.signoz.clickhouse.enabled }}
+{{- $clickhouseHere = eq (include "clickhouse.namespace" .Subcharts.signoz.Subcharts.clickhouse) .Release.Namespace }}
+{{- $zookeeper := get .Values.signoz.clickhouse "zookeeper" | default dict }}
+{{- $zookeeperHere = and (dig "enabled" true $zookeeper) (eq (get $zookeeper "namespaceOverride" | default .Release.Namespace) .Release.Namespace) }}
+{{- end }}
+{{- $required := list "mariadbIngress" "mongodbIngress" "rabbitmqIngress" "matrixPostgresIngress" "keycloakIngress" }}
+{{- if $clickhouseHere }}
+{{- $required = append $required "clickhouseIngress" }}
+{{- end }}
+{{- range $name := $required }}
+{{- if not (dig "enabled" false (get $policies $name | default dict)) }}
+{{- fail (printf "networkPolicies.namespaceIngress requires networkPolicies.%s.enabled=true; without it the default-deny cuts that store off from its clients" $name) }}
+{{- end }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: namespace-default-deny-ingress
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: application-ingress
+  namespace: {{ .Release.Namespace }}
+spec:
+  # Everything except the pods that have their own, narrower policy. Pods without an
+  # `app` or `app.kubernetes.io/component` label (cert-manager HTTP-01 solvers, SigNoz
+  # jobs) are part of this tier.
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: NotIn
+        values:
+          - mariadb
+          - mongodb
+          - rabbitmq
+          - redis
+          - matrix-postgres
+          - keycloak
+          - matrixrtc-auth-policy-gateway
+          - matrixrtc-authorization-service
+      - key: app.kubernetes.io/component
+        operator: NotIn
+        values:
+          - clickhouse
+          - zookeeper
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- include "oriso.matrixrtc.ingressControllerPeer" . | nindent 8 }}
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: livekit-ingress
+  namespace: {{ .Release.Namespace }}
+spec:
+  # WebRTC clients reach LiveKit directly. With hostNetwork no policy applies to it;
+  # without, its hostPorts must stay open to every source.
+  podSelector:
+    matchLabels:
+      app: livekit
+  policyTypes: [Ingress]
+  ingress:
+    - {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-ingress
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes: [Ingress]
+  ingress:
+    # shortcut: Redis stays open to every source because LiveKit (hostNetwork) reaches it
+    # from node addresses no pod selector matches; narrow it once Helm#538 decides how
+    # LiveKit is admitted (node CIDRs or LiveKit off hostNetwork).
+    - {}
+{{- if .Values.nginxController.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ingress-controller-ingress
+  namespace: {{ .Release.Namespace }}
+spec:
+  # The bundled controller is the public entry point.
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/instance: ingress-nginx
+  policyTypes: [Ingress]
+  ingress:
+    - {}
+{{- end }}
+{{- if $zookeeperHere }}
+{{- $clickhouse := .Subcharts.signoz.Subcharts.clickhouse }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: zookeeper-ingress
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: zookeeper
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: zookeeper
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- $clickhouseNamespace := include "clickhouse.namespace" $clickhouse }}
+        - {{- if ne $clickhouseNamespace .Release.Namespace }}
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $clickhouseNamespace | quote }}
+          {{- end }}
+          podSelector:
+            matchLabels:
+              {{- include "clickhouse.selectorLabels" $clickhouse | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 2181
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: zookeeper
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/component: zookeeper
+      ports:
+        - protocol: TCP
+          port: 2181
+        - protocol: TCP
+          port: 2888
+        - protocol: TCP
+          port: 3888
+{{- end }}
+{{- end }}

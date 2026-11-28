@@ -69,9 +69,9 @@ class RabbitMqIngressPolicyTest(unittest.TestCase):
         })
 
     def test_policy_requires_explicit_opt_in(self):
-        for overlays in ((), ("values-dev.yaml",)):
-            with self.subTest(overlays=overlays):
-                self.assertNotIn(POLICY, resources(*overlays).keys())
+        self.assertNotIn(POLICY, resources())
+        # values-dev.yaml opts in (#538).
+        self.assertNotIn(POLICY, resources("values-dev.yaml", helm_args=("--set", "networkPolicies.rabbitmqIngress.enabled=false", "--set", "networkPolicies.namespaceIngress.enabled=false")))
 
     def test_opt_in_admits_only_application_peers_without_observability(self):
         base = resources()
