@@ -5,12 +5,15 @@ The chart's ingress-nginx controller runs two replicas by default, spread over
 nodes by soft anti-affinity, with a PodDisruptionBudget that lets a node drain
 proceed. A readiness probe keeps a new replica out of the Service until nginx
 has loaded its backends, and a shutdown grace period keeps a terminating one
-serving while traffic moves away. ip-anonymizer must stay at one replica: each
-pod keeps its sessions in memory, so the render fails above one.
+serving while traffic moves away. ip-anonymizer can scale only with a shared
+session key (ORISO-IpAnonymizer#8): without one the render fails above one
+replica. It gets the same soft spread and drain-safe PDB.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import os
 import subprocess
 import sys
@@ -148,18 +151,50 @@ def main() -> None:
         "name": "ANON_SESSION_KEY",
         "valueFrom": {"secretKeyRef": {"name": "ip-anonymizer-session-key", "key": "ANON_SESSION_KEY"}},
     }], "expected ANON_SESSION_KEY from the configured Secret"
-    blocked_scale = helm(
+    scaled_docs = render(
         "ipAnonymizer.enabled=true",
         "ipAnonymizer.sessionKeySecretName=ip-anonymizer-session-key",
         "ipAnonymizer.replicas=2",
     )
-    assert blocked_scale.returncode != 0 and "ipAnonymizer.replicas must be 1" in blocked_scale.stderr
-    scaled = helm("ipAnonymizer.enabled=true", "ipAnonymizer.replicas=2")
-    assert scaled.returncode != 0 and "ipAnonymizer.replicas must be 1" in scaled.stderr, scaled.stderr
+    scaled = scaled_docs[("Deployment", "ip-anonymizer")]
+    assert scaled["spec"]["replicas"] == 2
+    assert scaled["spec"]["template"]["spec"]["affinity"] == {"podAntiAffinity": {
+        "preferredDuringSchedulingIgnoredDuringExecution": [{"weight": 100, "podAffinityTerm": {
+            "labelSelector": {"matchLabels": {"app": "ip-anonymizer"}},
+            "topologyKey": "kubernetes.io/hostname"}}]}}, scaled["spec"]["template"]["spec"].get("affinity")
+    anon_pdb = scaled_docs[("PodDisruptionBudget", "ip-anonymizer")]
+    assert anon_pdb["spec"] == {"maxUnavailable": 1, "selector": {"matchLabels": {"app": "ip-anonymizer"}}}
+    assert ("PodDisruptionBudget", "ip-anonymizer") in render("ipAnonymizer.enabled=true")
+    assert ("PodDisruptionBudget", "ip-anonymizer") not in render()
+    keyless = helm("ipAnonymizer.enabled=true", "ipAnonymizer.replicas=2")
+    assert keyless.returncode != 0 and "needs ipAnonymizer.sessionKey or ipAnonymizer.sessionKeySecretName" in keyless.stderr, keyless.stderr
     # The guard only applies when ip-anonymizer is rendered.
     render("ipAnonymizer.replicas=2")
 
-    print("PASS: ingress controller renders 2 spread, probed replicas with a drain-safe PDB; ip-anonymizer stays at 1")
+    # Declarative key: secrets.yaml's ipAnonymizer.sessionKey renders the Secret itself.
+    key = base64.b64encode(bytes(range(32))).decode()
+    declared = render("ipAnonymizer.enabled=true", "ipAnonymizer.replicas=2", f"ipAnonymizer.sessionKey={key}")
+    secret = declared[("Secret", "ip-anonymizer-session-key")]
+    assert base64.b64decode(secret["data"]["ANON_SESSION_KEY"]).decode() == key
+    pod = declared[("Deployment", "ip-anonymizer")]["spec"]["template"]
+    [declared_container] = pod["spec"]["containers"]
+    assert {"name": "ANON_SESSION_KEY", "valueFrom": {"secretKeyRef": {
+        "name": "ip-anonymizer-session-key", "key": "ANON_SESSION_KEY"}}} in declared_container["env"]
+    assert pod["metadata"]["annotations"]["checksum/session-key"] == hashlib.sha256(key.encode()).hexdigest()
+    assert ("Secret", "ip-anonymizer-session-key") not in render("ipAnonymizer.enabled=true")
+    assert ("Secret", "ip-anonymizer-session-key") not in render(f"ipAnonymizer.sessionKey={key}")
+    short_key = base64.b64encode(bytes(16)).decode()
+    for bad in ("not-base64!", short_key, key.rstrip("=")):
+        result = helm("ipAnonymizer.enabled=true", f"ipAnonymizer.sessionKey={bad}")
+        assert result.returncode != 0 and "standard-base64 32-byte key" in result.stderr, (bad, result.stderr)
+    placeholder = helm("ipAnonymizer.enabled=true", "ipAnonymizer.sessionKey=changeme")
+    assert placeholder.returncode != 0, "the shipped placeholder must not render"
+    both = helm("ipAnonymizer.enabled=true", f"ipAnonymizer.sessionKey={key}",
+                "ipAnonymizer.sessionKeySecretName=ip-anonymizer-session-key")
+    assert both.returncode != 0 and "not both" in both.stderr, both.stderr
+
+    print("PASS: ingress controller renders 2 spread, probed replicas with a drain-safe PDB; "
+          "ip-anonymizer scales only with a shared, validated session key")
 
 
 if __name__ == "__main__":
