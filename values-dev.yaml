@@ -71,11 +71,18 @@ signoz:
   clickhouse:
     # Measured on Dev, 2026-11-03: 1.2-2.6 GiB in use, largest healthy merge 486 MiB.
     # ClickHouse caps itself at 90% of the limit instead of filling the 7.57 GiB worker.
+    # CPU and storage match the live Dev installation (read 2026-11-21), so a
+    # rollout from this file neither restarts ClickHouse over CPU nor asks to
+    # shrink the 25Gi data claim, which Kubernetes refuses.
     resources:
       requests:
+        cpu: 500m
         memory: 2Gi
       limits:
+        cpu: "2"
         memory: 4Gi
+    persistence:
+      size: 25Gi
     files:
       # Apply per installation so the operator reconciles the changed files.
       # Layered Pre-Dev inherits the policy. Later files may disable a writer.
