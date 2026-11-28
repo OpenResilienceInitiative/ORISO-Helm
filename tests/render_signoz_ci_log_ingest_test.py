@@ -55,7 +55,11 @@ def main():
     ):
         error = render_dev_fails({"signoz": OPT_IN, "global": global_values})
         assert "ciLogIngest.enabled=true requires deploymentEnvironment=dev and domainName=dev.oriso.org" in error
-    error = render_dev_fails({"signoz": {"enabled": False, **OPT_IN}})
+    error = render_dev_fails({"signoz": {
+        "enabled": False,
+        "orisoObservability": {"browserVitalsCheck": {"enabled": False}},
+        **OPT_IN,
+    }})
     assert "ciLogIngest.enabled=true requires signoz.enabled=true" in error
     error = render_dev_fails({"signoz": {"otelCollector": {
         "ciLogIngest": {"enabled": True},

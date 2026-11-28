@@ -62,6 +62,12 @@ signoz:
     enabled: true
     apiKeySecret:
       name: "signoz-observability-api-key"
+    # Five-minute Web Vitals freshness check (#521). Create this Secret with a
+    # dedicated SigNoz Viewer key first: runbooks/signoz-managed-observability.md
+    # ("Schedule the stored-sample check").
+    browserVitalsCheck:
+      enabled: true
+      apiKeySecretName: "signoz-browser-vitals-reader"
   signoz:
     # The existing Dev ext4 CSI volume uses fsGroupPolicy: File. Kubelet
     # gives access to the root-owned SQLite data without copying the database.
