@@ -801,11 +801,13 @@ nginxController:
 # session-scoped UUID so no ORISO backend ever sees a real client IP.
 ipAnonymizer:
   enabled: false
-  # Must stay 1 until sessions are shared between pods; the render fails above 1 (ORISO-Helm#544).
+  # Above 1 needs a shared session key (sessionKey in secrets.yaml, or
+  # sessionKeySecretName), so all pods derive the same X-Anon-Id; the render fails otherwise (ORISO-Helm#544).
   replicas: 1
   image: "ghcr.io/openresilienceinitiative/ip-anonymizer:latest"
-  # Before deploying the stateless image, name an existing Secret in the release
-  # namespace with ANON_SESSION_KEY set to a standard-base64 32-byte random key.
+  # The stateless image needs ANON_SESSION_KEY. Prefer ipAnonymizer.sessionKey in
+  # secrets.yaml (the chart renders the Secret). Or name an existing Secret in the
+  # release namespace with ANON_SESSION_KEY set to a standard-base64 32-byte key.
   sessionKeySecretName: ""
 
 

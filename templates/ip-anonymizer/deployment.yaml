@@ -1,6 +1,11 @@
 {{- if (.Values.ipAnonymizer).enabled }}
-{{- if gt (int .Values.ipAnonymizer.replicas) 1 }}
-{{- fail "ipAnonymizer.replicas must be 1: each pod keeps its sessions in memory, so a second replica hands the same browser a different X-Anon-Id on many requests (ORISO-Helm#544)." }}
+{{- $sessionKey := .Values.ipAnonymizer.sessionKey | default "" }}
+{{- if and $sessionKey .Values.ipAnonymizer.sessionKeySecretName }}
+{{- fail "Set either ipAnonymizer.sessionKey (secrets.yaml) or ipAnonymizer.sessionKeySecretName, not both." }}
+{{- end }}
+{{- $sessionKeySecret := ternary "ip-anonymizer-session-key" (.Values.ipAnonymizer.sessionKeySecretName | default "") (ne $sessionKey "") }}
+{{- if and (gt (int .Values.ipAnonymizer.replicas) 1) (not $sessionKeySecret) }}
+{{- fail "ipAnonymizer.replicas above 1 needs ipAnonymizer.sessionKey or ipAnonymizer.sessionKeySecretName: replicas only agree on X-Anon-Id when they share ANON_SESSION_KEY (ORISO-IpAnonymizer#8, ORISO-Helm#544)." }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -18,7 +23,21 @@ spec:
     metadata:
       labels:
         app: ip-anonymizer
+      {{- with $sessionKey }}
+      annotations:
+        # Env vars are read at start; restart the pods when the key changes.
+        checksum/session-key: {{ sha256sum . | quote }}
+      {{- end }}
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app: ip-anonymizer
+              topologyKey: kubernetes.io/hostname
       automountServiceAccountToken: false
       securityContext:
         {{- include "oriso.podSecurityContext" (dict) | nindent 8 }}
@@ -26,7 +45,7 @@ spec:
         - name: ip-anonymizer
           image: {{ .Values.ipAnonymizer.image | quote }}
           imagePullPolicy: {{ include "oriso.imagePullPolicy" . | quote }}
-          {{- with .Values.ipAnonymizer.sessionKeySecretName }}
+          {{- with $sessionKeySecret }}
           env:
             - name: ANON_SESSION_KEY
               valueFrom:

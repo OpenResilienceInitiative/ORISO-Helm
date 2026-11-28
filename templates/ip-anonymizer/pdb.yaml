@@ -1,0 +1,15 @@
+{{- if (.Values.ipAnonymizer).enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ip-anonymizer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: ip-anonymizer
+spec:
+  # maxUnavailable, not minAvailable: with replicas 1 a node drain still proceeds instead of hanging.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: ip-anonymizer
+{{- end }}
