@@ -34,6 +34,9 @@ online-counseling-keycloak:
     useManagementPort: false
 
 global:
+  # Dev opens /health with the operator login (HealthDashboard#58); Pre-Dev keeps
+  # Basic Auth on the whole path, see healthDashboard below.
+  healthDashboardOperatorAccess: false
   # Public host of the Pre-Dev environment (main-ingress serves App, /admin, /auth
   # and /_matrix on it). Every public URL and mail link derives from it.
   domainName: "predev.oriso.org"
@@ -122,3 +125,8 @@ matrix:
   matrixServerName: "predev.oriso.org"
 matrixrtcAuth:
   membershipReaderUserId: "@matrixrtc-auth:predev.oriso.org"
+
+# Pre-Dev keeps /health behind Basic Auth (Dev opens it, HealthDashboard#58).
+healthDashboard:
+  ingress:
+    basicAuth: true

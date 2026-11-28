@@ -368,7 +368,7 @@ def assert_dev_alias(
     for override in (
         {"signoz": {"orisoIngress": {"devAliasRedirect": False}}},
         {"signoz": {"orisoIngress": {"enabled": False}}},
-        {"global": {"enableTls": False}},
+        {"global": {"enableTls": False, "healthDashboardOperatorAccess": False}},
         {
             "signoz": {"enabled": False, "orisoObservability": {"enabled": False}},
             "signozCollector": {"enabled": False},
@@ -501,7 +501,7 @@ def assert_second_review_findings() -> None:
     assert selector["matchLabels"]["app.kubernetes.io/component"] == "observer"
 
     # Without TLS the browsers get an http ingest URL.
-    docs = render_dev_with({"global": {"enableTls": False}})
+    docs = render_dev_with({"global": {"enableTls": False, "healthDashboardOperatorAccess": False}})
     assert docs[("ConfigMap", "frontend-configmap")]["data"]["REACT_APP_OTEL_METRICS_URL"] == (
         "http://dev.oriso.org/signoz-rum/v1/metrics")
 
