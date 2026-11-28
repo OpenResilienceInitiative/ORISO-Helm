@@ -387,6 +387,10 @@ networkPolicies:
   mariadbIngress:
     # Verify out-of-chart consumers for the installation before enabling.
     enabled: false
+  clickhouseIngress:
+    # Only SigNoz, its collector, migrator and the ClickHouse operator may reach
+    # ClickHouse. Verify the installation's clients before enabling (#675).
+    enabled: false
 
 # MariaDB
 online-counseling-mariadb:
