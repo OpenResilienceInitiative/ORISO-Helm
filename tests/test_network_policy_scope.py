@@ -84,6 +84,11 @@ class NetworkPolicyScopeTest(unittest.TestCase):
             ],
         )
 
+    def test_dev_enables_every_datastore_policy(self):
+        dev = render(dev=True)
+        for name in ("mariadb", "mongodb", "rabbitmq", "keycloak", "matrix-postgres", f"{RELEASE}-clickhouse"):
+            self.assertIn(("NetworkPolicy", f"{name}-ingress"), dev)
+
     def test_dev_opt_in_also_admits_the_monitoring_hook_and_cluster_collector(self):
         self.assert_policy(
             self.dev_enabled,
