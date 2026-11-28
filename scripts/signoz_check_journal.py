@@ -2,6 +2,7 @@
 """Read completed Dev monitoring checks from the systemd manager journal."""
 
 import argparse
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from itertools import islice
 import json
@@ -14,6 +15,7 @@ import time
 
 UPTIME = "oriso-signoz-uptime.service"
 HEARTBEAT = "oriso-signoz-heartbeat-check.service"
+DEV_NIGHTLY = "oriso-dev-nightly-monitor.service"
 BACKUP_PUSH = "oriso-offsite-backup.service"
 BACKUP_CHECK = "oriso-offsite-check.service"
 BACKUP_STORES = ("mariadb", "mongodb", "matrix-postgres")
@@ -35,12 +37,18 @@ UNIT_MATCHES = ("_PID=1", f"UNIT={UPTIME}", f"UNIT={HEARTBEAT}")
 SCOPE_MATCHES = {
     "signoz": UNIT_MATCHES,
     "offsite-backup": ("_PID=1", f"UNIT={BACKUP_PUSH}", f"UNIT={BACKUP_CHECK}"),
+    "dev-nightly": ("_PID=1", f"UNIT={DEV_NIGHTLY}"),
 }
-CADENCE_UNITS = {"uptime": UPTIME, "heartbeat": HEARTBEAT}
+CADENCE_CHECKS = {
+    "uptime": ("signoz", UPTIME),
+    "heartbeat": ("signoz", HEARTBEAT),
+    "dev-nightly": ("dev-nightly", DEV_NIGHTLY),
+}
 CADENCE_EXIT = {"OK": 0, "CRITICAL": 2, "UNKNOWN": 3}
 PLUGIN_STATES = {
     UPTIME: {1: "WARNING", 2: "CRITICAL", 3: "UNKNOWN"},
     HEARTBEAT: {2: "CRITICAL"},
+    DEV_NIGHTLY: {1: "PENDING", 2: "CRITICAL", 3: "UNKNOWN"},
     BACKUP_PUSH: {1: "CRITICAL"},
     BACKUP_CHECK: {1: "CRITICAL"},
 }
@@ -48,17 +56,78 @@ JOURNAL_FIELDS = (
     "UNIT,_PID,_MACHINE_ID,INVOCATION_ID,JOB_TYPE,JOB_RESULT,MESSAGE_ID,"
     "UNIT_RESULT,EXIT_CODE,EXIT_STATUS"
 )
+DEV_NIGHTLY_STDOUT_FIELDS = "_TRANSPORT,_SYSTEMD_UNIT,_SYSTEMD_INVOCATION_ID,_MACHINE_ID,_BOOT_ID,MESSAGE"
+DEV_NIGHTLY_REPOSITORY = "OpenResilienceInitiative/ORISO-E2E"
+DEV_NIGHTLY_TARGET = "https://dev.oriso.org"
+DEV_NIGHTLY_RUN_URL = f"https://github.com/{DEV_NIGHTLY_REPOSITORY}/actions/runs/"
+DEV_NIGHTLY_VERDICTS = {
+    "green": ("OK", 0),
+    "within-grace": ("PENDING", 1), "running": ("PENDING", 1),
+    "absent": ("CRITICAL", 2), "red": ("CRITICAL", 2), "stalled": ("CRITICAL", 2),
+    "unregistered": ("CRITICAL", 2), "disabled": ("CRITICAL", 2),
+    "lookup-failed": ("UNKNOWN", 3),
+}
+RUNNING_ACTION_STATES = {"queued", "requested", "waiting", "pending", "in_progress"}
+ACTION_CONCLUSIONS = {
+    "success", "failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale", "skipped", "neutral",
+}
+NIGHTLY_JOBS = {
+    "Workflow and reporter contract", "Dev nightly specs", "Public Dev call readiness", "Dev Test Access readiness",
+    "Dev video runner readiness", "Protected Dev video call", "Dev video acceptance",
+}
+NIGHTLY_REQUIRED_CHECKS = NIGHTLY_JOBS | {
+    "Dev nightly specs / Run the Dev spec set",
+    "Dev nightly specs / Verify stored Dev traces",
+    "Dev Test Access readiness / Check encrypted Dev chat history",
+    "Protected Dev video call / Run the protected Dev video call",
+}
+NIGHTLY_ATTEMPT_UNVERIFIED = "Could not verify GitHub attempt jobs."
+# Known names stay legible. New or unreviewed names use the step number until reviewed here.
+NIGHTLY_STEPS = {
+    "Set up job", "Resolve the reviewed Dev source", "Verify the checked-out workflow matches the launcher",
+    "Prove the Dev nightly cannot reach another environment or the cluster",
+    "Check Dev workflow and runner contracts",
+    "Prove the trace headers and the authenticated export are well formed",
+    "Verify the checked-out Dev call test source",
+    "Check public Dev video call prerequisites",
+    "Check Dev video runner label", "Verify the checked-out Dev video call source",
+    "Check the Dev video runner tools", "Run the protected Dev video call", "Require a completed Dev video proof",
+    "Verify the tested Dev source before accessing credentials",
+    "Fail fast when secrets are absent or the hub rejects the token",
+    "Check Dev telemetry prerequisites", "Check scoped Dev Test Access",
+    "Resolve the reviewed Test Access source", "Install reviewed Test Access and Chromium",
+    "Check encrypted Dev chat history",
+    "Typecheck the E2E suite", "Run the Dev spec set", "Verify stored Dev traces",
+    "Job summary with counts and trace ids of failures", "Upload Playwright report and exported spans",
+    "Prepare the sanitized Dev nightly JUnit artifact", "Upload the sanitized Dev nightly JUnit artifact", "Complete job",
+}
+NIGHTLY_DETAILS = {
+    "unregistered": {"Launcher is absent from the default branch.", "No matching Actions workflow registration."},
+    "lookup-failed": {"Multiple scheduled run IDs matched this slot."} | {
+        f"Could not verify GitHub {phase}." for phase in (
+            "runner credential", "repository metadata", "default branch revision", "default branch workflow files",
+            "Actions workflow registration", "scheduled run history",
+        )
+    },
+}
+NIGHTLY_DIAGNOSTIC_DETAILS = {
+    "GitHub did not report a matching job for this attempt.",
+    "Could not verify GitHub attempt jobs. The workflow verdict is unchanged.",
+}
+GITHUB_NUMBER = r"[1-9][0-9]{0,15}"
+GIT_SHA = re.compile(r"[0-9a-f]{40}")
+MAX_NIGHTLY_MESSAGE_BYTES = 4096
 
 
-def read_journal(options, matches, limit):
+def read_journal(options, matches, limit, *, fields=JOURNAL_FIELDS, timeout="8s"):
     """Read one bounded journal page in forward order."""
     machine = Path("/etc/machine-id").read_text(encoding="ascii").strip()
     if not re.fullmatch("[0-9a-f]{32}", machine):
         raise ValueError("invalid local machine ID")
     command = [
-        "/usr/bin/timeout", "--kill-after=1s", "8s",
+        "/usr/bin/timeout", "--kill-after=1s", timeout,
         "/usr/bin/journalctl", "--system", "--quiet", "--no-pager",
-        "--output=json", f"--output-fields={JOURNAL_FIELDS}", *options,
+        "--output=json", f"--output-fields={fields}", *options,
         f"_MACHINE_ID={machine}", *matches,
     ]
     with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -116,6 +185,173 @@ def completion_details(ids, *, options=(), limit=PAGE_SIZE * 4, unit_matches=UNI
     return details
 
 
+def action_state(observation):
+    status, conclusion = observation["status"], observation["conclusion"]
+    if status == "completed" and conclusion in ACTION_CONCLUSIONS:
+        return {"status": status, "conclusion": conclusion}
+    if status in RUNNING_ACTION_STATES and conclusion is None:
+        return {"status": status, "conclusion": None}
+    raise ValueError("invalid Actions state")
+
+
+def github_number(value):
+    return type(value) is int and 0 < value <= 9_007_199_254_740_991
+
+
+def nightly_problem(problem, run_url, state):
+    job, url = problem["job"], problem["url"]
+    if job not in NIGHTLY_JOBS or not re.fullmatch(re.escape(run_url) + r"/job/" + GITHUB_NUMBER, url):
+        raise ValueError("invalid nightly job identity")
+    projected = {"job": job, "url": url, **action_state(problem)}
+    active = projected["status"] != "completed"
+    if (active and state != "stalled") or projected["conclusion"] == "success":
+        raise ValueError("job state disagrees with the nightly result")
+    if "step" in problem:
+        step = problem["step"]
+        number, name = step["number"], step["name"]
+        if not github_number(number) or not isinstance(name, str):
+            raise ValueError("invalid nightly step")
+        status = action_state(step)
+        if (active and status["status"] != "in_progress") or (
+            not active and (status["status"] != "completed" or status["conclusion"] in {"success", "skipped"})
+        ):
+            raise ValueError("step state disagrees with the nightly result")
+        projected["step"] = {"number": number, "name": name if name in NIGHTLY_STEPS else f"Step {number}", **status}
+    return projected
+
+
+def nightly_problems(run, run_url, state):
+    primary = nightly_problem(run["problem"], run_url, state)
+    if "problems" not in run:
+        return [primary]
+    records = run["problems"]
+    if not isinstance(records, list) or not 2 <= len(records) <= len(NIGHTLY_JOBS):
+        raise ValueError("invalid number of nightly problems")
+    problems = [nightly_problem(record, run_url, state) for record in records]
+    if (
+        primary != problems[0] or len({item["job"] for item in problems}) != len(problems)
+        or len({item["url"] for item in problems}) != len(problems)
+    ):
+        raise ValueError("inconsistent nightly problem identities")
+    return problems
+
+
+def describe_nightly_problem(problem):
+    step = problem.get("step")
+    subject = f"{problem['job']} / {step['name']}" if step else problem["job"]
+    status = step if step else problem
+    return f"{subject} ({status['conclusion'] or status['status']})."
+
+
+def project_nightly_probe(message, completion):
+    if not isinstance(message, str) or len(message.encode("utf-8")) > MAX_NIGHTLY_MESSAGE_BYTES:
+        raise ValueError("invalid nightly report size")
+    report = json.loads(message, object_pairs_hook=unique_object)
+    state = report["state"]
+    if (
+        report["repository"] != DEV_NIGHTLY_REPOSITORY or report["target"] != DEV_NIGHTLY_TARGET
+        or DEV_NIGHTLY_VERDICTS.get(state) != (completion["state"], completion["exit_status"])
+    ):
+        raise ValueError("nightly report disagrees with manager result")
+    scheduled = utc_timestamp(report["scheduledAt"])
+    if utc_timestamp(completion["completed_at"]) < scheduled:
+        raise ValueError("nightly slot follows completion")
+    probe = {"repository": DEV_NIGHTLY_REPOSITORY, "target": DEV_NIGHTLY_TARGET,
+             "state": state, "scheduledAt": report["scheduledAt"]}
+    if "defaultBranchSha" in report:
+        if not GIT_SHA.fullmatch(report["defaultBranchSha"]):
+            raise ValueError("invalid nightly default branch SHA")
+        probe["defaultBranchSha"] = report["defaultBranchSha"]
+    detail = report.get("detail")
+    unverified_attempt = state == "lookup-failed" and "run" in report
+    if state in {"running", "stalled", "green", "red"} or unverified_attempt:
+        run = report["run"]
+        url, attempt, sha = run["url"], run["attempt"], run["launcherSha"]
+        if not re.fullmatch(re.escape(DEV_NIGHTLY_RUN_URL) + GITHUB_NUMBER, url) or not github_number(attempt):
+            raise ValueError("invalid nightly run identity")
+        if sha is not None and not GIT_SHA.fullmatch(sha):
+            raise ValueError("invalid nightly launcher SHA")
+        projected = {"url": url, "attempt": attempt, "launcherSha": sha, **action_state(run)}
+        missing_checks = "missingProofs" in run
+        if (
+            (state in {"running", "stalled"}) != (projected["status"] != "completed")
+            or (state == "green" or missing_checks or unverified_attempt) != (projected["conclusion"] == "success")
+        ):
+            raise ValueError("run state disagrees with the nightly result")
+        has_problems = "problem" in run or "problems" in run
+        if missing_checks:
+            missing = run["missingProofs"]
+            if (
+                state != "red" or sha is None or has_problems or not isinstance(missing, list) or not missing
+                or len(missing) > len(NIGHTLY_REQUIRED_CHECKS)
+                or any(not isinstance(check, str) or check not in NIGHTLY_REQUIRED_CHECKS for check in missing)
+                or len(set(missing)) != len(missing)
+            ):
+                raise ValueError("invalid missing nightly checks")
+            projected["missingProofs"] = missing
+            probe["detail"] = f"Missing successful checks: {'; '.join(missing)}."
+        elif unverified_attempt:
+            if detail != NIGHTLY_ATTEMPT_UNVERIFIED or has_problems:
+                raise ValueError("invalid unverified nightly run")
+            probe["detail"] = NIGHTLY_ATTEMPT_UNVERIFIED
+        elif has_problems:
+            if state not in {"red", "stalled"} or sha is None:
+                raise ValueError("unattributed nightly problem")
+            problems = nightly_problems(run, url, state)
+            projected["problem"] = problems[0]
+            if len(problems) > 1:
+                projected["problems"] = problems
+            probe["detail"] = " ".join(map(describe_nightly_problem, problems))
+        elif state in {"red", "stalled"} and isinstance(detail, str) and detail in NIGHTLY_DIAGNOSTIC_DETAILS:
+            probe["detail"] = detail
+        if "testSourceSha" in run:
+            tested = run["testSourceSha"]
+            if "missingProofs" not in projected and "problem" not in projected:
+                raise ValueError("unattributed nightly E2E test source")
+            if not isinstance(tested, str) or not GIT_SHA.fullmatch(tested) or tested == "0" * 40:
+                raise ValueError("invalid nightly E2E test source SHA")
+            projected["testSourceSha"] = tested
+            probe["detail"] += f" E2E test source {tested}."
+        probe["run"] = projected
+    elif "run" in report:
+        raise ValueError("nightly report unexpectedly has a run")
+    elif isinstance(detail, str) and detail in NIGHTLY_DETAILS.get(state, ()):
+        probe["detail"] = detail
+    return probe
+
+
+def add_nightly_probes(completed, ids):
+    if not ids:
+        return
+    try:
+        stdout, extra = read_journal((), (
+            "_TRANSPORT=stdout", f"_SYSTEMD_UNIT={DEV_NIGHTLY}",
+            *(f"_SYSTEMD_INVOCATION_ID={value}" for value in ids),
+        ), PAGE_SIZE * 2, fields=DEV_NIGHTLY_STDOUT_FIELDS, timeout="2s")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return
+    if extra:
+        return
+    messages = defaultdict(list)
+    for row in stdout:
+        if not isinstance(row, dict) or row.get("_TRANSPORT") != "stdout":
+            continue
+        identity = tuple(row.get(key) for key in ("_MACHINE_ID", "_BOOT_ID", "_SYSTEMD_UNIT", "_SYSTEMD_INVOCATION_ID"))
+        if all(isinstance(value, str) for value in identity):
+            messages[identity].append(row.get("MESSAGE"))
+    for completion in completed:
+        identity = tuple(completion[key] for key in ("machine_id", "boot_id", "unit", "invocation_id"))
+        if not all(isinstance(value, str) for value in identity):
+            continue
+        matching = messages[identity]
+        if len(matching) == 1:
+            try:
+                completion["probe"] = project_nightly_probe(matching[0], completion)
+            except (KeyError, TypeError, ValueError, RecursionError):
+                # Optional service stdout cannot change the manager verdict or the page cursor.
+                pass
+
+
 def read_page(*, cursor=None, since=None, scope="signoz"):
     unit_matches = SCOPE_MATCHES[scope]
     options = [f"--cursor={cursor}"] if cursor is not None else [f"--since={since}"]
@@ -145,6 +381,8 @@ def read_page(*, cursor=None, since=None, scope="signoz"):
             "completed_at": timestamp.isoformat(),
             "cursor": row["__CURSOR"],
         })
+    if scope == "dev-nightly":
+        add_nightly_probes(completed, ids)
     return {"completed": completed, "next_cursor": rows[-1]["__CURSOR"] if rows else cursor, "more": more}
 
 
@@ -288,12 +526,13 @@ def local_boot_id():
 
 def check_cadence(unit):
     result = {"unit": unit}
+    unit_matches = ("_PID=1", f"UNIT={unit}")
     try:
         if timer_state(unit.removesuffix(".service") + ".timer") != "active":
             return dict(result, state="CRITICAL", reason="timer-not-active")
         boot_id = local_boot_id()
         rows, extra = read_journal((f"--boot={boot_id}", "--lines=1"), (
-            "_PID=1", f"UNIT={unit}", "JOB_TYPE=start", f"MESSAGE_ID={JOB_DONE}", f"MESSAGE_ID={JOB_FAILED}",
+            *unit_matches, "JOB_TYPE=start", f"MESSAGE_ID={JOB_DONE}", f"MESSAGE_ID={JOB_FAILED}",
         ), 1)
         if not rows and not extra:
             return dict(result, state="CRITICAL", reason="missing-completion")
@@ -308,7 +547,7 @@ def check_cadence(unit):
         if age >= MAX_COMPLETION_AGE_SECONDS * 1_000_000:
             return dict(result, state="CRITICAL", reason="stale-completion")
         ids = invocation_ids(rows)
-        details = completion_details(ids, options=(f"--boot={boot_id}",), limit=4)
+        details = completion_details(ids, options=(f"--boot={boot_id}",), limit=4, unit_matches=unit_matches)
         probe_state, service_result, _ = classify(completion, details) if ids else ("UNKNOWN", None, None)
         if service_result is None:
             return dict(result, state="UNKNOWN", reason="unattributed-completion")
@@ -319,24 +558,26 @@ def check_cadence(unit):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scope", choices=SCOPE_MATCHES, default="signoz", help="which manager units to read")
+    parser.add_argument("--scope", choices=SCOPE_MATCHES, help="which manager units to read (default signoz for pages)")
     start = parser.add_mutually_exclusive_group(required=True)
     start.add_argument("--since", help="Journal start time for the first page")
     start.add_argument("--cursor", help="Last completion cursor accepted by the consumer")
-    start.add_argument("--check-cadence", choices=CADENCE_UNITS, help="Check a running timer and its latest completion")
+    start.add_argument("--check-cadence", choices=CADENCE_CHECKS, help="Check a running timer and its latest completion")
     args = parser.parse_args()
     if args.check_cadence:
-        if args.scope != "signoz":
-            parser.error("--check-cadence is only supported for the signoz scope")
-        result = check_cadence(CADENCE_UNITS[args.check_cadence])
+        scope, unit = CADENCE_CHECKS[args.check_cadence]
+        if args.scope is not None and args.scope != scope:
+            parser.error(f"--check-cadence {args.check_cadence} requires --scope {scope} when a scope is specified")
+        result = check_cadence(unit)
         print(json.dumps(result, sort_keys=True))
         return CADENCE_EXIT[result["state"]]
+    scope = args.scope or "signoz"
     try:
-        page = read_page(since=args.since, cursor=args.cursor, scope=args.scope)
+        page = read_page(since=args.since, cursor=args.cursor, scope=scope)
     except (KeyError, OSError, TypeError, ValueError) as error:
         print(f"Cannot read SigNoz check completions: {error}", file=sys.stderr)
         return 3
-    if args.scope == "offsite-backup":
+    if scope == "offsite-backup":
         page["freshness"] = read_backup_freshness()
     print(json.dumps(page, sort_keys=True))
     return 0

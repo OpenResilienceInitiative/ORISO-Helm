@@ -418,6 +418,55 @@ The [off-site backup monitoring scope](offsite-backup.md#monitor-the-backup-jobs
 uses its own cursor for the two backup units and includes a sanitized archive
 freshness snapshot on every poll.
 
+For the independent Dev nightly monitor, use a separate cursor with
+`--scope dev-nightly`. When the service wrote one valid JSON report, its
+completion includes a `probe` object scoped to the same boot and
+invocation. The incident text includes the schedule slot and launcher
+revision. Each reported job has its own link and the step when available.
+This includes the public Dev call check and the app smoke when both fail.
+A successful workflow with a missing required check produces a critical
+incident. The journal identifies the missing checks by their reviewed names
+and keeps the link to the GitHub attempt.
+When a checkout was verified in the same attempt, the incident adds the E2E
+test source SHA alongside the launcher revision. The run evidence records any
+deployed application builds observed by the browser.
+The systemd verdict determines routing when details are unavailable. The
+optional lookup has a short deadline and needs only the existing restricted
+journal reader.
+
+#### Deliver Dev nightly incidents to Slack
+
+Run `scripts/signoz_dev_nightly_notify.py` once a minute on the independent
+monitoring host. Install it next to the reviewed journal reader. Give its
+service account access to a private writable state directory and to the pinned
+SSH host alias for the read-only runner. Use the existing restricted reader
+command on the runner. The sender needs an incoming webhook for the approved
+Slack channel. Store it in the service's credential file.
+
+```sh
+python3 /opt/oriso/dev-nightly-relay/signoz_dev_nightly_notify.py \
+  --runner sig-check-runner \
+  --state-file /var/lib/oriso-dev-nightly-relay/state.json \
+  --webhook-file "$CREDENTIALS_DIRECTORY/slack-webhook"
+```
+
+The [systemd templates](systemd/) use the existing SSH reader account as the
+instance name. The service expects the root-owned credential at
+`/etc/oriso/dev-nightly-relay/slack-webhook` and SSH alias `sig-check-runner`.
+Enable the timer for that account after validating the destination.
+
+The sender keeps runner health and workflow incidents separate. A pending
+workflow preserves the previous incident. Recovery requires a verified green
+workflow receipt. The messages include the UTC slot, available revisions and
+the affected GitHub run and jobs. Review their contents in the approved
+channel during acceptance.
+
+The sender stores the journal cursor after Slack acknowledges the message.
+Repeated checks with identical evidence produce one message. If Slack rejects
+delivery, the next poll resumes from the last accepted cursor. A process
+failure after Slack accepts a message and before the cursor is saved can
+cause a duplicate. Monitor sender failures on the independent host.
+
 #### Watch the check runner from another host
 
 Install the same journal reader on the check runner. From the independent

@@ -1,6 +1,6 @@
 """Exercise completion, failure detail and cursor handling at the reader boundary."""
 
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 import json
@@ -17,6 +17,7 @@ INVOCATION = "b" * 32
 MACHINE = "d" * 32
 UPTIME = "oriso-signoz-uptime.service"
 HEARTBEAT = "oriso-signoz-heartbeat-check.service"
+DEV_NIGHTLY = "oriso-dev-nightly-monitor.service"
 PUSH = "oriso-offsite-backup.service"
 CHECK = "oriso-offsite-check.service"
 
@@ -145,6 +146,344 @@ class CheckCadenceTest(TestCase):
             ):
                 result = reader.check_cadence(UPTIME)
                 self.assertEqual((result["state"], result["reason"]), expected)
+
+
+class DevNightlyJournalTest(TestCase):
+    run_url = "https://github.com/OpenResilienceInitiative/ORISO-E2E/actions/runs/123"
+
+    def report(self):
+        return {
+            "repository": "OpenResilienceInitiative/ORISO-E2E",
+            "target": "https://dev.oriso.org", "state": "red",
+            "scheduledAt": "2026-11-24T02:30:00.000Z", "defaultBranchSha": "c" * 40,
+            "run": {
+                "url": self.run_url, "launcherSha": "e" * 40, "attempt": 2,
+                "status": "completed", "conclusion": "failure",
+                "problem": {
+                    "job": "Dev nightly specs", "url": f"{self.run_url}/job/456",
+                    "status": "completed", "conclusion": "failure",
+                    "step": {"number": 3, "name": "Run the Dev spec set",
+                             "status": "completed", "conclusion": "failure"},
+                },
+            },
+        }
+
+    def stdout_record(self, message, **overrides):
+        return {
+            "_TRANSPORT": "stdout", "_SYSTEMD_UNIT": DEV_NIGHTLY,
+            "_MACHINE_ID": MACHINE, "_BOOT_ID": BOOT,
+            "_SYSTEMD_INVOCATION_ID": INVOCATION, "MESSAGE": message, **overrides,
+        }
+
+    def incident_page(self, observations):
+        completion = event(
+            reader.JOB_FAILED, UNIT=DEV_NIGHTLY, JOB_RESULT="failed",
+            __CURSOR="incident", __REALTIME_TIMESTAMP="1795496400000000",
+        )
+        details = [
+            event(reader.UNIT_FAILED, UNIT=DEV_NIGHTLY, UNIT_RESULT="exit-code"),
+            event(reader.PROCESS_EXIT, UNIT=DEV_NIGHTLY, EXIT_CODE="exited", EXIT_STATUS="2"),
+        ]
+        with patch.object(reader, "read_journal", side_effect=[
+            ([completion], False), (details, False), observations,
+        ]) as journal:
+            page = reader.read_page(since="10 minutes ago", scope="dev-nightly")
+        self.assertEqual(page["next_cursor"], "incident")
+        self.assertFalse(page["more"])
+        self.assertEqual(page["completed"][0]["state"], "CRITICAL")
+        self.assertEqual(page["completed"][0]["exit_status"], 2)
+        self.assertEqual(journal.call_count, 3)
+        return page["completed"][0], journal.call_args_list[2]
+
+    def test_nightly_scope_preserves_each_plugin_exit_when_stdout_is_missing(self):
+        outcomes = [(0, "OK"), (1, "PENDING"), (2, "CRITICAL"), (3, "UNKNOWN")]
+        completions = []
+        details = []
+        for status, _ in outcomes:
+            fields = {"UNIT": DEV_NIGHTLY, "INVOCATION_ID": f"{status:032x}"}
+            message = reader.JOB_FAILED if status else reader.JOB_DONE
+            completions.append(event(
+                message, **fields, JOB_TYPE="start", JOB_RESULT="failed" if status else "done",
+                __CURSOR=f"nightly-{status}", __REALTIME_TIMESTAMP=str((status + 1) * 1000000),
+            ))
+            if status:
+                details.extend([
+                    event(reader.UNIT_FAILED, **fields, UNIT_RESULT="exit-code"),
+                    event(reader.PROCESS_EXIT, **fields, EXIT_CODE="exited", EXIT_STATUS=str(status)),
+                ])
+            else:
+                details.append(event(reader.UNIT_SUCCEEDED, **fields, MESSAGE="untrusted service output"))
+
+        with (
+            patch.object(reader.sys, "argv", ["monitor", "--scope", "dev-nightly", "--since", "10 minutes ago"]),
+            patch.object(reader, "read_journal", side_effect=[
+                (completions, False), (details, False), ([], False),
+            ]) as journal,
+            redirect_stdout(StringIO()) as output,
+        ):
+            self.assertEqual(reader.main(), 0)
+
+        page = json.loads(output.getvalue())
+        self.assertEqual([(row["exit_status"], row["state"]) for row in page["completed"]], outcomes)
+        self.assertTrue(all("probe" not in row for row in page["completed"]))
+        self.assertEqual(page["next_cursor"], "nightly-3")
+        self.assertNotIn("untrusted service output", output.getvalue())
+        for call in journal.call_args_list[:2]:
+            self.assertIn("_PID=1", call.args[1])
+            self.assertIn(f"UNIT={DEV_NIGHTLY}", call.args[1])
+            self.assertNotIn(f"UNIT={UPTIME}", call.args[1])
+            self.assertNotIn(f"UNIT={PUSH}", call.args[1])
+        for status, _ in outcomes:
+            self.assertIn(f"_SYSTEMD_INVOCATION_ID={status:032x}", journal.call_args_list[2].args[1])
+
+    def test_nightly_scope_attaches_only_the_validated_probe(self):
+        expected = self.report()
+        raw = self.report()
+        raw["detail"] = "should not be relayed"
+        raw["run"]["problem"]["runner_name"] = "should not be relayed"
+        raw["repository_secret"] = "should not be relayed"
+        valid = self.stdout_record(json.dumps(raw))
+        foreign = self.stdout_record(json.dumps(raw), _MACHINE_ID="c" * 32)
+        wrong_boot = self.stdout_record(json.dumps(raw), _BOOT_ID="c" * 32)
+        wrong_unit = self.stdout_record(json.dumps(raw), _SYSTEMD_UNIT=UPTIME)
+        wrong_invocation = self.stdout_record(json.dumps(raw), _SYSTEMD_INVOCATION_ID="c" * 32)
+        result, read = self.incident_page(([foreign, wrong_boot, wrong_unit, wrong_invocation, valid], False))
+        self.assertEqual(result["probe"], dict(expected, detail="Dev nightly specs / Run the Dev spec set (failure)."))
+        self.assertEqual(read.args[1], (
+            "_TRANSPORT=stdout", f"_SYSTEMD_UNIT={DEV_NIGHTLY}",
+            f"_SYSTEMD_INVOCATION_ID={INVOCATION}",
+        ))
+        self.assertLessEqual(read.args[2], 2 * reader.PAGE_SIZE)
+        self.assertIn("MESSAGE", read.kwargs["fields"].split(","))
+        self.assertNotIn("should not be relayed", json.dumps(result))
+
+    def test_duplicate_invalid_or_unavailable_stdout_does_not_affect_the_incident(self):
+        valid = self.stdout_record(json.dumps(self.report()))
+        wrong_verdict = self.stdout_record(json.dumps(dict(self.report(), state="green")))
+        bad_url = self.report()
+        bad_url["run"]["problem"]["url"] = self.run_url + "/job/456?private=canary"
+        messages = (
+            "unparseable canary", "[123]", '{"state":"red","state":"green"}',
+            " " * (reader.MAX_NIGHTLY_MESSAGE_BYTES + 1), json.dumps(bad_url),
+        )
+        for observations in (
+            *[([self.stdout_record(message)], False) for message in messages],
+            ([valid, valid], False), ([valid], True), ([wrong_verdict], False),
+            PermissionError("private journal error"),
+        ):
+            with self.subTest(observations=type(observations).__name__):
+                result, _ = self.incident_page(observations)
+                self.assertNotIn("probe", result)
+
+    def test_unreviewed_step_name_is_replaced_and_stalled_job_is_attributed(self):
+        report = self.report()
+        report["state"] = "stalled"
+        run = report["run"]
+        run.update(status="in_progress", conclusion=None)
+        run["problem"].update(status="in_progress", conclusion=None)
+        run["problem"]["step"].update(name="unreviewed name", status="in_progress", conclusion=None)
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["state"], "stalled")
+        self.assertEqual(result["probe"]["run"]["problem"]["step"]["name"], "Step 3")
+        self.assertEqual(result["probe"]["detail"], "Dev nightly specs / Step 3 (in_progress).")
+
+    def test_two_failed_workflow_jobs_are_relayed_with_their_reviewed_steps(self):
+        report = self.report()
+        run = report["run"]
+        call_check = {
+            "job": "Public Dev call readiness", "url": f"{self.run_url}/job/457",
+            "status": "completed", "conclusion": "failure",
+            "step": {"number": 4, "name": "Check public Dev video call prerequisites",
+                     "status": "completed", "conclusion": "failure"},
+        }
+        run["problems"] = [run["problem"], call_check]
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["run"]["problems"], run["problems"])
+        self.assertEqual(
+            result["probe"]["detail"],
+            "Dev nightly specs / Run the Dev spec set (failure). "
+            "Public Dev call readiness / Check public Dev video call prerequisites (failure).",
+        )
+
+        run["problems"] = [run["problem"], call_check | {"url": run["problem"]["url"]}]
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["state"], "CRITICAL")
+        self.assertNotIn("probe", result)
+
+        run.update(status="in_progress", conclusion=None)
+        report["state"] = "stalled"
+        run["problem"].update(status="waiting", conclusion=None)
+        run["problem"].pop("step")
+        run["problems"] = [run["problem"], call_check]
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["run"]["problems"], run["problems"])
+        self.assertIn("Dev nightly specs (waiting)", result["probe"]["detail"])
+        self.assertIn("Check public Dev video call prerequisites (failure)", result["probe"]["detail"])
+
+    def test_telemetry_and_test_access_failures_are_both_in_the_incident(self):
+        report = self.report()
+        run = report["run"]
+        run["problem"]["step"]["name"] = "Check Dev telemetry prerequisites"
+        broker = {
+            "job": "Dev Test Access readiness", "url": f"{self.run_url}/job/458",
+            "status": "completed", "conclusion": "failure",
+            "step": {"number": 4, "name": "Check scoped Dev Test Access",
+                     "status": "completed", "conclusion": "failure"},
+        }
+        run["problems"] = [run["problem"], broker]
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["run"]["problems"], run["problems"])
+        self.assertIn("Dev nightly specs / Check Dev telemetry prerequisites", result["probe"]["detail"])
+        self.assertIn("Dev Test Access readiness / Check scoped Dev Test Access", result["probe"]["detail"])
+
+        broker["step"]["name"] = "Check encrypted Dev chat history"
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["run"]["problems"], run["problems"])
+        self.assertIn("Dev Test Access readiness / Check encrypted Dev chat history", result["probe"]["detail"])
+
+    def test_successful_workflow_with_missing_required_checks_is_a_critical_incident(self):
+        report = self.report()
+        run = report["run"]
+        run.pop("problem")
+        missing = [
+            "Dev Test Access readiness / Check encrypted Dev chat history",
+            "Protected Dev video call",
+        ]
+        run.update(conclusion="success", missingProofs=missing, testSourceSha="a" * 40)
+        report["detail"] = "unreviewed value"
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["run"], run)
+        self.assertEqual(
+            result["probe"]["detail"],
+            f"Missing successful checks: {'; '.join(missing)}. E2E test source {'a' * 40}.",
+        )
+        self.assertNotIn("unreviewed value", json.dumps(result))
+
+        for invalid in ([], [missing[0], missing[0]], ["unreviewed name"], [{}]):
+            run["missingProofs"] = invalid
+            result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+            self.assertNotIn("probe", result)
+
+    def test_unverified_success_keeps_the_run_link_in_an_unknown_incident(self):
+        report = self.report()
+        report.update(state="lookup-failed", detail="Could not verify GitHub attempt jobs.")
+        run = report["run"]
+        run.pop("problem")
+        run.update(conclusion="success")
+        completion = {"state": "UNKNOWN", "exit_status": 3, "completed_at": "2026-11-24T04:00:00Z"}
+        probe = reader.project_nightly_probe(json.dumps(report), completion)
+        self.assertEqual(probe["run"], run)
+        self.assertEqual(probe["detail"], report["detail"])
+        report["detail"] = "unreviewed value"
+        with self.assertRaises(ValueError):
+            reader.project_nightly_probe(json.dumps(report), completion)
+
+    def test_incident_keeps_verified_e2e_source_separate_from_launcher(self):
+        report = self.report()
+        tested = "d" * 40
+        run = report["run"]
+        run["testSourceSha"] = tested
+        run["problem"]["job"] = "Public Dev call readiness"
+        run["problem"]["step"]["name"] = "Verify the checked-out Dev call test source"
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertEqual(result["probe"]["run"]["launcherSha"], "e" * 40)
+        self.assertEqual(result["probe"]["run"]["testSourceSha"], tested)
+        self.assertIn("Verify the checked-out Dev call test source (failure)", result["probe"]["detail"])
+        self.assertTrue(result["probe"]["detail"].endswith(f"E2E test source {tested}."))
+
+    def test_native_video_incident_keeps_independent_failures_and_the_verified_source(self):
+        report = self.report()
+        run = report["run"]
+        tested = "d" * 40
+        failures = [
+            ("Protected Dev video call", "Run the protected Dev video call"),
+            ("Public Dev call readiness", "Check public Dev video call prerequisites"),
+            ("Dev nightly specs", "Check Dev telemetry prerequisites"),
+            ("Dev Test Access readiness", "Check encrypted Dev chat history"),
+            ("Dev video acceptance", "Require a completed Dev video proof"),
+        ]
+        run["problems"] = [
+            {
+                "job": job, "url": f"{self.run_url}/job/{456 + index}", "status": "completed",
+                "conclusion": "failure",
+                "step": {"number": 4, "name": step, "status": "completed", "conclusion": "failure"},
+            }
+            for index, (job, step) in enumerate(failures)
+        ]
+        run["problem"] = run["problems"][0]
+        run["testSourceSha"] = tested
+        report["detail"] = " ".join(f"{job} / {step} (failure)." for job, step in failures)
+        message = json.dumps(report)
+        self.assertGreater(len(message.encode("utf-8")), 2048)
+        result, _ = self.incident_page(([self.stdout_record(message)], False))
+        self.assertEqual(result["state"], "CRITICAL")
+        self.assertEqual(result["probe"]["run"]["problems"], run["problems"])
+        self.assertEqual(result["probe"]["run"]["testSourceSha"], tested)
+        self.assertIn("Protected Dev video call / Run the protected Dev video call", result["probe"]["detail"])
+
+        runner = run["problems"][0]
+        runner.update(job="Dev video runner readiness")
+        runner["step"]["name"] = "Check Dev video runner label"
+        run["problems"][1].update(job="Protected Dev video call", conclusion="skipped")
+        run["problems"][1].pop("step")
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertIn("Dev video runner readiness / Check Dev video runner label (failure)", result["probe"]["detail"])
+        self.assertIn("Protected Dev video call (skipped)", result["probe"]["detail"])
+
+    def test_rejects_invalid_or_unattributed_e2e_source_without_changing_the_verdict(self):
+        for source in (None, {}, "0" * 40, "x" * 40, "d" * 40 + "\n"):
+            with self.subTest(source=source):
+                report = self.report()
+                report["run"]["testSourceSha"] = source
+                result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+                self.assertNotIn("probe", result)
+                self.assertEqual(result["state"], "CRITICAL")
+
+        report = self.report()
+        report["run"]["testSourceSha"] = "d" * 40
+        report["run"].pop("problem")
+        result, _ = self.incident_page(([self.stdout_record(json.dumps(report))], False))
+        self.assertNotIn("probe", result)
+
+    def test_recent_pending_probe_has_healthy_cadence_without_recovering_the_probe(self):
+        completed = event(reader.JOB_FAILED, UNIT=DEV_NIGHTLY, JOB_RESULT="failed",
+                          __MONOTONIC_TIMESTAMP="100000000")
+        failed = event(reader.UNIT_FAILED, UNIT=DEV_NIGHTLY, UNIT_RESULT="exit-code")
+        exited = event(reader.PROCESS_EXIT, UNIT=DEV_NIGHTLY, EXIT_CODE="exited", EXIT_STATUS="1")
+        for arguments in ([], ["--scope", "dev-nightly"]):
+            with (
+                self.subTest(arguments=arguments),
+                patch.object(reader.sys, "argv", ["monitor", *arguments, "--check-cadence", "dev-nightly"]),
+                patch.object(reader, "timer_state", return_value="active") as timer,
+                patch.object(reader, "local_boot_id", return_value=BOOT),
+                patch.object(reader.time, "monotonic_ns", return_value=140_000_000_000),
+                patch.object(reader, "read_journal", side_effect=[
+                    ([completed], False), ([failed, exited], False),
+                ]) as journal,
+                redirect_stdout(StringIO()) as output,
+            ):
+                self.assertEqual(reader.main(), 0)
+            timer.assert_called_once_with("oriso-dev-nightly-monitor.timer")
+            for call in journal.call_args_list:
+                self.assertIn(f"--boot={BOOT}", call.args[0])
+                self.assertIn(f"UNIT={DEV_NIGHTLY}", call.args[1])
+                self.assertNotIn(f"UNIT={HEARTBEAT}", call.args[1])
+            self.assertEqual(json.loads(output.getvalue()), {
+                "unit": DEV_NIGHTLY, "state": "OK", "reason": "recent-completion",
+                "age_seconds": 40.0, "last_probe_state": "PENDING",
+            })
+
+    def test_explicit_cadence_scope_cannot_read_a_different_unit(self):
+        with (
+            patch.object(reader.sys, "argv", ["monitor", "--scope", "dev-nightly", "--check-cadence", "uptime"]),
+            patch.object(reader, "check_cadence") as check,
+            redirect_stderr(StringIO()) as output,
+            self.assertRaises(SystemExit) as raised,
+        ):
+            reader.main()
+        self.assertEqual(raised.exception.code, 2)
+        check.assert_not_called()
+        self.assertIn("--check-cadence uptime requires --scope signoz", output.getvalue())
 
 
 class BackupJournalTest(TestCase):

@@ -1,0 +1,18 @@
+[Unit]
+Description=Relay ORISO Dev nightly incidents to the approved operations channel
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=%i
+StateDirectory=oriso-dev-nightly-relay-%i
+StateDirectoryMode=0700
+LoadCredential=slack-webhook:/etc/oriso/dev-nightly-relay/slack-webhook
+ExecStart=/usr/bin/python3 -Es /opt/oriso/dev-nightly-relay/signoz_dev_nightly_notify.py --state-file /var/lib/oriso-dev-nightly-relay-%i/state.json --webhook-file %d/slack-webhook
+TimeoutStartSec=90s
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

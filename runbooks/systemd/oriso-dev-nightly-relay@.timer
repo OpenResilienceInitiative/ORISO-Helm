@@ -1,0 +1,10 @@
+[Unit]
+Description=Poll the independent ORISO Dev nightly monitor for %i
+
+[Timer]
+OnActiveSec=1s
+OnUnitInactiveSec=60s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
